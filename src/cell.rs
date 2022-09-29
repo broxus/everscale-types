@@ -36,13 +36,11 @@ impl Cell {
 
         const ALIGN: usize = std::mem::align_of::<ArcInner<EmptyData>>() - 1;
 
-        let bit_len = compute_bit_len(data, d2 & 1 == 0);
-        let byte_len = ((bit_len + 7) / 8) as usize;
-
         let data_offset =
             crate::offset_of!(ArcInner<EmptyData>, data) + crate::offset_of!(EmptyData, data);
+        let data_len = data.len();
 
-        let size = (data_offset + byte_len + ALIGN - 1) & !(ALIGN - 1);
+        let size = (data_offset + data_len + ALIGN - 1) & !(ALIGN - 1);
 
         unsafe {
             let layout = Layout::from_size_align_unchecked(size, ALIGN);
@@ -51,16 +49,15 @@ impl Cell {
                 std::alloc::handle_alloc_error(layout);
             }
 
-            let fake_slice = std::ptr::slice_from_raw_parts_mut(buffer, byte_len);
+            let fake_slice = std::ptr::slice_from_raw_parts_mut(buffer, data_len);
             let ptr = fake_slice as *mut ArcInner<Cell>;
 
             std::ptr::write(&mut (*ptr).strong, AtomicUsize::new(1));
             std::ptr::write(&mut (*ptr).weak, AtomicUsize::new(1));
-            std::ptr::write(&mut (*ptr).data.bit_len, bit_len);
             std::ptr::write(&mut (*ptr).data.d1, d1);
             std::ptr::write(&mut (*ptr).data.d2, d2);
             std::ptr::write(&mut (*ptr).data.references, make_empty_references());
-            std::ptr::copy_nonoverlapping(data.as_ptr(), (*ptr).data.data.as_mut_ptr(), byte_len);
+            std::ptr::copy_nonoverlapping(data.as_ptr(), (*ptr).data.data.as_mut_ptr(), data_len);
 
             Arc::from_raw(std::ptr::addr_of_mut!((*ptr).data))
         }
@@ -297,7 +294,6 @@ impl Deref for Index {
 }
 
 pub struct GenericCell<T: ?Sized, R> {
-    bit_len: u16,
     d1: u8,
     d2: u8,
     references: [MaybeUninit<R>; 4],
