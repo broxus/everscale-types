@@ -37,7 +37,6 @@ impl LevelMask {
 
     /// Computes hash index for the specified level
     pub const fn hash_index(&self, level: u8) -> u8 {
-        let level = if level > 3 { 3 } else { level };
         Self(self.0 & Self::from_level(level).0).level()
     }
 
