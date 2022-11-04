@@ -8,18 +8,64 @@ use super::{ArcCell, Cell, CellType, LevelMask};
 
 pub fn make_arc_cell(header: CellHeader<ArcCell>, data: &[u8]) -> ArcCell {
     #[repr(C)]
-    struct ArcInner<T: ?Sized> {
-        strong: AtomicUsize,
-        weak: AtomicUsize,
+    struct ArcInner<A, T: ?Sized> {
+        strong: A,
+        weak: A,
         obj: T,
     }
 
-    const ALIGN: usize = std::mem::align_of::<ArcInner<EmptyData>>();
+    type EmptyData = GenericCell<[u8; 0], ArcCell>;
+
+    pub fn compute_data_len(len: usize) -> (usize, usize) {
+        let len = std::cmp::min(len, 128) as u8;
+        let target = if len == 0 {
+            0
+        } else {
+            len.next_power_of_two() as usize
+        };
+        (len as usize, target)
+    }
+
+    /// # Safety
+    /// `len` must be a power of two
+    pub unsafe fn get_vtable(len: usize) -> usize {
+        let vtable_ptr = *VTABLES.get_unchecked(if len == 0 {
+            0
+        } else {
+            1 + len.trailing_zeros() as usize
+        });
+
+        // Cast vtable pointer to usize
+        std::mem::transmute(vtable_ptr)
+    }
+
+    const fn gen_vtable_ptr<const N: usize>() -> *const () {
+        let uninit = std::mem::MaybeUninit::<GenericCell<[u8; N], ArcCell>>::uninit();
+        let fat_ptr = uninit.as_ptr() as *const dyn Cell;
+        let [_, vtable] = unsafe { std::mem::transmute::<_, [*const (); 2]>(fat_ptr) };
+        vtable
+    }
+
+    const VTABLES: [*const (); 9] = [
+        gen_vtable_ptr::<0>(),
+        gen_vtable_ptr::<1>(),
+        gen_vtable_ptr::<2>(),
+        gen_vtable_ptr::<4>(),
+        gen_vtable_ptr::<8>(),
+        gen_vtable_ptr::<16>(),
+        gen_vtable_ptr::<32>(),
+        gen_vtable_ptr::<64>(),
+        gen_vtable_ptr::<128>(),
+    ];
+
+    const _: () = assert!(std::mem::size_of::<AtomicUsize>() == std::mem::size_of::<usize>());
+    const ALIGN: usize = std::mem::align_of::<ArcInner<AtomicUsize, EmptyData>>();
+    const DATA_OFFSET: usize =
+        offset_of!(ArcInner<usize, EmptyData>, obj) + offset_of!(EmptyData, data);
 
     let (raw_data_len, target_data_len) = compute_data_len(data.len());
 
-    let data_offset = offset_of!(ArcInner<EmptyData>, obj) + offset_of!(EmptyData, data);
-    let size = (data_offset + target_data_len + ALIGN - 1) & !(ALIGN - 1);
+    let size = (DATA_OFFSET + target_data_len + ALIGN - 1) & !(ALIGN - 1);
 
     unsafe {
         let layout = Layout::from_size_align_unchecked(size, ALIGN).pad_to_align();
@@ -28,7 +74,7 @@ pub fn make_arc_cell(header: CellHeader<ArcCell>, data: &[u8]) -> ArcCell {
             std::alloc::handle_alloc_error(layout);
         }
 
-        let ptr = buffer as *mut ArcInner<EmptyData>;
+        let ptr = buffer as *mut ArcInner<AtomicUsize, EmptyData>;
 
         std::ptr::write(&mut (*ptr).strong, AtomicUsize::new(1));
         std::ptr::write(&mut (*ptr).weak, AtomicUsize::new(1));
@@ -43,53 +89,13 @@ pub fn make_arc_cell(header: CellHeader<ArcCell>, data: &[u8]) -> ArcCell {
     }
 }
 
-type EmptyData = GenericCell<[u8; 0], ArcCell>;
-
-pub fn compute_data_len(len: usize) -> (usize, usize) {
-    let len = std::cmp::min(len, 128) as u8;
-    let target = if len == 0 {
-        0
-    } else {
-        len.next_power_of_two() as usize
-    };
-    (len as usize, target)
-}
-
-/// # Safety
-/// `len` must be a power of two
-pub unsafe fn get_vtable(len: usize) -> usize {
-    let vtable_ptr = *VTABLES.get_unchecked(if len == 0 {
-        0
-    } else {
-        1 + len.trailing_zeros() as usize
-    });
-
-    // Cast vtable pointer to usize
-    std::mem::transmute(vtable_ptr)
-}
-
-const VTABLES: [*const (); 9] = [
-    gen_vtable_ptr::<0>(),
-    gen_vtable_ptr::<1>(),
-    gen_vtable_ptr::<2>(),
-    gen_vtable_ptr::<4>(),
-    gen_vtable_ptr::<8>(),
-    gen_vtable_ptr::<16>(),
-    gen_vtable_ptr::<32>(),
-    gen_vtable_ptr::<64>(),
-    gen_vtable_ptr::<128>(),
-];
-
-const fn gen_vtable_ptr<const N: usize>() -> *const () {
-    let uninit = std::mem::MaybeUninit::<GenericCell<[u8; N], ArcCell>>::uninit();
-    let fat_ptr = uninit.as_ptr() as *const dyn Cell;
-    let [_, vtable] = unsafe { std::mem::transmute::<_, [*const (); 2]>(fat_ptr) };
-    vtable
-}
-
 impl<const N: usize> Cell for GenericCell<[u8; N], ArcCell> {
     fn cell_type(&self) -> CellType {
-        todo!()
+        if (&self.header.d1 & 0b1000) == 0 {
+            CellType::Ordinary
+        } else {
+            todo!()
+        }
     }
 
     fn level_mask(&self) -> LevelMask {
