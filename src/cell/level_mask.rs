@@ -4,6 +4,8 @@ use std::ops::{BitOr, BitOrAssign};
 pub struct LevelMask(u8);
 
 impl LevelMask {
+    pub const EMPTY: Self = LevelMask(0);
+
     /// Constructs new level mask, truncating extra bits
     #[inline(always)]
     pub const fn new(mask: u8) -> Self {
@@ -44,6 +46,12 @@ impl LevelMask {
     #[inline(always)]
     pub const fn virtualize(&self, offset: u8) -> Self {
         Self(self.0 >> offset)
+    }
+}
+
+impl PartialEq<u8> for LevelMask {
+    fn eq(&self, other: &u8) -> bool {
+        self.0 == *other
     }
 }
 
@@ -106,7 +114,6 @@ mod tests {
         for mask in 0b000..=0b111 {
             let mask = LevelMask(mask);
 
-            let mut max_hash_index = 0;
             for i in 0..=3 {
                 let hash_index = mask.hash_index(i);
                 assert_eq!(hash_index, HASH_INDEX_TABLE[mask.0 as usize][i as usize]);

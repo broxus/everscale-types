@@ -1,0 +1,25 @@
+[package]
+name = "everscale-types-fuzz"
+version = "0.0.0"
+authors = ["Automatically generated"]
+publish = false
+edition = "2018"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.everscale-types]
+path = ".."
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "cell_deserialize"
+path = "fuzz_targets/cell_deserialize.rs"
+test = false
+doc = false

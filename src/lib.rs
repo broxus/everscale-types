@@ -20,6 +20,20 @@ macro_rules! offset_of {
     }};
 }
 
+#[cfg(debug_assertions)]
+macro_rules! debug_unreachable {
+    () => {
+        unreachable!()
+    };
+}
+
+#[cfg(not(debug_assertions))]
+macro_rules! debug_unreachable {
+    () => {
+        unsafe { std::hint::unreachable_unchecked() }
+    };
+}
+
 pub use self::cell::Cell;
 
 pub mod boc;
