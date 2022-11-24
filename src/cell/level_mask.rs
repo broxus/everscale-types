@@ -5,6 +5,7 @@ pub struct LevelMask(u8);
 
 impl LevelMask {
     pub const EMPTY: Self = LevelMask(0);
+    pub const MAX_LEVEL: u8 = 3;
 
     /// Constructs new level mask, truncating extra bits
     #[inline(always)]
@@ -33,23 +34,24 @@ impl LevelMask {
     }
 
     /// Counts presented higher hashes
-    pub const fn level(&self) -> u8 {
+    pub const fn level(self) -> u8 {
         (self.0 & 1) + ((self.0 >> 1) & 1) + ((self.0 >> 2) & 1)
     }
 
     /// Computes hash index for the specified level
-    pub const fn hash_index(&self, level: u8) -> u8 {
+    pub const fn hash_index(self, level: u8) -> u8 {
         Self(self.0 & Self::from_level(level).0).level()
     }
 
     /// Creates a new mask, shifted by the offset
     #[inline(always)]
-    pub const fn virtualize(&self, offset: u8) -> Self {
+    pub const fn virtualize(self, offset: u8) -> Self {
         Self(self.0 >> offset)
     }
 }
 
 impl PartialEq<u8> for LevelMask {
+    #[inline]
     fn eq(&self, other: &u8) -> bool {
         self.0 == *other
     }

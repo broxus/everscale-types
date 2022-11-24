@@ -4,6 +4,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
+use sha2::Digest;
 use smallvec::SmallVec;
 
 use super::descriptor::CellDescriptor;
@@ -113,6 +114,13 @@ impl<R> CellHeader<R> {
         } else {
             None
         }
+    }
+
+    unsafe fn references(&self) -> &[R] {
+        std::slice::from_raw_parts(
+            self.references.as_ptr() as *const R,
+            self.descriptor.reference_count(),
+        )
     }
 }
 
@@ -423,7 +431,7 @@ pub fn deserialize(src: &[u8]) -> Result<ArcCell, std::io::Error> {
 
             done_cells.insert(
                 index as u32,
-                make_arc_cell(
+                ok!(finalize_cell(
                     CellHeader {
                         tree_bit_count,
                         tree_cell_count,
@@ -432,7 +440,7 @@ pub fn deserialize(src: &[u8]) -> Result<ArcCell, std::io::Error> {
                         references: references.build(),
                     },
                     data,
-                ),
+                )),
             );
         }
     }
@@ -443,15 +451,27 @@ pub fn deserialize(src: &[u8]) -> Result<ArcCell, std::io::Error> {
     }
 }
 
-fn finalize_cell(header: CellHeader<ArcCell>, data: &[u8]) -> Result<ArcCell, std::io::Error> {
+fn finalize_cell(mut header: CellHeader<ArcCell>, data: &[u8]) -> Result<ArcCell, std::io::Error> {
     const HASH_BITS: usize = 256;
     const DEPTH_BITS: usize = 16;
 
-    let descriptor = header.descriptor;
+    let mut descriptor = header.descriptor;
+    let level_mask = descriptor.level_mask();
+    let level = level_mask.level() as usize;
     let bit_len = compute_bit_len(data, descriptor.is_aligned()) as usize;
-    let ref_count = header.descriptor.reference_count();
 
-    if unlikely(descriptor.is_exotic()) {
+    // SAFETY: all childer must be initialized
+    let references = unsafe { header.references() };
+
+    let mut children_mask = LevelMask::EMPTY;
+    for child in references {
+        children_mask |= child.level_mask();
+    }
+
+    // `hashes_len` is guaranteed to be in range 1..4
+    let mut hashes_len = level + 1;
+
+    let (cell_type, computed_level_mask) = if unlikely(descriptor.is_exotic()) {
         let Some(&first_byte) = data.first() else {
             return Err(unexpected_eof("empty data for exotic cell"))
         };
@@ -459,57 +479,110 @@ fn finalize_cell(header: CellHeader<ArcCell>, data: &[u8]) -> Result<ArcCell, st
         match first_byte {
             // 8 bits type, 8 bits level mask, level x (hash, depth)
             CellType::PRUNED_BRANCH => {
-                let level_mask = descriptor.level_mask();
-
-                let level = level_mask.level() as usize;
                 let expected_bit_len = 8 + 8 + level * (HASH_BITS + DEPTH_BITS);
 
                 if unlikely(bit_len != expected_bit_len) {
                     return Err(invalid_data("pruned branch bit length mismatch"));
-                } else if unlikely(ref_count != 0) {
+                } else if unlikely(!references.is_empty()) {
                     return Err(invalid_data("pruned branch contains references"));
                 } else if unlikely(level_mask != data[1]) {
                     return Err(invalid_data("pruned branch level mask mismatch"));
                 }
+
+                hashes_len = 1;
+                (CellType::PrunedBranch, level_mask)
             }
             // 8 bits type, hash, depth
             CellType::MERKLE_PROOF => {
                 const EXPECTED_BIT_LEN: usize = 8 + HASH_BITS + DEPTH_BITS;
                 if unlikely(bit_len != EXPECTED_BIT_LEN) {
                     return Err(invalid_data("merkle proof bit length mismatch"));
-                } else if unlikely(ref_count != 1) {
+                } else if unlikely(references.len() != 1) {
                     return Err(invalid_data(
                         "merkle proof cell must contain exactly one reference",
                     ));
                 }
+
+                (CellType::MerkleProof, children_mask.virtualize(1))
             }
             // 8 bits type, 2 x (hash, depth)
             CellType::MERKLE_UPDATE => {
                 const EXPECTED_BIT_LEN: usize = 8 + 2 * (HASH_BITS + DEPTH_BITS);
                 if unlikely(bit_len != EXPECTED_BIT_LEN) {
                     return Err(invalid_data("merkle update bit length mismatch"));
-                } else if unlikely(ref_count != 2) {
+                } else if unlikely(references.len() != 2) {
                     return Err(invalid_data(
                         "merkle update cell must contain exactly two references",
                     ));
                 }
+
+                (CellType::MerkleUpdate, children_mask.virtualize(1))
             }
             // 8 bits type, hash
             CellType::LIBRARY_REFERENCE => {
                 const EXPECTED_BIT_LEN: usize = 8 + HASH_BITS;
                 if unlikely(bit_len != EXPECTED_BIT_LEN) {
                     return Err(invalid_data("library reference cell bit length mismatch"));
-                } else if unlikely(ref_count != 0) {
+                } else if unlikely(!references.is_empty()) {
                     return Err(invalid_data("library reference cell contains references"));
                 }
+
+                (CellType::LibraryReference, LevelMask::EMPTY)
             }
             _ => return Err(invalid_data("unknown cell type")),
         }
+    } else {
+        (CellType::Ordinary, children_mask)
+    };
+
+    if unlikely(computed_level_mask != level_mask) {
+        return Err(invalid_data("level mask mismatch"));
     }
 
-    let mut children_mask = LevelMask::EMPTY;
+    let level_offset = cell_type.is_merkle() as u8;
 
-    Ok(todo!())
+    let mut hashes = Vec::<(CellHash, u16)>::with_capacity(hashes_len);
+    for level in 0..hashes_len {
+        let mut hasher = sha2::Sha256::new();
+
+        let level_mask = if cell_type == CellType::PrunedBranch {
+            level_mask
+        } else {
+            LevelMask::from_level(level as u8)
+        };
+
+        descriptor.d1 &= !(CellDescriptor::LEVEL_MASK | CellDescriptor::STORE_HASHES_MASK);
+        descriptor.d1 |= u8::from(level_mask) << 5;
+        hasher.update([descriptor.d1, descriptor.d2]);
+
+        if level == 0 {
+            hasher.update(data);
+        } else {
+            let prev_hash = unsafe { hashes.get_unchecked(level - 1) };
+            hasher.update(prev_hash.0.as_slice());
+        }
+
+        let mut depth = 0;
+        for child in references {
+            let child_depth = child.depth(level as u8 + level_offset);
+
+            // TODO: check depth overflow
+            depth = std::cmp::max(depth, child_depth + 1);
+
+            hasher.update(child_depth.to_be_bytes());
+        }
+
+        for child in references {
+            let child_hash = child.hash(level as u8 + level_offset);
+            hasher.update(child_hash.as_slice());
+        }
+
+        let hash = hasher.finalize().into();
+        hashes.push((hash, depth));
+    }
+
+    header.hashes = hashes;
+    Ok(make_arc_cell(header, data))
 }
 
 const ABSENT_D1: u8 = 0b0000_1111;
@@ -553,5 +626,6 @@ mod tests {
         let data = base64::decode("te6ccgEBBAEAzwACg4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAIBAEAAAAAAAAAAAAAAAAAAAAAAAAAAm2c6ClpzoTVSAHvzVQGDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHKq1w7OAAkYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACRwAwBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEljGP8=").unwrap();
         //let data = base64::decode("te6ccgEBAQEABgAACACrQTA=").unwrap();
         let cell = deserialize(&data).unwrap();
+        println!("{}", cell.display_tree());
     }
 }

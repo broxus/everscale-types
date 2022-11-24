@@ -1,6 +1,6 @@
 use super::level_mask::LevelMask;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Hash, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct CellDescriptor {
     pub d1: u8,
@@ -8,6 +8,11 @@ pub struct CellDescriptor {
 }
 
 impl CellDescriptor {
+    pub const REF_COUNT_MASK: u8 = 0b0000_0111;
+    pub const IS_EXOTIC_MASK: u8 = 0b0000_1000;
+    pub const STORE_HASHES_MASK: u8 = 0b0001_0000;
+    pub const LEVEL_MASK: u8 = 0b1110_0000;
+
     #[inline(always)]
     pub const fn new(bytes: [u8; 2]) -> Self {
         Self {
@@ -18,17 +23,17 @@ impl CellDescriptor {
 
     #[inline(always)]
     pub const fn reference_count(&self) -> usize {
-        (self.d1 & 0b111) as usize
+        (self.d1 & Self::REF_COUNT_MASK) as usize
     }
 
     #[inline(always)]
     pub const fn is_exotic(&self) -> bool {
-        self.d1 & 0b1000 != 0
+        self.d1 & Self::IS_EXOTIC_MASK != 0
     }
 
     #[inline(always)]
     pub const fn store_hashes(&self) -> bool {
-        self.d1 & 0b10000 != 0
+        self.d1 & Self::STORE_HASHES_MASK != 0
     }
 
     #[inline(always)]
