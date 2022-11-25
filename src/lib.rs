@@ -39,3 +39,4 @@ pub use self::cell::Cell;
 pub mod boc;
 pub mod cell;
 pub mod util;
+pub mod error;
