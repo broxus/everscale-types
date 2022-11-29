@@ -58,7 +58,7 @@ impl<'a> BocHeader<'a> {
         let boc_tag = unsafe { reader.read_boc_tag(data) };
         match boc_tag {
             Some(BocTag::Indexed) => {
-                has_index = false;
+                has_index = true;
                 has_crc = false;
                 has_cache_bits = false;
                 ref_size = flags as usize;
@@ -172,13 +172,17 @@ impl<'a> BocHeader<'a> {
         debug_assert!(data.len() >= (6 + ref_size * 3 + offset_size + root_count * ref_size));
 
         let mut roots = SmallVec::with_capacity(root_count);
-        for _ in 0..root_count {
-            // SAFETY: we have already requested for {root_count}*{ref_size}
-            let root_index = unsafe { reader.read_next_be_uint_fast(data, ref_size) };
-            if unlikely(root_index >= cell_count) {
-                return Err(Error::RootOutOfBounds);
+        if supports_multiple_roots {
+            for _ in 0..root_count {
+                // SAFETY: we have already requested for {root_count}*{ref_size}
+                let root_index = unsafe { reader.read_next_be_uint_fast(data, ref_size) };
+                if unlikely(root_index >= cell_count) {
+                    return Err(Error::RootOutOfBounds);
+                }
+                roots.push(root_index as u32);
             }
-            roots.push(root_index as u32);
+        } else {
+            roots.push(0);
         }
 
         // NOTE: `cell_count` is in range ..=u32::MAX, `offset_size` is in range 1..=8
