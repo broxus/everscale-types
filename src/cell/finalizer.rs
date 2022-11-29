@@ -1,19 +1,18 @@
 use sha2::Digest;
 
 use super::{ArcCell, Cell, CellDescriptor, CellHash, CellTreeStats, CellType, LevelMask};
-use crate::error::{invalid_data, unexpected_eof};
 use crate::util::{unlikely, ArrayVec};
 
 /// A trait for describing cell finalization logic.
 pub trait Finalizer<R = ArcCell> {
-    fn finalize_cell(&mut self, cell: PartialCell<R>) -> std::io::Result<R>;
+    fn finalize_cell(&mut self, cell: PartialCell<R>) -> Option<R>;
 }
 
 impl<F, R> Finalizer<R> for F
 where
-    F: FnMut(PartialCell<R>) -> std::io::Result<R>,
+    F: FnMut(PartialCell<R>) -> Option<R>,
 {
-    fn finalize_cell(&mut self, cell: PartialCell<R>) -> std::io::Result<R> {
+    fn finalize_cell(&mut self, cell: PartialCell<R>) -> Option<R> {
         (*self)(cell)
     }
 }
@@ -47,7 +46,7 @@ where
     R: AsRef<dyn Cell>,
 {
     /// Validates cell and computes all hashes.
-    pub fn compute_hashes(&self) -> std::io::Result<Vec<(CellHash, u16)>> {
+    pub fn compute_hashes(&self) -> Option<Vec<(CellHash, u16)>> {
         const HASH_BITS: usize = 256;
         const DEPTH_BITS: usize = 16;
 
@@ -63,7 +62,7 @@ where
 
         let (cell_type, computed_level_mask) = if unlikely(descriptor.is_exotic()) {
             let Some(&first_byte) = self.data.first() else {
-                return Err(unexpected_eof("empty data for exotic cell"))
+                return None;
             };
 
             const PRUNED_BRANCH: u8 = CellType::PrunedBranch.to_byte();
@@ -75,19 +74,17 @@ where
                 // 8 bits type, 8 bits level mask, level x (hash, depth)
                 PRUNED_BRANCH => {
                     if unlikely(level == 0) {
-                        return Err(invalid_data("invalid pruned branch level"));
+                        return None;
                     }
 
                     let expected_bit_len = 8 + 8 + level * (HASH_BITS + DEPTH_BITS);
-                    if unlikely(bit_len != expected_bit_len) {
-                        return Err(invalid_data("pruned branch bit length mismatch"));
-                    } else if unlikely(!references.is_empty()) {
-                        return Err(invalid_data("pruned branch contains references"));
+                    if unlikely(bit_len != expected_bit_len || !references.is_empty()) {
+                        return None;
                     }
 
                     let stored_mask = self.data.get(1).copied().unwrap_or_default();
                     if unlikely(level_mask != stored_mask) {
-                        return Err(invalid_data("pruned branch level mask mismatch"));
+                        return None;
                     }
 
                     hashes_len = 1;
@@ -96,12 +93,8 @@ where
                 // 8 bits type, hash, depth
                 MERKLE_PROOF => {
                     const EXPECTED_BIT_LEN: usize = 8 + HASH_BITS + DEPTH_BITS;
-                    if unlikely(bit_len != EXPECTED_BIT_LEN) {
-                        return Err(invalid_data("merkle proof bit length mismatch"));
-                    } else if unlikely(references.len() != 1) {
-                        return Err(invalid_data(
-                            "merkle proof cell must contain exactly one reference",
-                        ));
+                    if unlikely(bit_len != EXPECTED_BIT_LEN || references.len() != 1) {
+                        return None;
                     }
 
                     (CellType::MerkleProof, self.children_mask.virtualize(1))
@@ -109,12 +102,8 @@ where
                 // 8 bits type, 2 x (hash, depth)
                 MERKLE_UPDATE => {
                     const EXPECTED_BIT_LEN: usize = 8 + 2 * (HASH_BITS + DEPTH_BITS);
-                    if unlikely(bit_len != EXPECTED_BIT_LEN) {
-                        return Err(invalid_data("merkle update bit length mismatch"));
-                    } else if unlikely(references.len() != 2) {
-                        return Err(invalid_data(
-                            "merkle update cell must contain exactly two references",
-                        ));
+                    if unlikely(bit_len != EXPECTED_BIT_LEN || references.len() != 2) {
+                        return None;
                     }
 
                     (CellType::MerkleUpdate, self.children_mask.virtualize(1))
@@ -122,22 +111,20 @@ where
                 // 8 bits type, hash
                 LIBRARY_REFERENCE => {
                     const EXPECTED_BIT_LEN: usize = 8 + HASH_BITS;
-                    if unlikely(bit_len != EXPECTED_BIT_LEN) {
-                        return Err(invalid_data("library reference cell bit length mismatch"));
-                    } else if unlikely(!references.is_empty()) {
-                        return Err(invalid_data("library reference cell contains references"));
+                    if unlikely(bit_len != EXPECTED_BIT_LEN || !references.is_empty()) {
+                        return None;
                     }
 
                     (CellType::LibraryReference, LevelMask::EMPTY)
                 }
-                _ => return Err(invalid_data("unknown cell type")),
+                _ => return None,
             }
         } else {
             (CellType::Ordinary, self.children_mask)
         };
 
         if unlikely(computed_level_mask != level_mask) {
-            return Err(invalid_data("level mask mismatch"));
+            return None;
         }
 
         let level_offset = cell_type.is_merkle() as u8;
@@ -182,6 +169,6 @@ where
             hashes.push((hash, depth));
         }
 
-        Ok(hashes)
+        Some(hashes)
     }
 }

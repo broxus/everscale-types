@@ -6,7 +6,6 @@ use smallvec::SmallVec;
 use super::BocTag;
 use crate::cell::finalizer::{Finalizer, PartialCell};
 use crate::cell::{Cell, CellDescriptor, CellTreeStats, LevelMask};
-use crate::error::{invalid_data, unexpected_eof, unsupported};
 use crate::util::{unlikely, ArrayVec};
 
 #[derive(Debug, Default, Clone)]
@@ -36,14 +35,14 @@ pub struct BocHeader<'a> {
 
 impl<'a> BocHeader<'a> {
     /// Decodes boc info from the specified bytes
-    pub fn decode(data: &'a [u8], options: &Options) -> std::io::Result<Self> {
+    pub fn decode(data: &'a [u8], options: &Options) -> Result<Self, Error> {
         let mut reader = BocReader::new(data.len());
 
         // 4 bytes - tag
         // 1 byte - flags
         // 1 byte - offset size
         if unlikely(!reader.require(6)) {
-            return Err(unexpected_eof("invalid BOC header"));
+            return Err(Error::UnexpectedEof);
         }
         debug_assert!(data.len() >= 6);
 
@@ -79,20 +78,20 @@ impl<'a> BocHeader<'a> {
                 ref_size = (flags & 0b0000_0111) as usize;
                 supports_multiple_roots = true;
             }
-            None => return Err(invalid_data("unknown BOC tag")),
+            None => return Err(Error::UnknownBocTag),
         }
 
         if unlikely(has_cache_bits && !has_index) {
-            return Err(invalid_data("invalid header"));
+            return Err(Error::InvalidHeader);
         }
         if unlikely(ref_size == 0 || ref_size > std::mem::size_of::<u32>()) {
-            return Err(invalid_data("ref index does not fit in `u32` type"));
+            return Err(Error::InvalidRefSize);
         }
         debug_assert!((1..=4).contains(&ref_size));
 
         let offset_size = offset_size as usize;
         if unlikely(offset_size == 0 || offset_size > std::mem::size_of::<usize>()) {
-            return Err(invalid_data("cell offset does not fit in `usize` type"));
+            return Err(Error::InvalidOffsetSize);
         }
         debug_assert!((1..=8).contains(&offset_size));
 
@@ -103,7 +102,7 @@ impl<'a> BocHeader<'a> {
         // {ref_size} bytes - absent cell count
         // {offset_size} bytes - total cells size
         if unlikely(!reader.require(ref_size * 3 + offset_size)) {
-            return Err(invalid_data("invalid BOC header"));
+            return Err(Error::InvalidHeader);
         }
         debug_assert!(data.len() >= (6 + ref_size * 3 + offset_size));
 
@@ -119,24 +118,24 @@ impl<'a> BocHeader<'a> {
 
         // Validate root or absent cells
         if unlikely(root_count == 0) {
-            return Err(invalid_data("root cells not found"));
+            return Err(Error::RootCellNotFound);
         }
         if unlikely(!supports_multiple_roots && root_count > 1) {
-            return Err(invalid_data("unexpected multiple roots"));
+            return Err(Error::UnexpectedMultipleRoots);
         }
         if unlikely(root_count.saturating_add(absent_count) > cell_count) {
-            return Err(invalid_data("too many root or absent cells"));
+            return Err(Error::TooManyRootCells);
         }
         if unlikely(absent_count > 0) {
-            return Err(unsupported("absent cells are not supported"));
+            return Err(Error::AbsentCellsNotSupported);
         }
         if let Some(min_roots) = options.min_roots {
             if unlikely(root_count < min_roots) {
-                return Err(invalid_data("too few root cells"));
+                return Err(Error::TooFewRootCells);
             }
         }
         if unlikely(root_count > options.max_roots.unwrap_or(MAX_ROOTS)) {
-            return Err(invalid_data("more root cells than expected"));
+            return Err(Error::TooManyRootCells);
         }
         debug_assert!(absent_count == 0 && (1..=MAX_ROOTS).contains(&root_count));
 
@@ -152,7 +151,7 @@ impl<'a> BocHeader<'a> {
         let min_total_cell_size = (cell_count as u64) * (MIN_CELL_SIZE + ref_size as u64)
             - (root_count * ref_size) as u64;
         if unlikely(total_cells_size < min_total_cell_size) {
-            return Err(invalid_data("invalid total cells size"));
+            return Err(Error::InvalidTotalSize);
         }
 
         // NOTE: `cell_count` is guaranteed to be in range of `u32`, so
@@ -163,12 +162,12 @@ impl<'a> BocHeader<'a> {
         // 4*{ref_size} - max references
         let max_cell_size = 2 + 4 * (2 + 32) + 128 + 4 * ref_size as u64; // ~282 bytes
         if unlikely(total_cells_size > (cell_count as u64) * max_cell_size) {
-            return Err(invalid_data("invalid total cells size"));
+            return Err(Error::InvalidTotalSize);
         }
 
         // NOTE: `root_count` is in range ..=u32::MAX and `ref_size` is in range 1..=4
         if unlikely(!reader.require(root_count * ref_size)) {
-            return Err(unexpected_eof("expected list of roots"));
+            return Err(Error::UnexpectedEof);
         }
         debug_assert!(data.len() >= (6 + ref_size * 3 + offset_size + root_count * ref_size));
 
@@ -177,7 +176,7 @@ impl<'a> BocHeader<'a> {
             // SAFETY: we have already requested for {root_count}*{ref_size}
             let root_index = unsafe { reader.read_next_be_uint_fast(data, ref_size) };
             if unlikely(root_index >= cell_count) {
-                return Err(invalid_data("root index out of bounds"));
+                return Err(Error::RootOutOfBounds);
             }
             roots.push(root_index as u32);
         }
@@ -186,7 +185,7 @@ impl<'a> BocHeader<'a> {
         let index_size = has_index as u64 * cell_count as u64 * offset_size as u64;
         if unlikely(!reader.require((index_size + total_cells_size + has_crc as u64 * 4) as usize))
         {
-            return Err(unexpected_eof("missing the rest of the BOC"));
+            return Err(Error::UnexpectedEof);
         }
 
         if has_index {
@@ -198,7 +197,7 @@ impl<'a> BocHeader<'a> {
         let data_ptr = data.as_ptr();
         for _ in 0..cell_count {
             if unlikely(!reader.require(2)) {
-                return Err(unexpected_eof("expected descriptor bytes"));
+                return Err(Error::UnexpectedEof);
             }
 
             // SAFETY: there are manual bounds checks for bytes offset
@@ -207,7 +206,7 @@ impl<'a> BocHeader<'a> {
             // SAFETY: we have already checked the reader has 2 bytes
             let descriptor = unsafe { reader.read_cell_descriptor(data) };
             if unlikely(descriptor.is_absent()) {
-                return Err(unsupported("absent cells are not supported"));
+                return Err(Error::AbsentCellsNotSupported);
             }
 
             // 0b11111111 -> 0b01111111 + 1 = 0b10000000 = byte len 128, max bit len = 1023
@@ -215,24 +214,24 @@ impl<'a> BocHeader<'a> {
             let data_len = descriptor.byte_len() as usize;
             let ref_count = descriptor.reference_count() as usize;
             if unlikely(ref_count > 4) {
-                return Err(invalid_data("cell ref count not in range 0..=4"));
+                return Err(Error::InvalidRef);
             }
 
             // TODO: handle store hashes (skipped by now)
             if unlikely(descriptor.store_hashes()) {
-                return Err(unsupported("store hashes flags is not supported"));
+                return Err(Error::StoreHashesNotSupported);
             }
 
             let total_len = 2 + data_len + ref_count * ref_size;
             if unlikely(!reader.require(total_len)) {
-                return Err(unexpected_eof("expected cell data and references"));
+                return Err(Error::UnexpectedEof);
             }
 
             if data_len > 0 && !descriptor.is_aligned() {
                 // SAFETY: we have already requested 2+{data_len} bytes
                 let byte_with_tag = unsafe { reader.read_cell_tag(data, data_len) };
                 if unlikely(byte_with_tag & 0x7f == 0) {
-                    return Err(invalid_data("unnormalized cell"));
+                    return Err(Error::UnnormalizedCell);
                 }
             }
             reader.advance(total_len);
@@ -250,10 +249,7 @@ impl<'a> BocHeader<'a> {
     }
 
     /// Assembles cell tree from slices using the specified finalizer
-    pub fn finalize<R>(
-        &self,
-        finalizer: &mut dyn Finalizer<R>,
-    ) -> std::io::Result<FxHashMap<u32, R>>
+    pub fn finalize<R>(&self, finalizer: &mut dyn Finalizer<R>) -> Result<FxHashMap<u32, R>, Error>
     where
         R: AsRef<dyn Cell> + Clone,
     {
@@ -296,7 +292,7 @@ impl<'a> BocHeader<'a> {
                     let child_index = read_be_uint_fast(data_ptr, ref_size);
                     let child = match res.get(&child_index) {
                         Some(child) => child.clone(),
-                        None => return Err(invalid_data("invalid children order")),
+                        None => return Err(Error::InvalidRefOrder),
                     };
 
                     {
@@ -317,7 +313,10 @@ impl<'a> BocHeader<'a> {
                     references,
                     data,
                 };
-                let cell = ok!(finalizer.finalize_cell(ctx));
+                let cell = match finalizer.finalize_cell(ctx) {
+                    Some(cell) => cell,
+                    None => return Err(Error::InvalidCell),
+                };
                 res.insert(index as u32, cell);
             }
         }
@@ -442,3 +441,41 @@ const CELLS_ON_STACK: usize = 32;
 const ROOTS_ON_STACK: usize = 2;
 
 const MAX_ROOTS: usize = 32;
+
+#[derive(Debug, Copy, Clone, thiserror::Error)]
+pub enum Error {
+    #[error("unexpected EOF")]
+    UnexpectedEof,
+    #[error("unknown BOC tag")]
+    UnknownBocTag,
+    #[error("invalid header")]
+    InvalidHeader,
+    #[error("ref index does not fit in `u32` type")]
+    InvalidRefSize,
+    #[error("cell offset does not fit in `usize` type")]
+    InvalidOffsetSize,
+    #[error("root cell not found")]
+    RootCellNotFound,
+    #[error("unexpected multiple roots")]
+    UnexpectedMultipleRoots,
+    #[error("too many root cells")]
+    TooManyRootCells,
+    #[error("absent cells are not supported")]
+    AbsentCellsNotSupported,
+    #[error("too few root cells")]
+    TooFewRootCells,
+    #[error("invalid total cells size")]
+    InvalidTotalSize,
+    #[error("root index out of bounds")]
+    RootOutOfBounds,
+    #[error("cell ref count not in range 0..=4")]
+    InvalidRef,
+    #[error("store hashes flags is not supported")]
+    StoreHashesNotSupported,
+    #[error("unnormalized cell")]
+    UnnormalizedCell,
+    #[error("invalid children order")]
+    InvalidRefOrder,
+    #[error("invalid cell")]
+    InvalidCell,
+}

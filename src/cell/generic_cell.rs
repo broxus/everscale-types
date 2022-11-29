@@ -10,8 +10,8 @@ use super::{ArcCell, Cell, CellDescriptor, CellHash, CellTreeStats};
 pub struct GenericCellFinalizer;
 
 impl Finalizer<ArcCell> for GenericCellFinalizer {
-    fn finalize_cell(&mut self, ctx: PartialCell<ArcCell>) -> std::io::Result<ArcCell> {
-        let hashes = ok!(ctx.compute_hashes());
+    fn finalize_cell(&mut self, ctx: PartialCell<ArcCell>) -> Option<ArcCell> {
+        let hashes = ctx.compute_hashes()?;
 
         // SAFETY: references will be dropped with the header
         let header = unsafe {
@@ -24,7 +24,7 @@ impl Finalizer<ArcCell> for GenericCellFinalizer {
         };
 
         // SAFETY: `compute_hashes` ensures that data and references are well-formed
-        Ok(unsafe { make_generic_cell(header, ctx.data) })
+        Some(unsafe { make_generic_cell(header, ctx.data) })
     }
 }
 

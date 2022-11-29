@@ -25,7 +25,6 @@ pub use self::cell::{ArcCell, Cell, CellDescriptor, LevelMask};
 
 pub mod boc;
 pub mod cell;
-pub mod error;
 pub mod util;
 
 #[cfg(test)]
