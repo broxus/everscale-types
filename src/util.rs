@@ -11,13 +11,14 @@ pub const fn unlikely(b: bool) -> bool {
     }
 }
 
+/// Small on-stack vector of max lenth N.
 pub struct ArrayVec<T, const N: usize> {
     inner: [MaybeUninit<T>; N],
     len: u8,
 }
 
 impl<T, const N: usize> Default for ArrayVec<T, N> {
-    #[inline(always)]
+    #[inline]
     fn default() -> Self {
         Self {
             // SAFETY: An uninitialized `[MaybeUninit<_>; LEN]` is valid.
@@ -28,14 +29,28 @@ impl<T, const N: usize> Default for ArrayVec<T, N> {
 }
 
 impl<T, const N: usize> ArrayVec<T, N> {
+    /// Ensure that provided length is small enough
     const _ASSERT_LEN: () = assert!(N <= u8::MAX as usize);
 
-    /// Initialized next item
+    /// Returns the number of elements in the vector, also referred to as its ‘length’.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.len as usize
+    }
+
+    /// Returns true if the vector contains no elements.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Appends an element to the back of a collection.
     ///
     /// # Safety
     ///
-    /// - at most `N-1` items were initialized
-    #[inline(always)]
+    /// The following must be true:
+    /// - The length of this vector is less than `N`
+    #[inline]
     pub unsafe fn push(&mut self, item: T) {
         debug_assert!((self.len as usize) < N);
 
@@ -43,8 +58,13 @@ impl<T, const N: usize> ArrayVec<T, N> {
         self.len += 1;
     }
 
-    /// Returns inner array without dropping its elements
-    #[inline(always)]
+    /// Returns the inner data without dropping its elements.
+    ///
+    /// # Safety
+    ///
+    /// The caller is responsible for calling the destructor for
+    /// `len` initialized items in the returned array.
+    #[inline]
     pub unsafe fn into_inner(self) -> [MaybeUninit<T>; N] {
         let this = std::mem::ManuallyDrop::new(self);
         std::ptr::read(&this.inner)
@@ -52,6 +72,7 @@ impl<T, const N: usize> ArrayVec<T, N> {
 }
 
 impl<R, const N: usize> AsRef<[R]> for ArrayVec<R, N> {
+    #[inline]
     fn as_ref(&self) -> &[R] {
         // SAFETY: {len} elements were initialized
         unsafe { std::slice::from_raw_parts(self.inner.as_ptr() as *const R, self.len as usize) }

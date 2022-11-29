@@ -20,23 +20,23 @@ macro_rules! offset_of {
     }};
 }
 
-#[cfg(debug_assertions)]
-macro_rules! debug_unreachable {
-    () => {
-        unreachable!()
-    };
-}
-
-#[cfg(not(debug_assertions))]
-macro_rules! debug_unreachable {
-    () => {
-        unsafe { std::hint::unreachable_unchecked() }
-    };
-}
-
-pub use self::cell::Cell;
+pub use self::boc::Boc;
+pub use self::cell::{ArcCell, Cell, CellDescriptor, LevelMask};
 
 pub mod boc;
 pub mod cell;
-pub mod util;
 pub mod error;
+pub mod util;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn correct_deserialization() {
+        let data = base64::decode("te6ccgEBBAEAzwACg4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAIBAEAAAAAAAAAAAAAAAAAAAAAAAAAAm2c6ClpzoTVSAHvzVQGDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHKq1w7OAAkYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACRwAwBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEljGP8=").unwrap();
+        //let data = base64::decode("te6ccgEBAQEABgAACACrQTA=").unwrap();
+        let cell = Boc::decode(data).unwrap();
+        println!("{}", cell.display_tree());
+    }
+}

@@ -1,9 +1,10 @@
-use super::descriptor::{Descriptor, CellType};
-use super::level_mask::LevelMask;
-use super::{ArcCell, Cell, CellHash, CellTreeStats};
+use sha2::Digest;
+
+use super::{ArcCell, Cell, CellDescriptor, CellHash, CellTreeStats, CellType, LevelMask};
 use crate::error::{invalid_data, unexpected_eof};
 use crate::util::{unlikely, ArrayVec};
 
+/// A trait for describing cell finalization logic.
 pub trait Finalizer<R = ArcCell> {
     fn finalize_cell(&mut self, cell: PartialCell<R>) -> std::io::Result<R>;
 }
@@ -17,12 +18,27 @@ where
     }
 }
 
+/// Partially assembled cell.
 pub struct PartialCell<'a, R> {
+    /// Cell tree storage stats.
     pub stats: CellTreeStats,
+
+    /// Length of this cell's data in bits.
     pub bit_len: u16,
-    pub descriptor: Descriptor,
+
+    /// Well-formed cell descriptor.
+    pub descriptor: CellDescriptor,
+
+    /// Bitwise OR of child level masks.
     pub children_mask: LevelMask,
+
+    /// Array of child cells.
+    ///
+    /// NOTE: it is guaranteed that the length of the array is consistent
+    /// with the descriptor.
     pub references: ArrayVec<R, 4>,
+
+    /// Cell data slice
     pub data: &'a [u8],
 }
 
@@ -30,6 +46,7 @@ impl<'a, R> PartialCell<'a, R>
 where
     R: AsRef<dyn Cell>,
 {
+    /// Validates cell and computes all hashes.
     pub fn compute_hashes(&self) -> std::io::Result<Vec<(CellHash, u16)>> {
         const HASH_BITS: usize = 256;
         const DEPTH_BITS: usize = 16;
@@ -49,9 +66,14 @@ where
                 return Err(unexpected_eof("empty data for exotic cell"))
             };
 
+            const PRUNED_BRANCH: u8 = CellType::PrunedBranch.to_byte();
+            const MERKLE_PROOF: u8 = CellType::MerkleProof.to_byte();
+            const MERKLE_UPDATE: u8 = CellType::MerkleUpdate.to_byte();
+            const LIBRARY_REFERENCE: u8 = CellType::LibraryReference.to_byte();
+
             match first_byte {
                 // 8 bits type, 8 bits level mask, level x (hash, depth)
-                CellType::PRUNED_BRANCH => {
+                PRUNED_BRANCH => {
                     if unlikely(level == 0) {
                         return Err(invalid_data("invalid pruned branch level"));
                     }
@@ -72,7 +94,7 @@ where
                     (CellType::PrunedBranch, level_mask)
                 }
                 // 8 bits type, hash, depth
-                CellType::MERKLE_PROOF => {
+                MERKLE_PROOF => {
                     const EXPECTED_BIT_LEN: usize = 8 + HASH_BITS + DEPTH_BITS;
                     if unlikely(bit_len != EXPECTED_BIT_LEN) {
                         return Err(invalid_data("merkle proof bit length mismatch"));
@@ -85,7 +107,7 @@ where
                     (CellType::MerkleProof, self.children_mask.virtualize(1))
                 }
                 // 8 bits type, 2 x (hash, depth)
-                CellType::MERKLE_UPDATE => {
+                MERKLE_UPDATE => {
                     const EXPECTED_BIT_LEN: usize = 8 + 2 * (HASH_BITS + DEPTH_BITS);
                     if unlikely(bit_len != EXPECTED_BIT_LEN) {
                         return Err(invalid_data("merkle update bit length mismatch"));
@@ -98,7 +120,7 @@ where
                     (CellType::MerkleUpdate, self.children_mask.virtualize(1))
                 }
                 // 8 bits type, hash
-                CellType::LIBRARY_REFERENCE => {
+                LIBRARY_REFERENCE => {
                     const EXPECTED_BIT_LEN: usize = 8 + HASH_BITS;
                     if unlikely(bit_len != EXPECTED_BIT_LEN) {
                         return Err(invalid_data("library reference cell bit length mismatch"));
@@ -130,7 +152,7 @@ where
                 LevelMask::from_level(level as u8)
             };
 
-            descriptor.d1 &= !(Descriptor::LEVEL_MASK | Descriptor::STORE_HASHES_MASK);
+            descriptor.d1 &= !(CellDescriptor::LEVEL_MASK | CellDescriptor::STORE_HASHES_MASK);
             descriptor.d1 |= u8::from(level_mask) << 5;
             hasher.update([descriptor.d1, descriptor.d2]);
 
@@ -143,7 +165,7 @@ where
 
             let mut depth = 0;
             for child in references {
-                let child_depth = child.depth(level as u8 + level_offset);
+                let child_depth = child.as_ref().depth(level as u8 + level_offset);
 
                 // TODO: check depth overflow
                 depth = std::cmp::max(depth, child_depth + 1);
@@ -152,7 +174,7 @@ where
             }
 
             for child in references {
-                let child_hash = child.hash(level as u8 + level_offset);
+                let child_hash = child.as_ref().hash(level as u8 + level_offset);
                 hasher.update(child_hash.as_slice());
             }
 

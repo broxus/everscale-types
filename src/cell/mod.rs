@@ -2,7 +2,10 @@ use std::ops::{Add, AddAssign};
 use std::ops::{BitOr, BitOrAssign};
 use std::sync::Arc;
 
-pub mod arc_cell;
+/// Generic cell implementation
+pub(crate) mod generic_cell;
+
+/// Cell finalization primitives
 pub mod finalizer;
 
 /// Represents the interface of a well-formed cell.
@@ -92,6 +95,16 @@ impl dyn Cell + '_ {
         self.hash(LevelMask::MAX_LEVEL)
     }
 
+    /// Creates an iterator through child nodes.
+    #[inline]
+    pub fn references(&self) -> RefsIter<'_> {
+        RefsIter {
+            cell: self,
+            len: self.reference_count() as u8,
+            index: 0,
+        }
+    }
+
     /// Returns an object that implements [`Display`] for printing only
     /// the root cell of the cell tree.
     ///
@@ -108,6 +121,109 @@ impl dyn Cell + '_ {
     #[inline]
     pub fn display_tree(&'_ self) -> DisplayCellTree<'_> {
         DisplayCellTree(self)
+    }
+}
+
+/// An iterator through child nodes.
+#[derive(Clone)]
+#[must_use = "iterators are lazy and do nothing unless consumed"]
+pub struct RefsIter<'a> {
+    cell: &'a dyn Cell,
+    len: u8,
+    index: u8,
+}
+
+impl<'a> RefsIter<'a> {
+    /// Creates an iterator through child nodes which produces cloned references.
+    #[inline]
+    pub fn cloned(self) -> ClonedRefsIter<'a> {
+        ClonedRefsIter { inner: self }
+    }
+}
+
+impl<'a> Iterator for RefsIter<'a> {
+    type Item = &'a dyn Cell;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.len {
+            None
+        } else {
+            let child = self.cell.reference(self.index);
+            self.index += 1;
+            child
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.len.saturating_sub(self.index) as usize;
+        (remaining, Some(remaining))
+    }
+}
+
+impl<'a> DoubleEndedIterator for RefsIter<'a> {
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.len > self.index {
+            self.len -= 1;
+            self.cell.reference(self.len)
+        } else {
+            None
+        }
+    }
+}
+
+impl ExactSizeIterator for RefsIter<'_> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.size_hint().0
+    }
+}
+
+/// An iterator through child nodes which produces cloned references.
+#[derive(Clone)]
+#[must_use = "iterators are lazy and do nothing unless consumed"]
+pub struct ClonedRefsIter<'a> {
+    inner: RefsIter<'a>,
+}
+
+impl<'a> Iterator for ClonedRefsIter<'a> {
+    type Item = ArcCell;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.inner.index >= self.inner.len {
+            None
+        } else {
+            let child = self.inner.cell.reference_cloned(self.inner.index);
+            self.inner.index += 1;
+            child
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+impl<'a> DoubleEndedIterator for ClonedRefsIter<'a> {
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.inner.len > self.inner.index {
+            self.inner.len -= 1;
+            self.inner.cell.reference_cloned(self.inner.len)
+        } else {
+            None
+        }
+    }
+}
+
+impl ExactSizeIterator for ClonedRefsIter<'_> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.size_hint().0
     }
 }
 
@@ -131,12 +247,6 @@ pub enum CellType {
 }
 
 impl CellType {
-    pub const ORDINARY: u8 = 0xff;
-    pub const PRUNED_BRANCH: u8 = 1;
-    pub const LIBRARY_REFERENCE: u8 = 2;
-    pub const MERKLE_PROOF: u8 = 3;
-    pub const MERKLE_UPDATE: u8 = 4;
-
     /// Returns whether this cell type is Merkle proof or Merkle update.
     #[inline]
     pub const fn is_merkle(self) -> bool {
@@ -148,17 +258,24 @@ impl CellType {
     pub const fn is_exotic(self) -> bool {
         !matches!(self, Self::Ordinary)
     }
+
+    /// Encodes cell type as byte
+    #[inline]
+    pub const fn to_byte(self) -> u8 {
+        match self {
+            CellType::Ordinary => 0xff,
+            CellType::PrunedBranch => 1,
+            CellType::LibraryReference => 2,
+            CellType::MerkleProof => 3,
+            CellType::MerkleUpdate => 4,
+        }
+    }
 }
 
 impl From<CellType> for u8 {
+    #[inline]
     fn from(cell_type: CellType) -> u8 {
-        match cell_type {
-            CellType::Ordinary => CellType::ORDINARY,
-            CellType::PrunedBranch => CellType::PRUNED_BRANCH,
-            CellType::LibraryReference => CellType::LIBRARY_REFERENCE,
-            CellType::MerkleProof => CellType::MERKLE_PROOF,
-            CellType::MerkleUpdate => CellType::MERKLE_UPDATE,
-        }
+        cell_type.to_byte()
     }
 }
 
@@ -178,6 +295,7 @@ impl CellDescriptor {
     pub const STORE_HASHES_MASK: u8 = 0b0001_0000;
     pub const LEVEL_MASK: u8 = 0b1110_0000;
 
+    /// Constructs cell descriptor from descriptor bytes.
     #[inline(always)]
     pub const fn new(bytes: [u8; 2]) -> Self {
         Self {
@@ -186,6 +304,7 @@ impl CellDescriptor {
         }
     }
 
+    /// Computes cell type.
     pub fn cell_type(self) -> CellType {
         if self.d1 & Self::IS_EXOTIC_MASK == 0 {
             CellType::Ordinary
@@ -205,66 +324,82 @@ impl CellDescriptor {
         }
     }
 
+    /// Computes child cell count.
     #[inline(always)]
     pub const fn reference_count(self) -> usize {
         (self.d1 & Self::REF_COUNT_MASK) as usize
     }
 
+    /// Returns whether the cell is not [`Ordinary`].
+    ///
+    /// [`Ordinary`]: crate::cell::CellType::Ordinary
     #[inline(always)]
     pub const fn is_exotic(self) -> bool {
         self.d1 & Self::IS_EXOTIC_MASK != 0
     }
 
+    /// Returns whether this cell refers to some external data.
     #[inline(always)]
     pub fn is_absent(self) -> bool {
-        self.d1 & (Self::REF_COUNT_MASK | Self::IS_EXOTIC_MASK) != 0
+        self.d1 == (Self::REF_COUNT_MASK | Self::IS_EXOTIC_MASK)
     }
 
+    /// Returns whether this cell should store hashes in data.
     #[inline(always)]
     pub const fn store_hashes(self) -> bool {
         self.d1 & Self::STORE_HASHES_MASK != 0
     }
 
+    /// Computes level mask.
     #[inline(always)]
     pub const fn level_mask(self) -> LevelMask {
         // SAFETY: `u8 >> 5` is always 3 bits long
         unsafe { LevelMask::new_unchecked(self.d1 >> 5) }
     }
 
+    /// Returns whether this cell's data is 8-bit aligned.
     #[inline(always)]
     pub const fn is_aligned(self) -> bool {
         self.d2 & 1 == 0
     }
 
+    /// Returns this cell's data length in bytes.
     #[inline(always)]
     pub const fn byte_len(self) -> u8 {
         (self.d2 & 1) + (self.d2 >> 1)
     }
 }
 
+/// _de Brujn_ level presense bitset.
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct LevelMask(u8);
 
 impl LevelMask {
+    /// Empty bitset.
     pub const EMPTY: Self = LevelMask(0);
+    /// Max _de Brujn_ level.
     pub const MAX_LEVEL: u8 = 3;
 
-    /// Constructs new level mask, truncating extra bits
+    /// Constructs a new level mask, truncating extra bits.
     #[inline(always)]
     pub const fn new(mask: u8) -> Self {
         Self(mask & 0b111)
     }
 
+    /// Constructs a new level mask from the provided byte as is.
+    ///
     /// # Safety
-    /// Mask must be in range `0b000..=0b111`
+    ///
+    /// The following must be true:
+    /// - Mask must be in range `0b000..=0b111`.
     #[inline(always)]
     pub const unsafe fn new_unchecked(mask: u8) -> Self {
         Self(mask)
     }
 
-    /// Creates a sufficient mask for the specified level
+    /// Creates a sufficient mask for the specified level.
     ///
-    /// NOTE: levels > 3 has no effect (mask will always be `0b111`)
+    /// NOTE: levels > 3 has no effect (mask will always be `0b111`).
     #[inline(always)]
     pub const fn from_level(level: u8) -> Self {
         Self(match level {
@@ -275,17 +410,17 @@ impl LevelMask {
         })
     }
 
-    /// Counts presented higher hashes
+    /// Counts presented higher hashes.
     pub const fn level(self) -> u8 {
         (self.0 & 1) + ((self.0 >> 1) & 1) + ((self.0 >> 2) & 1)
     }
 
-    /// Computes hash index for the specified level
+    /// Computes hash index for the specified level.
     pub const fn hash_index(self, level: u8) -> u8 {
         Self(self.0 & Self::from_level(level).0).level()
     }
 
-    /// Creates a new mask, shifted by the offset
+    /// Creates a new mask, shifted by the offset.
     #[inline(always)]
     pub const fn virtualize(self, offset: u8) -> Self {
         Self(self.0 >> offset)
@@ -328,9 +463,14 @@ impl std::fmt::Debug for LevelMask {
     }
 }
 
+/// Cell tree storage stats.
+///
+/// NOTE: identical cells are counted each time they occur in the tree.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CellTreeStats {
+    /// Total number of bits in tree.
     pub bit_count: u64,
+    /// Total number of cells in tree.
     pub cell_count: u64,
 }
 
@@ -354,6 +494,7 @@ impl AddAssign for CellTreeStats {
     }
 }
 
+/// Helper struct to print only the root cell in the cell tree.
 #[derive(Clone, Copy)]
 pub struct DisplayCellRoot<'a>(&'a dyn Cell);
 
@@ -377,6 +518,7 @@ impl std::fmt::Display for DisplayCellRoot<'_> {
     }
 }
 
+/// Helper struct to print all cells in the cell tree.
 #[derive(Clone, Copy)]
 pub struct DisplayCellTree<'a>(&'a dyn Cell);
 

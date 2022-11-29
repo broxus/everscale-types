@@ -4,9 +4,8 @@ use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
 use super::BocTag;
-use crate::cell::descriptor::Descriptor;
-use crate::cell::level_mask::LevelMask;
-use crate::cell::{ArcCell, Cell, CellFinalizer, CellTreeStats, FinalizerContext};
+use crate::cell::finalizer::{Finalizer, PartialCell};
+use crate::cell::{Cell, CellDescriptor, CellTreeStats, LevelMask};
 use crate::error::{invalid_data, unexpected_eof, unsupported};
 use crate::util::{unlikely, ArrayVec};
 
@@ -18,6 +17,16 @@ pub struct Options {
     pub max_roots: Option<usize>,
 }
 
+impl Options {
+    /// Constructs decoder options to expect exactly the specified number of roots
+    pub const fn exact(number: usize) -> Self {
+        Self {
+            min_roots: Some(number),
+            max_roots: Some(number),
+        }
+    }
+}
+
 /// Parsed BOC header
 pub struct BocHeader<'a> {
     ref_size: usize,
@@ -26,7 +35,8 @@ pub struct BocHeader<'a> {
 }
 
 impl<'a> BocHeader<'a> {
-    pub fn deserialize(data: &'a [u8], options: &Options) -> std::io::Result<Self> {
+    /// Decodes boc info from the specified bytes
+    pub fn decode(data: &'a [u8], options: &Options) -> std::io::Result<Self> {
         let mut reader = BocReader::new(data.len());
 
         // 4 bytes - tag
@@ -45,7 +55,9 @@ impl<'a> BocHeader<'a> {
         let ref_size;
         let supports_multiple_roots;
 
-        match BocTag::from_bytes(data[0..4].try_into().unwrap()) {
+        // SAFETY: we have already requested more than 4 bytes
+        let boc_tag = unsafe { reader.read_boc_tag(data) };
+        match boc_tag {
             Some(BocTag::Indexed) => {
                 has_index = false;
                 has_crc = false;
@@ -160,7 +172,7 @@ impl<'a> BocHeader<'a> {
         }
         debug_assert!(data.len() >= (6 + ref_size * 3 + offset_size + root_count * ref_size));
 
-        let roots = SmallVec::with_capacity(root_count);
+        let mut roots = SmallVec::with_capacity(root_count);
         for _ in 0..root_count {
             // SAFETY: we have already requested for {root_count}*{ref_size}
             let root_index = unsafe { reader.read_next_be_uint_fast(data, ref_size) };
@@ -237,10 +249,13 @@ impl<'a> BocHeader<'a> {
         })
     }
 
-    pub fn finalize<R, F>(&self, mut finalizer: F) -> std::io::Result<FxHashMap<u32, R>>
+    /// Assembles cell tree from slices using the specified finalizer
+    pub fn finalize<R>(
+        &self,
+        finalizer: &mut dyn Finalizer<R>,
+    ) -> std::io::Result<FxHashMap<u32, R>>
     where
         R: AsRef<dyn Cell> + Clone,
-        F: CellFinalizer<R>,
     {
         let ref_size = self.ref_size;
         let cell_count = self.cells.len();
@@ -255,12 +270,12 @@ impl<'a> BocHeader<'a> {
             unsafe {
                 let cell_ptr = cell.as_ptr();
 
-                let descriptor = Descriptor::new(*(cell_ptr as *const [u8; 2]));
+                let descriptor = CellDescriptor::new(*(cell_ptr as *const [u8; 2]));
                 let byte_len = descriptor.byte_len() as usize;
 
                 let mut data_ptr = cell_ptr.add(2);
                 let data = std::slice::from_raw_parts(data_ptr, byte_len);
-                data_ptr.add(byte_len);
+                data_ptr = data_ptr.add(byte_len);
 
                 let bit_len = if descriptor.is_aligned() {
                     (byte_len * 8) as u16
@@ -270,7 +285,7 @@ impl<'a> BocHeader<'a> {
                     0
                 };
 
-                let mut refs = ArrayVec::<R, 4>::default();
+                let mut references = ArrayVec::<R, 4>::default();
                 let mut children_mask = LevelMask::EMPTY;
                 let mut stats = CellTreeStats {
                     bit_count: bit_len as u64,
@@ -278,7 +293,7 @@ impl<'a> BocHeader<'a> {
                 };
 
                 for _ in 0..descriptor.reference_count() {
-                    let child_index = read_be_uint_fast(data_ptr, 0, ref_size);
+                    let child_index = read_be_uint_fast(data_ptr, ref_size);
                     let child = match res.get(&child_index) {
                         Some(child) => child.clone(),
                         None => return Err(invalid_data("invalid children order")),
@@ -289,17 +304,17 @@ impl<'a> BocHeader<'a> {
                         children_mask |= child.descriptor().level_mask();
                         stats += child.stats();
                     }
-                    refs.push(child);
+                    references.push(child);
 
                     data_ptr = data_ptr.add(ref_size);
                 }
 
-                let ctx = FinalizerContext {
+                let ctx = PartialCell {
                     stats,
                     bit_len,
                     descriptor,
                     children_mask,
-                    references: refs.into_inner(),
+                    references,
                     data,
                 };
                 let cell = ok!(finalizer.finalize_cell(ctx));
@@ -349,32 +364,36 @@ impl BocReader {
         self.offset += bytes;
     }
 
+    #[inline(always)]
+    unsafe fn read_boc_tag(&self, data: &[u8]) -> Option<BocTag> {
+        BocTag::from_bytes(*(data.as_ptr() as *const [u8; 4]))
+    }
+
     /// # Safety
     ///
-    /// - size must be in range 1..=4
-    /// - data must be at least `self.offset + size` bytes long
+    /// The following must be true:
+    /// - size must be in range 1..=4.
+    /// - data must be at least `self.offset + size` bytes long.
     #[inline(always)]
     unsafe fn read_next_be_uint_fast(&mut self, data: &[u8], size: usize) -> usize {
-        let res = read_be_uint_fast(data.as_ptr(), self.offset, size) as usize;
+        let res = read_be_uint_fast(data.as_ptr().add(self.offset), size) as usize;
         self.advance(size);
         res
     }
 
     /// # Safety
     ///
-    /// - size must be in range 1..=8
-    /// - data must be at least `self.offset + size` bytes long
+    /// The following must be true:
+    /// - size must be in range 1..=8.
+    /// - data must be at least `self.offset + size` bytes long.
     #[inline(always)]
     unsafe fn read_next_be_uint_full(&mut self, data: &[u8], size: usize) -> u64 {
+        let data_ptr = data.as_ptr().add(self.offset);
         let res = match size {
-            1..=4 => read_be_uint_fast(data.as_ptr(), self.offset, size) as u64,
+            1..=4 => read_be_uint_fast(data_ptr, size) as u64,
             5..=8 => {
                 let mut bytes = [0u8; 8];
-                std::ptr::copy_nonoverlapping(
-                    data.as_ptr().add(self.offset),
-                    bytes.as_mut_ptr().add(8 - size),
-                    size,
-                );
+                std::ptr::copy_nonoverlapping(data_ptr, bytes.as_mut_ptr().add(8 - size), size);
                 u64::from_be_bytes(bytes)
             }
             _ => std::hint::unreachable_unchecked(),
@@ -384,9 +403,9 @@ impl BocReader {
     }
 
     #[inline(always)]
-    unsafe fn read_cell_descriptor(&self, data: &[u8]) -> Descriptor {
-        const _: () = assert!(std::mem::size_of::<Descriptor>() == 2);
-        *(data.as_ptr().add(self.offset) as *const Descriptor)
+    unsafe fn read_cell_descriptor(&self, data: &[u8]) -> CellDescriptor {
+        const _: () = assert!(std::mem::size_of::<CellDescriptor>() == 2);
+        *(data.as_ptr().add(self.offset) as *const CellDescriptor)
     }
 
     #[inline(always)]
@@ -405,16 +424,16 @@ impl Deref for BocReader {
 }
 
 #[inline(always)]
-unsafe fn read_be_uint_fast(data_ptr: *const u8, offset: usize, size: usize) -> u32 {
+unsafe fn read_be_uint_fast(data_ptr: *const u8, size: usize) -> u32 {
     match size {
         1 => *data_ptr as u32,
-        2 => u16::from_be_bytes(*(data_ptr.add(offset) as *const [u8; 2])) as u32,
+        2 => u16::from_be_bytes(*(data_ptr as *const [u8; 2])) as u32,
         3 => {
             let mut bytes = [0u8; 4];
-            std::ptr::copy_nonoverlapping(data_ptr.add(offset), bytes.as_mut_ptr().add(1), 3);
+            std::ptr::copy_nonoverlapping(data_ptr, bytes.as_mut_ptr().add(1), 3);
             u32::from_be_bytes(bytes) as u32
         }
-        4 => u32::from_be_bytes(*(data_ptr.add(offset) as *const [u8; 4])) as u32,
+        4 => u32::from_be_bytes(*(data_ptr as *const [u8; 4])) as u32,
         _ => std::hint::unreachable_unchecked(),
     }
 }
