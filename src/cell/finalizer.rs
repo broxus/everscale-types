@@ -153,9 +153,7 @@ where
             let mut depth = 0;
             for child in references {
                 let child_depth = child.as_ref().depth(level as u8 + level_offset);
-
-                // TODO: check depth overflow
-                depth = std::cmp::max(depth, child_depth + 1);
+                depth = std::cmp::max(depth, child_depth.checked_add(1)?);
 
                 hasher.update(child_depth.to_be_bytes());
             }

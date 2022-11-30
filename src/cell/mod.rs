@@ -231,7 +231,7 @@ pub type ArcCell = Arc<dyn Cell>;
 
 pub type CellHash = [u8; 32];
 
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum CellType {
     /// Cell of this type just stores data and references.
     Ordinary,
