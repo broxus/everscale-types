@@ -258,10 +258,13 @@ impl<'a> BocHeader<'a> {
         R: AsRef<dyn Cell> + Clone,
     {
         let ref_size = self.ref_size;
-        let cell_count = self.cells.len();
+        let cell_count = self.cells.len() as u32;
 
         // TODO: somehow reuse `cells` vec
-        let mut res = SmallVec::<[R; CELLS_ON_STACK]>::with_capacity(cell_count);
+        let mut res = SmallVec::<[R; CELLS_ON_STACK]>::new();
+        if res.try_reserve_exact(cell_count as usize).is_err() {
+            return Err(Error::InvalidTotalSize);
+        }
 
         for cell in self.cells().iter().rev() {
             // SAFETY: cell data structure was already validated before
@@ -291,12 +294,12 @@ impl<'a> BocHeader<'a> {
                 };
 
                 for _ in 0..descriptor.reference_count() {
-                    let child_index = read_be_uint_fast(data_ptr, ref_size) as usize;
+                    let child_index = read_be_uint_fast(data_ptr, ref_size);
                     if child_index >= cell_count {
                         return Err(Error::InvalidRef);
                     }
 
-                    let child = match res.get(cell_count - child_index - 1) {
+                    let child = match res.get((cell_count - child_index - 1) as usize) {
                         Some(child) => child.clone(),
                         None => return Err(Error::InvalidRefOrder),
                     };

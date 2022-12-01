@@ -108,7 +108,7 @@ impl Boc<ArcCell> {
 
     /// Decodes a pair of cell trees
     #[inline]
-    pub fn decode_pair<T>(data: &T) -> Result<(ArcCell, ArcCell), de::Error>
+    pub fn decode_pair<T>(data: T) -> Result<(ArcCell, ArcCell), de::Error>
     where
         T: AsRef<[u8]>,
     {
