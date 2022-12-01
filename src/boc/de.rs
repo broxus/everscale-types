@@ -221,19 +221,25 @@ impl<'a> BocHeader<'a> {
                 return Err(Error::InvalidRef);
             }
 
-            // TODO: handle store hashes (skipped by now)
+            let mut data_offset = 0;
             if unlikely(descriptor.store_hashes()) {
-                return Err(Error::StoreHashesNotSupported);
+                let level = descriptor.level_mask().level();
+                data_offset = (32 + 2)
+                    * if descriptor.is_absent() && ref_count == 0 && level > 0 {
+                        1 // pruned branch always has only 1 hash
+                    } else {
+                        level as usize + 1
+                    };
             }
 
-            let total_len = 2 + data_len + ref_count * ref_size;
+            let total_len = 2 + data_offset + data_len + ref_count * ref_size;
             if unlikely(!reader.require(total_len)) {
                 return Err(Error::UnexpectedEof);
             }
 
             if data_len > 0 && !descriptor.is_aligned() {
                 // SAFETY: we have already requested 2+{data_len} bytes
-                let byte_with_tag = unsafe { reader.read_cell_tag(data, data_len) };
+                let byte_with_tag = unsafe { reader.read_cell_tag(data, data_offset, data_len) };
                 if unlikely(byte_with_tag & 0x7f == 0) {
                     return Err(Error::UnnormalizedCell);
                 }
@@ -275,6 +281,24 @@ impl<'a> BocHeader<'a> {
                 let byte_len = descriptor.byte_len() as usize;
 
                 let mut data_ptr = cell_ptr.add(2);
+                if unlikely(descriptor.store_hashes()) {
+                    const LOWER_MASK: u8 = CellDescriptor::STORE_HASHES_MASK
+                        | CellDescriptor::IS_EXOTIC_MASK
+                        | CellDescriptor::REF_COUNT_MASK;
+                    const BLANK_PRUNED: u8 =
+                        CellDescriptor::STORE_HASHES_MASK | CellDescriptor::IS_EXOTIC_MASK;
+
+                    let level = descriptor.level_mask().level();
+                    data_ptr = data_ptr.add(
+                        (32 + 2)
+                            * if level > 0 && descriptor.d1 & LOWER_MASK == BLANK_PRUNED {
+                                1 // pruned branch always has only 1 hash
+                            } else {
+                                level as usize + 1
+                            },
+                    );
+                }
+
                 let data = std::slice::from_raw_parts(data_ptr, byte_len);
                 data_ptr = data_ptr.add(byte_len);
 
@@ -428,8 +452,10 @@ impl BocReader {
     }
 
     #[inline(always)]
-    unsafe fn read_cell_tag(&self, data: &[u8], data_len: usize) -> u8 {
-        *data.as_ptr().add(self.offset + 2 + data_len - 1)
+    unsafe fn read_cell_tag(&self, data: &[u8], data_offset: usize, data_len: usize) -> u8 {
+        *data
+            .as_ptr()
+            .add(self.offset + 2 + data_offset + data_len - 1)
     }
 }
 
@@ -490,8 +516,6 @@ pub enum Error {
     RootOutOfBounds,
     #[error("cell ref count not in range 0..=4")]
     InvalidRef,
-    #[error("store hashes flags is not supported")]
-    StoreHashesNotSupported,
     #[error("unnormalized cell")]
     UnnormalizedCell,
     #[error("invalid children order")]
