@@ -111,7 +111,10 @@ impl dyn Cell + '_ {
     /// [`Display`]: std::fmt::Display
     #[inline]
     pub fn display_root(&'_ self) -> DisplayCellRoot<'_> {
-        DisplayCellRoot(self)
+        DisplayCellRoot {
+            cell: self,
+            level: 0,
+        }
     }
 
     /// Returns an object that implements [`Display`] for printing all
@@ -496,24 +499,34 @@ impl AddAssign for CellTreeStats {
 
 /// Helper struct to print only the root cell in the cell tree.
 #[derive(Clone, Copy)]
-pub struct DisplayCellRoot<'a>(&'a dyn Cell);
+pub struct DisplayCellRoot<'a> {
+    cell: &'a dyn Cell,
+    level: usize,
+}
 
 impl std::fmt::Display for DisplayCellRoot<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // TODO: encode on stack
-        let data = hex::encode(self.0.data());
+        let data = hex::encode(self.cell.data());
 
+        let indent = self.level * 2;
         if f.alternate() {
-            std::fmt::Display::fmt(&data, f)
+            f.write_fmt(format_args!("{:indent$}{data}\n", ""))
         } else {
-            let repr_hash = self.0.repr_hash();
-            let descriptor = self.0.descriptor();
+            let repr_depth = self.cell.depth(LevelMask::MAX_LEVEL);
+            let repr_hash = self.cell.repr_hash();
+            let descriptor = self.cell.descriptor();
             f.write_fmt(format_args!(
-                "{data}\nbits: {:>4}, refs: {}, hash: {}",
-                descriptor.byte_len(),
-                descriptor.reference_count(),
-                hex::encode(repr_hash),
-            ))
+                    "{:indent$}{:?}: {data}\n{:indent$}bits: {:>4}, refs: {}, l: {:?}, depth: {}, hash: {}\n",
+                    "",
+                    descriptor.cell_type(),
+                    "",
+                    descriptor.byte_len(),
+                    descriptor.reference_count(),
+                    descriptor.level_mask(),
+                    repr_depth,
+                    hex::encode(repr_hash),
+                ))
         }
     }
 }
@@ -527,9 +540,9 @@ impl std::fmt::Display for DisplayCellTree<'_> {
         let mut stack = vec![(0, self.0)];
 
         while let Some((level, cell)) = stack.pop() {
-            f.write_fmt(format_args!("{:level$}{}\n", "", cell.display_root()))?;
+            std::fmt::Display::fmt(&DisplayCellRoot { cell, level }, f)?;
 
-            let reference_count = self.0.reference_count() as u8;
+            let reference_count = cell.reference_count() as u8;
             for i in (0..reference_count).rev() {
                 if let Some(child) = cell.reference(i) {
                     stack.push((level + 1, child));
