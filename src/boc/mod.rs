@@ -56,10 +56,10 @@ where
             },
         ));
 
-        if let Some(root) = header.roots().first() {
+        if let Some(&root) = header.roots().first() {
             let cells = ok!(header.finalize(finalizer));
             if let Some(root) = cells.get(root) {
-                return Ok(root.clone());
+                return Ok(root);
             }
         }
 
@@ -82,10 +82,10 @@ where
         ));
 
         let mut roots = header.roots().iter();
-        if let (Some(root1), Some(root2)) = (roots.next(), roots.next()) {
+        if let (Some(&root1), Some(&root2)) = (roots.next(), roots.next()) {
             let cells = ok!(header.finalize(finalizer));
             if let (Some(root1), Some(root2)) = (cells.get(root1), cells.get(root2)) {
-                return Ok((root1.clone(), root2.clone()));
+                return Ok((root1, root2));
             }
         }
 

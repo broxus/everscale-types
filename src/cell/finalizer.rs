@@ -146,6 +146,9 @@ where
             if level == 0 {
                 hasher.update(self.data);
             } else {
+                debug_assert!((level - 1) < hashes.len());
+                // SAFETY: new hash is added on each iteration, so there will
+                // definitely be a hash, when level>0
                 let prev_hash = unsafe { hashes.get_unchecked(level - 1) };
                 hasher.update(prev_hash.0.as_slice());
             }

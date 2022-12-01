@@ -24,50 +24,51 @@ pub struct GenericCellFinalizer;
 impl Finalizer<ArcCell> for GenericCellFinalizer {
     fn finalize_cell(&mut self, ctx: PartialCell<ArcCell>) -> Option<ArcCell> {
         let hashes = ctx.compute_hashes()?;
+        // SAFETY: ctx now represents a well-formed cell
+        unsafe { make_cell(ctx, hashes) }
+    }
+}
 
-        match ctx.descriptor.cell_type() {
-            CellType::PrunedBranch => {
-                // SAFETY: references will be dropped with the header
-                let header = unsafe {
-                    let repr = hashes.get_unchecked(0);
+unsafe fn make_cell(ctx: PartialCell<ArcCell>, hashes: Vec<(CellHash, u16)>) -> Option<ArcCell> {
+    match ctx.descriptor.cell_type() {
+        CellType::PrunedBranch => {
+            debug_assert!(hashes.len() == 1);
+            let repr = hashes.get_unchecked(0);
 
-                    PrunedBranchHeader {
-                        repr_hash: repr.0,
-                        repr_depth: repr.1,
-                        level: ctx.descriptor.level_mask().level(),
-                        descriptor: ctx.descriptor,
-                    }
-                };
-
-                // SAFETY: `compute_hashes` ensures that data and references are well-formed
-                Some(unsafe { make_pruned_branch(header, ctx.data) })
-            }
-            CellType::LibraryReference => {
-                let repr = unsafe { hashes.get_unchecked(0) };
-
-                Some(Arc::new(LibraryReference {
+            Some(make_pruned_branch(
+                PrunedBranchHeader {
                     repr_hash: repr.0,
                     repr_depth: repr.1,
+                    level: ctx.descriptor.level_mask().level(),
                     descriptor: ctx.descriptor,
-                    data: unsafe { *(ctx.data.as_ptr() as *const [u8; 33]) },
-                }))
-            }
-            _ => {
-                // SAFETY: references will be dropped with the header
-                let header = unsafe {
-                    OrdinaryCellHeader {
-                        bit_len: ctx.bit_len,
-                        stats: ctx.stats,
-                        hashes,
-                        descriptor: ctx.descriptor,
-                        references: ctx.references.into_inner(),
-                    }
-                };
-
-                // SAFETY: `compute_hashes` ensures that data and references are well-formed
-                Some(unsafe { make_ordinary_cell(header, ctx.data) })
-            }
+                },
+                ctx.data,
+            ))
         }
+        CellType::LibraryReference => {
+            debug_assert!(hashes.len() == 1);
+            let repr = hashes.get_unchecked(0);
+
+            debug_assert!(ctx.descriptor.byte_len() == 33);
+            debug_assert!(ctx.data.len() == 33);
+
+            Some(Arc::new(LibraryReference {
+                repr_hash: repr.0,
+                repr_depth: repr.1,
+                descriptor: ctx.descriptor,
+                data: *(ctx.data.as_ptr() as *const [u8; 33]),
+            }))
+        }
+        _ => Some(make_ordinary_cell(
+            OrdinaryCellHeader {
+                bit_len: ctx.bit_len,
+                stats: ctx.stats,
+                hashes,
+                descriptor: ctx.descriptor,
+                references: ctx.references.into_inner(),
+            },
+            ctx.data,
+        )),
     }
 }
 
@@ -79,7 +80,7 @@ impl Finalizer<ArcCell> for GenericCellFinalizer {
 /// - Header references array must be consistent with the descriptor.
 /// - Data length in bytes must be in range 0..=128.
 unsafe fn make_ordinary_cell(header: OrdinaryCellHeader<ArcCell>, data: &[u8]) -> ArcCell {
-    define_gen_vtable_ptr!((const N: usize) => OrdinaryCell<[u8; N], ArcCell>);
+    define_gen_vtable_ptr!((const N: usize) => OrdinaryCell<ArcCell, N>);
 
     const VTABLES: [*const (); 9] = [
         gen_vtable_ptr::<0>(),
@@ -93,22 +94,33 @@ unsafe fn make_ordinary_cell(header: OrdinaryCellHeader<ArcCell>, data: &[u8]) -
         gen_vtable_ptr::<128>(),
     ];
 
-    type EmptyCell = OrdinaryCell<[u8; 0], ArcCell>;
+    type EmptyCell = OrdinaryCell<ArcCell, 0>;
 
     // Clamp data to 0..=128 bytes range
-    let raw_data_len = std::cmp::min(data.len(), 128) as u8;
+    let raw_data_len = data.len();
+    debug_assert!(raw_data_len <= 128);
 
     // Compute nearest target data length and vtable
     let (target_data_len, vtable) = if raw_data_len == 0 {
         (0, VTABLES[0])
     } else {
-        let len = std::cmp::max(raw_data_len, 8).next_power_of_two() as usize;
+        let len = std::cmp::max(raw_data_len, 8).next_power_of_two();
         let vtable = *VTABLES.get_unchecked(1 + len.trailing_zeros() as usize);
         (len, vtable)
     };
+    debug_assert!(raw_data_len <= target_data_len);
 
     // Compute object layout
-    const ALIGN: usize = std::mem::align_of::<ArcInner<AtomicUsize, EmptyCell>>();
+    type InnerOrdinaryCell<const N: usize> = ArcInner<AtomicUsize, OrdinaryCell<ArcCell, N>>;
+
+    const ALIGN: usize = std::mem::align_of::<InnerOrdinaryCell<0>>();
+    const _: () = assert!(
+        ALIGN == std::mem::align_of::<InnerOrdinaryCell<8>>()
+            && ALIGN == std::mem::align_of::<InnerOrdinaryCell<16>>()
+            && ALIGN == std::mem::align_of::<InnerOrdinaryCell<32>>()
+            && ALIGN == std::mem::align_of::<InnerOrdinaryCell<64>>()
+            && ALIGN == std::mem::align_of::<InnerOrdinaryCell<128>>()
+    );
 
     const ARC_DATA_OFFSET: usize =
         offset_of!(ArcInner<usize, EmptyCell>, obj) + offset_of!(EmptyCell, data);
@@ -121,15 +133,15 @@ unsafe fn make_ordinary_cell(header: OrdinaryCellHeader<ArcCell>, data: &[u8]) -
         layout,
         header,
         data.as_ptr(),
-        raw_data_len as usize,
+        raw_data_len,
         vtable,
     )
 }
 
-type OrdinaryCell<T, R> = HeaderWithData<OrdinaryCellHeader<R>, T>;
+type OrdinaryCell<R, const N: usize> = HeaderWithData<OrdinaryCellHeader<R>, [u8; N]>;
 
 // TODO: merge VTables for different data array sizes
-impl<const N: usize> Cell for OrdinaryCell<[u8; N], ArcCell> {
+impl<const N: usize> Cell for OrdinaryCell<ArcCell, N> {
     fn descriptor(&self) -> CellDescriptor {
         self.header.descriptor
     }
@@ -177,6 +189,8 @@ struct OrdinaryCellHeader<R> {
 impl<R> OrdinaryCellHeader<R> {
     fn level_descr(&self, level: u8) -> &(CellHash, u16) {
         let hash_index = hash_index(self.descriptor, level);
+        debug_assert!((hash_index as usize) < self.hashes.len());
+
         // SAFETY: hash index is in range 0..=3
         unsafe { self.hashes.get_unchecked(hash_index as usize) }
     }
@@ -195,6 +209,8 @@ impl<R> OrdinaryCellHeader<R> {
 impl<R> Drop for OrdinaryCellHeader<R> {
     fn drop(&mut self) {
         let references_ptr = self.references.as_mut_ptr() as *mut R;
+        debug_assert!(self.descriptor.reference_count() <= 4);
+
         for i in 0..self.descriptor.reference_count() {
             // SAFETY: references were initialized
             unsafe { std::ptr::drop_in_place(references_ptr.add(i)) };
@@ -251,7 +267,7 @@ impl Cell for LibraryReference {
 }
 
 unsafe fn make_pruned_branch(header: PrunedBranchHeader, data: &[u8]) -> ArcCell {
-    define_gen_vtable_ptr!((const N: usize) => PrunedBranch<[u8; N]>);
+    define_gen_vtable_ptr!((const N: usize) => PrunedBranch<N>);
 
     #[inline]
     const fn cell_data_len(level: usize) -> usize {
@@ -264,15 +280,24 @@ unsafe fn make_pruned_branch(header: PrunedBranchHeader, data: &[u8]) -> ArcCell
         gen_vtable_ptr::<{ cell_data_len(3) }>(),
     ];
 
-    type BaseSlice = [u8; cell_data_len(1)];
-    type EmptyCell = PrunedBranch<BaseSlice>;
+    type EmptyCell = PrunedBranch<{ cell_data_len(1) }>;
 
     // Compute nearest target data length and vtable
     let data_len = cell_data_len(header.level as usize);
+    debug_assert!((1..=3).contains(&header.level));
+    debug_assert_eq!(data_len, data.len());
+    debug_assert_eq!(data_len, header.descriptor.byte_len() as usize);
+
     let vtable = *VTABLES.get_unchecked((header.level - 1) as usize);
 
     // Compute object layout
-    const ALIGN: usize = std::mem::align_of::<ArcInner<AtomicUsize, EmptyCell>>();
+    type InnerPrunedBranch<const N: usize> = ArcInner<AtomicUsize, PrunedBranch<N>>;
+
+    const ALIGN: usize = std::mem::align_of::<InnerPrunedBranch<{ cell_data_len(1) }>>();
+    const _: () = assert!(
+        ALIGN == std::mem::align_of::<InnerPrunedBranch<{ cell_data_len(2) }>>()
+            && ALIGN == std::mem::align_of::<InnerPrunedBranch<{ cell_data_len(3) }>>()
+    );
 
     const ARC_DATA_OFFSET: usize =
         offset_of!(ArcInner<usize, EmptyCell>, obj) + offset_of!(EmptyCell, data);
@@ -281,12 +306,18 @@ unsafe fn make_pruned_branch(header: PrunedBranchHeader, data: &[u8]) -> ArcCell
     let layout = Layout::from_size_align_unchecked(size, ALIGN).pad_to_align();
 
     // Make ArcCell
-    make_arc_cell::<PrunedBranchHeader, BaseSlice>(layout, header, data.as_ptr(), data_len, vtable)
+    make_arc_cell::<PrunedBranchHeader, [u8; cell_data_len(1)]>(
+        layout,
+        header,
+        data.as_ptr(),
+        data_len,
+        vtable,
+    )
 }
 
-type PrunedBranch<T> = HeaderWithData<PrunedBranchHeader, T>;
+type PrunedBranch<const N: usize> = HeaderWithData<PrunedBranchHeader, [u8; N]>;
 
-impl<const N: usize> Cell for PrunedBranch<[u8; N]> {
+impl<const N: usize> Cell for PrunedBranch<N> {
     fn descriptor(&self) -> CellDescriptor {
         self.header.descriptor
     }
@@ -299,8 +330,7 @@ impl<const N: usize> Cell for PrunedBranch<[u8; N]> {
     }
 
     fn bit_len(&self) -> u16 {
-        // Pruned branch data is always aligned
-        self.header.descriptor.byte_len() as u16 * 8
+        8 + 8 + (self.header.level as u16) * (256 + 16)
     }
 
     fn reference(&self, _: u8) -> Option<&dyn Cell> {
@@ -317,7 +347,11 @@ impl<const N: usize> Cell for PrunedBranch<[u8; N]> {
             self.header.repr_hash
         } else {
             let offset = 2 + hash_index as usize * 32;
+            debug_assert!(offset + 32 <= self.header.descriptor.byte_len() as usize);
+
             let data_ptr = std::ptr::addr_of!(self.data) as *const u8;
+
+            // SAFETY: Cell was created from a well-formed parts, so data is big enough
             unsafe { *(data_ptr.add(offset) as *const [u8; 32]) }
         }
     }
@@ -328,7 +362,11 @@ impl<const N: usize> Cell for PrunedBranch<[u8; N]> {
             self.header.repr_depth
         } else {
             let offset = 2 + self.header.level as usize * 32 + hash_index as usize * 2;
+            debug_assert!(offset + 2 <= self.header.descriptor.byte_len() as usize);
+
             let data_ptr = std::ptr::addr_of!(self.data) as *const u8;
+
+            // SAFETY: Cell was created from a well-formed parts, so data is big enough
             u16::from_be_bytes(unsafe { *(data_ptr.add(offset) as *const [u8; 2]) })
         }
     }

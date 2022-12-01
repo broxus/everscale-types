@@ -1,6 +1,5 @@
 use std::ops::Deref;
 
-use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
 use super::BocTag;
@@ -46,6 +45,7 @@ impl<'a> BocHeader<'a> {
         }
         debug_assert!(data.len() >= 6);
 
+        // SAFETY: we have already requested more than 6 bytes
         let [flags, offset_size] = unsafe { *(data.as_ptr().add(4) as *const [u8; 2]) };
 
         let has_index;
@@ -253,19 +253,17 @@ impl<'a> BocHeader<'a> {
     }
 
     /// Assembles cell tree from slices using the specified finalizer
-    pub fn finalize<R>(&self, finalizer: &mut dyn Finalizer<R>) -> Result<FxHashMap<u32, R>, Error>
+    pub fn finalize<R>(&self, finalizer: &mut dyn Finalizer<R>) -> Result<ProcessedCells<R>, Error>
     where
         R: AsRef<dyn Cell> + Clone,
     {
         let ref_size = self.ref_size;
         let cell_count = self.cells.len();
 
-        let mut res = FxHashMap::<u32, R>::with_capacity_and_hasher(cell_count, Default::default());
+        // TODO: somehow reuse `cells` vec
+        let mut res = SmallVec::<[R; CELLS_ON_STACK]>::with_capacity(cell_count);
 
-        let mut index = cell_count;
         for cell in self.cells().iter().rev() {
-            index -= 1;
-
             // SAFETY: cell data structure was already validated before
             unsafe {
                 let cell_ptr = cell.as_ptr();
@@ -293,8 +291,12 @@ impl<'a> BocHeader<'a> {
                 };
 
                 for _ in 0..descriptor.reference_count() {
-                    let child_index = read_be_uint_fast(data_ptr, ref_size);
-                    let child = match res.get(&child_index) {
+                    let child_index = read_be_uint_fast(data_ptr, ref_size) as usize;
+                    if child_index >= cell_count {
+                        return Err(Error::InvalidRef);
+                    }
+
+                    let child = match res.get(cell_count - child_index - 1) {
                         Some(child) => child.clone(),
                         None => return Err(Error::InvalidRefOrder),
                     };
@@ -321,11 +323,11 @@ impl<'a> BocHeader<'a> {
                     Some(cell) => cell,
                     None => return Err(Error::InvalidCell),
                 };
-                res.insert(index as u32, cell);
+                res.push(cell);
             }
         }
 
-        Ok(res)
+        Ok(ProcessedCells(res))
     }
 
     /// Cell index size in bytes. Guaranteed to be 4 at max
@@ -341,6 +343,17 @@ impl<'a> BocHeader<'a> {
     /// Root indices
     pub fn roots(&self) -> &[u32] {
         &self.roots
+    }
+}
+
+pub struct ProcessedCells<R>(SmallVec<[R; CELLS_ON_STACK]>);
+
+impl<R> ProcessedCells<R>
+where
+    R: Clone,
+{
+    pub fn get(&self, index: u32) -> Option<R> {
+        self.0.get(self.0.len() - index as usize - 1).cloned()
     }
 }
 
@@ -441,7 +454,7 @@ unsafe fn read_be_uint_fast(data_ptr: *const u8, size: usize) -> u32 {
     }
 }
 
-const CELLS_ON_STACK: usize = 32;
+const CELLS_ON_STACK: usize = 16;
 const ROOTS_ON_STACK: usize = 2;
 
 const MAX_ROOTS: usize = 32;
