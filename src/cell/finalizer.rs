@@ -1,24 +1,27 @@
 use sha2::Digest;
 
-use super::{ArcCell, Cell, CellDescriptor, CellHash, CellTreeStats, CellType, LevelMask};
+use crate::cell::{
+    Cell, CellContainer, CellDescriptor, CellFamily, CellHash, CellTreeStats, CellType, LevelMask,
+};
 use crate::util::{unlikely, ArrayVec};
 
 /// A trait for describing cell finalization logic.
-pub trait Finalizer<R = ArcCell> {
-    fn finalize_cell(&mut self, cell: PartialCell<R>) -> Option<R>;
+pub trait Finalizer<C: CellFamily + ?Sized> {
+    fn finalize_cell(&mut self, cell: PartialCell<C>) -> Option<CellContainer<C>>;
 }
 
-impl<F, R> Finalizer<R> for F
+impl<F, C: CellFamily> Finalizer<C> for F
 where
-    F: FnMut(PartialCell<R>) -> Option<R>,
+    F: FnMut(PartialCell<C>) -> Option<CellContainer<C>>,
+    CellContainer<C>: AsRef<dyn Cell<C>>,
 {
-    fn finalize_cell(&mut self, cell: PartialCell<R>) -> Option<R> {
+    fn finalize_cell(&mut self, cell: PartialCell<C>) -> Option<CellContainer<C>> {
         (*self)(cell)
     }
 }
 
 /// Partially assembled cell.
-pub struct PartialCell<'a, R> {
+pub struct PartialCell<'a, C: CellFamily + ?Sized> {
     /// Cell tree storage stats.
     pub stats: CellTreeStats,
 
@@ -35,15 +38,15 @@ pub struct PartialCell<'a, R> {
     ///
     /// NOTE: it is guaranteed that the length of the array is consistent
     /// with the descriptor.
-    pub references: ArrayVec<R, 4>,
+    pub references: ArrayVec<CellContainer<C>, 4>,
 
     /// Cell data slice
     pub data: &'a [u8],
 }
 
-impl<'a, R> PartialCell<'a, R>
+impl<'a, C: CellFamily> PartialCell<'a, C>
 where
-    R: AsRef<dyn Cell>,
+    CellContainer<C>: AsRef<dyn Cell<C>>,
 {
     /// Validates cell and computes all hashes.
     pub fn compute_hashes(&self) -> Option<Vec<(CellHash, u16)>> {

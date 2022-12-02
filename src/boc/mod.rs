@@ -1,10 +1,10 @@
 use crate::cell::finalizer::Finalizer;
-use crate::cell::generic_cell::GenericCellFinalizer;
-use crate::cell::{ArcCell, Cell};
+use crate::cell::{Cell, CellContainer, CellFamily};
 
 /// BOC decoder implementation
 pub mod de;
 
+/// BOC file magic number
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum BocTag {
     Indexed,
@@ -36,16 +36,34 @@ impl BocTag {
 }
 
 /// BOC (Bag Of Cells) helper
-pub struct Boc<R = ArcCell> {
-    _cell_type: std::marker::PhantomData<R>,
+pub struct Boc<C> {
+    _cell_type: std::marker::PhantomData<C>,
 }
 
-impl<R> Boc<R>
+impl<C: CellFamily> Boc<C>
 where
-    R: AsRef<dyn Cell> + Clone,
+    CellContainer<C>: AsRef<dyn Cell<C>>,
 {
+    /// Decodes a cell tree using the default Cell family finalizer
+    #[inline]
+    pub fn decode<T>(data: T) -> Result<CellContainer<C>, de::Error>
+    where
+        T: AsRef<[u8]>,
+    {
+        fn decode_impl<C: CellFamily>(data: &[u8]) -> Result<CellContainer<C>, de::Error>
+        where
+            CellContainer<C>: AsRef<dyn Cell<C>>,
+        {
+            Boc::<C>::decode_ext(data, &mut C::default_finalizer())
+        }
+        decode_impl::<C>(data.as_ref())
+    }
+
     /// Decodes a cell tree using the specified finalizer
-    pub fn decode_ext(data: &[u8], finalizer: &mut dyn Finalizer<R>) -> Result<R, de::Error> {
+    pub fn decode_ext(
+        data: &[u8],
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<CellContainer<C>, de::Error> {
         use self::de::*;
 
         let header = ok!(de::BocHeader::decode(
@@ -66,11 +84,26 @@ where
         Err(de::Error::RootCellNotFound)
     }
 
+    /// Decodes a pair of cell trees using the default Cell family finalizer
+    #[inline]
+    pub fn decode_pair<T>(data: T) -> Result<CellContainerPair<C>, de::Error>
+    where
+        T: AsRef<[u8]>,
+    {
+        fn decode_pair_impl<C: CellFamily>(data: &[u8]) -> Result<CellContainerPair<C>, de::Error>
+        where
+            CellContainer<C>: AsRef<dyn Cell<C>>,
+        {
+            Boc::<C>::decode_pair_ext(data, &mut C::default_finalizer())
+        }
+        decode_pair_impl::<C>(data.as_ref())
+    }
+
     /// Decodes a pair of cell trees using the specified finalizer
     pub fn decode_pair_ext(
         data: &[u8],
-        finalizer: &mut dyn Finalizer<R>,
-    ) -> Result<(R, R), de::Error> {
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<CellContainerPair<C>, de::Error> {
         use self::de::*;
 
         let header = ok!(de::BocHeader::decode(
@@ -93,28 +126,4 @@ where
     }
 }
 
-impl Boc<ArcCell> {
-    /// Decodes a cell tree
-    #[inline]
-    pub fn decode<T>(data: T) -> Result<ArcCell, de::Error>
-    where
-        T: AsRef<[u8]>,
-    {
-        fn decode_impl(data: &[u8]) -> Result<ArcCell, de::Error> {
-            Boc::<ArcCell>::decode_ext(data, &mut GenericCellFinalizer)
-        }
-        decode_impl(data.as_ref())
-    }
-
-    /// Decodes a pair of cell trees
-    #[inline]
-    pub fn decode_pair<T>(data: T) -> Result<(ArcCell, ArcCell), de::Error>
-    where
-        T: AsRef<[u8]>,
-    {
-        fn decode_pair_impl(data: &[u8]) -> Result<(ArcCell, ArcCell), de::Error> {
-            Boc::<ArcCell>::decode_pair_ext(data, &mut GenericCellFinalizer)
-        }
-        decode_pair_impl(data.as_ref())
-    }
-}
+type CellContainerPair<C> = (CellContainer<C>, CellContainer<C>);

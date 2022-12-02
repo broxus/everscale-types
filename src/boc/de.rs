@@ -4,7 +4,7 @@ use smallvec::SmallVec;
 
 use super::BocTag;
 use crate::cell::finalizer::{Finalizer, PartialCell};
-use crate::cell::{Cell, CellDescriptor, CellTreeStats, LevelMask};
+use crate::cell::{Cell, CellContainer, CellDescriptor, CellFamily, CellTreeStats, LevelMask};
 use crate::util::{unlikely, ArrayVec};
 
 #[derive(Debug, Default, Clone)]
@@ -259,15 +259,16 @@ impl<'a> BocHeader<'a> {
     }
 
     /// Assembles cell tree from slices using the specified finalizer
-    pub fn finalize<R>(&self, finalizer: &mut dyn Finalizer<R>) -> Result<ProcessedCells<R>, Error>
+    pub fn finalize<C>(&self, finalizer: &mut dyn Finalizer<C>) -> Result<ProcessedCells<C>, Error>
     where
-        R: AsRef<dyn Cell> + Clone,
+        C: CellFamily,
+        CellContainer<C>: AsRef<dyn Cell<C>>,
     {
         let ref_size = self.ref_size;
         let cell_count = self.cells.len() as u32;
 
         // TODO: somehow reuse `cells` vec
-        let mut res = SmallVec::<[R; CELLS_ON_STACK]>::new();
+        let mut res = SmallVec::<[CellContainer<C>; CELLS_ON_STACK]>::new();
         if res.try_reserve_exact(cell_count as usize).is_err() {
             return Err(Error::InvalidTotalSize);
         }
@@ -310,7 +311,7 @@ impl<'a> BocHeader<'a> {
                     0
                 };
 
-                let mut references = ArrayVec::<R, 4>::default();
+                let mut references = ArrayVec::<CellContainer<C>, 4>::default();
                 let mut children_mask = LevelMask::EMPTY;
                 let mut stats = CellTreeStats {
                     bit_count: bit_len as u64,
@@ -373,13 +374,10 @@ impl<'a> BocHeader<'a> {
     }
 }
 
-pub struct ProcessedCells<R>(SmallVec<[R; CELLS_ON_STACK]>);
+pub struct ProcessedCells<C: CellFamily>(SmallVec<[CellContainer<C>; CELLS_ON_STACK]>);
 
-impl<R> ProcessedCells<R>
-where
-    R: Clone,
-{
-    pub fn get(&self, index: u32) -> Option<R> {
+impl<C: CellFamily> ProcessedCells<C> {
+    pub fn get(&self, index: u32) -> Option<CellContainer<C>> {
         self.0.get(self.0.len() - index as usize - 1).cloned()
     }
 }

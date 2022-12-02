@@ -21,7 +21,9 @@ macro_rules! offset_of {
 }
 
 pub use self::boc::Boc;
-pub use self::cell::{ArcCell, Cell, CellDescriptor, LevelMask};
+pub use self::cell::rc::{RcCell, RcCellFamily};
+pub use self::cell::sync::{ArcCell, ArcCellFamily};
+pub use self::cell::{Cell, CellDescriptor, LevelMask};
 
 pub mod boc;
 pub mod cell;
@@ -34,8 +36,11 @@ mod tests {
     #[test]
     fn correct_deserialization() {
         let data = base64::decode("te6ccgEBBAEAzwACg4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAIBAEAAAAAAAAAAAAAAAAAAAAAAAAAAm2c6ClpzoTVSAHvzVQGDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHKq1w7OAAkYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACRwAwBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEljGP8=").unwrap();
-        //let data = base64::decode("te6ccgEBAQEABgAACACrQTA=").unwrap();
-        let cell = Boc::decode(data).unwrap();
+
+        let cell = Boc::<ArcCellFamily>::decode(&data).unwrap();
+        println!("{}", cell.display_tree());
+
+        let cell = Boc::<RcCellFamily>::decode(&data).unwrap();
         println!("{}", cell.display_tree());
     }
 }
