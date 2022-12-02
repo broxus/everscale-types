@@ -8,7 +8,7 @@ use super::{
 use crate::cell::finalizer::{Finalizer, PartialCell};
 use crate::cell::{Cell, CellContainer, CellFamily, CellHash, CellType};
 
-/// Single-threaded cell family
+/// Single-threaded cell family.
 pub struct RcCellFamily;
 
 impl CellFamily for RcCellFamily {
@@ -24,10 +24,10 @@ impl CellFamily for RcCellFamily {
     }
 }
 
-/// Single-threaded cell
+/// Single-threaded cell.
 pub type RcCell = CellContainer<RcCellFamily>;
 
-/// Single-threaded cell finalizer
+/// Single-threaded cell finalizer.
 #[derive(Clone, Copy)]
 pub struct RcCellFinalizer;
 
@@ -88,7 +88,7 @@ unsafe fn make_cell(
     }
 }
 
-/// Constructs an `RcCell` from well-formed cell header and data
+/// Constructs an `RcCell` from well-formed cell header and data.
 ///
 /// # Safety
 ///
@@ -244,7 +244,7 @@ where
     Rc::from_raw(ptr)
 }
 
-/// Internal Rc representation
+/// Internal Rc representation.
 #[repr(C)]
 struct RcBox<A, T: ?Sized> {
     strong: A,

@@ -43,4 +43,27 @@ mod tests {
         let cell = Boc::<RcCellFamily>::decode(&data).unwrap();
         println!("{}", cell.display_tree());
     }
+
+    #[test]
+    fn cell_slices() {
+        let data = base64::decode("te6ccgEBAQEABQAABb23wA==").unwrap();
+        let cell = Boc::<RcCellFamily>::decode(data).unwrap();
+        println!("{}", cell.display_tree());
+
+        let mut slice = cell.as_slice();
+        assert!(!slice.is_data_empty());
+        assert_eq!(slice.remaining_bits(), 17);
+        assert!(slice.is_refs_empty());
+        assert_eq!(slice.remaining_refs(), 0);
+        assert!(slice.reference(0).is_none());
+        assert!(slice.reference_cloned(0).is_none());
+        assert!(slice.get_next_reference().is_none());
+        assert!(slice.get_next_reference_cloned().is_none());
+
+        assert_eq!(slice.get_bit(0), Some(true));
+        assert_eq!(slice.get_next_bit(), Some(true));
+        assert_eq!(slice.get_bits(0, 8), Some(123));
+        assert_eq!(slice.get_bits(8, 8), Some(111));
+        assert_eq!(slice.get_bits(16, 1), None);
+    }
 }

@@ -40,7 +40,7 @@ pub struct PartialCell<'a, C: CellFamily + ?Sized> {
     /// with the descriptor.
     pub references: ArrayVec<CellContainer<C>, 4>,
 
-    /// Cell data slice
+    /// Cell data slice.
     pub data: &'a [u8],
 }
 

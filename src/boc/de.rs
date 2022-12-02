@@ -9,14 +9,14 @@ use crate::util::{unlikely, ArrayVec};
 
 #[derive(Debug, Default, Clone)]
 pub struct Options {
-    /// The minimum allowed root count
+    /// The minimum allowed root count.
     pub min_roots: Option<usize>,
-    /// The maximum allowed root count
+    /// The maximum allowed root count.
     pub max_roots: Option<usize>,
 }
 
 impl Options {
-    /// Constructs decoder options to expect exactly the specified number of roots
+    /// Constructs decoder options to expect exactly the specified number of roots.
     pub const fn exact(number: usize) -> Self {
         Self {
             min_roots: Some(number),
@@ -25,7 +25,7 @@ impl Options {
     }
 }
 
-/// Parsed BOC header
+/// Parsed BOC header.
 pub struct BocHeader<'a> {
     ref_size: usize,
     cells: SmallVec<[&'a [u8]; CELLS_ON_STACK]>,
@@ -33,7 +33,7 @@ pub struct BocHeader<'a> {
 }
 
 impl<'a> BocHeader<'a> {
-    /// Decodes boc info from the specified bytes
+    /// Decodes boc info from the specified bytes.
     pub fn decode(data: &'a [u8], options: &Options) -> Result<Self, Error> {
         let mut reader = BocReader::new(data.len());
 
@@ -258,7 +258,7 @@ impl<'a> BocHeader<'a> {
         })
     }
 
-    /// Assembles cell tree from slices using the specified finalizer
+    /// Assembles cell tree from slices using the specified finalizer.
     pub fn finalize<C>(&self, finalizer: &mut dyn Finalizer<C>) -> Result<ProcessedCells<C>, Error>
     where
         C: CellFamily,
@@ -306,7 +306,7 @@ impl<'a> BocHeader<'a> {
                 let bit_len = if descriptor.is_aligned() {
                     (byte_len * 8) as u16
                 } else if let Some(data) = data.last() {
-                    8 - data.trailing_zeros() as u16
+                    byte_len as u16 * 8 - data.trailing_zeros() as u16 - 1
                 } else {
                     0
                 };
@@ -358,17 +358,17 @@ impl<'a> BocHeader<'a> {
         Ok(ProcessedCells(res))
     }
 
-    /// Cell index size in bytes. Guaranteed to be 4 at max
+    /// Cell index size in bytes. Guaranteed to be 4 at max.
     pub fn ref_size(&self) -> usize {
         self.ref_size
     }
 
-    /// Slices of the unique cells
+    /// Slices of the unique cells.
     pub fn cells(&self) -> &[&'a [u8]] {
         &self.cells
     }
 
-    /// Root indices
+    /// Root indices.
     pub fn roots(&self) -> &[u32] {
         &self.roots
     }
@@ -383,7 +383,7 @@ impl<C: CellFamily> ProcessedCells<C> {
 }
 
 /// Wrapper around indexed bytes slice access
-/// to eliminate bounds check
+/// to eliminate bounds check.
 struct BocReader {
     len: usize,
     offset: usize,

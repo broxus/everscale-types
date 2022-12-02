@@ -9,7 +9,7 @@ use super::{
 use crate::cell::finalizer::{Finalizer, PartialCell};
 use crate::cell::{Cell, CellContainer, CellFamily, CellHash, CellType};
 
-/// Thread-safe cell family
+/// Thread-safe cell family.
 pub struct ArcCellFamily;
 
 impl CellFamily for ArcCellFamily {
@@ -25,10 +25,10 @@ impl CellFamily for ArcCellFamily {
     }
 }
 
-/// Thread-safe cell
+/// Thread-safe cell.
 pub type ArcCell = CellContainer<ArcCellFamily>;
 
-/// Thread-safe cell finalizer
+/// Thread-safe cell finalizer.
 #[derive(Clone, Copy)]
 pub struct ArcCellFinalizer;
 
@@ -89,7 +89,7 @@ unsafe fn make_cell(
     }
 }
 
-/// Constructs an `ArcCell` from well-formed cell header and data
+/// Constructs an `ArcCell` from well-formed cell header and data.
 ///
 /// # Safety
 ///
@@ -241,7 +241,7 @@ where
     Arc::from_raw(ptr)
 }
 
-/// Internal Arc representation
+/// Internal Arc representation.
 #[repr(C)]
 struct ArcInner<A, T: ?Sized> {
     strong: A,

@@ -16,12 +16,12 @@ macro_rules! define_gen_vtable_ptr {
     };
 }
 
-/// Single-threaded cell implementation
+/// Single-threaded cell implementation.
 pub mod rc;
-/// Thread-safe cell implementation
+/// Thread-safe cell implementation.
 pub mod sync;
 
-/// Helper struct for tightly packed cell data
+/// Helper struct for tightly packed cell data.
 #[repr(C)]
 struct HeaderWithData<H, const N: usize> {
     header: H,
@@ -87,7 +87,7 @@ impl<C: CellFamily> OrdinaryCellHeader<C> {
     }
 
     fn reference(&self, i: u8) -> Option<&CellContainer<C>> {
-        if i < self.descriptor.reference_count() as u8 {
+        if i < self.descriptor.reference_count() {
             // SAFETY: Item is initialized
             let child = unsafe { self.references.get_unchecked(i as usize).assume_init_ref() };
             Some(child)
@@ -104,7 +104,7 @@ impl<C: CellFamily> Drop for OrdinaryCellHeader<C> {
 
         for i in 0..self.descriptor.reference_count() {
             // SAFETY: references were initialized
-            unsafe { std::ptr::drop_in_place(references_ptr.add(i)) };
+            unsafe { std::ptr::drop_in_place(references_ptr.add(i as usize)) };
         }
     }
 }

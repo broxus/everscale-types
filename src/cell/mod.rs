@@ -1,18 +1,21 @@
 use std::ops::{Add, AddAssign};
 use std::ops::{BitOr, BitOrAssign};
 
-pub use self::cell_impl::{rc, sync};
+use crate::util::DisplayHash;
 
-/// Generic cell implementation
+pub use self::cell_impl::{rc, sync};
+use self::slice::CellSlice;
+
+/// Generic cell implementation.
 mod cell_impl;
 
-/// Cell finalization primitives
+/// Cell finalization primitives.
 pub mod finalizer;
 
-/// Cell view
+/// Cell view utils.
 pub mod slice;
 
-/// Cell implementation family
+/// Cell implementation family.
 pub trait CellFamily {
     type Container<T: ?Sized>: Clone;
     type DefaultFinalizer: finalizer::Finalizer<Self>;
@@ -21,6 +24,7 @@ pub trait CellFamily {
     fn default_finalizer() -> Self::DefaultFinalizer;
 }
 
+/// Type alias for a cell family container.
 pub type CellContainer<C> = <C as CellFamily>::Container<dyn Cell<C>>;
 
 /// Represents the interface of a well-formed cell.
@@ -75,21 +79,21 @@ impl<C: CellFamily> dyn Cell<C> + '_ {
         self.descriptor().cell_type()
     }
 
-    /// Computes cell level from level mask.
+    /// Computes the cell level from the level mask.
     #[inline]
     pub fn level(&self) -> u8 {
         self.descriptor().level_mask().level()
     }
 
-    /// Computes level mask from descriptor bytes.
+    /// Computes the level mask from the descriptor bytes.
     #[inline]
     pub fn level_mask(&self) -> LevelMask {
         self.descriptor().level_mask()
     }
 
-    /// Computes child cell count from descriptor bytes.
+    /// Computes the number of child cells from descriptor bytes.
     #[inline]
-    pub fn reference_count(&self) -> usize {
+    pub fn reference_count(&self) -> u8 {
         self.descriptor().reference_count()
     }
 
@@ -107,14 +111,24 @@ impl<C: CellFamily> dyn Cell<C> + '_ {
         self.hash(LevelMask::MAX_LEVEL)
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.hash(LevelMask::MAX_LEVEL) == EMPTY_CELL_HASH
+    }
+
     /// Creates an iterator through child nodes.
     #[inline]
     pub fn references(&self) -> RefsIter<'_, C> {
         RefsIter {
             cell: self,
-            len: self.reference_count() as u8,
+            len: self.reference_count(),
             index: 0,
         }
+    }
+
+    /// Returns this cell as a cell slice.
+    #[inline]
+    pub fn as_slice(&self) -> CellSlice<'_, C> {
+        CellSlice::new(self)
     }
 
     /// Returns an object that implements [`Display`] for printing only
@@ -136,6 +150,15 @@ impl<C: CellFamily> dyn Cell<C> + '_ {
     #[inline]
     pub fn display_tree(&'_ self) -> DisplayCellTree<'_, C> {
         DisplayCellTree(self)
+    }
+}
+
+impl<C: CellFamily> std::fmt::Debug for dyn Cell<C> + '_ {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cell")
+            .field("ty", &self.cell_type())
+            .field("hash", &DisplayHash(&self.repr_hash()))
+            .finish()
     }
 }
 
@@ -242,13 +265,16 @@ impl<C: CellFamily> ExactSizeIterator for ClonedRefsIter<'_, C> {
     }
 }
 
+/// Type alias for a cell hash.
 pub type CellHash = [u8; 32];
 
+/// Hash of an empty (0 bits of data, no refs) ordinary cell.
 pub const EMPTY_CELL_HASH: CellHash = [
     0x96, 0xa2, 0x96, 0xd2, 0x24, 0xf2, 0x85, 0xc6, 0x7b, 0xee, 0x93, 0xc3, 0x0f, 0x8a, 0x30, 0x91,
     0x57, 0xf0, 0xda, 0xa3, 0x5d, 0xc5, 0xb8, 0x7e, 0x41, 0x0b, 0x78, 0x63, 0x0a, 0x09, 0xcf, 0xc7,
 ];
 
+/// Well-formed cell type.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum CellType {
     /// Cell of this type just stores data and references.
@@ -277,7 +303,7 @@ impl CellType {
         !matches!(self, Self::Ordinary)
     }
 
-    /// Encodes cell type as byte
+    /// Encodes cell type as byte.
     #[inline]
     pub const fn to_byte(self) -> u8 {
         match self {
@@ -297,13 +323,13 @@ impl From<CellType> for u8 {
     }
 }
 
-/// Tightly packed info about a cell
+/// Tightly packed info about a cell.
 #[derive(Hash, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct CellDescriptor {
-    /// First descriptor byte with a generic info about cell
+    /// First descriptor byte with a generic info about cell.
     pub d1: u8,
-    /// Second descriptor byte with a packed data size
+    /// Second descriptor byte with a packed data size.
     pub d2: u8,
 }
 
@@ -344,8 +370,8 @@ impl CellDescriptor {
 
     /// Computes child cell count.
     #[inline(always)]
-    pub const fn reference_count(self) -> usize {
-        (self.d1 & Self::REF_COUNT_MASK) as usize
+    pub const fn reference_count(self) -> u8 {
+        self.d1 & Self::REF_COUNT_MASK
     }
 
     /// Returns whether the cell is not [`Ordinary`].
@@ -536,11 +562,11 @@ impl<C: CellFamily> std::fmt::Display for DisplayCellRoot<'_, C> {
                     "",
                     descriptor.cell_type(),
                     "",
-                    descriptor.byte_len(),
+                    self.cell.bit_len(),
                     descriptor.reference_count(),
                     descriptor.level_mask(),
                     repr_depth,
-                    hex::encode(repr_hash),
+                    DisplayHash(&repr_hash),
                 ))
         }
     }

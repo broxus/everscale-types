@@ -11,6 +11,28 @@ pub const fn unlikely(b: bool) -> bool {
     }
 }
 
+/// Helper struct to prerry-print hash.
+#[derive(Clone, Copy)]
+pub struct DisplayHash<'a>(pub &'a [u8; 32]);
+
+impl std::fmt::Display for DisplayHash<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut output = [0u8; 64];
+        hex::encode_to_slice(self.0, &mut output).ok();
+
+        // SAFETY: output is guaranteed to contain only [0-9a-f]
+        let output = unsafe { std::str::from_utf8_unchecked(&output) };
+        f.write_str(output)
+    }
+}
+
+impl std::fmt::Debug for DisplayHash<'_> {
+    #[inline(always)]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self, f)
+    }
+}
+
 /// Small on-stack vector of max lenth N.
 pub struct ArrayVec<T, const N: usize> {
     inner: [MaybeUninit<T>; N],
@@ -29,7 +51,7 @@ impl<T, const N: usize> Default for ArrayVec<T, N> {
 }
 
 impl<T, const N: usize> ArrayVec<T, N> {
-    /// Ensure that provided length is small enough
+    /// Ensure that provided length is small enough.
     const _ASSERT_LEN: () = assert!(N <= u8::MAX as usize);
 
     /// Returns the number of elements in the vector, also referred to as its ‘length’.
@@ -49,7 +71,7 @@ impl<T, const N: usize> ArrayVec<T, N> {
     /// # Safety
     ///
     /// The following must be true:
-    /// - The length of this vector is less than `N`
+    /// - The length of this vector is less than `N`.
     #[inline]
     pub unsafe fn push(&mut self, item: T) {
         debug_assert!((self.len as usize) < N);
