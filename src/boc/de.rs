@@ -224,12 +224,11 @@ impl<'a> BocHeader<'a> {
             let mut data_offset = 0;
             if unlikely(descriptor.store_hashes()) {
                 let level = descriptor.level_mask().level();
-                data_offset = (32 + 2)
-                    * if descriptor.is_absent() && ref_count == 0 && level > 0 {
-                        1 // pruned branch always has only 1 hash
-                    } else {
-                        level as usize + 1
-                    };
+                if descriptor.is_exotic() && ref_count == 0 && level > 0 {
+                    // Pruned branch with `store_hashes` is invalid
+                    return Err(Error::UnnormalizedCell);
+                }
+                data_offset = (32 + 2) * (level as usize + 1);
             }
 
             let total_len = 2 + data_offset + data_len + ref_count * ref_size;
@@ -283,21 +282,9 @@ impl<'a> BocHeader<'a> {
 
                 let mut data_ptr = cell_ptr.add(2);
                 if unlikely(descriptor.store_hashes()) {
-                    const LOWER_MASK: u8 = CellDescriptor::STORE_HASHES_MASK
-                        | CellDescriptor::IS_EXOTIC_MASK
-                        | CellDescriptor::REF_COUNT_MASK;
-                    const BLANK_PRUNED: u8 =
-                        CellDescriptor::STORE_HASHES_MASK | CellDescriptor::IS_EXOTIC_MASK;
-
                     let level = descriptor.level_mask().level();
-                    data_ptr = data_ptr.add(
-                        (32 + 2)
-                            * if level > 0 && descriptor.d1 & LOWER_MASK == BLANK_PRUNED {
-                                1 // pruned branch always has only 1 hash
-                            } else {
-                                level as usize + 1
-                            },
-                    );
+                    debug_assert!(!descriptor.cell_type().is_pruned_branch());
+                    data_ptr = data_ptr.add((32 + 2) * (level as usize + 1));
                 }
 
                 let data = std::slice::from_raw_parts(data_ptr, byte_len);

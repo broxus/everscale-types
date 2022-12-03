@@ -157,10 +157,16 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     }
 
     /// Tries to read the next small subset of `bits` (0..=8), incrementing the bits window start.
-    pub fn get_next_bits(&mut self, offset: u16, bits: u8) -> Option<u8> {
-        let res = self.get_bits(offset, bits)?;
-        self.bits_window_start += offset;
+    pub fn get_next_bits(&mut self, bits: u8) -> Option<u8> {
+        let res = self.get_bits(0, bits)?;
+        self.bits_window_start += bits as u16;
         Some(res)
+    }
+
+    /// Tries to read the next `u8`, incrementing the bits windows start.
+    #[inline]
+    pub fn get_next_u8(&mut self) -> Option<u8> {
+        self.get_next_bits(8)
     }
 
     /// Returns a reference to the Nth child cell (relative to this slice's refs window).
