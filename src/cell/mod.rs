@@ -303,6 +303,12 @@ impl CellType {
         !matches!(self, Self::Ordinary)
     }
 
+    /// Returns whether the cell is a pruned branch
+    #[inline]
+    pub const fn is_pruned_branch(self) -> bool {
+        matches!(self, Self::PrunedBranch)
+    }
+
     /// Encodes cell type as byte.
     #[inline]
     pub const fn to_byte(self) -> u8 {
