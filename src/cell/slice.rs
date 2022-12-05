@@ -144,7 +144,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
                 // r^
                 Some((byte >> (8 - r - bits)) & ((1 << bits) - 1))
             } else {
-                // ______xx|x_______ -> _____xxx
+                // ______xx|y_______ -> _____xxy
                 //     r^
 
                 let mut res = (byte as u16) << 8;
@@ -163,10 +163,150 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
         Some(res)
     }
 
-    /// Tries to read the next `u8`, incrementing the bits windows start.
+    /// Tries to read the next `u8`, incrementing the bits window start.
     #[inline]
     pub fn get_next_u8(&mut self) -> Option<u8> {
         self.get_next_bits(8)
+    }
+
+    /// Reads `u16` starting from the `offset`.
+    #[inline]
+    pub fn get_u16(&self, offset: u16) -> Option<u16> {
+        if self.bits_window_start + offset + 16 <= self.bits_window_end {
+            let index = self.bits_window_start + offset;
+            let data = self.cell.data();
+            let data_len = data.len();
+
+            let r = index % 8;
+            let q = (index / 8) as usize;
+
+            if r == 0 && q + 1 < data_len {
+                // xxxxxxxx|yyyyyyyy -> xxxxxxxx|yyyyyyyy
+                //^r
+
+                // SAFETY: `q + 1 < data_len`
+                Some(u16::from_be_bytes(unsafe {
+                    *(data.as_ptr().add(q) as *const [u8; 2])
+                }))
+            } else if r != 0 && q + 2 < data_len {
+                // ___xxxxx|yyyyyyyy|zzz_____ -> xxxxxyyy|yyyyyzzz
+                //  r^
+
+                // SAFETY: `q + 2 < data_len`
+                let bytes = unsafe { *(data.as_ptr().add(q) as *const [u8; 3]) };
+                let mut res = (bytes[2] >> (8 - r)) as u16;
+                res |= (bytes[1] as u16) << r;
+                res |= (bytes[0] as u16) << (8 + r);
+                Some(res)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Tries to read the next `u16`, incrementing the bits window start.
+    #[inline]
+    pub fn get_next_u16(&mut self) -> Option<u16> {
+        let res = self.get_u16(0)?;
+        self.bits_window_start += 16;
+        Some(res)
+    }
+
+    /// Reads `u32` starting from the `offset`.
+    #[inline]
+    pub fn get_u32(&mut self, offset: u16) -> Option<u32> {
+        if self.bits_window_start + offset + 32 <= self.bits_window_end {
+            let index = self.bits_window_start + offset;
+            let data = self.cell.data();
+            let data_len = data.len();
+
+            let r = index % 8;
+            let q = (index / 8) as usize;
+
+            if r == 0 && q + 3 < data_len {
+                // xxxxxxxx|yyyyyyyy|zzzzzzzz|wwwwwwww -> xxxxxxxx|yyyyyyyy|zzzzzzzz|wwwwwwww
+                //^r
+
+                // SAFETY: `q + 3 < data_len`
+                Some(u32::from_be_bytes(unsafe {
+                    *(data.as_ptr().add(q) as *const [u8; 4])
+                }))
+            } else if r != 0 && q + 4 < data_len {
+                // ___xxxxx|yyyyyyyy|zzz_____ -> xxxxxyyy|yyyyyzzz
+                //  r^
+
+                // SAFETY: `q + 4 < data_len`
+                let bytes = unsafe { *(data.as_ptr().add(q) as *const [u8; 5]) };
+                let mut res = (bytes[4] >> (8 - r)) as u32;
+                res |= (bytes[3] as u32) << r;
+                res |= (bytes[2] as u32) << (8 + r);
+                res |= (bytes[1] as u32) << (16 + r);
+                res |= (bytes[0] as u32) << (24 + r);
+                Some(res)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Tries to read the next `u32`, incrementing the bits window start.
+    #[inline]
+    pub fn get_next_u32(&mut self) -> Option<u32> {
+        let res = self.get_u32(0)?;
+        self.bits_window_start += 32;
+        Some(res)
+    }
+
+    /// Reads `u64` starting from the `offset`.
+    #[inline]
+    pub fn get_u64(&mut self, offset: u16) -> Option<u64> {
+        if self.bits_window_start + offset + 64 <= self.bits_window_end {
+            let index = self.bits_window_start + offset;
+            let data = self.cell.data();
+            let data_len = data.len();
+
+            let r = index % 8;
+            let q = (index / 8) as usize;
+
+            if r == 0 && q + 7 < data_len {
+                // SAFETY: `q + 7 < data_len`
+                Some(u64::from_be_bytes(unsafe {
+                    *(data.as_ptr().add(q) as *const [u8; 8])
+                }))
+            } else if r != 0 && q + 8 < data_len {
+                // ___xxxxx|...|zzz_____ -> xxxxx...|...zzz
+                //  r^
+
+                // SAFETY: `q + 8 < data_len`
+                let bytes = unsafe { *(data.as_ptr().add(q) as *const [u8; 9]) };
+                let mut res = (bytes[8] >> (8 - r)) as u64;
+                res |= (bytes[7] as u64) << r;
+                res |= (bytes[6] as u64) << (8 + r);
+                res |= (bytes[5] as u64) << (16 + r);
+                res |= (bytes[4] as u64) << (24 + r);
+                res |= (bytes[3] as u64) << (32 + r);
+                res |= (bytes[2] as u64) << (40 + r);
+                res |= (bytes[1] as u64) << (48 + r);
+                res |= (bytes[0] as u64) << (56 + r);
+                Some(res)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Tries to read the next `u64`, incrementing the bits window start.
+    #[inline]
+    pub fn get_next_u64(&mut self) -> Option<u64> {
+        let res = self.get_u64(0)?;
+        self.bits_window_start += 64;
+        Some(res)
     }
 
     /// Returns a reference to the Nth child cell (relative to this slice's refs window).
