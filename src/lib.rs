@@ -22,8 +22,9 @@ macro_rules! offset_of {
 
 pub use self::boc::Boc;
 pub use self::cell::rc::{RcCell, RcCellFamily};
+pub use self::cell::slice::CellSlice;
 pub use self::cell::sync::{ArcCell, ArcCellFamily};
-pub use self::cell::{Cell, CellDescriptor, LevelMask};
+pub use self::cell::{Cell, CellDescriptor, CellHash, LevelMask};
 
 pub mod boc;
 pub mod cell;
@@ -46,13 +47,16 @@ mod tests {
 
     #[test]
     fn cell_slices() {
-        let data = base64::decode("te6ccgEBAQEABQAABb23wA==").unwrap();
+        let data = base64::decode(
+            "te6ccgEBAQEALQAAVb23gAA3/WsCOdnvw2dedGrVhjTaZxn/TYcWb7TR8Im/MkK13n6c883gt8A=",
+        )
+        .unwrap();
         let cell = Boc::<RcCellFamily>::decode(data).unwrap();
         println!("{}", cell.display_tree());
 
         let mut slice = cell.as_slice();
         assert!(!slice.is_data_empty());
-        assert_eq!(slice.remaining_bits(), 17);
+        assert_eq!(slice.remaining_bits(), 337);
         assert!(slice.is_refs_empty());
         assert_eq!(slice.remaining_refs(), 0);
         assert!(slice.reference(0).is_none());
@@ -64,6 +68,18 @@ mod tests {
         assert_eq!(slice.get_next_bit(), Some(true));
         assert_eq!(slice.get_bits(0, 8), Some(123));
         assert_eq!(slice.get_bits(8, 8), Some(111));
-        assert_eq!(slice.get_bits(16, 1), None);
+        assert_eq!(slice.get_next_u16(), Some(0x7b6f));
+        assert_eq!(slice.get_u32(0), Some(0x00006ffa));
+        assert_eq!(slice.get_u32(32), Some(0xd60473b3));
+        assert_eq!(slice.get_next_u64(), Some(0x6ffad60473b3));
+        assert_eq!(
+            slice.get_next_u256(),
+            Some([
+                0xdf, 0x86, 0xce, 0xbc, 0xe8, 0xd5, 0xab, 0x0c, 0x69, 0xb4, 0xce, 0x33, 0xfe, 0x9b,
+                0x0e, 0x2c, 0xdf, 0x69, 0xa3, 0xe1, 0x13, 0x7e, 0x64, 0x85, 0x6b, 0xbc, 0xfd, 0x39,
+                0xe7, 0x9b, 0xc1, 0x6f,
+            ])
+        );
+        assert_eq!(slice.get_bits(0, 1), None);
     }
 }
