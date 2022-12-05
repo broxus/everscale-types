@@ -1,4 +1,4 @@
-use crate::cell::{Cell, CellContainer, CellFamily, CellType, LevelMask, RefsIter};
+use crate::cell::{Cell, CellContainer, CellFamily, CellHash, CellType, LevelMask, RefsIter};
 
 /// A read-only view for a subcell of a cell
 #[derive(Debug)]
@@ -186,21 +186,21 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
             let r = index % 8;
             let q = (index / 8) as usize;
 
-            if r == 0 && q + 1 < data_len {
+            if r == 0 && q + 2 <= data_len {
                 // xxxxxxxx|yyyyyyyy -> xxxxxxxx|yyyyyyyy
                 //^r
 
-                // SAFETY: `q + 1 < data_len`
+                // SAFETY: `q + 2 <= data_len`
                 Some(u16::from_be_bytes(unsafe {
                     *(data.as_ptr().add(q) as *const [u8; 2])
                 }))
-            } else if r != 0 && q + 2 < data_len {
+            } else if r != 0 && q + 3 <= data_len {
                 // ___xxxxx|yyyyyyyy|zzz_____ -> xxxxxyyy|yyyyyzzz
                 //  r^
 
                 let mut bytes = [0u8; 4];
 
-                // SAFETY: `q + 2 < data_len`
+                // SAFETY: `q + 3 <= data_len`
                 unsafe {
                     std::ptr::copy_nonoverlapping(
                         data.as_ptr().add(q),
@@ -237,21 +237,21 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
             let r = index % 8;
             let q = (index / 8) as usize;
 
-            if r == 0 && q + 3 < data_len {
+            if r == 0 && q + 4 <= data_len {
                 // xxxxxxxx|yyyyyyyy|zzzzzzzz|wwwwwwww -> xxxxxxxx|yyyyyyyy|zzzzzzzz|wwwwwwww
                 //^r
 
-                // SAFETY: `q + 3 < data_len`
+                // SAFETY: `q + 4 <= data_len`
                 Some(u32::from_be_bytes(unsafe {
                     *(data.as_ptr().add(q) as *const [u8; 4])
                 }))
-            } else if r != 0 && q + 4 < data_len {
+            } else if r != 0 && q + 5 <= data_len {
                 // ___xxxxx|yyyyyyyy|zzz_____ -> xxxxxyyy|yyyyyzzz
                 //  r^
 
                 let mut bytes = [0u8; 8];
 
-                // SAFETY: `q + 4 < data_len`
+                // SAFETY: `q + 5 <= data_len`
                 unsafe {
                     std::ptr::copy_nonoverlapping(
                         data.as_ptr().add(q),
@@ -288,18 +288,18 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
             let r = index % 8;
             let q = (index / 8) as usize;
 
-            if r == 0 && q + 7 < data_len {
-                // SAFETY: `q + 7 < data_len`
+            if r == 0 && q + 8 <= data_len {
+                // SAFETY: `q + 8 <= data_len`
                 Some(u64::from_be_bytes(unsafe {
                     *(data.as_ptr().add(q) as *const [u8; 8])
                 }))
-            } else if r != 0 && q + 8 < data_len {
+            } else if r != 0 && q + 9 <= data_len {
                 // ___xxxxx|...|zzz_____ -> xxxxx...|...zzz
                 //  r^
 
                 let mut bytes = [0u8; 16];
 
-                // SAFETY: `q + 8 < data_len`
+                // SAFETY: `q + 9 <= data_len`
                 unsafe {
                     std::ptr::copy_nonoverlapping(
                         data.as_ptr().add(q),
@@ -323,6 +323,96 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     pub fn get_next_u64(&mut self) -> Option<u64> {
         let res = self.get_u64(0)?;
         self.bits_window_start += 64;
+        Some(res)
+    }
+
+    /// Reads `u128` starting from the `offset`.
+    pub fn get_u128(&self, offset: u16) -> Option<u128> {
+        if self.bits_window_start + offset + 128 <= self.bits_window_end {
+            let index = self.bits_window_start + offset;
+            let data = self.cell.data();
+            let data_len = data.len();
+
+            let r = index % 8;
+            let q = (index / 8) as usize;
+
+            if r == 0 && q + 16 <= data_len {
+                // SAFETY: `q + 16 <= data_len`
+                Some(u128::from_be_bytes(unsafe {
+                    *(data.as_ptr().add(q) as *const [u8; 16])
+                }))
+            } else if r != 0 && q + 17 <= data_len {
+                // ___xxxxx|...|zzz_____ -> xxxxx...|...zzz
+                //  r^
+
+                let mut bytes = [0u8; 17];
+
+                // SAFETY: `q + 17 <= data_len`
+                unsafe {
+                    std::ptr::copy_nonoverlapping(data.as_ptr().add(q), bytes.as_mut_ptr(), 17);
+                };
+
+                let res = u128::from_be_bytes(bytes[1..].try_into().unwrap());
+                Some(((bytes[0] as u128) << (120 + r)) | (res >> (8 - r)))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Tries to read the next `u128`, incrementing the bits window start.
+    #[inline]
+    pub fn get_next_u128(&mut self) -> Option<u128> {
+        let res = self.get_u128(0)?;
+        self.bits_window_start += 128;
+        Some(res)
+    }
+
+    pub fn get_u256(&self, offset: u16) -> Option<CellHash> {
+        if self.bits_window_start + offset + 256 <= self.bits_window_end {
+            let index = self.bits_window_start + offset;
+            let data = self.cell.data();
+            let data_len = data.len();
+
+            let r = index % 8;
+            let q = (index / 8) as usize;
+
+            if r == 0 && q + 32 <= data_len {
+                // SAFETY: `q + 32 <= data_len`
+                Some(unsafe { *(data.as_ptr().add(q) as *const [u8; 32]) })
+            } else if r != 0 && q + 33 <= data_len {
+                // ___xxxxx|...|zzz_____ -> xxxxx...|...zzz
+                //  r^
+
+                let mut bytes = [0u8; 33];
+
+                // SAFETY: `q + 33 <= data_len`
+                unsafe {
+                    std::ptr::copy_nonoverlapping(data.as_ptr().add(q), bytes.as_mut_ptr(), 33);
+                };
+
+                let mut res = [0u8; 32];
+                let shift = 8 - r;
+                for i in 0..32 {
+                    res[i] = bytes[i] << r | (bytes[i + 1] >> shift);
+                }
+
+                Some(res)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Tries to read the next `u128`, incrementing the bits window start.
+    #[inline]
+    pub fn get_next_u256(&mut self) -> Option<CellHash> {
+        let res = self.get_u256(0)?;
+        self.bits_window_start += 256;
         Some(res)
     }
 
