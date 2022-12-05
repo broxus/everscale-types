@@ -10,12 +10,14 @@ fuzz_target!(|data: &[u8]| {
         _ = slice.get_u16(0);
         _ = slice.get_u32(0);
         _ = slice.get_u64(0);
+        _ = slice.get_u128(0);
         _ = slice.get_u256(0);
         if slice.try_advance(3) {
             _ = slice.get_u8(0);
             _ = slice.get_u16(0);
             _ = slice.get_u32(0);
             _ = slice.get_u64(0);
+            _ = slice.get_u128(0);
             _ = slice.get_u256(0);
         }
     }

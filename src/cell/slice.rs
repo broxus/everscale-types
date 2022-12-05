@@ -386,20 +386,31 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
                 // ___xxxxx|...|zzz_____ -> xxxxx...|...zzz
                 //  r^
 
-                let mut bytes = [0u8; 33];
+                let shift = 8 - r;
+                let rev_shift = 120 + r;
 
                 // SAFETY: `q + 33 <= data_len`
                 unsafe {
+                    let mut bytes = [0u8; 33];
                     std::ptr::copy_nonoverlapping(data.as_ptr().add(q), bytes.as_mut_ptr(), 33);
-                };
 
-                let mut res = [0u8; 32];
-                let shift = 8 - r;
-                for i in 0..32 {
-                    res[i] = bytes[i] << r | (bytes[i + 1] >> shift);
+                    // Interpret last 32 bytes as two u128
+                    let [ovf, bytes @ ..] = bytes;
+                    let [mut hi, mut lo]: [u128; 2] = std::mem::transmute(bytes);
+
+                    // Numbers are in big endian order, swap bytes on little endian arch
+                    #[cfg(target_endian = "little")]
+                    {
+                        hi = hi.swap_bytes();
+                        lo = lo.swap_bytes();
+                    }
+
+                    // Shift right, putting `ovf` to the high bits
+                    Some(std::mem::transmute([
+                        (hi >> shift | ((ovf as u128) << rev_shift)).to_be_bytes(),
+                        (lo >> shift | (hi << rev_shift)).to_be_bytes(),
+                    ]))
                 }
-
-                Some(res)
             } else {
                 None
             }
