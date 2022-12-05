@@ -22,6 +22,7 @@ macro_rules! offset_of {
 
 pub use self::boc::Boc;
 pub use self::cell::rc::{RcCell, RcCellFamily};
+pub use self::cell::slice::CellSlice;
 pub use self::cell::sync::{ArcCell, ArcCellFamily};
 pub use self::cell::{Cell, CellDescriptor, LevelMask};
 

@@ -157,6 +157,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     }
 
     /// Tries to read the next small subset of `bits` (0..=8), incrementing the bits window start.
+    #[inline]
     pub fn get_next_bits(&mut self, bits: u8) -> Option<u8> {
         let res = self.get_bits(0, bits)?;
         self.bits_window_start += bits as u16;
@@ -170,7 +171,6 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     }
 
     /// Reads `u16` starting from the `offset`.
-    #[inline]
     pub fn get_u16(&self, offset: u16) -> Option<u16> {
         if self.bits_window_start + offset + 16 <= self.bits_window_end {
             let index = self.bits_window_start + offset;
@@ -215,7 +215,6 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     }
 
     /// Reads `u32` starting from the `offset`.
-    #[inline]
     pub fn get_u32(&mut self, offset: u16) -> Option<u32> {
         if self.bits_window_start + offset + 32 <= self.bits_window_end {
             let index = self.bits_window_start + offset;
@@ -262,7 +261,6 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     }
 
     /// Reads `u64` starting from the `offset`.
-    #[inline]
     pub fn get_u64(&mut self, offset: u16) -> Option<u64> {
         if self.bits_window_start + offset + 64 <= self.bits_window_end {
             let index = self.bits_window_start + offset;
