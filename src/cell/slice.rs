@@ -164,6 +164,12 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
         Some(res)
     }
 
+    /// Reads `u8` starting from the `offset`.
+    #[inline]
+    pub fn get_u8(&self, offset: u16) -> Option<u8> {
+        self.get_bits(offset, 8)
+    }
+
     /// Tries to read the next `u8`, incrementing the bits window start.
     #[inline]
     pub fn get_next_u8(&mut self) -> Option<u8> {
@@ -192,12 +198,19 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
                 // ___xxxxx|yyyyyyyy|zzz_____ -> xxxxxyyy|yyyyyzzz
                 //  r^
 
+                let mut bytes = [0u8; 4];
+
                 // SAFETY: `q + 2 < data_len`
-                let bytes = unsafe { *(data.as_ptr().add(q) as *const [u8; 3]) };
-                let mut res = (bytes[2] >> (8 - r)) as u16;
-                res |= (bytes[1] as u16) << r;
-                res |= (bytes[0] as u16) << (8 + r);
-                Some(res)
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        data.as_ptr().add(q),
+                        bytes.as_mut_ptr().add(1),
+                        3,
+                    );
+                };
+
+                let res = u32::from_be_bytes(bytes);
+                Some((res >> (8 - r)) as u16)
             } else {
                 None
             }
@@ -215,7 +228,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     }
 
     /// Reads `u32` starting from the `offset`.
-    pub fn get_u32(&mut self, offset: u16) -> Option<u32> {
+    pub fn get_u32(&self, offset: u16) -> Option<u32> {
         if self.bits_window_start + offset + 32 <= self.bits_window_end {
             let index = self.bits_window_start + offset;
             let data = self.cell.data();
@@ -236,14 +249,19 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
                 // ___xxxxx|yyyyyyyy|zzz_____ -> xxxxxyyy|yyyyyzzz
                 //  r^
 
+                let mut bytes = [0u8; 8];
+
                 // SAFETY: `q + 4 < data_len`
-                let bytes = unsafe { *(data.as_ptr().add(q) as *const [u8; 5]) };
-                let mut res = (bytes[4] >> (8 - r)) as u32;
-                res |= (bytes[3] as u32) << r;
-                res |= (bytes[2] as u32) << (8 + r);
-                res |= (bytes[1] as u32) << (16 + r);
-                res |= (bytes[0] as u32) << (24 + r);
-                Some(res)
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        data.as_ptr().add(q),
+                        bytes.as_mut_ptr().add(3),
+                        5,
+                    );
+                };
+
+                let res = u64::from_be_bytes(bytes);
+                Some((res >> (8 - r)) as u32)
             } else {
                 None
             }
@@ -261,7 +279,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     }
 
     /// Reads `u64` starting from the `offset`.
-    pub fn get_u64(&mut self, offset: u16) -> Option<u64> {
+    pub fn get_u64(&self, offset: u16) -> Option<u64> {
         if self.bits_window_start + offset + 64 <= self.bits_window_end {
             let index = self.bits_window_start + offset;
             let data = self.cell.data();
@@ -279,18 +297,19 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
                 // ___xxxxx|...|zzz_____ -> xxxxx...|...zzz
                 //  r^
 
+                let mut bytes = [0u8; 16];
+
                 // SAFETY: `q + 8 < data_len`
-                let bytes = unsafe { *(data.as_ptr().add(q) as *const [u8; 9]) };
-                let mut res = (bytes[8] >> (8 - r)) as u64;
-                res |= (bytes[7] as u64) << r;
-                res |= (bytes[6] as u64) << (8 + r);
-                res |= (bytes[5] as u64) << (16 + r);
-                res |= (bytes[4] as u64) << (24 + r);
-                res |= (bytes[3] as u64) << (32 + r);
-                res |= (bytes[2] as u64) << (40 + r);
-                res |= (bytes[1] as u64) << (48 + r);
-                res |= (bytes[0] as u64) << (56 + r);
-                Some(res)
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        data.as_ptr().add(q),
+                        bytes.as_mut_ptr().add(7),
+                        9,
+                    );
+                };
+
+                let res = u128::from_be_bytes(bytes);
+                Some((res >> (8 - r)) as u64)
             } else {
                 None
             }
