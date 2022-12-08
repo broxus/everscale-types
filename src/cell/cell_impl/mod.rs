@@ -2,6 +2,7 @@ use std::mem::MaybeUninit;
 
 use super::{
     Cell, CellContainer, CellDescriptor, CellFamily, CellHash, CellTreeStats, EMPTY_CELL_HASH,
+    MAX_REF_COUNT,
 };
 
 macro_rules! define_gen_vtable_ptr {
@@ -74,7 +75,7 @@ struct OrdinaryCellHeader<C: CellFamily> {
     stats: CellTreeStats,
     hashes: Vec<(CellHash, u16)>,
     descriptor: CellDescriptor,
-    references: [MaybeUninit<CellContainer<C>>; 4],
+    references: [MaybeUninit<CellContainer<C>>; MAX_REF_COUNT],
 }
 
 impl<C: CellFamily> OrdinaryCellHeader<C> {
@@ -100,7 +101,7 @@ impl<C: CellFamily> OrdinaryCellHeader<C> {
 impl<C: CellFamily> Drop for OrdinaryCellHeader<C> {
     fn drop(&mut self) {
         let references_ptr = self.references.as_mut_ptr() as *mut CellContainer<C>;
-        debug_assert!(self.descriptor.reference_count() <= 4);
+        debug_assert!(self.descriptor.reference_count() <= MAX_REF_COUNT as u8);
 
         for i in 0..self.descriptor.reference_count() {
             // SAFETY: references were initialized

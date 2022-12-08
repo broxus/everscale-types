@@ -15,6 +15,9 @@ pub mod finalizer;
 /// Cell view utils.
 pub mod slice;
 
+/// Cell creation utils.
+pub mod builder;
+
 /// Cell implementation family.
 pub trait CellFamily {
     type Container<T: ?Sized>: Clone;
@@ -275,9 +278,10 @@ pub const EMPTY_CELL_HASH: CellHash = [
 ];
 
 /// Well-formed cell type.
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Default, Debug, Copy, Clone, Eq, PartialEq)]
 pub enum CellType {
     /// Cell of this type just stores data and references.
+    #[default]
     Ordinary,
     /// Exotic cell which was pruned from the original tree of cells
     /// when a Merkle proof has been created.
@@ -344,6 +348,18 @@ impl CellDescriptor {
     pub const IS_EXOTIC_MASK: u8 = 0b0000_1000;
     pub const STORE_HASHES_MASK: u8 = 0b0001_0000;
     pub const LEVEL_MASK: u8 = 0b1110_0000;
+
+    /// Computes d1 descriptor byte from parts
+    #[inline(always)]
+    pub const fn compute_d1(level_mask: LevelMask, is_exotic: bool, ref_count: u8) -> u8 {
+        (level_mask.0 << 5) | ((is_exotic as u8) << 3) | (ref_count & Self::REF_COUNT_MASK)
+    }
+
+    /// Computes d2 descriptor byte from cell length in bits
+    #[inline(always)]
+    pub const fn compute_d2(bit_len: u16) -> u8 {
+        (((bit_len >> 2) as u8) & !0b1) | ((bit_len % 8 != 0) as u8)
+    }
 
     /// Constructs cell descriptor from descriptor bytes.
     #[inline(always)]
@@ -600,6 +616,9 @@ impl<C: CellFamily> std::fmt::Display for DisplayCellTree<'_, C> {
         Ok(())
     }
 }
+
+pub const MAX_BIT_LEN: u16 = 1023;
+pub const MAX_REF_COUNT: usize = 4;
 
 #[cfg(test)]
 mod tests {

@@ -21,6 +21,7 @@ macro_rules! offset_of {
 }
 
 pub use self::boc::Boc;
+pub use self::cell::builder::CellBuilder;
 pub use self::cell::rc::{RcCell, RcCellFamily};
 pub use self::cell::slice::CellSlice;
 pub use self::cell::sync::{ArcCell, ArcCellFamily};
@@ -81,5 +82,38 @@ mod tests {
             ])
         );
         assert_eq!(slice.get_bits(0, 1), None);
+    }
+
+    #[test]
+    fn test_builder() {
+        let data = base64::decode("te6ccgEBAQEAAwAAAbE=").unwrap();
+        let parsed_cell = Boc::<RcCellFamily>::decode(data).unwrap();
+
+        let mut builder = CellBuilder::<RcCellFamily>::new();
+        assert!(builder.store_bit_true());
+        assert!(builder.store_bit_zero());
+        assert!(builder.store_bit_true());
+        assert!(builder.store_bit_true());
+        assert!(builder.store_bit_zero());
+        assert!(builder.store_bit_zero());
+        assert!(builder.store_bit_zero());
+        let built_cell = builder.build().unwrap();
+
+        assert_eq!(parsed_cell.repr_hash(), built_cell.repr_hash());
+
+        let data = base64::decode("te6ccgEBAQEAggAA////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////").unwrap();
+        let parsed_cell = Boc::<RcCellFamily>::decode(data).unwrap();
+
+        let mut builder = CellBuilder::<RcCellFamily>::new();
+        for _ in 0..cell::MAX_BIT_LEN {
+            assert!(builder.store_bit_true());
+        }
+        assert!(!builder.store_bit_true());
+        let built_cell = builder.build().unwrap();
+
+        println!("{}", built_cell.display_tree());
+        println!("{}", parsed_cell.display_tree());
+
+        assert_eq!(parsed_cell.repr_hash(), built_cell.repr_hash());
     }
 }

@@ -5,10 +5,11 @@ use crate::cell::{Cell, CellContainer, CellFamily};
 pub mod de;
 
 /// BOC file magic number.
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Default, Copy, Clone, Eq, PartialEq)]
 pub enum BocTag {
     Indexed,
     IndexedCrc32,
+    #[default]
     Generic,
 }
 

@@ -4,7 +4,9 @@ use smallvec::SmallVec;
 
 use super::BocTag;
 use crate::cell::finalizer::{Finalizer, PartialCell};
-use crate::cell::{Cell, CellContainer, CellDescriptor, CellFamily, CellTreeStats, LevelMask};
+use crate::cell::{
+    Cell, CellContainer, CellDescriptor, CellFamily, CellTreeStats, LevelMask, MAX_REF_COUNT,
+};
 use crate::util::{unlikely, ArrayVec};
 
 #[derive(Debug, Default, Clone)]
@@ -160,7 +162,7 @@ impl<'a> BocHeader<'a> {
         // 4 * (2 + 32) - inline hashes and depths if presented
         // 128 - max data length
         // 4*{ref_size} - max references
-        let max_cell_size = 2 + 4 * (2 + 32) + 128 + 4 * ref_size as u64; // ~282 bytes
+        let max_cell_size = 2 + 4 * (2 + 32) + 128 + (MAX_REF_COUNT as u64) * ref_size as u64; // ~282 bytes
         if unlikely(total_cells_size > (cell_count as u64) * max_cell_size) {
             return Err(Error::InvalidTotalSize);
         }
@@ -217,7 +219,7 @@ impl<'a> BocHeader<'a> {
             // 0b11111110 -> 0b01111111 = byte len 127, bit len = 1016
             let data_len = descriptor.byte_len() as usize;
             let ref_count = descriptor.reference_count() as usize;
-            if unlikely(ref_count > 4) {
+            if unlikely(ref_count > MAX_REF_COUNT) {
                 return Err(Error::InvalidRef);
             }
 
@@ -298,7 +300,7 @@ impl<'a> BocHeader<'a> {
                     0
                 };
 
-                let mut references = ArrayVec::<CellContainer<C>, 4>::default();
+                let mut references = ArrayVec::<CellContainer<C>, MAX_REF_COUNT>::default();
                 let mut children_mask = LevelMask::EMPTY;
                 let mut stats = CellTreeStats {
                     bit_count: bit_len as u64,

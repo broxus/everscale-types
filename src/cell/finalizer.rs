@@ -2,6 +2,7 @@ use sha2::Digest;
 
 use crate::cell::{
     Cell, CellContainer, CellDescriptor, CellFamily, CellHash, CellTreeStats, CellType, LevelMask,
+    MAX_REF_COUNT,
 };
 use crate::util::{unlikely, ArrayVec};
 
@@ -38,7 +39,7 @@ pub struct PartialCell<'a, C: CellFamily + ?Sized> {
     ///
     /// NOTE: it is guaranteed that the length of the array is consistent
     /// with the descriptor.
-    pub references: ArrayVec<CellContainer<C>, 4>,
+    pub references: ArrayVec<CellContainer<C>, MAX_REF_COUNT>,
 
     /// Cell data slice.
     pub data: &'a [u8],
