@@ -165,6 +165,15 @@ impl<C: CellFamily> std::fmt::Debug for dyn Cell<C> + '_ {
     }
 }
 
+impl<C: CellFamily> Eq for dyn Cell<C> + '_ {}
+
+impl<C1: CellFamily, C2: CellFamily> PartialEq<dyn Cell<C2> + '_> for dyn Cell<C1> + '_ {
+    #[inline]
+    fn eq(&self, other: &dyn Cell<C2>) -> bool {
+        self.repr_hash() == other.repr_hash()
+    }
+}
+
 /// An iterator through child nodes.
 #[derive(Clone)]
 #[must_use = "iterators are lazy and do nothing unless consumed"]

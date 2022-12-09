@@ -30,6 +30,31 @@ impl<C: CellFamily> CellBuilder<C> {
     }
 }
 
+macro_rules! impl_store_uint {
+    ($self:ident, $value:ident, bytes: $bytes:literal, bits: $bits:literal) => {
+        if $self.bit_len + $bits <= MAX_BIT_LEN {
+            let q = ($self.bit_len / 8) as usize;
+            let r = $self.bit_len % 8;
+            unsafe {
+                let data_ptr = $self.data.as_mut_ptr().add(q);
+                if r == 0 {
+                    let value = $value.to_be_bytes();
+                    std::ptr::copy_nonoverlapping(value.as_ptr(), data_ptr, $bytes);
+                } else {
+                    *data_ptr |= ($value >> ($bits - 8 + r)) as u8;
+
+                    let value: [u8; $bytes] = ($value << (8 - r)).to_be_bytes();
+                    std::ptr::copy_nonoverlapping(value.as_ptr(), data_ptr.add(1), $bytes);
+                }
+            };
+            $self.bit_len += $bits;
+            true
+        } else {
+            false
+        }
+    };
+}
+
 impl<C: CellFamily> CellBuilder<C>
 where
     CellContainer<C>: AsRef<dyn Cell<C>>,
@@ -79,12 +104,9 @@ where
         self.level_mask = Some(level_mask);
     }
 
-    pub fn store_bit(&mut self, bit: bool) -> bool {
-        if self.bit_len < MAX_BIT_LEN {
-            let q = (self.bit_len / 8) as usize;
-            let r = self.bit_len % 8;
-            unsafe { *self.data.get_unchecked_mut(q) |= (bit as u8) << (7 - r) };
-            self.bit_len += 1;
+    pub fn store_zeroes(&mut self, bits: u16) -> bool {
+        if self.bit_len + bits <= MAX_BIT_LEN {
+            self.bit_len += bits;
             true
         } else {
             false
@@ -92,11 +114,58 @@ where
     }
 
     pub fn store_bit_zero(&mut self) -> bool {
-        self.store_bit(false)
+        let fits = self.bit_len < MAX_BIT_LEN;
+        self.bit_len += fits as u16;
+        fits
     }
 
     pub fn store_bit_true(&mut self) -> bool {
-        self.store_bit(true)
+        if self.bit_len < MAX_BIT_LEN {
+            let q = (self.bit_len / 8) as usize;
+            let r = self.bit_len % 8;
+            unsafe { *self.data.get_unchecked_mut(q) |= 1 << (7 - r) };
+            self.bit_len += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn store_u8(&mut self, value: u8) -> bool {
+        if self.bit_len + 8 <= MAX_BIT_LEN {
+            let q = (self.bit_len / 8) as usize;
+            let r = self.bit_len % 8;
+            unsafe {
+                if r == 0 {
+                    // xxxxxxxx
+                    *self.data.get_unchecked_mut(q) = value;
+                } else {
+                    // yyyxxxxx|xxx00000
+                    *self.data.get_unchecked_mut(q) |= value >> r;
+                    *self.data.get_unchecked_mut(q + 1) = value << (8 - r);
+                }
+            };
+            self.bit_len += 8;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn store_u16(&mut self, value: u16) -> bool {
+        impl_store_uint!(self, value, bytes: 2, bits: 16)
+    }
+
+    pub fn store_u32(&mut self, value: u32) -> bool {
+        impl_store_uint!(self, value, bytes: 4, bits: 32)
+    }
+
+    pub fn store_u64(&mut self, value: u64) -> bool {
+        impl_store_uint!(self, value, bytes: 8, bits: 64)
+    }
+
+    pub fn store_u128(&mut self, value: u128) -> bool {
+        impl_store_uint!(self, value, bytes: 16, bits: 128)
     }
 
     #[inline]

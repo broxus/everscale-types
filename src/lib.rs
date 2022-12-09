@@ -27,6 +27,15 @@ pub use self::cell::slice::CellSlice;
 pub use self::cell::sync::{ArcCell, ArcCellFamily};
 pub use self::cell::{Cell, CellDescriptor, CellHash, LevelMask};
 
+pub type ArcBoc = Boc<ArcCellFamily>;
+pub type RcBoc = Boc<RcCellFamily>;
+
+pub type ArcCellBuilder = CellBuilder<ArcCellFamily>;
+pub type RcCellBuilder = CellBuilder<RcCellFamily>;
+
+pub type ArcCellSlice<'a> = CellSlice<'a, ArcCellFamily>;
+pub type RcCellSlice<'a> = CellSlice<'a, RcCellFamily>;
+
 pub mod boc;
 pub mod cell;
 pub mod util;
@@ -39,11 +48,17 @@ mod tests {
     fn correct_deserialization() {
         let data = base64::decode("te6ccgEBBAEAzwACg4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAIBAEAAAAAAAAAAAAAAAAAAAAAAAAAAm2c6ClpzoTVSAHvzVQGDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHKq1w7OAAkYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACRwAwBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEljGP8=").unwrap();
 
-        let cell = Boc::<ArcCellFamily>::decode(&data).unwrap();
-        println!("{}", cell.display_tree());
-
-        let cell = Boc::<RcCellFamily>::decode(&data).unwrap();
-        println!("{}", cell.display_tree());
+        let arc_cell = ArcBoc::decode(&data).unwrap();
+        let rc_cell = RcBoc::decode(&data).unwrap();
+        assert_eq!(arc_cell.as_ref(), rc_cell.as_ref());
+        assert_eq!(
+            arc_cell.repr_hash(),
+            [
+                0x63, 0xd4, 0x75, 0x13, 0x9a, 0xc1, 0x4f, 0x3e, 0xfe, 0x69, 0x0e, 0xd7, 0xfd, 0x4f,
+                0xf0, 0x02, 0x1c, 0xf2, 0x6b, 0xc4, 0xab, 0xd0, 0xaf, 0x01, 0x40, 0xa3, 0xb4, 0xc8,
+                0x95, 0xf0, 0x73, 0x76
+            ]
+        );
     }
 
     #[test]
@@ -52,8 +67,7 @@ mod tests {
             "te6ccgEBAQEALQAAVb23gAA3/WsCOdnvw2dedGrVhjTaZxn/TYcWb7TR8Im/MkK13n6c883gt8A=",
         )
         .unwrap();
-        let cell = Boc::<RcCellFamily>::decode(data).unwrap();
-        println!("{}", cell.display_tree());
+        let cell = RcBoc::decode(data).unwrap();
 
         let mut slice = cell.as_slice();
         assert!(!slice.is_data_empty());
@@ -102,18 +116,27 @@ mod tests {
         assert_eq!(parsed_cell.repr_hash(), built_cell.repr_hash());
 
         let data = base64::decode("te6ccgEBAQEAggAA////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////").unwrap();
-        let parsed_cell = Boc::<RcCellFamily>::decode(data).unwrap();
+        let parsed_cell = RcBoc::decode(data).unwrap();
 
-        let mut builder = CellBuilder::<RcCellFamily>::new();
+        let mut builder = RcCellBuilder::new();
         for _ in 0..cell::MAX_BIT_LEN {
             assert!(builder.store_bit_true());
         }
         assert!(!builder.store_bit_true());
         let built_cell = builder.build().unwrap();
 
-        println!("{}", built_cell.display_tree());
-        println!("{}", parsed_cell.display_tree());
-
         assert_eq!(parsed_cell.repr_hash(), built_cell.repr_hash());
+
+        let mut builder = RcCellBuilder::new();
+        builder.store_bit_true();
+        builder.store_u128(0xaaffaaffaaffaaffaaffaaffaaffaaff);
+        let cell = builder.build().unwrap();
+        println!("{}", cell.display_tree());
+
+        let mut builder = RcCellBuilder::new();
+        builder.store_bit_true();
+        builder.store_u64(0xaaffaaffaaffaaff);
+        builder.store_u64(0xaaffaaffaaffaaff);
+        assert_eq!(cell.as_ref(), builder.build().unwrap().as_ref());
     }
 }
