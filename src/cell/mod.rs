@@ -626,7 +626,9 @@ impl<C: CellFamily> std::fmt::Display for DisplayCellTree<'_, C> {
     }
 }
 
+/// Max cell data capacity in bits
 pub const MAX_BIT_LEN: u16 = 1023;
+/// Maximum number of child cells
 pub const MAX_REF_COUNT: usize = 4;
 
 #[cfg(test)]

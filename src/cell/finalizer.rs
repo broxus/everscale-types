@@ -8,21 +8,22 @@ use crate::util::{unlikely, ArrayVec};
 
 /// A trait for describing cell finalization logic.
 pub trait Finalizer<C: CellFamily + ?Sized> {
-    fn finalize_cell(&mut self, cell: PartialCell<C>) -> Option<CellContainer<C>>;
+    /// Builds a new cell from cell parts.
+    fn finalize_cell(&mut self, cell: CellParts<C>) -> Option<CellContainer<C>>;
 }
 
 impl<F, C: CellFamily> Finalizer<C> for F
 where
-    F: FnMut(PartialCell<C>) -> Option<CellContainer<C>>,
+    F: FnMut(CellParts<C>) -> Option<CellContainer<C>>,
     CellContainer<C>: AsRef<dyn Cell<C>>,
 {
-    fn finalize_cell(&mut self, cell: PartialCell<C>) -> Option<CellContainer<C>> {
+    fn finalize_cell(&mut self, cell: CellParts<C>) -> Option<CellContainer<C>> {
         (*self)(cell)
     }
 }
 
 /// Partially assembled cell.
-pub struct PartialCell<'a, C: CellFamily + ?Sized> {
+pub struct CellParts<'a, C: CellFamily + ?Sized> {
     /// Cell tree storage stats.
     pub stats: CellTreeStats,
 
@@ -45,7 +46,7 @@ pub struct PartialCell<'a, C: CellFamily + ?Sized> {
     pub data: &'a [u8],
 }
 
-impl<'a, C: CellFamily> PartialCell<'a, C>
+impl<'a, C: CellFamily> CellParts<'a, C>
 where
     CellContainer<C>: AsRef<dyn Cell<C>>,
 {

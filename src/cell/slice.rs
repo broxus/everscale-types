@@ -370,6 +370,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
         Some(res)
     }
 
+    /// Reads 32 bytes starting from the `offset`.
     pub fn get_u256(&self, offset: u16) -> Option<[u8; 32]> {
         if self.bits_window_start + offset + 256 <= self.bits_window_end {
             let index = self.bits_window_start + offset;
@@ -419,7 +420,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
         }
     }
 
-    /// Tries to read the next `u128`, incrementing the bits window start.
+    /// Tries to read the next 32 bytes, incrementing the bits window start.
     #[inline]
     pub fn get_next_u256(&mut self) -> Option<[u8; 32]> {
         let res = self.get_u256(0)?;

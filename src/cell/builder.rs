@@ -1,10 +1,11 @@
-use crate::cell::finalizer::{Finalizer, PartialCell};
+use crate::cell::finalizer::{CellParts, Finalizer};
 use crate::cell::{Cell, CellContainer, CellFamily, LevelMask, MAX_BIT_LEN, MAX_REF_COUNT};
 use crate::util::ArrayVec;
 use crate::CellDescriptor;
 
 use super::CellTreeStats;
 
+/// Builder for constructing cells with densely packed data.
 pub struct CellBuilder<C: CellFamily> {
     data: [u8; 128],
     level_mask: Option<LevelMask>,
@@ -20,6 +21,7 @@ impl<C: CellFamily> Default for CellBuilder<C> {
 }
 
 impl<C: CellFamily> CellBuilder<C> {
+    /// Creates an empty cell builder.
     pub fn new() -> Self {
         Self {
             data: [0; 128],
@@ -69,7 +71,7 @@ where
         self.compute_level_mask().level()
     }
 
-    // Computes the cell level mask from children
+    // Computes the cell level mask from children.
     pub fn compute_level_mask(&self) -> LevelMask {
         if let Some(level_mask) = self.level_mask {
             level_mask
@@ -88,28 +90,34 @@ where
         self.bit_len
     }
 
+    /// Returns remaining data capacity in bits.
     #[inline]
     pub fn spare_bits_capacity(&self) -> u16 {
         MAX_BIT_LEN - self.bit_len
     }
 
+    /// Returns remaining references capacity.
     #[inline]
     pub fn spare_refs_capacity(&self) -> u8 {
         (MAX_REF_COUNT - self.references.len()) as u8
     }
 
+    /// Explicitly sets the level mask and marks this cell as exotic.
     #[inline]
     pub fn with_level_mask(mut self, level_mask: LevelMask) -> Self {
         self.level_mask = Some(level_mask);
         self
     }
 
+    /// Explicitly sets the level mask and marks this cell as exotic.
     #[inline]
     pub fn set_level_mask(&mut self, level_mask: LevelMask) {
         self.level_mask = Some(level_mask);
     }
 
-    pub fn store_zeroes(&mut self, bits: u16) -> bool {
+    /// Tries to store the specified number of zero bits in the cell,
+    /// returning `false` if there is not enough remaining capacity.
+    pub fn store_zeros(&mut self, bits: u16) -> bool {
         if self.bit_len + bits <= MAX_BIT_LEN {
             self.bit_len += bits;
             true
@@ -118,12 +126,16 @@ where
         }
     }
 
+    /// Tries to store one zero bit in the cell,
+    /// returning `false` if there is not enough remaining capacity.
     pub fn store_bit_zero(&mut self) -> bool {
         let fits = self.bit_len < MAX_BIT_LEN;
         self.bit_len += fits as u16;
         fits
     }
 
+    /// Tries to store one non-zero bit in the cell,
+    /// returning `false` if there is not enough remaining capacity.
     pub fn store_bit_true(&mut self) -> bool {
         if self.bit_len < MAX_BIT_LEN {
             let q = (self.bit_len / 8) as usize;
@@ -136,6 +148,8 @@ where
         }
     }
 
+    /// Tries to store `u8` in the cell,
+    /// returning `false` if there is not enough remaining capacity.
     pub fn store_u8(&mut self, value: u8) -> bool {
         if self.bit_len + 8 <= MAX_BIT_LEN {
             let q = (self.bit_len / 8) as usize;
@@ -159,22 +173,32 @@ where
         }
     }
 
+    /// Tries to store `u16` in the cell,
+    /// returning `false` if there is not enough remaining capacity.
     pub fn store_u16(&mut self, value: u16) -> bool {
         impl_store_uint!(self, value, bytes: 2, bits: 16)
     }
 
+    /// Tries to store `u32` in the cell,
+    /// returning `false` if there is not enough remaining capacity.
     pub fn store_u32(&mut self, value: u32) -> bool {
         impl_store_uint!(self, value, bytes: 4, bits: 32)
     }
 
+    /// Tries to store `u64` in the cell,
+    /// returning `false` if there is not enough remaining capacity.
     pub fn store_u64(&mut self, value: u64) -> bool {
         impl_store_uint!(self, value, bytes: 8, bits: 64)
     }
 
+    /// Tries to store `u128` in the cell,
+    /// returning `false` if there is not enough remaining capacity.
     pub fn store_u128(&mut self, value: u128) -> bool {
         impl_store_uint!(self, value, bytes: 16, bits: 128)
     }
 
+    /// Tries to store 32 bytes in the cell,
+    /// returning `false` if there is not enough remaining capacity.
     pub fn store_u256(&mut self, value: &[u8; 32]) -> bool {
         if self.bit_len + 256 <= MAX_BIT_LEN {
             let q = (self.bit_len / 8) as usize;
@@ -215,6 +239,10 @@ where
         }
     }
 
+    /// Tries to store `u8` in the cell (but only the specified number of bits),
+    /// returning `false` if there is not enough remaining capacity.
+    ///
+    /// NOTE: if `bits` is greater than **8**, pads the value with zeros (as high bits).
     pub fn store_small_uint(&mut self, mut value: u8, mut bits: u16) -> bool {
         if bits == 0 {
             return true;
@@ -254,13 +282,17 @@ where
         }
     }
 
+    /// Tries to store `u64` in the cell (but only the specified number of bits),
+    /// returning `false` if there is not enough remaining capacity.
+    ///
+    /// NOTE: if `bits` is greater than **64**, pads the value with zeros (as high bits).
     pub fn store_uint(&mut self, mut value: u64, mut bits: u16) -> bool {
         if bits == 0 {
             return true;
         }
 
         if self.bit_len + bits <= MAX_BIT_LEN {
-            // Store zeroes if bits is greater than 64
+            // Store zeros if bits is greater than 64
             bits = if let Some(offset) = bits.checked_sub(64) {
                 self.bit_len += offset;
                 64
@@ -315,11 +347,14 @@ where
         }
     }
 
+    /// Returns a slice of the child cells stored in the builder.
     #[inline]
     pub fn references(&self) -> &[CellContainer<C>] {
         self.references.as_ref()
     }
 
+    /// Tries to store a child in the cell,
+    /// returning `false` if there is not enough remaining capacity.
     pub fn store_reference(&mut self, cell: CellContainer<C>) -> bool {
         if self.references.len() < MAX_REF_COUNT {
             // SAFETY: reference count is in the valid range
@@ -330,10 +365,16 @@ where
         }
     }
 
+    /// Tries to build a new cell using the default finalizer.
+    ///
+    /// See [`Finalizer`]
+    ///
+    /// [`default_finalizer`]: trait@crate::cell::finalizer::Finalizer
     pub fn build(self) -> Option<CellContainer<C>> {
         self.build_ext(&mut C::default_finalizer())
     }
 
+    /// Tries to build a new cell using the specified finalizer.
     pub fn build_ext(mut self, finalizer: &mut dyn Finalizer<C>) -> Option<CellContainer<C>> {
         debug_assert!(self.bit_len <= MAX_BIT_LEN);
         debug_assert!(self.references.len() <= MAX_REF_COUNT);
@@ -379,7 +420,7 @@ where
         let byte_len = (self.bit_len + 7) / 8;
         let data = &self.data[..std::cmp::min(byte_len as usize, 128)];
 
-        let partial_cell: PartialCell<C> = PartialCell {
+        let cell_parts: CellParts<C> = CellParts {
             stats,
             bit_len: self.bit_len,
             descriptor: CellDescriptor { d1, d2 },
@@ -387,6 +428,6 @@ where
             references: self.references,
             data,
         };
-        finalizer.finalize_cell(partial_cell)
+        finalizer.finalize_cell(cell_parts)
     }
 }

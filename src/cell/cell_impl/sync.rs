@@ -6,7 +6,7 @@ use super::{
     EmptyOrdinaryCell, HeaderWithData, LibraryReference, OrdinaryCell, OrdinaryCellHeader,
     PrunedBranch, PrunedBranchHeader,
 };
-use crate::cell::finalizer::{Finalizer, PartialCell};
+use crate::cell::finalizer::{CellParts, Finalizer};
 use crate::cell::{Cell, CellContainer, CellFamily, CellHash, CellType};
 
 /// Thread-safe cell family.
@@ -33,7 +33,7 @@ pub type ArcCell = CellContainer<ArcCellFamily>;
 pub struct ArcCellFinalizer;
 
 impl Finalizer<ArcCellFamily> for ArcCellFinalizer {
-    fn finalize_cell(&mut self, ctx: PartialCell<ArcCellFamily>) -> Option<ArcCell> {
+    fn finalize_cell(&mut self, ctx: CellParts<ArcCellFamily>) -> Option<ArcCell> {
         let hashes = ctx.compute_hashes()?;
         // SAFETY: ctx now represents a well-formed cell
         unsafe { make_cell(ctx, hashes) }
@@ -41,7 +41,7 @@ impl Finalizer<ArcCellFamily> for ArcCellFinalizer {
 }
 
 unsafe fn make_cell(
-    ctx: PartialCell<ArcCellFamily>,
+    ctx: CellParts<ArcCellFamily>,
     hashes: Vec<(CellHash, u16)>,
 ) -> Option<ArcCell> {
     match ctx.descriptor.cell_type() {

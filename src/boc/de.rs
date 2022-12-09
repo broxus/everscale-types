@@ -3,7 +3,7 @@ use std::ops::Deref;
 use smallvec::SmallVec;
 
 use super::BocTag;
-use crate::cell::finalizer::{Finalizer, PartialCell};
+use crate::cell::finalizer::{CellParts, Finalizer};
 use crate::cell::{
     Cell, CellContainer, CellDescriptor, CellFamily, CellTreeStats, LevelMask, MAX_REF_COUNT,
 };
@@ -328,7 +328,7 @@ impl<'a> BocHeader<'a> {
                     data_ptr = data_ptr.add(ref_size);
                 }
 
-                let ctx = PartialCell {
+                let ctx = CellParts {
                     stats,
                     bit_len,
                     descriptor,

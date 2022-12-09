@@ -27,13 +27,19 @@ pub use self::cell::slice::CellSlice;
 pub use self::cell::sync::{ArcCell, ArcCellFamily};
 pub use self::cell::{Cell, CellDescriptor, CellHash, LevelMask};
 
+/// BOC (Bag Of Cells) helper for the `Arc` family of cells.
 pub type ArcBoc = Boc<ArcCellFamily>;
+/// BOC (Bag Of Cells) helper for the `Rc` family of cells.
 pub type RcBoc = Boc<RcCellFamily>;
 
+/// Cell builder for the `Arc` family of cells.
 pub type ArcCellBuilder = CellBuilder<ArcCellFamily>;
+/// Cell builder for the `Rc` family of cells.
 pub type RcCellBuilder = CellBuilder<RcCellFamily>;
 
+/// A read-only view for the `Arc` family of cells.
 pub type ArcCellSlice<'a> = CellSlice<'a, ArcCellFamily>;
+/// A read-only view for the `Rc` family of cells.
 pub type RcCellSlice<'a> = CellSlice<'a, RcCellFamily>;
 
 pub mod boc;
@@ -140,7 +146,7 @@ mod tests {
         assert_eq!(cell.as_ref(), builder.build().unwrap().as_ref());
 
         let mut builder = RcCellBuilder::new();
-        builder.store_zeroes(1020);
+        builder.store_zeros(1020);
         builder.store_small_uint(0x5, 3);
         let cell = builder.build().unwrap();
         println!("{}", cell.display_tree());
