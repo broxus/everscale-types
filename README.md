@@ -12,6 +12,9 @@
 
 A set of primitive types and utilities for the Everscale blockchain.
 
+Heavily inspired by [`ton-labs-types`](https://github.com/tonlabs/ton-labs-types),
+but with much more emphasis on speed.
+
 ### How to miri check
 
 ```bash
@@ -34,3 +37,12 @@ cargo +nightly fuzz run boc_arc_decode -j 12
 cargo +nightly fuzz run boc_rc_decode_pair -j 12
 cargo +nightly fuzz run boc_rc_decode -j 12
 ```
+
+## License
+
+Licensed under either of
+
+* Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or <http://www.apache.org/licenses/LICENSE-2.0>)
+* MIT license ([LICENSE-MIT](LICENSE-MIT) or <http://opensource.org/licenses/MIT>)
+
+at your option.
