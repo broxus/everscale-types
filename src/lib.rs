@@ -138,5 +138,27 @@ mod tests {
         builder.store_u64(0xaaffaaffaaffaaff);
         builder.store_u64(0xaaffaaffaaffaaff);
         assert_eq!(cell.as_ref(), builder.build().unwrap().as_ref());
+
+        let mut builder = RcCellBuilder::new();
+        builder.store_zeroes(1020);
+        builder.store_small_uint(0x5, 3);
+        let cell = builder.build().unwrap();
+        println!("{}", cell.display_tree());
+
+        let mut builder = RcCellBuilder::new();
+        builder.store_small_uint(5, 3);
+        builder.store_u256(&[
+            0xdf, 0x86, 0xce, 0xbc, 0xe8, 0xd5, 0xab, 0x0c, 0x69, 0xb4, 0xce, 0x33, 0xfe, 0x9b,
+            0x0e, 0x2c, 0xdf, 0x69, 0xa3, 0xe1, 0x13, 0x7e, 0x64, 0x85, 0x6b, 0xbc, 0xfd, 0x39,
+            0xe7, 0x9b, 0xc1, 0x6f,
+        ]);
+        let cell = builder.build().unwrap();
+
+        let target_cell = RcBoc::decode(
+            base64::decode("te6ccgEBAQEAIwAAQbvw2dedGrVhjTaZxn/TYcWb7TR8Im/MkK13n6c883gt8A==")
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(cell.as_ref(), target_cell.as_ref());
     }
 }

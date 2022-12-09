@@ -1,4 +1,4 @@
-use crate::cell::{Cell, CellContainer, CellFamily, CellHash, CellType, LevelMask, RefsIter};
+use crate::cell::{Cell, CellContainer, CellFamily, CellType, LevelMask, RefsIter};
 
 /// A read-only view for a subcell of a cell
 #[derive(Debug)]
@@ -370,7 +370,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
         Some(res)
     }
 
-    pub fn get_u256(&self, offset: u16) -> Option<CellHash> {
+    pub fn get_u256(&self, offset: u16) -> Option<[u8; 32]> {
         if self.bits_window_start + offset + 256 <= self.bits_window_end {
             let index = self.bits_window_start + offset;
             let data = self.cell.data();
@@ -421,7 +421,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
     /// Tries to read the next `u128`, incrementing the bits window start.
     #[inline]
-    pub fn get_next_u256(&mut self) -> Option<CellHash> {
+    pub fn get_next_u256(&mut self) -> Option<[u8; 32]> {
         let res = self.get_u256(0)?;
         self.bits_window_start += 256;
         Some(res)

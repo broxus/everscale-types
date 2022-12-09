@@ -22,7 +22,7 @@ impl<C: CellFamily> Default for CellBuilder<C> {
 impl<C: CellFamily> CellBuilder<C> {
     pub fn new() -> Self {
         Self {
-            data: [0; 128], // TODO: use uninit
+            data: [0; 128],
             level_mask: None,
             bit_len: 0,
             references: Default::default(),
@@ -35,15 +35,20 @@ macro_rules! impl_store_uint {
         if $self.bit_len + $bits <= MAX_BIT_LEN {
             let q = ($self.bit_len / 8) as usize;
             let r = $self.bit_len % 8;
+            // SAFETY: q is in range 0..=127, r is in range 0..=7
             unsafe {
                 let data_ptr = $self.data.as_mut_ptr().add(q);
+                debug_assert!(q + $bytes + usize::from(r > 0) <= 128);
                 if r == 0 {
+                    // Just append data
                     let value = $value.to_be_bytes();
                     std::ptr::copy_nonoverlapping(value.as_ptr(), data_ptr, $bytes);
                 } else {
+                    // Append high bits to the last byte
                     *data_ptr |= ($value >> ($bits - 8 + r)) as u8;
-
+                    // Make shifted bytes
                     let value: [u8; $bytes] = ($value << (8 - r)).to_be_bytes();
+                    // Write shifted bytes
                     std::ptr::copy_nonoverlapping(value.as_ptr(), data_ptr.add(1), $bytes);
                 }
             };
@@ -137,9 +142,11 @@ where
             let r = self.bit_len % 8;
             unsafe {
                 if r == 0 {
+                    debug_assert!(q < 128);
                     // xxxxxxxx
                     *self.data.get_unchecked_mut(q) = value;
                 } else {
+                    debug_assert!(q + 1 < 128);
                     // yyyxxxxx|xxx00000
                     *self.data.get_unchecked_mut(q) |= value >> r;
                     *self.data.get_unchecked_mut(q + 1) = value << (8 - r);
@@ -166,6 +173,146 @@ where
 
     pub fn store_u128(&mut self, value: u128) -> bool {
         impl_store_uint!(self, value, bytes: 16, bits: 128)
+    }
+
+    pub fn store_u256(&mut self, value: &[u8; 32]) -> bool {
+        if self.bit_len + 256 <= MAX_BIT_LEN {
+            let q = (self.bit_len / 8) as usize;
+            let r = self.bit_len % 8;
+            unsafe {
+                let data_ptr = self.data.as_mut_ptr().add(q);
+                debug_assert!(q + 32 + usize::from(r > 0) <= 128);
+                if r == 0 {
+                    // Just append data
+                    std::ptr::copy_nonoverlapping(value.as_ptr(), data_ptr, 32);
+                } else {
+                    // Interpret 32 bytes as two u128
+                    let [mut hi, mut lo]: [u128; 2] = std::mem::transmute_copy(value);
+
+                    // Numbers are in big endian order, swap bytes on little endian arch
+                    #[cfg(target_endian = "little")]
+                    {
+                        hi = hi.swap_bytes();
+                        lo = lo.swap_bytes();
+                    }
+
+                    let shift = 8 - r;
+
+                    // Append high bits to the last byte
+                    *data_ptr |= (hi >> (128 - shift)) as u8;
+                    // Make shifted bytes
+                    let hi: [u8; 16] = ((hi << shift) | (lo >> (128 - shift))).to_be_bytes();
+                    let lo: [u8; 16] = (lo << shift).to_be_bytes();
+                    // Write shifted bytes
+                    std::ptr::copy_nonoverlapping(hi.as_ptr(), data_ptr.add(1), 16);
+                    std::ptr::copy_nonoverlapping(lo.as_ptr(), data_ptr.add(17), 16);
+                }
+            };
+            self.bit_len += 256;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn store_small_uint(&mut self, mut value: u8, mut bits: u16) -> bool {
+        if bits == 0 {
+            return true;
+        }
+
+        if self.bit_len + bits <= MAX_BIT_LEN {
+            bits = if let Some(offset) = bits.checked_sub(8) {
+                self.bit_len += offset;
+                8
+            } else {
+                bits
+            };
+
+            // Ensure that value starts with significant bits
+            value <<= 8 - bits;
+
+            let q = (self.bit_len / 8) as usize;
+            let r = self.bit_len % 8;
+            unsafe {
+                debug_assert!(q < 128);
+                if r == 0 {
+                    // xxxxxxxx
+                    *self.data.get_unchecked_mut(q) = value;
+                } else {
+                    // yyyxxxxx|xxx00000
+                    *self.data.get_unchecked_mut(q) |= value >> r;
+                    if bits + r > 8 {
+                        debug_assert!(q + 1 < 128);
+                        *self.data.get_unchecked_mut(q + 1) = value << (8 - r);
+                    }
+                }
+            };
+            self.bit_len += bits;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn store_uint(&mut self, mut value: u64, mut bits: u16) -> bool {
+        if bits == 0 {
+            return true;
+        }
+
+        if self.bit_len + bits <= MAX_BIT_LEN {
+            // Store zeroes if bits is greater than 64
+            bits = if let Some(offset) = bits.checked_sub(64) {
+                self.bit_len += offset;
+                64
+            } else {
+                bits
+            };
+
+            // Ensure that value starts with significant bits
+            value <<= 64 - bits;
+
+            let q = (self.bit_len / 8) as usize;
+            let r = self.bit_len % 8;
+            // SAFETY: q is in range 0..=127, r is in range 0..=7
+            unsafe {
+                let data_ptr = self.data.as_mut_ptr().add(q);
+                if r == 0 {
+                    let byte_len = ((bits + 7) / 8) as usize;
+                    debug_assert!(q + byte_len <= 128);
+
+                    // Just append data
+                    let value = value.to_be_bytes();
+                    std::ptr::copy_nonoverlapping(value.as_ptr(), data_ptr, byte_len);
+                } else {
+                    debug_assert!(q < 128);
+
+                    // Append high bits to the last byte
+                    let shift = 8 - r;
+                    *data_ptr |= (value >> (64 - shift)) as u8;
+
+                    // If there are some bits left
+                    if let Some(bits) = bits.checked_sub(shift) {
+                        if bits > 0 {
+                            let byte_len = ((bits + 7) / 8) as usize;
+                            debug_assert!(q + 1 + byte_len <= 128);
+
+                            // Make shifted bytes
+                            let value: [u8; 8] = (value << shift).to_be_bytes();
+                            // Write shifted bytes
+                            std::ptr::copy_nonoverlapping(
+                                value.as_ptr(),
+                                data_ptr.add(1),
+                                byte_len,
+                            );
+                        }
+                    }
+                }
+            }
+            self.bit_len += bits;
+            true
+        } else {
+            false
+        }
     }
 
     #[inline]
