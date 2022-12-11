@@ -169,7 +169,7 @@ mod tests {
 
         let mut builder = RcCellBuilder::new();
         builder.store_zeros(3);
-        builder.store_raw(&[0xff, 0xff], 5);
+        builder.store_raw(&[0xdd, 0x55], 10);
         let cell = builder.build().unwrap();
         println!("{}", cell.display_tree());
     }

@@ -20,14 +20,16 @@ impl<C: CellFamily> Default for CellBuilder<C> {
     }
 }
 
-impl<C: CellFamily> CellBuilder<C> {
-    /// Creates an empty cell builder.
-    pub fn new() -> Self {
+impl<C: CellFamily> Clone for CellBuilder<C>
+where
+    CellContainer<C>: Clone,
+{
+    fn clone(&self) -> Self {
         Self {
-            data: [0; 128],
-            level_mask: None,
-            bit_len: 0,
-            references: Default::default(),
+            data: self.data,
+            level_mask: self.level_mask,
+            bit_len: self.bit_len,
+            references: self.references.clone(),
         }
     }
 }
@@ -62,25 +64,26 @@ macro_rules! impl_store_uint {
     };
 }
 
-impl<C: CellFamily> CellBuilder<C>
-where
-    CellContainer<C>: AsRef<dyn Cell<C>>,
-{
-    /// Computes the cell level from the level mask.
-    pub fn compute_level(&self) -> u8 {
-        self.compute_level_mask().level()
+impl<C: CellFamily> CellBuilder<C> {
+    /// Creates an empty cell builder.
+    pub fn new() -> Self {
+        Self {
+            data: [0; 128],
+            level_mask: None,
+            bit_len: 0,
+            references: Default::default(),
+        }
     }
 
-    // Computes the cell level mask from children.
-    pub fn compute_level_mask(&self) -> LevelMask {
-        if let Some(level_mask) = self.level_mask {
-            level_mask
+    /// Tries to create a cell builder with the specified data.
+    ///
+    /// NOTE: if `bits` is greater than `bytes * 8`, pads the value with zeros (as high bits).
+    pub fn from_raw_data(value: &[u8], bits: u16) -> Option<Self> {
+        let mut res = Self::new();
+        if res.store_raw(value, bits) {
+            Some(res)
         } else {
-            let mut children_mask = LevelMask::EMPTY;
-            for child in self.references.as_ref() {
-                children_mask |= child.as_ref().descriptor().level_mask();
-            }
-            children_mask
+            None
         }
     }
 
@@ -351,66 +354,130 @@ where
     /// returning `false` if there is not enough remaining capacity.
     ///
     /// NOTE: if `bits` is greater than `bytes * 8`, pads the value with zeros (as high bits).
-    pub fn store_raw(&mut self, value: &[u8], mut bits: u16) -> bool {
+    pub fn store_raw(&mut self, value: &[u8], bits: u16) -> bool {
+        store_raw(&mut self.data, &mut self.bit_len, value, bits)
+    }
+
+    /// Tries to prepend bytes to the cell data (but only the specified number of bits),
+    /// returning `false` if there is not enough capacity.
+    ///
+    /// NOTE: if `bits` is greater than `bytes * 8`, pads the value with zeros (as high bits).
+    pub fn prepend_raw(&mut self, value: &[u8], bits: u16) -> bool {
+        if bits == 0 {
+            return true;
+        }
+
+        // Prevent asm code bloat
+        fn store_raw_impl(
+            data: &mut [u8; 128],
+            bit_len: &mut u16,
+            value: &[u8],
+            bits: u16,
+        ) -> bool {
+            store_raw(data, bit_len, value, bits)
+        }
+
         if self.bit_len + bits <= MAX_BIT_LEN {
-            let max_bit_len = value.len().saturating_mul(8) as u16;
-            bits = if let Some(offset) = bits.checked_sub(max_bit_len) {
-                self.bit_len += offset;
-                max_bit_len
+            let mut data = [0; 128];
+            let mut bit_len = 0;
+            if store_raw_impl(&mut data, &mut bit_len, value, bits)
+                && store_raw_impl(&mut data, &mut bit_len, &self.data, self.bit_len)
+            {
+                self.data = data;
+                self.bit_len = bit_len;
+                true
             } else {
-                bits
-            };
-
-            // Do nothing for empty slices or noop store
-            if bits == 0 {
-                return true;
+                false
             }
-
-            let q = (self.bit_len / 8) as usize;
-            let r = self.bit_len % 8;
-            // SAFETY: q is in range 0..=127, r is in range 0..=7
-            unsafe {
-                let mut data_ptr = self.data.as_mut_ptr().add(q);
-                let mut value_ptr = value.as_ptr();
-
-                if r == 0 {
-                    let byte_len = ((bits + 7) / 8) as usize;
-                    debug_assert!(q + byte_len <= 128);
-                    debug_assert!(byte_len <= value.len());
-
-                    std::ptr::copy_nonoverlapping(value_ptr, data_ptr, byte_len);
-
-                    let bits_r = bits % 8;
-                    if bits_r != 0 {
-                        *data_ptr.add(byte_len - 1) &= 0xff << (8 - bits_r);
-                    }
-                } else {
-                    let byte_len = ((bits + r + 7) / 8) as usize - 1;
-                    let value_len = ((bits + 7) / 8) as usize;
-                    debug_assert!(q + byte_len <= 128);
-                    debug_assert!(byte_len <= value_len && value_len <= value.len());
-
-                    let shift = 8 - r;
-                    for _ in 0..byte_len {
-                        *data_ptr |= *value_ptr >> r;
-                        data_ptr = data_ptr.add(1);
-                        *data_ptr = *value_ptr << shift;
-                        value_ptr = value_ptr.add(1);
-                    }
-                    if byte_len < value_len {
-                        *data_ptr |= *value_ptr >> r;
-                    }
-
-                    let bits_r = (r + bits) % 8;
-                    if bits_r != 0 {
-                        *data_ptr &= 0xff << (8 - bits_r);
-                    }
-                }
-            }
-            self.bit_len += bits;
-            true
         } else {
             false
+        }
+    }
+}
+
+#[inline]
+fn store_raw(data: &mut [u8; 128], bit_len: &mut u16, value: &[u8], mut bits: u16) -> bool {
+    if *bit_len + bits <= MAX_BIT_LEN {
+        let max_bit_len = value.len().saturating_mul(8) as u16;
+        bits = if let Some(offset) = bits.checked_sub(max_bit_len) {
+            *bit_len += offset;
+            max_bit_len
+        } else {
+            bits
+        };
+
+        // Do nothing for empty slices or noop store
+        if bits == 0 {
+            return true;
+        }
+
+        let q = (*bit_len / 8) as usize;
+        let r = *bit_len % 8;
+        // SAFETY: q is in range 0..=127, r is in range 0..=7
+        unsafe {
+            let mut data_ptr = data.as_mut_ptr().add(q);
+            let mut value_ptr = value.as_ptr();
+
+            if r == 0 {
+                let byte_len = ((bits + 7) / 8) as usize;
+                debug_assert!(q + byte_len <= 128);
+                debug_assert!(byte_len <= value.len());
+
+                std::ptr::copy_nonoverlapping(value_ptr, data_ptr, byte_len);
+
+                let bits_r = bits % 8;
+                if bits_r != 0 {
+                    *data_ptr.add(byte_len - 1) &= 0xff << (8 - bits_r);
+                }
+            } else {
+                let byte_len = ((bits + r + 7) / 8) as usize - 1;
+                let value_len = ((bits + 7) / 8) as usize;
+                debug_assert!(q + byte_len <= 128);
+                debug_assert!(byte_len <= value_len && value_len <= value.len());
+
+                let shift = 8 - r;
+                for _ in 0..byte_len {
+                    *data_ptr |= *value_ptr >> r;
+                    data_ptr = data_ptr.add(1);
+                    *data_ptr = *value_ptr << shift;
+                    value_ptr = value_ptr.add(1);
+                }
+                if byte_len < value_len {
+                    *data_ptr |= *value_ptr >> r;
+                }
+
+                let bits_r = (r + bits) % 8;
+                if bits_r != 0 {
+                    *data_ptr &= 0xff << (8 - bits_r);
+                }
+            }
+        }
+        *bit_len += bits;
+        true
+    } else {
+        false
+    }
+}
+
+impl<C: CellFamily> CellBuilder<C>
+where
+    CellContainer<C>: AsRef<dyn Cell<C>>,
+{
+    /// Computes the cell level from the level mask.
+    pub fn compute_level(&self) -> u8 {
+        self.compute_level_mask().level()
+    }
+
+    // Computes the cell level mask from children.
+    pub fn compute_level_mask(&self) -> LevelMask {
+        if let Some(level_mask) = self.level_mask {
+            level_mask
+        } else {
+            let mut children_mask = LevelMask::EMPTY;
+            for child in self.references.as_ref() {
+                children_mask |= child.as_ref().descriptor().level_mask();
+            }
+            children_mask
         }
     }
 
@@ -504,18 +571,41 @@ mod tests {
     use super::*;
     use crate::RcCellFamily;
 
+    type RcCellBuilder = CellBuilder<RcCellFamily>;
+
     #[test]
+    fn clone_builder() {
+        let mut builder = RcCellBuilder::new();
+        assert!(builder.store_u32(0xdeafbeaf));
+        let cell1 = builder.clone().build().unwrap();
+        let cell2 = builder.clone().build().unwrap();
+        assert_eq!(cell1.as_ref(), cell2.as_ref());
+
+        builder.store_u32(0xb00b5);
+        let cell3 = builder.build().unwrap();
+        assert_ne!(cell1.as_ref(), cell3.as_ref());
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // takes too long to execute on miri
     fn store_raw() {
         const ONES: &[u8] = &[0xff; 128];
         for offset in 0..8 {
             for bits in 0..=1016 {
-                let mut builder = CellBuilder::<RcCellFamily>::new();
+                let mut builder = RcCellBuilder::new();
                 assert!(builder.store_zeros(offset));
                 assert!(builder.store_raw(ONES, bits));
-
-                #[cfg(not(miri))] // takes too long to execute on miri
                 builder.build().unwrap();
             }
         }
+    }
+
+    #[test]
+    fn prepend_raw() {
+        let mut builder = RcCellBuilder::new();
+        assert!(builder.store_raw(&[0xde, 0xaf, 0xbe, 0xaf], 20));
+        assert!(builder.prepend_raw(&[0xaa, 0x55], 5));
+        let cell = builder.build().unwrap();
+        println!("{}", cell.display_tree());
     }
 }
