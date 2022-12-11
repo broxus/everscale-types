@@ -347,6 +347,73 @@ where
         }
     }
 
+    /// Tries to store bytes in the cell (but only the specified number of bits),
+    /// returning `false` if there is not enough remaining capacity.
+    ///
+    /// NOTE: if `bits` is greater than `bytes * 8`, pads the value with zeros (as high bits).
+    pub fn store_raw(&mut self, value: &[u8], mut bits: u16) -> bool {
+        if self.bit_len + bits <= MAX_BIT_LEN {
+            let max_bit_len = value.len().saturating_mul(8) as u16;
+            bits = if let Some(offset) = bits.checked_sub(max_bit_len) {
+                self.bit_len += offset;
+                max_bit_len
+            } else {
+                bits
+            };
+
+            // Do nothing for empty slices or noop store
+            if bits == 0 {
+                return true;
+            }
+
+            let q = (self.bit_len / 8) as usize;
+            let r = self.bit_len % 8;
+            // SAFETY: q is in range 0..=127, r is in range 0..=7
+            unsafe {
+                let mut data_ptr = self.data.as_mut_ptr().add(q);
+                let mut value_ptr = value.as_ptr();
+
+                if r == 0 {
+                    let byte_len = ((bits + 7) / 8) as usize;
+                    debug_assert!(q + byte_len <= 128);
+                    debug_assert!(byte_len <= value.len());
+
+                    std::ptr::copy_nonoverlapping(value_ptr, data_ptr, byte_len);
+
+                    let bits_r = bits % 8;
+                    if bits_r != 0 {
+                        *data_ptr.add(byte_len - 1) &= 0xff << (8 - bits_r);
+                    }
+                } else {
+                    let byte_len = ((bits + r + 7) / 8) as usize - 1;
+                    let value_len = ((bits + 7) / 8) as usize;
+                    debug_assert!(q + byte_len <= 128);
+                    debug_assert!(byte_len <= value_len && value_len <= value.len());
+
+                    let shift = 8 - r;
+                    for _ in 0..byte_len {
+                        *data_ptr |= *value_ptr >> r;
+                        data_ptr = data_ptr.add(1);
+                        *data_ptr = *value_ptr << shift;
+                        value_ptr = value_ptr.add(1);
+                    }
+                    if byte_len < value_len {
+                        *data_ptr |= *value_ptr >> r;
+                    }
+
+                    let bits_r = (r + bits) % 8;
+                    if bits_r != 0 {
+                        *data_ptr &= 0xff << (8 - bits_r);
+                    }
+                }
+            }
+            self.bit_len += bits;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Returns a slice of the child cells stored in the builder.
     #[inline]
     pub fn references(&self) -> &[CellContainer<C>] {
@@ -429,5 +496,26 @@ where
             data,
         };
         finalizer.finalize_cell(cell_parts)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::RcCellFamily;
+
+    #[test]
+    fn store_raw() {
+        const ONES: &[u8] = &[0xff; 128];
+        for offset in 0..8 {
+            for bits in 0..=1016 {
+                let mut builder = CellBuilder::<RcCellFamily>::new();
+                assert!(builder.store_zeros(offset));
+                assert!(builder.store_raw(ONES, bits));
+
+                #[cfg(not(miri))] // takes too long to execute on miri
+                builder.build().unwrap();
+            }
+        }
     }
 }

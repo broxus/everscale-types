@@ -166,5 +166,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(cell.as_ref(), target_cell.as_ref());
+
+        let mut builder = RcCellBuilder::new();
+        builder.store_zeros(3);
+        builder.store_raw(&[0xff, 0xff], 5);
+        let cell = builder.build().unwrap();
+        println!("{}", cell.display_tree());
     }
 }
