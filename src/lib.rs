@@ -46,6 +46,10 @@ pub mod boc;
 pub mod cell;
 pub mod util;
 
+pub fn emit(cell: &dyn Cell<RcCellFamily>) -> Vec<u8> {
+    Boc::<RcCellFamily>::encode(cell)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -65,6 +69,10 @@ mod tests {
                 0x95, 0xf0, 0x73, 0x76
             ]
         );
+
+
+        let serialized = RcBoc::encode(rc_cell.as_ref());
+        assert_eq!(serialized, data);
     }
 
     #[test]

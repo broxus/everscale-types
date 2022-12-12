@@ -12,6 +12,7 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 base64 = "0.13"
 thiserror = "1.0"
+rustc-hash = "1.1.0"
 sha2 = "0.9"
 smallvec = { version = "1.9", features = ["union"] }
 hex = "0.4"

@@ -3,6 +3,8 @@ use crate::cell::{Cell, CellContainer, CellFamily};
 
 /// BOC decoder implementation.
 pub mod de;
+/// BOC encoder implementation.
+pub mod ser;
 
 /// BOC file magic number.
 #[derive(Default, Copy, Clone, Eq, PartialEq)]
@@ -39,6 +41,24 @@ impl BocTag {
 /// BOC (Bag Of Cells) helper.
 pub struct Boc<C> {
     _cell_type: std::marker::PhantomData<C>,
+}
+
+impl<C: CellFamily> Boc<C> {
+    // TODO: somehow use Borrow with GATs
+    pub fn encode(cell: &dyn Cell<C>) -> Vec<u8> {
+        let mut result = Vec::new();
+        ser::BocHeader::new(cell).encode(&mut result);
+        result
+    }
+
+    // TODO: somehow use Borrow with GATs
+    pub fn encode_pair((cell1, cell2): (&dyn Cell<C>, &dyn Cell<C>)) -> Vec<u8> {
+        let mut result = Vec::new();
+        let mut encoder = ser::BocHeader::new(cell1);
+        encoder.add_root(cell2);
+        encoder.encode(&mut result);
+        result
+    }
 }
 
 impl<C: CellFamily> Boc<C>
