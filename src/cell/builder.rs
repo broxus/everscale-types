@@ -1,7 +1,10 @@
+use std::borrow::Borrow;
+use std::mem::MaybeUninit;
+
 use crate::cell::finalizer::{CellParts, Finalizer};
 use crate::cell::{Cell, CellContainer, CellFamily, LevelMask, MAX_BIT_LEN, MAX_REF_COUNT};
 use crate::util::ArrayVec;
-use crate::CellDescriptor;
+use crate::{CellDescriptor, CellSlice};
 
 use super::CellTreeStats;
 
@@ -358,6 +361,23 @@ impl<C: CellFamily> CellBuilder<C> {
         store_raw(&mut self.data, &mut self.bit_len, value, bits)
     }
 
+    /// Tries to store the remaining slice data in the cell,
+    /// returning `false` if there is not enough remaining capacity.
+    pub fn store_slice_data<C1: CellFamily>(&mut self, value: &CellSlice<'_, C1>) -> bool {
+        let bits = value.remaining_bits();
+        if self.bit_len + bits <= MAX_BIT_LEN {
+            let mut slice_data = MaybeUninit::<[u8; 128]>::uninit();
+            let slice_data = unsafe { &mut *(slice_data.as_mut_ptr() as *mut [u8; 128]) };
+            let Some(slice_data) = value.get_raw(0, slice_data, bits) else {
+                return false;
+            };
+
+            self.store_raw(slice_data, bits)
+        } else {
+            false
+        }
+    }
+
     /// Tries to prepend bytes to the cell data (but only the specified number of bits),
     /// returning `false` if there is not enough capacity.
     ///
@@ -459,8 +479,9 @@ fn store_raw(data: &mut [u8; 128], bit_len: &mut u16, value: &[u8], mut bits: u1
     }
 }
 
-impl<C: CellFamily> CellBuilder<C>
+impl<C> CellBuilder<C>
 where
+    for<'a> C: CellFamily + 'a, // explicit lifetime to fix GATs
     CellContainer<C>: AsRef<dyn Cell<C>>,
 {
     /// Computes the cell level from the level mask.
@@ -493,6 +514,46 @@ where
         if self.references.len() < MAX_REF_COUNT {
             // SAFETY: reference count is in the valid range
             unsafe { self.references.push(cell) }
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Tries to append a builder (its data and references),
+    /// returning `false` if there is not enough remaining capacity.
+    pub fn store_builder(&mut self, builder: &Self) -> bool {
+        if self.bit_len + builder.bit_len <= MAX_BIT_LEN
+            && self.references.len() + builder.references.len() <= MAX_REF_COUNT
+            && self.store_raw(&builder.data, builder.bit_len)
+        {
+            for cell in builder.references.as_ref() {
+                if !self.store_reference(cell.clone()) {
+                    return false;
+                }
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Tries to append a cell slice (its data and references),
+    /// returning `false` if there is not enough remaining capacity.
+    pub fn store_slice<'a, T>(&mut self, value: T) -> bool
+    where
+        T: Borrow<CellSlice<'a, C>>,
+    {
+        let value: &CellSlice<'a, C> = value.borrow();
+        if self.bit_len + value.remaining_bits() <= MAX_BIT_LEN
+            && self.references.len() + value.remaining_refs() as usize <= MAX_REF_COUNT
+            && self.store_slice_data(value)
+        {
+            for cell in value.references().cloned() {
+                if !self.store_reference(cell) {
+                    return false;
+                }
+            }
             true
         } else {
             false
@@ -607,5 +668,28 @@ mod tests {
         assert!(builder.prepend_raw(&[0xaa, 0x55], 5));
         let cell = builder.build().unwrap();
         println!("{}", cell.display_tree());
+    }
+
+    #[test]
+    fn store_slice() {
+        const SOME_HASH: &[u8; 32] = &[
+            0xdf, 0x86, 0xce, 0xbc, 0xe8, 0xd5, 0xab, 0x0c, 0x69, 0xb4, 0xce, 0x33, 0xfe, 0x9b,
+            0x0e, 0x2c, 0xdf, 0x69, 0xa3, 0xe1, 0x13, 0x7e, 0x64, 0x85, 0x6b, 0xbc, 0xfd, 0x39,
+            0xe7, 0x9b, 0xc1, 0x6f,
+        ];
+
+        let mut builder = RcCellBuilder::new();
+        assert!(builder.store_zeros(3));
+        assert!(builder.store_u256(SOME_HASH));
+        let cell = builder.build().unwrap();
+        println!("{}", cell.display_tree());
+
+        let mut builder = RcCellBuilder::new();
+        let mut slice = cell.as_slice();
+        assert!(slice.try_advance(3));
+        assert!(builder.store_slice(slice));
+        let cell = builder.build().unwrap();
+        println!("{}", cell.display_tree());
+        assert_eq!(cell.data(), SOME_HASH);
     }
 }

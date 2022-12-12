@@ -37,6 +37,12 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
         }
     }
 
+    /// Returns a reference to the underlying cell.
+    #[inline]
+    pub fn cell(&self) -> &'a dyn Cell<C> {
+        self.cell
+    }
+
     /// Computes cell type from descriptor bytes.
     #[inline]
     pub fn cell_type(&self) -> CellType {
@@ -428,6 +434,79 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
         Some(res)
     }
 
+    /// Reads the specified number of bits to the taret starting from the `offset`.
+    pub fn get_raw<'b>(
+        &'_ self,
+        offset: u16,
+        target: &'b mut [u8],
+        bits: u16,
+    ) -> Option<&'b mut [u8]> {
+        if bits == 0 {
+            return Some(&mut target[..0]);
+        }
+
+        if self.bits_window_start + bits <= self.bits_window_end {
+            let index = self.bits_window_start + offset;
+            let data = self.cell.data();
+            let data_len = data.len();
+
+            let target_len = ((bits + 7) / 8) as usize;
+            let target = if target_len <= target.len() {
+                &mut target[..target_len]
+            } else {
+                return None;
+            };
+
+            let r = index % 8;
+            let q = (index / 8) as usize;
+
+            // SAFETY: q will be checked to be in range 0..data_len,
+            // r is in range 0..=7, target is guaranteed to be `target_len`
+            unsafe {
+                let mut data_ptr = data.as_ptr().add(q);
+                let target_ptr = target.as_mut_ptr();
+
+                if r == 0 && q + target_len <= data_len {
+                    std::ptr::copy_nonoverlapping(data_ptr, target_ptr, target_len as usize);
+                } else if r != 0 {
+                    let byte_len = ((bits + r + 7) / 8) as usize - 1;
+                    if q + byte_len > data_len {
+                        return None;
+                    }
+
+                    let shift = 8 - r;
+                    for i in 0..byte_len {
+                        let target = target_ptr.add(i);
+                        *target = *data_ptr << r;
+                        data_ptr = data_ptr.add(1);
+                        *target |= *data_ptr >> shift;
+                    }
+                    if byte_len < target_len {
+                        *target_ptr.add(byte_len) = *data_ptr << r;
+                    }
+                } else {
+                    return None;
+                }
+
+                let bits_r = bits % 8;
+                if bits_r != 0 {
+                    *target_ptr.add(target_len - 1) &= 0xff << (8 - bits_r);
+                }
+                Some(target)
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Tries to read the specified number of bits, incrementing the bits window start.
+    /// Returns the minimum subslice containing all bits.
+    pub fn get_next_raw<'b>(&'_ mut self, target: &'b mut [u8], bits: u16) -> Option<&'b mut [u8]> {
+        let res = self.get_raw(0, target, bits)?;
+        self.bits_window_start += bits;
+        Some(res)
+    }
+
     /// Returns a reference to the Nth child cell (relative to this slice's refs window).
     pub fn reference(&self, index: u8) -> Option<&dyn Cell<C>> {
         if self.refs_window_start + index < self.refs_window_end {
@@ -482,6 +561,37 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
             Some(cell)
         } else {
             None
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::RcCellBuilder;
+
+    #[test]
+    fn get_raw() {
+        let cell = RcCellBuilder::from_raw_data(&[0xff; 128], 200)
+            .and_then(RcCellBuilder::build)
+            .unwrap();
+        let slice = cell.as_slice();
+
+        let mut data = [0; 1];
+        assert!(slice.get_raw(0, &mut data, 100).is_none());
+
+        let mut data = [0; 64];
+        assert!(slice.get_raw(0, &mut data, 500).is_none());
+
+        let cell = RcCellBuilder::from_raw_data(&[0xff; 128], 1023)
+            .and_then(RcCellBuilder::build)
+            .unwrap();
+        let slice = cell.as_slice();
+
+        let mut data = [0; 128];
+        for offset in 0..=8 {
+            for bits in 0..=(1023 - offset) {
+                slice.get_raw(offset, &mut data, bits).unwrap();
+            }
         }
     }
 }
