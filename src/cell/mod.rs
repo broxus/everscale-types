@@ -65,7 +65,7 @@ pub trait Cell<C: CellFamily> {
     ///
     /// Cell representation hash is the hash at the maximum level ([`LevelMask::MAX_LEVEL`]).
     /// Use `repr_hash` as a simple alias for this.
-    fn hash(&self, level: u8) -> CellHash;
+    fn hash(&self, level: u8) -> &CellHash;
 
     /// Returns cell depth for the specified level.
     fn depth(&self, level: u8) -> u16;
@@ -110,12 +110,12 @@ impl<C: CellFamily> dyn Cell<C> + '_ {
 
     /// Returns representation hash of the cell.
     #[inline]
-    pub fn repr_hash(&self) -> [u8; 32] {
+    pub fn repr_hash(&self) -> &CellHash {
         self.hash(LevelMask::MAX_LEVEL)
     }
 
     pub fn is_empty(&self) -> bool {
-        self.hash(LevelMask::MAX_LEVEL) == EMPTY_CELL_HASH
+        self.hash(LevelMask::MAX_LEVEL) == &EMPTY_CELL_HASH
     }
 
     /// Creates an iterator through child nodes.
@@ -160,7 +160,7 @@ impl<C: CellFamily> std::fmt::Debug for dyn Cell<C> + '_ {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Cell")
             .field("ty", &self.cell_type())
-            .field("hash", &DisplayHash(&self.repr_hash()))
+            .field("hash", &DisplayHash(self.repr_hash()))
             .finish()
     }
 }
@@ -597,7 +597,7 @@ impl<C: CellFamily> std::fmt::Display for DisplayCellRoot<'_, C> {
                     descriptor.reference_count(),
                     descriptor.level_mask(),
                     repr_depth,
-                    DisplayHash(&repr_hash),
+                    DisplayHash(repr_hash),
                 ))
         }
     }

@@ -88,7 +88,7 @@ impl<'a, C: CellFamily> BocHeader<'a, C> {
             target.extend_from_slice(&[descriptor.d1, descriptor.d2]);
             target.extend_from_slice(cell.data());
             for child in cell.references() {
-                if let Some(rev_index) = self.rev_indices.get(&child.repr_hash()) {
+                if let Some(rev_index) = self.rev_indices.get(child.repr_hash()) {
                     let rev_index = self.cell_count - *rev_index - 1;
                     target.extend_from_slice(&rev_index.to_be_bytes()[4 - ref_size as usize..]);
                 } else {
@@ -102,7 +102,7 @@ impl<'a, C: CellFamily> BocHeader<'a, C> {
     }
 
     fn fill(&mut self, root: &'a dyn Cell<C>) -> u32 {
-        if let Some(index) = self.rev_indices.get(&root.repr_hash()) {
+        if let Some(index) = self.rev_indices.get(root.repr_hash()) {
             return *index;
         }
 
@@ -111,7 +111,7 @@ impl<'a, C: CellFamily> BocHeader<'a, C> {
         }
 
         let index = self.cell_count;
-        self.rev_indices.insert(root.repr_hash(), index);
+        self.rev_indices.insert(*root.repr_hash(), index);
         self.rev_cells.push(root);
 
         let descriptor = root.descriptor();
@@ -124,7 +124,7 @@ impl<'a, C: CellFamily> BocHeader<'a, C> {
 
     // NOTE: Duplicate iteration method to reduce operations per child
     fn fill_iter(&mut self, cell: &'a dyn Cell<C>) {
-        if self.rev_indices.contains_key(&cell.repr_hash()) {
+        if self.rev_indices.contains_key(cell.repr_hash()) {
             return;
         }
 
@@ -132,7 +132,7 @@ impl<'a, C: CellFamily> BocHeader<'a, C> {
             self.fill_iter(child);
         }
 
-        self.rev_indices.insert(cell.repr_hash(), self.cell_count);
+        self.rev_indices.insert(*cell.repr_hash(), self.cell_count);
         self.rev_cells.push(cell);
 
         let descriptor = cell.descriptor();
