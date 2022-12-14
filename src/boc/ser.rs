@@ -1,7 +1,7 @@
 use rustc_hash::FxHashMap;
 
 use super::BocTag;
-use crate::cell::{Cell, CellFamily, CellHash};
+use crate::cell::{Cell, CellDescriptor, CellFamily, CellHash};
 
 pub struct BocHeader<'a, C> {
     root_rev_indices: Vec<u32>,
@@ -10,6 +10,7 @@ pub struct BocHeader<'a, C> {
     total_data_size: u64,
     reference_count: u64,
     cell_count: u32,
+    without_hashes: bool,
     include_crc: bool,
 }
 
@@ -22,6 +23,7 @@ impl<'a, C: CellFamily> BocHeader<'a, C> {
             total_data_size: 0,
             reference_count: 0,
             cell_count: 0,
+            without_hashes: false,
             include_crc: false,
         };
         res.add_root(root);
@@ -39,16 +41,27 @@ impl<'a, C: CellFamily> BocHeader<'a, C> {
         self
     }
 
-    pub fn encode(self, target: &mut Vec<u8>) -> bool {
+    #[inline]
+    pub fn without_hashes(mut self, without_hashes: bool) -> Self {
+        self.without_hashes = without_hashes;
+        self
+    }
+
+    pub fn encode(self, target: &mut Vec<u8>) {
         let root_count = self.root_rev_indices.len();
 
         let ref_size = number_of_bytes_to_fit(self.cell_count as u64);
+        // NOTE: `ref_size` will be in range 1..=4 because `self.cell_count`
+        // is `u32`, and there is at least one cell (see Self::new)
+        debug_assert!((1..=4).contains(&ref_size));
+
         let total_cells_size: u64 = self.total_data_size
             + (self.cell_count as u64 * 2) // all descriptor bytes
             + (ref_size as u64 * self.reference_count);
         let offset_size = number_of_bytes_to_fit(total_cells_size);
 
-        debug_assert!((1..=4).contains(&ref_size));
+        // NOTE: `offset_size` will be in range 1..=8 because `self.cell_count`
+        // is at least 1, and `total_cells_size` is `u64`
         debug_assert!((1..=8).contains(&offset_size));
 
         let flags = (ref_size as u8) | (u8::from(self.include_crc) * 0b0100_0000);
@@ -84,8 +97,18 @@ impl<'a, C: CellFamily> BocHeader<'a, C> {
         }
 
         for cell in self.rev_cells.into_iter().rev() {
-            let descriptor = cell.descriptor();
+            let mut descriptor = cell.descriptor();
+            descriptor.d1 &= !(u8::from(self.without_hashes) * CellDescriptor::STORE_HASHES_MASK);
             target.extend_from_slice(&[descriptor.d1, descriptor.d2]);
+            if descriptor.store_hashes() {
+                let hash_count = descriptor.level_mask().level() + 1;
+                for level in 0..hash_count {
+                    target.extend_from_slice(cell.hash(level));
+                }
+                for level in 0..hash_count {
+                    target.extend_from_slice(&cell.depth(level).to_be_bytes());
+                }
+            }
             target.extend_from_slice(cell.data());
             for child in cell.references() {
                 if let Some(rev_index) = self.rev_indices.get(child.repr_hash()) {
@@ -93,12 +116,9 @@ impl<'a, C: CellFamily> BocHeader<'a, C> {
                     target.extend_from_slice(&rev_index.to_be_bytes()[4 - ref_size as usize..]);
                 } else {
                     debug_assert!(false, "child not found");
-                    return false;
                 }
             }
         }
-
-        true
     }
 
     fn fill(&mut self, root: &'a dyn Cell<C>) -> u32 {
@@ -115,7 +135,7 @@ impl<'a, C: CellFamily> BocHeader<'a, C> {
         self.rev_cells.push(root);
 
         let descriptor = root.descriptor();
-        self.total_data_size += descriptor.byte_len() as u64;
+        self.total_data_size += descriptor.byte_len_full(self.without_hashes);
         self.reference_count += descriptor.reference_count() as u64;
         self.cell_count += 1;
 
@@ -136,9 +156,19 @@ impl<'a, C: CellFamily> BocHeader<'a, C> {
         self.rev_cells.push(cell);
 
         let descriptor = cell.descriptor();
-        self.total_data_size += descriptor.byte_len() as u64;
+        self.total_data_size += descriptor.byte_len_full(self.without_hashes);
         self.reference_count += descriptor.reference_count() as u64;
         self.cell_count += 1;
+    }
+}
+
+impl CellDescriptor {
+    fn byte_len_full(self, without_hashes: bool) -> u64 {
+        let mut byte_len = self.byte_len() as u64;
+        if !without_hashes && self.store_hashes() {
+            byte_len += (self.level_mask().level() + 1) as u64 * (32 + 2);
+        }
+        byte_len
     }
 }
 
