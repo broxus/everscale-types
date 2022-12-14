@@ -15,6 +15,9 @@ pub mod finalizer;
 /// Cell view utils.
 pub mod slice;
 
+/// Cell creation utils.
+pub mod builder;
+
 /// Cell implementation family.
 pub trait CellFamily {
     type Container<T: ?Sized>: Clone;
@@ -62,7 +65,7 @@ pub trait Cell<C: CellFamily> {
     ///
     /// Cell representation hash is the hash at the maximum level ([`LevelMask::MAX_LEVEL`]).
     /// Use `repr_hash` as a simple alias for this.
-    fn hash(&self, level: u8) -> CellHash;
+    fn hash(&self, level: u8) -> &CellHash;
 
     /// Returns cell depth for the specified level.
     fn depth(&self, level: u8) -> u16;
@@ -107,12 +110,12 @@ impl<C: CellFamily> dyn Cell<C> + '_ {
 
     /// Returns representation hash of the cell.
     #[inline]
-    pub fn repr_hash(&self) -> [u8; 32] {
+    pub fn repr_hash(&self) -> &CellHash {
         self.hash(LevelMask::MAX_LEVEL)
     }
 
     pub fn is_empty(&self) -> bool {
-        self.hash(LevelMask::MAX_LEVEL) == EMPTY_CELL_HASH
+        self.hash(LevelMask::MAX_LEVEL) == &EMPTY_CELL_HASH
     }
 
     /// Creates an iterator through child nodes.
@@ -157,8 +160,17 @@ impl<C: CellFamily> std::fmt::Debug for dyn Cell<C> + '_ {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Cell")
             .field("ty", &self.cell_type())
-            .field("hash", &DisplayHash(&self.repr_hash()))
+            .field("hash", &DisplayHash(self.repr_hash()))
             .finish()
+    }
+}
+
+impl<C: CellFamily> Eq for dyn Cell<C> + '_ {}
+
+impl<C1: CellFamily, C2: CellFamily> PartialEq<dyn Cell<C2> + '_> for dyn Cell<C1> + '_ {
+    #[inline]
+    fn eq(&self, other: &dyn Cell<C2>) -> bool {
+        self.repr_hash() == other.repr_hash()
     }
 }
 
@@ -275,9 +287,10 @@ pub const EMPTY_CELL_HASH: CellHash = [
 ];
 
 /// Well-formed cell type.
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Default, Debug, Copy, Clone, Eq, PartialEq)]
 pub enum CellType {
     /// Cell of this type just stores data and references.
+    #[default]
     Ordinary,
     /// Exotic cell which was pruned from the original tree of cells
     /// when a Merkle proof has been created.
@@ -344,6 +357,18 @@ impl CellDescriptor {
     pub const IS_EXOTIC_MASK: u8 = 0b0000_1000;
     pub const STORE_HASHES_MASK: u8 = 0b0001_0000;
     pub const LEVEL_MASK: u8 = 0b1110_0000;
+
+    /// Computes d1 descriptor byte from parts
+    #[inline(always)]
+    pub const fn compute_d1(level_mask: LevelMask, is_exotic: bool, ref_count: u8) -> u8 {
+        (level_mask.0 << 5) | ((is_exotic as u8) << 3) | (ref_count & Self::REF_COUNT_MASK)
+    }
+
+    /// Computes d2 descriptor byte from cell length in bits
+    #[inline(always)]
+    pub const fn compute_d2(bit_len: u16) -> u8 {
+        (((bit_len >> 2) as u8) & !0b1) | ((bit_len % 8 != 0) as u8)
+    }
 
     /// Constructs cell descriptor from descriptor bytes.
     #[inline(always)]
@@ -572,7 +597,7 @@ impl<C: CellFamily> std::fmt::Display for DisplayCellRoot<'_, C> {
                     descriptor.reference_count(),
                     descriptor.level_mask(),
                     repr_depth,
-                    DisplayHash(&repr_hash),
+                    DisplayHash(repr_hash),
                 ))
         }
     }
@@ -600,6 +625,11 @@ impl<C: CellFamily> std::fmt::Display for DisplayCellTree<'_, C> {
         Ok(())
     }
 }
+
+/// Max cell data capacity in bits
+pub const MAX_BIT_LEN: u16 = 1023;
+/// Maximum number of child cells
+pub const MAX_REF_COUNT: usize = 4;
 
 #[cfg(test)]
 mod tests {

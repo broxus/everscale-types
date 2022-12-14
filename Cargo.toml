@@ -1,13 +1,19 @@
 [package]
 name = "everscale-types"
-version = "0.1.0"
+description = "A set of primitive types and utilities for the Everscale blockchain."
+authors = ["Ivan Kalinin <i.kalinin@dexpa.io>"]
+repository = "https://github.com/broxus/everscale-types"
+version = "0.1.0-pre.0"
 edition = "2021"
 rust-version = "1.65"
+include = ["src/**/*.rs", "LICENSE-*", "README.md"]
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 base64 = "0.13"
 thiserror = "1.0"
-sha2 = "0.9"
+rustc-hash = "1.1.0"
+sha2 = "0.10"
 smallvec = { version = "1.9", features = ["union"] }
 hex = "0.4"
 

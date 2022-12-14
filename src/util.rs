@@ -39,17 +39,6 @@ pub struct ArrayVec<T, const N: usize> {
     len: u8,
 }
 
-impl<T, const N: usize> Default for ArrayVec<T, N> {
-    #[inline]
-    fn default() -> Self {
-        Self {
-            // SAFETY: An uninitialized `[MaybeUninit<_>; LEN]` is valid.
-            inner: unsafe { MaybeUninit::<[MaybeUninit<T>; N]>::uninit().assume_init() },
-            len: 0,
-        }
-    }
-}
-
 impl<T, const N: usize> ArrayVec<T, N> {
     /// Ensure that provided length is small enough.
     const _ASSERT_LEN: () = assert!(N <= u8::MAX as usize);
@@ -93,11 +82,33 @@ impl<T, const N: usize> ArrayVec<T, N> {
     }
 }
 
+impl<T, const N: usize> Default for ArrayVec<T, N> {
+    #[inline]
+    fn default() -> Self {
+        Self {
+            // SAFETY: An uninitialized `[MaybeUninit<_>; LEN]` is valid.
+            inner: unsafe { MaybeUninit::<[MaybeUninit<T>; N]>::uninit().assume_init() },
+            len: 0,
+        }
+    }
+}
+
 impl<R, const N: usize> AsRef<[R]> for ArrayVec<R, N> {
     #[inline]
     fn as_ref(&self) -> &[R] {
         // SAFETY: {len} elements were initialized
         unsafe { std::slice::from_raw_parts(self.inner.as_ptr() as *const R, self.len as usize) }
+    }
+}
+
+impl<T: Clone, const N: usize> Clone for ArrayVec<T, N> {
+    fn clone(&self) -> Self {
+        let mut res = Self::default();
+        for item in self.as_ref() {
+            // SAFETY: {len} elements were initialized
+            unsafe { res.push(item.clone()) };
+        }
+        res
     }
 }
 

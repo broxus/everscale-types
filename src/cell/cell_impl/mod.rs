@@ -2,6 +2,7 @@ use std::mem::MaybeUninit;
 
 use super::{
     Cell, CellContainer, CellDescriptor, CellFamily, CellHash, CellTreeStats, EMPTY_CELL_HASH,
+    MAX_REF_COUNT,
 };
 
 macro_rules! define_gen_vtable_ptr {
@@ -51,8 +52,8 @@ impl<C: CellFamily> Cell<C> for EmptyOrdinaryCell {
         None
     }
 
-    fn hash(&self, _: u8) -> CellHash {
-        EMPTY_CELL_HASH
+    fn hash(&self, _: u8) -> &CellHash {
+        &EMPTY_CELL_HASH
     }
 
     fn depth(&self, _: u8) -> u16 {
@@ -74,7 +75,7 @@ struct OrdinaryCellHeader<C: CellFamily> {
     stats: CellTreeStats,
     hashes: Vec<(CellHash, u16)>,
     descriptor: CellDescriptor,
-    references: [MaybeUninit<CellContainer<C>>; 4],
+    references: [MaybeUninit<CellContainer<C>>; MAX_REF_COUNT],
 }
 
 impl<C: CellFamily> OrdinaryCellHeader<C> {
@@ -100,7 +101,7 @@ impl<C: CellFamily> OrdinaryCellHeader<C> {
 impl<C: CellFamily> Drop for OrdinaryCellHeader<C> {
     fn drop(&mut self) {
         let references_ptr = self.references.as_mut_ptr() as *mut CellContainer<C>;
-        debug_assert!(self.descriptor.reference_count() <= 4);
+        debug_assert!(self.descriptor.reference_count() <= MAX_REF_COUNT as u8);
 
         for i in 0..self.descriptor.reference_count() {
             // SAFETY: references were initialized
@@ -137,8 +138,8 @@ where
         Some(self.header.reference(index)?.clone())
     }
 
-    fn hash(&self, level: u8) -> CellHash {
-        self.header.level_descr(level).0
+    fn hash(&self, level: u8) -> &CellHash {
+        &self.header.level_descr(level).0
     }
 
     fn depth(&self, level: u8) -> u16 {
@@ -182,8 +183,8 @@ impl<C: CellFamily> Cell<C> for LibraryReference {
         None
     }
 
-    fn hash(&self, _: u8) -> CellHash {
-        self.repr_hash
+    fn hash(&self, _: u8) -> &CellHash {
+        &self.repr_hash
     }
 
     fn depth(&self, _: u8) -> u16 {
@@ -238,10 +239,10 @@ impl<C: CellFamily, const N: usize> Cell<C> for PrunedBranch<N> {
         None
     }
 
-    fn hash(&self, level: u8) -> CellHash {
+    fn hash(&self, level: u8) -> &CellHash {
         let hash_index = hash_index(self.header.descriptor, level);
         if hash_index == self.header.level {
-            self.header.repr_hash
+            &self.header.repr_hash
         } else {
             let offset = 2 + hash_index as usize * 32;
             debug_assert!(offset + 32 <= self.header.descriptor.byte_len() as usize);
@@ -249,7 +250,7 @@ impl<C: CellFamily, const N: usize> Cell<C> for PrunedBranch<N> {
             let data_ptr = std::ptr::addr_of!(self.data) as *const u8;
 
             // SAFETY: Cell was created from a well-formed parts, so data is big enough
-            unsafe { *(data_ptr.add(offset) as *const [u8; 32]) }
+            unsafe { &*(data_ptr.add(offset) as *const [u8; 32]) }
         }
     }
 
