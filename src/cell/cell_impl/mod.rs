@@ -17,6 +17,8 @@ macro_rules! define_gen_vtable_ptr {
     };
 }
 
+/// Single-threaded unsafe cell implementation.
+pub mod ptr;
 /// Single-threaded cell implementation.
 pub mod rc;
 /// Thread-safe cell implementation.

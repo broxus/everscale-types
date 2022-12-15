@@ -53,6 +53,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test() {
+        let data = [
+            181, 238, 156, 114, 1, 1, 5, 1, 0, 53, 0, 67, 3, 3, 3, 3, 3, 2, 0, 1, 72, 72, 72, 1, 2,
+            0, 0, 0, 0, 218, 0, 252, 164, 93, 170, 240, 83, 252, 204, 170, 1, 195, 247, 5, 2, 1,
+            49, 112, 198, 42, 239, 0, 0, 1, 0, 38, 0, 200, 0, 0, 0, 0, 0, 118,
+        ];
+        println!("{}", base64::encode(data));
+
+        let rc_cell = RcBoc::decode(data).unwrap();
+        println!("{}", rc_cell.display_tree());
+    }
+
+    #[test]
     fn correct_deserialization() {
         let data = base64::decode("te6ccgEBBAEAzwACg4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAIBAEAAAAAAAAAAAAAAAAAAAAAAAAAAm2c6ClpzoTVSAHvzVQGDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHKq1w7OAAkYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACRwAwBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEljGP8=").unwrap();
 
@@ -181,5 +194,80 @@ mod tests {
         assert!(builder.store_slice(cell.as_slice()));
         let cell = builder.build().unwrap();
         println!("{}", cell.display_tree());
+    }
+
+    /// Memory buffer that is mapped to a file
+    pub struct MappedFile {
+        file: std::fs::File,
+        length: usize,
+        ptr: *mut libc::c_void,
+    }
+
+    impl MappedFile {
+        /// Opens an existing file and maps it to memory
+        pub fn from_existing_file(file: std::fs::File) -> std::io::Result<Self> {
+            use std::os::unix::io::AsRawFd;
+
+            let length = file.metadata()?.len() as usize;
+
+            // SAFETY: File was opened successfully, file mode is RW, offset is aligned
+            let ptr = unsafe {
+                libc::mmap(
+                    std::ptr::null_mut(),
+                    length,
+                    libc::PROT_READ,
+                    libc::MAP_SHARED,
+                    file.as_raw_fd(),
+                    0,
+                )
+            };
+
+            if ptr == libc::MAP_FAILED {
+                return Err(std::io::Error::last_os_error());
+            }
+
+            if unsafe { libc::madvise(ptr, length, libc::MADV_RANDOM) } != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+
+            Ok(Self { file, length, ptr })
+        }
+    }
+
+    impl Drop for MappedFile {
+        fn drop(&mut self) {
+            // SAFETY: File still exists, ptr and length were initialized once on creation
+            if unsafe { libc::munmap(self.ptr, self.length) } != 0 {
+                // TODO: how to handle this?
+                panic!("failed to unmap file: {}", std::io::Error::last_os_error());
+            }
+
+            let _ = self.file.set_len(0);
+            let _ = self.file.sync_all();
+        }
+    }
+
+    #[test]
+    fn test_state() {
+        use cell::ptr::*;
+
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .open("../node-comm-cli/masterchain.boc")
+            .unwrap();
+        let file = MappedFile::from_existing_file(file).unwrap();
+        let data = unsafe { std::slice::from_raw_parts(file.ptr as *const u8, file.length) };
+
+        let cell_family = PtrCellFamily::new(data);
+        let mut finalizer = cell_family.create_finalizer();
+
+        let rc_cell = Boc::<PtrCellFamily>::decode_ext(data, &mut finalizer).unwrap();
+        println!(
+            "HASH: {}, DEPTH: {}, STATS: {:?}",
+            hex::encode(rc_cell.repr_hash()),
+            rc_cell.depth(3),
+            rc_cell.stats(),
+        );
+        println!("TOTAL SIZE: {finalizer:?}");
     }
 }

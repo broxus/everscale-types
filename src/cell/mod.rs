@@ -4,7 +4,7 @@ use std::ops::{BitOr, BitOrAssign};
 use crate::util::DisplayHash;
 
 pub use self::builder::CellBuilder;
-pub use self::cell_impl::{rc, sync};
+pub use self::cell_impl::{ptr, rc, sync};
 pub use self::slice::CellSlice;
 
 /// Generic cell implementation.
