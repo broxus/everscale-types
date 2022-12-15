@@ -5,7 +5,7 @@ use super::{
     EmptyOrdinaryCell, HeaderWithData, LibraryReference, OrdinaryCell, OrdinaryCellHeader,
     PrunedBranch, PrunedBranchHeader,
 };
-use crate::cell::finalizer::{CellParts, Finalizer};
+use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 use crate::cell::{Cell, CellContainer, CellFamily, CellHash, CellType};
 
 /// Single-threaded cell family.
@@ -13,13 +13,16 @@ pub struct RcCellFamily;
 
 impl CellFamily for RcCellFamily {
     type Container<T: ?Sized> = Rc<T>;
-    type DefaultFinalizer = RcCellFinalizer;
 
     fn empty_cell() -> CellContainer<Self> {
         Rc::new(EmptyOrdinaryCell)
     }
+}
 
-    fn default_finalizer() -> Self::DefaultFinalizer {
+impl DefaultFinalizer for RcCellFamily {
+    type Finalizer = RcCellFinalizer;
+
+    fn default_finalizer() -> Self::Finalizer {
         RcCellFinalizer
     }
 }

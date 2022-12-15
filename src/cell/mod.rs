@@ -3,8 +3,9 @@ use std::ops::{BitOr, BitOrAssign};
 
 use crate::util::DisplayHash;
 
+pub use self::builder::CellBuilder;
 pub use self::cell_impl::{rc, sync};
-use self::slice::CellSlice;
+pub use self::slice::CellSlice;
 
 /// Generic cell implementation.
 mod cell_impl;
@@ -13,18 +14,16 @@ mod cell_impl;
 pub mod finalizer;
 
 /// Cell view utils.
-pub mod slice;
+mod slice;
 
 /// Cell creation utils.
-pub mod builder;
+mod builder;
 
 /// Cell implementation family.
 pub trait CellFamily {
     type Container<T: ?Sized>: Clone;
-    type DefaultFinalizer: finalizer::Finalizer<Self>;
 
     fn empty_cell() -> CellContainer<Self>;
-    fn default_finalizer() -> Self::DefaultFinalizer;
 }
 
 /// Type alias for a cell family container.
@@ -405,6 +404,19 @@ impl CellDescriptor {
         self.d1 & Self::REF_COUNT_MASK
     }
 
+    /// Computes hash count.
+    ///
+    /// NOTE: Guaranteed to be in range 1..=4.
+    #[inline(always)]
+    pub const fn hash_count(self) -> u8 {
+        let level = self.level_mask().level();
+        if self.is_exotic() && self.reference_count() == 0 && level > 0 {
+            1 // pruned branch always has 1 hash
+        } else {
+            level + 1
+        }
+    }
+
     /// Returns whether the cell is not [`Ordinary`].
     ///
     /// [`Ordinary`]: crate::cell::CellType::Ordinary
@@ -459,6 +471,12 @@ impl LevelMask {
     #[inline(always)]
     pub const fn new(mask: u8) -> Self {
         Self(mask & 0b111)
+    }
+
+    /// Returns true if there are no levels in mask.
+    #[inline(always)]
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
     }
 
     /// Constructs a new level mask from the provided byte as is.

@@ -6,7 +6,7 @@ use super::{
     EmptyOrdinaryCell, HeaderWithData, LibraryReference, OrdinaryCell, OrdinaryCellHeader,
     PrunedBranch, PrunedBranchHeader,
 };
-use crate::cell::finalizer::{CellParts, Finalizer};
+use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 use crate::cell::{Cell, CellContainer, CellFamily, CellHash, CellType};
 
 /// Thread-safe cell family.
@@ -14,13 +14,16 @@ pub struct ArcCellFamily;
 
 impl CellFamily for ArcCellFamily {
     type Container<T: ?Sized> = Arc<T>;
-    type DefaultFinalizer = ArcCellFinalizer;
 
     fn empty_cell() -> CellContainer<Self> {
         Arc::new(EmptyOrdinaryCell)
     }
+}
 
-    fn default_finalizer() -> Self::DefaultFinalizer {
+impl DefaultFinalizer for ArcCellFamily {
+    type Finalizer = ArcCellFinalizer;
+
+    fn default_finalizer() -> Self::Finalizer {
         ArcCellFinalizer
     }
 }

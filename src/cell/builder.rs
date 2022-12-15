@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 use std::mem::MaybeUninit;
 
-use crate::cell::finalizer::{CellParts, Finalizer};
+use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 use crate::cell::{Cell, CellContainer, CellFamily, LevelMask, MAX_BIT_LEN, MAX_REF_COUNT};
 use crate::util::ArrayVec;
 use crate::{CellDescriptor, CellSlice};
@@ -560,15 +560,6 @@ where
         }
     }
 
-    /// Tries to build a new cell using the default finalizer.
-    ///
-    /// See [`Finalizer`]
-    ///
-    /// [`default_finalizer`]: trait@crate::cell::finalizer::Finalizer
-    pub fn build(self) -> Option<CellContainer<C>> {
-        self.build_ext(&mut C::default_finalizer())
-    }
-
     /// Tries to build a new cell using the specified finalizer.
     pub fn build_ext(mut self, finalizer: &mut dyn Finalizer<C>) -> Option<CellContainer<C>> {
         debug_assert!(self.bit_len <= MAX_BIT_LEN);
@@ -624,6 +615,21 @@ where
             data,
         };
         finalizer.finalize_cell(cell_parts)
+    }
+}
+
+impl<C> CellBuilder<C>
+where
+    for<'a> C: DefaultFinalizer + 'a,
+    CellContainer<C>: AsRef<dyn Cell<C>>,
+{
+    /// Tries to build a new cell using the default finalizer.
+    ///
+    /// See [`Finalizer`]
+    ///
+    /// [`default_finalizer`]: trait@crate::cell::finalizer::Finalizer
+    pub fn build(self) -> Option<CellContainer<C>> {
+        self.build_ext(&mut C::default_finalizer())
     }
 }
 

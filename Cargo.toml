@@ -16,6 +16,10 @@ rustc-hash = "1.1.0"
 sha2 = "0.10"
 smallvec = { version = "1.9", features = ["union"] }
 hex = "0.4"
+bumpalo = "3.11"
+
+[dev-dependencies]
+libc = "0.2"
 
 [profile.release]
 debug = true

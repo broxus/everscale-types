@@ -1,4 +1,4 @@
-use crate::cell::finalizer::Finalizer;
+use crate::cell::finalizer::{DefaultFinalizer, Finalizer};
 use crate::cell::{Cell, CellContainer, CellFamily};
 
 /// BOC decoder implementation.
@@ -61,7 +61,7 @@ impl<C: CellFamily> Boc<C> {
     }
 }
 
-impl<C: CellFamily> Boc<C>
+impl<C: DefaultFinalizer> Boc<C>
 where
     CellContainer<C>: AsRef<dyn Cell<C>>,
 {
@@ -71,7 +71,7 @@ where
     where
         T: AsRef<[u8]>,
     {
-        fn decode_impl<C: CellFamily>(data: &[u8]) -> Result<CellContainer<C>, de::Error>
+        fn decode_impl<C: DefaultFinalizer>(data: &[u8]) -> Result<CellContainer<C>, de::Error>
         where
             CellContainer<C>: AsRef<dyn Cell<C>>,
         {
@@ -80,6 +80,28 @@ where
         decode_impl::<C>(data.as_ref())
     }
 
+    /// Decodes a pair of cell trees using the default Cell family finalizer.
+    #[inline]
+    pub fn decode_pair<T>(data: T) -> Result<CellContainerPair<C>, de::Error>
+    where
+        T: AsRef<[u8]>,
+    {
+        fn decode_pair_impl<C: DefaultFinalizer>(
+            data: &[u8],
+        ) -> Result<CellContainerPair<C>, de::Error>
+        where
+            CellContainer<C>: AsRef<dyn Cell<C>>,
+        {
+            Boc::<C>::decode_pair_ext(data, &mut C::default_finalizer())
+        }
+        decode_pair_impl::<C>(data.as_ref())
+    }
+}
+
+impl<C: CellFamily> Boc<C>
+where
+    CellContainer<C>: AsRef<dyn Cell<C>>,
+{
     /// Decodes a cell tree using the specified finalizer.
     pub fn decode_ext(
         data: &[u8],
@@ -103,21 +125,6 @@ where
         }
 
         Err(de::Error::RootCellNotFound)
-    }
-
-    /// Decodes a pair of cell trees using the default Cell family finalizer.
-    #[inline]
-    pub fn decode_pair<T>(data: T) -> Result<CellContainerPair<C>, de::Error>
-    where
-        T: AsRef<[u8]>,
-    {
-        fn decode_pair_impl<C: CellFamily>(data: &[u8]) -> Result<CellContainerPair<C>, de::Error>
-        where
-            CellContainer<C>: AsRef<dyn Cell<C>>,
-        {
-            Boc::<C>::decode_pair_ext(data, &mut C::default_finalizer())
-        }
-        decode_pair_impl::<C>(data.as_ref())
     }
 
     /// Decodes a pair of cell trees using the specified finalizer.

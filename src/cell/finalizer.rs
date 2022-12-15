@@ -9,7 +9,7 @@ use crate::util::{unlikely, ArrayVec};
 /// A trait for describing cell finalization logic.
 pub trait Finalizer<C: CellFamily + ?Sized> {
     /// Builds a new cell from cell parts.
-    fn finalize_cell(&mut self, cell: CellParts<C>) -> Option<CellContainer<C>>;
+    fn finalize_cell(&mut self, cell: CellParts<'_, C>) -> Option<CellContainer<C>>;
 }
 
 impl<F, C: CellFamily> Finalizer<C> for F
@@ -20,6 +20,13 @@ where
     fn finalize_cell(&mut self, cell: CellParts<C>) -> Option<CellContainer<C>> {
         (*self)(cell)
     }
+}
+
+/// Cell implementation family extension.
+pub trait DefaultFinalizer: CellFamily {
+    type Finalizer: Finalizer<Self>;
+
+    fn default_finalizer() -> Self::Finalizer;
 }
 
 /// Partially assembled cell.
@@ -46,7 +53,7 @@ pub struct CellParts<'a, C: CellFamily + ?Sized> {
     pub data: &'a [u8],
 }
 
-impl<'a, C: CellFamily> CellParts<'a, C>
+impl<'a, C: CellFamily + 'a> CellParts<'a, C>
 where
     CellContainer<C>: AsRef<dyn Cell<C>>,
 {
