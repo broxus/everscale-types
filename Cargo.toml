@@ -10,7 +10,7 @@ include = ["src/**/*.rs", "LICENSE-*", "README.md"]
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-base64 = "0.13"
+base64 = { version = "0.13", optional = true }
 thiserror = "1.0"
 rustc-hash = "1.1.0"
 sha2 = "0.10"
@@ -20,6 +20,10 @@ bumpalo = "3.11"
 
 [dev-dependencies]
 libc = "0.2"
+base64 = "0.13"
+
+[features]
+default = ["base64"]
 
 [profile.release]
 debug = true

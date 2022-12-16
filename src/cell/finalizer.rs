@@ -1,7 +1,7 @@
 use sha2::Digest;
 
 use crate::cell::{
-    Cell, CellContainer, CellDescriptor, CellFamily, CellHash, CellTreeStats, CellType, LevelMask,
+    CellContainer, CellDescriptor, CellFamily, CellHash, CellTreeStats, CellType, LevelMask,
     MAX_REF_COUNT,
 };
 use crate::util::{unlikely, ArrayVec};
@@ -15,7 +15,6 @@ pub trait Finalizer<C: CellFamily + ?Sized> {
 impl<F, C: CellFamily> Finalizer<C> for F
 where
     F: FnMut(CellParts<C>) -> Option<CellContainer<C>>,
-    CellContainer<C>: AsRef<dyn Cell<C>>,
 {
     fn finalize_cell(&mut self, cell: CellParts<C>) -> Option<CellContainer<C>> {
         (*self)(cell)
@@ -53,10 +52,7 @@ pub struct CellParts<'a, C: CellFamily + ?Sized> {
     pub data: &'a [u8],
 }
 
-impl<'a, C: CellFamily + 'a> CellParts<'a, C>
-where
-    CellContainer<C>: AsRef<dyn Cell<C>>,
-{
+impl<'a, C: CellFamily + 'a> CellParts<'a, C> {
     /// Validates cell and computes all hashes.
     pub fn compute_hashes(&self) -> Option<Vec<(CellHash, u16)>> {
         const HASH_BITS: usize = 256;

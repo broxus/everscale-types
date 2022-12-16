@@ -467,7 +467,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
                 let target_ptr = target.as_mut_ptr();
 
                 if r == 0 && q + target_len <= data_len {
-                    std::ptr::copy_nonoverlapping(data_ptr, target_ptr, target_len as usize);
+                    std::ptr::copy_nonoverlapping(data_ptr, target_ptr, target_len);
                 } else if r != 0 {
                     let byte_len = ((bits + r + 7) / 8) as usize - 1;
                     if q + byte_len > data_len {
@@ -542,7 +542,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
     /// Returns a reference to the next child cell (relative to this slice's refs window),
     /// incrementing the refs window start.
-    pub fn get_next_reference(&mut self) -> Option<&dyn Cell<C>> {
+    pub fn get_next_reference(&mut self) -> Option<&'a dyn Cell<C>> {
         if self.refs_window_start < self.refs_window_end {
             let cell = self.cell.reference(self.refs_window_start)?;
             self.refs_window_start += 1;

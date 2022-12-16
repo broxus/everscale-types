@@ -93,7 +93,7 @@ impl<'a, C: CellFamily> BocHeader<'a, C> {
 
         for rev_index in self.root_rev_indices {
             let root_index = self.cell_count - rev_index - 1;
-            target.extend_from_slice(&root_index.to_be_bytes()[4 - ref_size as usize..]);
+            target.extend_from_slice(&root_index.to_be_bytes()[4 - ref_size..]);
         }
 
         for cell in self.rev_cells.into_iter().rev() {
@@ -113,7 +113,7 @@ impl<'a, C: CellFamily> BocHeader<'a, C> {
             for child in cell.references() {
                 if let Some(rev_index) = self.rev_indices.get(child.repr_hash()) {
                     let rev_index = self.cell_count - *rev_index - 1;
-                    target.extend_from_slice(&rev_index.to_be_bytes()[4 - ref_size as usize..]);
+                    target.extend_from_slice(&rev_index.to_be_bytes()[4 - ref_size..]);
                 } else {
                     debug_assert!(false, "child not found");
                 }

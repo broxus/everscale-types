@@ -7,19 +7,6 @@ macro_rules! ok {
     };
 }
 
-macro_rules! offset_of {
-    ($ty: path, $field: tt) => {{
-        let $ty { $field: _, .. };
-
-        let uninit = ::std::mem::MaybeUninit::<$ty>::uninit();
-        let base_ptr = uninit.as_ptr() as *const $ty;
-        unsafe {
-            let field_ptr = std::ptr::addr_of!((*base_ptr).$field);
-            (field_ptr as *const u8).offset_from(base_ptr as *const u8) as usize
-        }
-    }};
-}
-
 pub use self::boc::Boc;
 pub use self::cell::rc::{RcCell, RcCellFamily};
 pub use self::cell::sync::{ArcCell, ArcCellFamily};
@@ -43,10 +30,6 @@ pub type RcCellSlice<'a> = CellSlice<'a, RcCellFamily>;
 pub mod boc;
 pub mod cell;
 pub mod util;
-
-pub fn emit(cell: &dyn Cell<RcCellFamily>) -> Vec<u8> {
-    Boc::<RcCellFamily>::encode(cell)
-}
 
 #[cfg(test)]
 mod tests {
@@ -178,7 +161,7 @@ mod tests {
         let cell = builder.build().unwrap();
 
         let mut builder = RcCellBuilder::new();
-        assert!(builder.store_slice(cell.as_slice()));
+        assert!(builder.store_slice(&cell.as_slice()));
         let cell = builder.build().unwrap();
         println!("{}", cell.display_tree());
     }

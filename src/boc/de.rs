@@ -3,9 +3,9 @@ use std::ops::Deref;
 use smallvec::SmallVec;
 
 use super::BocTag;
-use crate::cell::finalizer::{CellParts, Finalizer};
 use crate::cell::{
-    Cell, CellContainer, CellDescriptor, CellFamily, CellTreeStats, LevelMask, MAX_REF_COUNT,
+    CellContainer, CellDescriptor, CellFamily, CellParts, CellTreeStats, Finalizer, LevelMask,
+    MAX_REF_COUNT,
 };
 use crate::util::{unlikely, ArrayVec};
 
@@ -263,7 +263,6 @@ impl<'a> BocHeader<'a> {
     pub fn finalize<C>(&self, finalizer: &mut dyn Finalizer<C>) -> Result<ProcessedCells<C>, Error>
     where
         C: CellFamily,
-        CellContainer<C>: AsRef<dyn Cell<C>>,
     {
         let ref_size = self.ref_size;
         let cell_count = self.cells.len() as u32;
@@ -463,9 +462,9 @@ unsafe fn read_be_uint_fast(data_ptr: *const u8, size: usize) -> u32 {
         3 => {
             let mut bytes = [0u8; 4];
             std::ptr::copy_nonoverlapping(data_ptr, bytes.as_mut_ptr().add(1), 3);
-            u32::from_be_bytes(bytes) as u32
+            u32::from_be_bytes(bytes)
         }
-        4 => u32::from_be_bytes(*(data_ptr as *const [u8; 4])) as u32,
+        4 => u32::from_be_bytes(*(data_ptr as *const [u8; 4])),
         _ => std::hint::unreachable_unchecked(),
     }
 }

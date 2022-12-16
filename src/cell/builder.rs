@@ -1,12 +1,22 @@
-use std::borrow::Borrow;
 use std::mem::MaybeUninit;
 
 use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
-use crate::cell::{Cell, CellContainer, CellFamily, LevelMask, MAX_BIT_LEN, MAX_REF_COUNT};
+use crate::cell::{CellContainer, CellFamily, LevelMask, MAX_BIT_LEN, MAX_REF_COUNT};
 use crate::util::ArrayVec;
 use crate::{CellDescriptor, CellSlice};
 
 use super::CellTreeStats;
+
+pub trait Store<C: CellFamily> {
+    fn store_into(&self, builder: &mut CellBuilder<C>) -> bool;
+}
+
+impl<C: CellFamily, T: Store<C> + ?Sized> Store<C> for &T {
+    #[inline]
+    fn store_into(&self, builder: &mut CellBuilder<C>) -> bool {
+        <T as Store<C>>::store_into(self, builder)
+    }
+}
 
 /// Builder for constructing cells with densely packed data.
 pub struct CellBuilder<C: CellFamily> {
@@ -479,11 +489,7 @@ fn store_raw(data: &mut [u8; 128], bit_len: &mut u16, value: &[u8], mut bits: u1
     }
 }
 
-impl<C> CellBuilder<C>
-where
-    for<'a> C: CellFamily + 'a, // explicit lifetime to fix GATs
-    CellContainer<C>: AsRef<dyn Cell<C>>,
-{
+impl<C: CellFamily> CellBuilder<C> {
     /// Computes the cell level from the level mask.
     pub fn compute_level(&self) -> u8 {
         self.compute_level_mask().level()
@@ -540,11 +546,7 @@ where
 
     /// Tries to append a cell slice (its data and references),
     /// returning `false` if there is not enough remaining capacity.
-    pub fn store_slice<'a, T>(&mut self, value: T) -> bool
-    where
-        T: Borrow<CellSlice<'a, C>>,
-    {
-        let value: &CellSlice<'a, C> = value.borrow();
+    pub fn store_slice<'a>(&mut self, value: &CellSlice<'a, C>) -> bool {
         if self.bit_len + value.remaining_bits() <= MAX_BIT_LEN
             && self.references.len() + value.remaining_refs() as usize <= MAX_REF_COUNT
             && self.store_slice_data(value)
@@ -621,7 +623,6 @@ where
 impl<C> CellBuilder<C>
 where
     for<'a> C: DefaultFinalizer + 'a,
-    CellContainer<C>: AsRef<dyn Cell<C>>,
 {
     /// Tries to build a new cell using the default finalizer.
     ///
@@ -693,7 +694,7 @@ mod tests {
         let mut builder = RcCellBuilder::new();
         let mut slice = cell.as_slice();
         assert!(slice.try_advance(3));
-        assert!(builder.store_slice(slice));
+        assert!(builder.store_slice(&slice));
         let cell = builder.build().unwrap();
         println!("{}", cell.display_tree());
         assert_eq!(cell.data(), SOME_HASH);

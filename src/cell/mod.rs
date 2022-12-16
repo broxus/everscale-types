@@ -3,15 +3,16 @@ use std::ops::{BitOr, BitOrAssign};
 
 use crate::util::DisplayHash;
 
-pub use self::builder::CellBuilder;
+pub use self::builder::{CellBuilder, Store};
 pub use self::cell_impl::{rc, sync};
+pub use self::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 pub use self::slice::CellSlice;
 
 /// Generic cell implementation.
 mod cell_impl;
 
 /// Cell finalization primitives.
-pub mod finalizer;
+mod finalizer;
 
 /// Cell view utils.
 mod slice;
@@ -21,7 +22,7 @@ mod builder;
 
 /// Cell implementation family.
 pub trait CellFamily {
-    type Container<T: ?Sized>: Clone;
+    type Container<T: ?Sized>: AsRef<T> + Clone;
 
     fn empty_cell() -> CellContainer<Self>;
 }
@@ -518,6 +519,12 @@ impl LevelMask {
     pub const fn virtualize(self, offset: u8) -> Self {
         Self(self.0 >> offset)
     }
+
+    /// Encodes level mask as byte.
+    #[inline]
+    pub const fn to_byte(self) -> u8 {
+        self.0
+    }
 }
 
 impl PartialEq<u8> for LevelMask {
@@ -632,7 +639,7 @@ impl<C: CellFamily> std::fmt::Display for DisplayCellTree<'_, C> {
         while let Some((level, cell)) = stack.pop() {
             std::fmt::Display::fmt(&DisplayCellRoot { cell, level }, f)?;
 
-            let reference_count = cell.reference_count() as u8;
+            let reference_count = cell.reference_count();
             for i in (0..reference_count).rev() {
                 if let Some(child) = cell.reference(i) {
                     stack.push((level + 1, child));

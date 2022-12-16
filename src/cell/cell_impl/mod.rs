@@ -17,6 +17,19 @@ macro_rules! define_gen_vtable_ptr {
     };
 }
 
+macro_rules! offset_of {
+    ($ty: path, $field: tt) => {{
+        let $ty { $field: _, .. };
+
+        let uninit = ::std::mem::MaybeUninit::<$ty>::uninit();
+        let base_ptr = uninit.as_ptr() as *const $ty;
+        unsafe {
+            let field_ptr = std::ptr::addr_of!((*base_ptr).$field);
+            (field_ptr as *const u8).offset_from(base_ptr as *const u8) as usize
+        }
+    }};
+}
+
 /// Single-threaded cell implementation.
 pub mod rc;
 /// Thread-safe cell implementation.
@@ -111,10 +124,7 @@ impl<C: CellFamily> Drop for OrdinaryCellHeader<C> {
 }
 
 // TODO: merge VTables for different data array sizes
-impl<C: CellFamily, const N: usize> Cell<C> for OrdinaryCell<C, N>
-where
-    CellContainer<C>: AsRef<dyn Cell<C>>,
-{
+impl<C: CellFamily, const N: usize> Cell<C> for OrdinaryCell<C, N> {
     fn descriptor(&self) -> CellDescriptor {
         self.header.descriptor
     }
