@@ -29,6 +29,7 @@ pub type RcCellSlice<'a> = CellSlice<'a, RcCellFamily>;
 
 pub mod boc;
 pub mod cell;
+pub mod merkle;
 pub mod util;
 
 #[cfg(test)]
@@ -68,21 +69,21 @@ mod tests {
         assert_eq!(slice.remaining_bits(), 337);
         assert!(slice.is_refs_empty());
         assert_eq!(slice.remaining_refs(), 0);
-        assert!(slice.reference(0).is_none());
-        assert!(slice.reference_cloned(0).is_none());
-        assert!(slice.get_next_reference().is_none());
-        assert!(slice.get_next_reference_cloned().is_none());
+        assert!(slice.get_reference(0).is_none());
+        assert!(slice.get_reference_cloned(0).is_none());
+        assert!(slice.load_reference().is_none());
+        assert!(slice.load_reference_cloned().is_none());
 
         assert_eq!(slice.get_bit(0), Some(true));
-        assert_eq!(slice.get_next_bit(), Some(true));
+        assert_eq!(slice.load_bit(), Some(true));
         assert_eq!(slice.get_bits(0, 8), Some(123));
         assert_eq!(slice.get_bits(8, 8), Some(111));
-        assert_eq!(slice.get_next_u16(), Some(0x7b6f));
+        assert_eq!(slice.load_u16(), Some(0x7b6f));
         assert_eq!(slice.get_u32(0), Some(0x00006ffa));
         assert_eq!(slice.get_u32(32), Some(0xd60473b3));
-        assert_eq!(slice.get_next_u64(), Some(0x6ffad60473b3));
+        assert_eq!(slice.load_u64(), Some(0x6ffad60473b3));
         assert_eq!(
-            slice.get_next_u256(),
+            slice.load_u256(),
             Some([
                 0xdf, 0x86, 0xce, 0xbc, 0xe8, 0xd5, 0xab, 0x0c, 0x69, 0xb4, 0xce, 0x33, 0xfe, 0x9b,
                 0x0e, 0x2c, 0xdf, 0x69, 0xa3, 0xe1, 0x13, 0x7e, 0x64, 0x85, 0x6b, 0xbc, 0xfd, 0x39,

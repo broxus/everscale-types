@@ -118,6 +118,12 @@ impl<C: CellFamily> CellBuilder<C> {
         (MAX_REF_COUNT - self.references.len()) as u8
     }
 
+    /// Returns true if there is enough remaining capacity to fit `bits` and `refs`.
+    #[inline]
+    pub fn has_capacity(&self, bits: u16, refs: u8) -> bool {
+        self.bit_len + bits <= MAX_BIT_LEN && self.references.len() + refs as usize <= MAX_REF_COUNT
+    }
+
     /// Explicitly sets the level mask and marks this cell as exotic.
     #[inline]
     pub fn with_level_mask(mut self, level_mask: LevelMask) -> Self {
@@ -693,7 +699,7 @@ mod tests {
 
         let mut builder = RcCellBuilder::new();
         let mut slice = cell.as_slice();
-        assert!(slice.try_advance(3));
+        assert!(slice.try_advance(3, 0));
         assert!(builder.store_slice(&slice));
         let cell = builder.build().unwrap();
         println!("{}", cell.display_tree());

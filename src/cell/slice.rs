@@ -1,5 +1,40 @@
 use crate::cell::{Cell, CellContainer, CellFamily, CellType, LevelMask, RefsIter};
 
+pub trait Load<'a, C: CellFamily>: Sized {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self>;
+}
+
+macro_rules! impl_primitive_loads {
+    ($($type:ty => |$s:ident| $expr:expr),*$(,)?) => {
+        $(impl<C: CellFamily> Load<'_, C> for $type {
+            #[inline]
+            fn load_from($s: &mut CellSlice<C>) -> Option<Self> {
+                $expr
+            }
+        })*
+    };
+}
+
+impl_primitive_loads! {
+    bool => |s| s.load_bit(),
+    u8 => |s| s.load_u8(),
+    i8 => |s| Some(s.load_u8()? as i8),
+    u16 => |s| s.load_u16(),
+    i16 => |s| Some(s.load_u16()? as i16),
+    u32 => |s| s.load_u32(),
+    i32 => |s| Some(s.load_u32()? as i32),
+    u64 => |s| s.load_u64(),
+    i64 => |s| Some(s.load_u64()? as i64),
+    u128 => |s| s.load_u128(),
+    i128 => |s| Some(s.load_u128()? as i128),
+}
+
+impl<'a, C: CellFamily> Load<'a, C> for &'a dyn Cell<C> {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+        slice.load_reference()
+    }
+}
+
 /// A read-only view for a subcell of a cell
 #[derive(Debug)]
 pub struct CellSlice<'a, C: CellFamily> {
@@ -95,11 +130,21 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
         self.bits_window_start
     }
 
-    /// Tries to advance the start of the data window,
-    /// returns `false` if `bits` is greater than the remainder.
-    pub fn try_advance(&mut self, bits: u16) -> bool {
-        if self.bits_window_start + bits <= self.bits_window_end {
+    /// Returns true if the slice contains at least `bits` and `refs`.
+    #[inline]
+    pub fn has_remaining(&self, bits: u16, refs: u8) -> bool {
+        self.bits_window_start + bits <= self.bits_window_end
+            && self.refs_window_start + refs <= self.refs_window_end
+    }
+
+    /// Tries to advance the start of data and refs windows,
+    /// returns `false` if `bits` or `refs` are greater than the remainder.
+    pub fn try_advance(&mut self, bits: u16, refs: u8) -> bool {
+        if self.bits_window_start + bits <= self.bits_window_end
+            && self.refs_window_start + refs <= self.refs_window_end
+        {
             self.bits_window_start += bits;
+            self.refs_window_start += refs;
             true
         } else {
             false
@@ -118,7 +163,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     }
 
     /// Tries to read the next bit, incrementing the bits window start.
-    pub fn get_next_bit(&mut self) -> Option<bool> {
+    pub fn load_bit(&mut self) -> Option<bool> {
         if self.bits_window_start < self.bits_window_end {
             let index = self.bits_window_start;
             let byte = *self.cell.data().get((index / 8) as usize)?;
@@ -164,7 +209,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
     /// Tries to read the next small subset of `bits` (0..=8), incrementing the bits window start.
     #[inline]
-    pub fn get_next_bits(&mut self, bits: u8) -> Option<u8> {
+    pub fn load_bits(&mut self, bits: u8) -> Option<u8> {
         let res = self.get_bits(0, bits)?;
         self.bits_window_start += bits as u16;
         Some(res)
@@ -178,8 +223,8 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
     /// Tries to read the next `u8`, incrementing the bits window start.
     #[inline]
-    pub fn get_next_u8(&mut self) -> Option<u8> {
-        self.get_next_bits(8)
+    pub fn load_u8(&mut self) -> Option<u8> {
+        self.load_bits(8)
     }
 
     /// Reads `u16` starting from the `offset`.
@@ -227,7 +272,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
     /// Tries to read the next `u16`, incrementing the bits window start.
     #[inline]
-    pub fn get_next_u16(&mut self) -> Option<u16> {
+    pub fn load_u16(&mut self) -> Option<u16> {
         let res = self.get_u16(0)?;
         self.bits_window_start += 16;
         Some(res)
@@ -278,7 +323,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
     /// Tries to read the next `u32`, incrementing the bits window start.
     #[inline]
-    pub fn get_next_u32(&mut self) -> Option<u32> {
+    pub fn load_u32(&mut self) -> Option<u32> {
         let res = self.get_u32(0)?;
         self.bits_window_start += 32;
         Some(res)
@@ -326,7 +371,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
     /// Tries to read the next `u64`, incrementing the bits window start.
     #[inline]
-    pub fn get_next_u64(&mut self) -> Option<u64> {
+    pub fn load_u64(&mut self) -> Option<u64> {
         let res = self.get_u64(0)?;
         self.bits_window_start += 64;
         Some(res)
@@ -370,7 +415,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
     /// Tries to read the next `u128`, incrementing the bits window start.
     #[inline]
-    pub fn get_next_u128(&mut self) -> Option<u128> {
+    pub fn load_u128(&mut self) -> Option<u128> {
         let res = self.get_u128(0)?;
         self.bits_window_start += 128;
         Some(res)
@@ -428,7 +473,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
     /// Tries to read the next 32 bytes, incrementing the bits window start.
     #[inline]
-    pub fn get_next_u256(&mut self) -> Option<[u8; 32]> {
+    pub fn load_u256(&mut self) -> Option<[u8; 32]> {
         let res = self.get_u256(0)?;
         self.bits_window_start += 256;
         Some(res)
@@ -501,14 +546,14 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
     /// Tries to read the specified number of bits, incrementing the bits window start.
     /// Returns the minimum subslice containing all bits.
-    pub fn get_next_raw<'b>(&'_ mut self, target: &'b mut [u8], bits: u16) -> Option<&'b mut [u8]> {
+    pub fn load_raw<'b>(&'_ mut self, target: &'b mut [u8], bits: u16) -> Option<&'b mut [u8]> {
         let res = self.get_raw(0, target, bits)?;
         self.bits_window_start += bits;
         Some(res)
     }
 
     /// Returns a reference to the Nth child cell (relative to this slice's refs window).
-    pub fn reference(&self, index: u8) -> Option<&dyn Cell<C>> {
+    pub fn get_reference(&self, index: u8) -> Option<&dyn Cell<C>> {
         if self.refs_window_start + index < self.refs_window_end {
             self.cell.reference(self.refs_window_start + index)
         } else {
@@ -517,7 +562,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     }
 
     /// Returns the Nth child cell (relative to this slice's refs window).
-    pub fn reference_cloned(&self, index: u8) -> Option<CellContainer<C>> {
+    pub fn get_reference_cloned(&self, index: u8) -> Option<CellContainer<C>> {
         if self.refs_window_start + index < self.refs_window_end {
             self.cell.reference_cloned(self.refs_window_start + index)
         } else {
@@ -542,7 +587,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
     /// Returns a reference to the next child cell (relative to this slice's refs window),
     /// incrementing the refs window start.
-    pub fn get_next_reference(&mut self) -> Option<&'a dyn Cell<C>> {
+    pub fn load_reference(&mut self) -> Option<&'a dyn Cell<C>> {
         if self.refs_window_start < self.refs_window_end {
             let cell = self.cell.reference(self.refs_window_start)?;
             self.refs_window_start += 1;
@@ -554,7 +599,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
     /// Returns the next child cell (relative to this slice's refs window),
     /// incrementing the refs window start.
-    pub fn get_next_reference_cloned(&mut self) -> Option<CellContainer<C>> {
+    pub fn load_reference_cloned(&mut self) -> Option<CellContainer<C>> {
         if self.refs_window_start < self.refs_window_end {
             let cell = self.cell.reference_cloned(self.refs_window_start)?;
             self.refs_window_start += 1;

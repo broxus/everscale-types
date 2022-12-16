@@ -6,7 +6,7 @@ use crate::util::DisplayHash;
 pub use self::builder::{CellBuilder, Store};
 pub use self::cell_impl::{rc, sync};
 pub use self::finalizer::{CellParts, DefaultFinalizer, Finalizer};
-pub use self::slice::CellSlice;
+pub use self::slice::{CellSlice, Load};
 
 /// Generic cell implementation.
 mod cell_impl;
@@ -134,6 +134,15 @@ impl<C: CellFamily> dyn Cell<C> + '_ {
         CellSlice::new(self)
     }
 
+    /// Returns an object that implements [`Debug`] for printing only
+    /// the root cell of the cell tree.
+    ///
+    /// [`Debug`]: std::fmt::Debug
+    #[inline]
+    pub fn debug_root(&'_ self) -> DebugCell<'_, C> {
+        DebugCell(self)
+    }
+
     /// Returns an object that implements [`Display`] for printing only
     /// the root cell of the cell tree.
     ///
@@ -171,6 +180,16 @@ impl<C1: CellFamily, C2: CellFamily> PartialEq<dyn Cell<C2> + '_> for dyn Cell<C
     #[inline]
     fn eq(&self, other: &dyn Cell<C2>) -> bool {
         self.repr_hash() == other.repr_hash()
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct DebugCell<'a, C: CellFamily>(&'a dyn Cell<C>);
+
+impl<C: CellFamily> std::fmt::Debug for DebugCell<'_, C> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
     }
 }
 
