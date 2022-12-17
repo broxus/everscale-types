@@ -632,9 +632,9 @@ where
 {
     /// Tries to build a new cell using the default finalizer.
     ///
-    /// See [`Finalizer`]
+    /// See [`default_finalizer`]
     ///
-    /// [`default_finalizer`]: trait@crate::cell::finalizer::Finalizer
+    /// [`default_finalizer`]: fn@crate::cell::finalizer::DefaultFinalizer::default_finalizer
     pub fn build(self) -> Option<CellContainer<C>> {
         self.build_ext(&mut C::default_finalizer())
     }

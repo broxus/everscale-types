@@ -47,5 +47,9 @@ mod test {
         let virtual_cell = cell.virtualize();
         assert_eq!(cell.repr_hash(), virtual_cell.repr_hash());
         assert_eq!(cell.depth(3), virtual_cell.depth(3));
+
+        let virtual_pruned_branch =
+            make_pruned_branch(virtual_cell, 0, &mut RcCellFamily::default_finalizer()).unwrap();
+        assert_eq!(pruned_branch.as_ref(), virtual_pruned_branch.as_ref());
     }
 }
