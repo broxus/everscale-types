@@ -24,7 +24,13 @@ mod builder;
 pub trait CellFamily {
     type Container<T: ?Sized>: AsRef<T> + Clone;
 
+    /// Creates an empty cell.
+    ///
+    /// NOTE: in most cases empty cell is ZST.
     fn empty_cell() -> CellContainer<Self>;
+
+    /// Creates a virtualized cell from the specified cell.
+    fn virtualize(cell: CellContainer<Self>) -> CellContainer<Self>;
 }
 
 /// Type alias for a cell family container.
@@ -60,6 +66,10 @@ pub trait Cell<C: CellFamily> {
 
     /// Returns the Nth child cell.
     fn reference_cloned(&self, index: u8) -> Option<CellContainer<C>>;
+
+    /// Returns this cell as a virtualized cell, so that all hashes
+    /// and depths will have an offset.
+    fn virtualize(&self) -> &dyn Cell<C>;
 
     /// Returns cell hash for the specified level.
     ///

@@ -65,6 +65,10 @@ impl<C: CellFamily> Cell<C> for EmptyOrdinaryCell {
         None
     }
 
+    fn virtualize(&self) -> &dyn Cell<C> {
+        self
+    }
+
     fn hash(&self, _: u8) -> &CellHash {
         &EMPTY_CELL_HASH
     }
@@ -148,6 +152,14 @@ impl<C: CellFamily, const N: usize> Cell<C> for OrdinaryCell<C, N> {
         Some(self.header.reference(index)?.clone())
     }
 
+    fn virtualize(&self) -> &dyn Cell<C> {
+        if self.header.descriptor.level_mask().is_empty() {
+            self
+        } else {
+            VirtualCellWrapper::wrap(self)
+        }
+    }
+
     fn hash(&self, level: u8) -> &CellHash {
         &self.header.level_descr(level).0
     }
@@ -191,6 +203,10 @@ impl<C: CellFamily> Cell<C> for LibraryReference {
 
     fn reference_cloned(&self, _: u8) -> Option<CellContainer<C>> {
         None
+    }
+
+    fn virtualize(&self) -> &dyn Cell<C> {
+        self
     }
 
     fn hash(&self, _: u8) -> &CellHash {
@@ -249,6 +265,10 @@ impl<C: CellFamily, const N: usize> Cell<C> for PrunedBranch<N> {
         None
     }
 
+    fn virtualize(&self) -> &dyn Cell<C> {
+        VirtualCellWrapper::wrap(self)
+    }
+
     fn hash(&self, level: u8) -> &CellHash {
         let hash_index = hash_index(self.header.descriptor, level);
         if hash_index == self.header.level {
@@ -282,6 +302,105 @@ impl<C: CellFamily, const N: usize> Cell<C> for PrunedBranch<N> {
     fn stats(&self) -> CellTreeStats {
         aligned_leaf_stats(self.header.descriptor)
     }
+}
+
+#[repr(transparent)]
+struct VirtualCell<T>(T);
+
+impl<C, T> Cell<C> for VirtualCell<T>
+where
+    for<'a> C: CellFamily + 'a,
+    T: AsRef<dyn Cell<C>>,
+{
+    fn descriptor(&self) -> CellDescriptor {
+        self.0.as_ref().descriptor()
+    }
+
+    fn data(&self) -> &[u8] {
+        self.0.as_ref().data()
+    }
+
+    fn bit_len(&self) -> u16 {
+        self.0.as_ref().bit_len()
+    }
+
+    fn reference(&self, index: u8) -> Option<&dyn Cell<C>> {
+        Some(self.0.as_ref().reference(index)?.virtualize())
+    }
+
+    fn reference_cloned(&self, index: u8) -> Option<CellContainer<C>> {
+        Some(C::virtualize(self.0.as_ref().reference_cloned(index)?))
+    }
+
+    fn virtualize(&self) -> &dyn Cell<C> {
+        self
+    }
+
+    fn hash(&self, level: u8) -> &CellHash {
+        let cell = self.0.as_ref();
+        cell.hash(virtual_hash_index(cell.descriptor(), level))
+    }
+
+    fn depth(&self, level: u8) -> u16 {
+        let cell = self.0.as_ref();
+        cell.depth(virtual_hash_index(cell.descriptor(), level))
+    }
+
+    fn stats(&self) -> CellTreeStats {
+        self.0.as_ref().stats()
+    }
+}
+
+#[repr(transparent)]
+struct VirtualCellWrapper<T>(T);
+
+impl<T> VirtualCellWrapper<T> {
+    pub fn wrap(value: &T) -> &Self {
+        // SAFETY: VirtualCellWrapper<T> is #[repr(transparent)]
+        unsafe { &*(value as *const T as *const Self) }
+    }
+}
+
+impl<C: CellFamily, T: Cell<C>> Cell<C> for VirtualCellWrapper<T> {
+    fn descriptor(&self) -> CellDescriptor {
+        self.0.descriptor()
+    }
+
+    fn data(&self) -> &[u8] {
+        self.0.data()
+    }
+
+    fn bit_len(&self) -> u16 {
+        self.0.bit_len()
+    }
+
+    fn reference(&self, index: u8) -> Option<&dyn Cell<C>> {
+        Some(self.0.reference(index)?.virtualize())
+    }
+
+    fn reference_cloned(&self, index: u8) -> Option<CellContainer<C>> {
+        Some(C::virtualize(self.0.reference_cloned(index)?))
+    }
+
+    fn virtualize(&self) -> &dyn Cell<C> {
+        self
+    }
+
+    fn hash(&self, level: u8) -> &CellHash {
+        self.0.hash(virtual_hash_index(self.0.descriptor(), level))
+    }
+
+    fn depth(&self, level: u8) -> u16 {
+        self.0.depth(virtual_hash_index(self.0.descriptor(), level))
+    }
+
+    fn stats(&self) -> CellTreeStats {
+        self.0.stats()
+    }
+}
+
+fn virtual_hash_index(descriptor: CellDescriptor, level: u8) -> u8 {
+    descriptor.level_mask().virtualize(1).hash_index(level)
 }
 
 fn hash_index(descriptor: CellDescriptor, level: u8) -> u8 {
