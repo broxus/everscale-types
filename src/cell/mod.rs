@@ -118,12 +118,19 @@ impl<C: CellFamily> dyn Cell<C> + '_ {
         self.descriptor().is_exotic()
     }
 
-    /// Returns representation hash of the cell.
+    /// Returns a representation hash of the cell.
     #[inline]
     pub fn repr_hash(&self) -> &CellHash {
         self.hash(LevelMask::MAX_LEVEL)
     }
 
+    /// Returns a representation depth of the cell.
+    #[inline]
+    pub fn repr_depth(&self) -> u16 {
+        self.depth(LevelMask::MAX_LEVEL)
+    }
+
+    /// Returns true if the cell is empty (no bits, no refs).
     pub fn is_empty(&self) -> bool {
         self.hash(LevelMask::MAX_LEVEL) == &EMPTY_CELL_HASH
     }

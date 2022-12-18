@@ -87,6 +87,7 @@ impl<C: CellFamily> Store<C> for MerkleUpdate<C> {
         let old_level_mask = self.old.as_ref().level_mask();
         let new_level_mask = self.new.as_ref().level_mask();
         b.set_level_mask((old_level_mask | new_level_mask).virtualize(1));
+        b.set_exotic(true);
         b.store_u8(CellType::MerkleUpdate.to_byte())
             && b.store_u256(&self.old_hash)
             && b.store_u256(&self.new_hash)

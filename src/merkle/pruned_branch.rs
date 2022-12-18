@@ -12,6 +12,7 @@ pub fn make_pruned_branch<C: CellFamily>(
     let hash_count = descriptor.hash_count();
 
     builder.set_level_mask(level_mask);
+    builder.set_exotic(true);
     builder.store_u8(CellType::PrunedBranch.to_byte());
     builder.store_u8(level_mask.to_byte());
     for i in 0..hash_count {

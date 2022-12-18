@@ -23,6 +23,7 @@ pub struct CellBuilder<C: CellFamily> {
     data: [u8; 128],
     level_mask: Option<LevelMask>,
     bit_len: u16,
+    is_exotic: bool,
     references: ArrayVec<CellContainer<C>, MAX_REF_COUNT>,
 }
 
@@ -42,6 +43,7 @@ where
             data: self.data,
             level_mask: self.level_mask,
             bit_len: self.bit_len,
+            is_exotic: self.is_exotic,
             references: self.references.clone(),
         }
     }
@@ -84,6 +86,7 @@ impl<C: CellFamily> CellBuilder<C> {
             data: [0; 128],
             level_mask: None,
             bit_len: 0,
+            is_exotic: false,
             references: Default::default(),
         }
     }
@@ -124,17 +127,23 @@ impl<C: CellFamily> CellBuilder<C> {
         self.bit_len + bits <= MAX_BIT_LEN && self.references.len() + refs as usize <= MAX_REF_COUNT
     }
 
-    /// Explicitly sets the level mask and marks this cell as exotic.
+    /// Explicitly sets the level mask.
     #[inline]
     pub fn with_level_mask(mut self, level_mask: LevelMask) -> Self {
         self.level_mask = Some(level_mask);
         self
     }
 
-    /// Explicitly sets the level mask and marks this cell as exotic.
+    /// Explicitly sets the level mask.
     #[inline]
     pub fn set_level_mask(&mut self, level_mask: LevelMask) {
         self.level_mask = Some(level_mask);
+    }
+
+    /// Marks this cell as exotic.
+    #[inline]
+    pub fn set_exotic(&mut self, is_exotic: bool) {
+        self.is_exotic = is_exotic;
     }
 
     /// Tries to store the specified number of zero bits in the cell,
@@ -585,7 +594,7 @@ impl<C: CellFamily> CellBuilder<C> {
             stats += child.stats();
         }
 
-        let is_exotic = self.level_mask.is_some();
+        let is_exotic = self.is_exotic;
         let level_mask = self.level_mask.unwrap_or(children_mask);
 
         let d1 = CellDescriptor::compute_d1(level_mask, is_exotic, self.references.len() as u8);
