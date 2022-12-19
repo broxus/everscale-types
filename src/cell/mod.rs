@@ -616,8 +616,8 @@ impl Add for CellTreeStats {
     #[inline]
     fn add(self, rhs: Self) -> Self::Output {
         Self {
-            bit_count: self.bit_count + rhs.bit_count,
-            cell_count: self.cell_count + rhs.cell_count,
+            bit_count: self.bit_count.saturating_add(rhs.bit_count),
+            cell_count: self.cell_count.saturating_add(rhs.cell_count),
         }
     }
 }
@@ -625,8 +625,8 @@ impl Add for CellTreeStats {
 impl AddAssign for CellTreeStats {
     #[inline]
     fn add_assign(&mut self, rhs: Self) {
-        self.bit_count += rhs.bit_count;
-        self.cell_count += rhs.cell_count;
+        self.bit_count = self.bit_count.saturating_add(rhs.bit_count);
+        self.cell_count = self.cell_count.saturating_add(rhs.cell_count);
     }
 }
 
