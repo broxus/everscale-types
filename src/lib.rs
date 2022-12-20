@@ -10,7 +10,9 @@ macro_rules! ok {
 pub use self::boc::Boc;
 pub use self::cell::rc::{RcCell, RcCellFamily};
 pub use self::cell::sync::{ArcCell, ArcCellFamily};
-pub use self::cell::{Cell, CellBuilder, CellDescriptor, CellHash, CellSlice, CellType, LevelMask};
+pub use self::cell::{
+    Cell, CellBuilder, CellDescriptor, CellFamily, CellHash, CellSlice, CellType, LevelMask,
+};
 
 /// BOC (Bag Of Cells) helper for the `Arc` family of cells.
 pub type ArcBoc = Boc<ArcCellFamily>;
@@ -29,6 +31,7 @@ pub type RcCellSlice<'a> = CellSlice<'a, RcCellFamily>;
 
 pub mod boc;
 pub mod cell;
+pub mod dict;
 pub mod merkle;
 pub mod util;
 
@@ -54,6 +57,12 @@ mod tests {
 
         let serialized = RcBoc::encode(rc_cell.as_ref());
         assert_eq!(serialized, data);
+    }
+
+    #[test]
+    fn big_cell_deserialization() {
+        let data = base64::decode("te6ccgIDAAwAAQAAAACIAAAEBAABAAEAAQABAAEEBAACAAIAAgACAAIEBAADAAMAAwADAAMEBAAEAAQABAAEAAQEBAAFAAUABQAFAAUEBAAGAAYABgAGAAYEBAAHAAcABwAHAAcEBAAIAAgACAAIAAgEBAAJAAkACQAJAAkEBAAKAAoACgAKAAoEBAALAAsACwALAAsABAAA").unwrap();
+        _ = RcBoc::decode(data).unwrap();
     }
 
     #[test]

@@ -97,11 +97,45 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     }
 
     /// Returns whether there are no bits of data left.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use everscale_types::{CellFamily, RcCellBuilder, RcCellFamily};
+    /// // Cell with empty data
+    /// let empty_cell = RcCellFamily::empty_cell();
+    /// assert!(empty_cell.as_slice().is_data_empty());
+    ///
+    /// // Cell with some bits in data
+    /// let not_empty_cell = {
+    ///     let mut builder = RcCellBuilder::new();
+    ///     builder.store_bit_zero();
+    ///     builder.build().unwrap()
+    /// };
+    /// assert!(!not_empty_cell.as_slice().is_data_empty());
+    /// ```
     pub fn is_data_empty(&self) -> bool {
         self.bits_window_start >= self.bits_window_end
     }
 
     /// Returns whether threre are no references left.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use everscale_types::{CellFamily, RcCellBuilder, RcCellFamily};
+    /// // Cell without references
+    /// let empty_cell = RcCellFamily::empty_cell();
+    /// assert!(empty_cell.as_slice().is_refs_empty());
+    ///
+    /// // Cell with some references
+    /// let not_empty_cell = {
+    ///     let mut builder = RcCellBuilder::new();
+    ///     builder.store_reference(empty_cell);
+    ///     builder.build().unwrap()
+    /// };
+    /// assert!(!not_empty_cell.as_slice().is_refs_empty());
+    /// ```
     pub fn is_refs_empty(&self) -> bool {
         self.refs_window_start >= self.refs_window_end
     }
@@ -125,12 +159,66 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     }
 
     /// Returns the start of the data window.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use everscale_types::RcCellBuilder;
+    /// let cell = {
+    ///     let mut builder = RcCellBuilder::new();
+    ///     builder.store_zeros(100);
+    ///     builder.build().unwrap()
+    /// };
+    /// let mut slice = cell.as_slice();
+    ///
+    /// _ = slice.load_u8();
+    /// assert_eq!(slice.bits_offset(), 8);
+    /// ```
     #[inline]
     pub fn bits_offset(&self) -> u16 {
         self.bits_window_start
     }
 
+    /// Returns the start of the references window.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use everscale_types::{CellFamily, RcCellBuilder, RcCellFamily};
+    /// let cell = {
+    ///     let mut builder = RcCellBuilder::new();
+    ///     builder.store_reference(RcCellFamily::empty_cell());
+    ///     builder.build().unwrap()
+    /// };
+    /// let mut slice = cell.as_slice();
+    ///
+    /// _ = slice.load_reference();
+    /// assert_eq!(slice.refs_offset(), 1);
+    /// ```
+    #[inline]
+    pub fn refs_offset(&self) -> u8 {
+        self.refs_window_start
+    }
+
     /// Returns true if the slice contains at least `bits` and `refs`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use everscale_types::{CellFamily, RcCellBuilder, RcCellFamily};
+    /// let cell = {
+    ///     let mut builder = RcCellBuilder::new();
+    ///     builder.store_zeros(100);
+    ///     builder.store_reference(RcCellFamily::empty_cell());
+    ///     builder.store_reference(RcCellFamily::empty_cell());
+    ///     builder.build().unwrap()
+    /// };
+    /// let mut slice = cell.as_slice();
+    ///
+    /// assert!(slice.has_remaining(10, 2));
+    /// assert!(!slice.has_remaining(500, 2)); // too many bits
+    /// assert!(!slice.has_remaining(0, 4)); // too many refs
+    /// ```
     #[inline]
     pub fn has_remaining(&self, bits: u16, refs: u8) -> bool {
         self.bits_window_start + bits <= self.bits_window_end
@@ -148,6 +236,90 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
             true
         } else {
             false
+        }
+    }
+
+    /// Checks whether the current slice consists of the same bits,
+    /// returns `None` if there are 0s and 1s, returns `Some(bit)` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use everscale_types::{CellFamily, RcCellBuilder, RcCellFamily};
+    /// // Uniform cell consisting of only 0s
+    /// let uniform_cell = {
+    ///     let mut builder = RcCellBuilder::new();
+    ///     builder.store_zeros(10);
+    ///     builder.build().unwrap()
+    /// };
+    /// assert_eq!(uniform_cell.as_slice().test_uniform(), Some(false));
+    ///
+    /// // Non-uniform cell consisting of 0s and 1s
+    /// let non_uniform_cell = {
+    ///     let mut builder = RcCellBuilder::new();
+    ///     builder.store_zeros(9);
+    ///     builder.store_bit_true();
+    ///     builder.build().unwrap()
+    /// };
+    /// assert_eq!(non_uniform_cell.as_slice().test_uniform(), None);
+    ///
+    /// // Empty cell is non-uniform
+    /// let non_uniform_cell = RcCellFamily::empty_cell();
+    /// assert_eq!(non_uniform_cell.as_slice().test_uniform(), None);
+    /// ```
+    pub fn test_uniform(&self) -> Option<bool> {
+        if self.bits_window_start >= self.bits_window_end {
+            return None;
+        }
+        let mut remaining_bits = self.bits_window_end - self.bits_window_start;
+        let data = self.cell.data();
+
+        // Check if data is enough
+        if (self.bits_window_end + 7) / 8 < data.len() as u16 {
+            return None;
+        }
+
+        let r = self.bits_window_start % 8;
+        let q = (self.bits_window_start / 8) as usize;
+
+        unsafe {
+            let mut data_ptr = data.as_ptr().add(q);
+            let first_byte = *data_ptr;
+
+            let target = ((first_byte >> (7 - r)) & 1) * u8::MAX;
+            let first_byte_mask: u8 = 0xff >> r;
+            let last_byte_mask: u8 = 0xff << (8 - (remaining_bits + 8 - r) % 8);
+
+            if r + remaining_bits <= 8 {
+                // Special case if all remaining_bits are in the first byte
+                if ((first_byte ^ target) & first_byte_mask & last_byte_mask) != 0 {
+                    return None;
+                }
+            } else {
+                // Check the first byte
+                if (first_byte ^ target) & first_byte_mask != 0 {
+                    return None;
+                }
+
+                // Check all full bytes
+                remaining_bits -= 8 - r;
+                for _ in 0..(remaining_bits / 8) {
+                    data_ptr = data_ptr.add(1);
+                    if *data_ptr != target {
+                        return None;
+                    }
+                }
+
+                // Check the last byte (if not aligned)
+                if remaining_bits % 8 != 0 {
+                    data_ptr = data_ptr.add(1);
+                    if (*data_ptr ^ target) & last_byte_mask != 0 {
+                        return None;
+                    }
+                }
+            }
+
+            Some(target != 0)
         }
     }
 
@@ -615,6 +787,7 @@ mod tests {
     use crate::RcCellBuilder;
 
     #[test]
+    #[cfg_attr(miri, ignore)] // takes too long to execute on miri
     fn get_raw() {
         let cell = RcCellBuilder::from_raw_data(&[0xff; 128], 200)
             .and_then(RcCellBuilder::build)
@@ -638,5 +811,41 @@ mod tests {
                 slice.get_raw(offset, &mut data, bits).unwrap();
             }
         }
+    }
+
+    #[test]
+    fn test_uniform() {
+        let cell = {
+            let mut builder = RcCellBuilder::new();
+            builder.store_zeros(10);
+            builder.build().unwrap()
+        };
+        assert_eq!(cell.as_slice().test_uniform(), Some(false));
+
+        let cell = {
+            let mut builder = RcCellBuilder::new();
+            builder.store_zeros(9);
+            builder.store_bit_true();
+            builder.build().unwrap()
+        };
+        assert_eq!(cell.as_slice().test_uniform(), None);
+
+        let cell = {
+            let mut builder = RcCellBuilder::new();
+            builder.store_zeros(20);
+            builder.store_bit_true();
+            builder.build().unwrap()
+        };
+        assert_eq!(cell.as_slice().test_uniform(), None);
+
+        let cell = {
+            let mut builder = RcCellBuilder::new();
+            builder.store_bit_zero();
+            builder.store_uint(u64::MAX, 29);
+            builder.build().unwrap()
+        };
+        let mut slice = cell.as_slice();
+        slice.try_advance(1, 0);
+        assert_eq!(slice.test_uniform(), Some(true));
     }
 }
