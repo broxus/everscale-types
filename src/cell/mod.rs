@@ -4,7 +4,7 @@ use std::ops::{BitOr, BitOrAssign};
 use crate::util::DisplayHash;
 
 pub use self::builder::{CellBuilder, Store};
-pub use self::cell_impl::{rc, sync};
+pub use self::cell_impl::{rc, sync, StaticCell};
 pub use self::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 pub use self::slice::{CellSlice, Load};
 

@@ -85,21 +85,45 @@ impl<C: CellFamily> Cell<C> for EmptyOrdinaryCell {
     }
 }
 
-static ALL_ZEROS_CELL: AllZerosCell = AllZerosCell;
+/// Static cell which can be used to create cell references in const context.
+pub struct StaticCell {
+    descriptor: CellDescriptor,
+    data: &'static [u8],
+    bit_len: u16,
+    hash: &'static [u8; 32],
+}
 
-struct AllZerosCell;
+impl StaticCell {
+    /// Creates a new plain ordinary cell from parts.
+    ///
+    /// # Safety
+    ///
+    /// The following must be true:
+    /// - Data must be well-formed and normalized (contain bit tag if needed and
+    ///   be enough to store `bit_len` of bits).
+    /// - `bit_len` must be in range 0..=1023
+    /// - `hash` must be a correct hash for the current cell.
+    pub const unsafe fn new(data: &'static [u8], bit_len: u16, hash: &'static [u8; 32]) -> Self {
+        Self {
+            descriptor: CellDescriptor::new([0, CellDescriptor::compute_d2(bit_len)]),
+            data,
+            bit_len,
+            hash,
+        }
+    }
+}
 
-impl<C: CellFamily> Cell<C> for AllZerosCell {
+impl<C: CellFamily> Cell<C> for StaticCell {
     fn descriptor(&self) -> CellDescriptor {
-        CellDescriptor::new([0, 0xff])
+        self.descriptor
     }
 
     fn data(&self) -> &[u8] {
-        &ALL_ZEROS_CELL_DATA
+        self.data
     }
 
     fn bit_len(&self) -> u16 {
-        1023
+        self.bit_len
     }
 
     fn reference(&self, _: u8) -> Option<&dyn Cell<C>> {
@@ -115,7 +139,7 @@ impl<C: CellFamily> Cell<C> for AllZerosCell {
     }
 
     fn hash(&self, _: u8) -> &CellHash {
-        &ALL_ZEROS_CELL_HASH
+        self.hash
     }
 
     fn depth(&self, _: u8) -> u16 {
@@ -124,11 +148,18 @@ impl<C: CellFamily> Cell<C> for AllZerosCell {
 
     fn stats(&self) -> CellTreeStats {
         CellTreeStats {
-            bit_count: 1023,
+            bit_count: self.bit_len as u64,
             cell_count: 1,
         }
     }
 }
+
+static ALL_ZEROS_CELL: StaticCell = StaticCell {
+    descriptor: CellDescriptor::new([0, 0xff]),
+    data: &ALL_ZEROS_CELL_DATA,
+    bit_len: 1023,
+    hash: &ALL_ZEROS_CELL_HASH,
+};
 
 const ALL_ZEROS_CELL_DATA: [u8; 128] = [
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -146,50 +177,12 @@ const ALL_ZEROS_CELL_HASH: [u8; 32] = [
     0x88, 0x9e, 0xbd, 0xf9, 0xd3, 0xb2, 0xf0, 0x1d, 0xbf, 0x94, 0x2c, 0x29, 0xbc, 0x48, 0x98, 0x71,
 ];
 
-static ALL_ONES_CELL: AllOnesCell = AllOnesCell;
-
-struct AllOnesCell;
-
-impl<C: CellFamily> Cell<C> for AllOnesCell {
-    fn descriptor(&self) -> CellDescriptor {
-        CellDescriptor::new([0, 0xff])
-    }
-
-    fn data(&self) -> &[u8] {
-        &ALL_ONES_CELL_DATA
-    }
-
-    fn bit_len(&self) -> u16 {
-        1023
-    }
-
-    fn reference(&self, _: u8) -> Option<&dyn Cell<C>> {
-        None
-    }
-
-    fn reference_cloned(&self, _: u8) -> Option<CellContainer<C>> {
-        None
-    }
-
-    fn virtualize(&self) -> &dyn Cell<C> {
-        self
-    }
-
-    fn hash(&self, _: u8) -> &CellHash {
-        &ALL_ONES_CELL_HASH
-    }
-
-    fn depth(&self, _: u8) -> u16 {
-        0
-    }
-
-    fn stats(&self) -> CellTreeStats {
-        CellTreeStats {
-            bit_count: 1023,
-            cell_count: 1,
-        }
-    }
-}
+static ALL_ONES_CELL: StaticCell = StaticCell {
+    descriptor: CellDescriptor::new([0, 0xff]),
+    data: &ALL_ONES_CELL_DATA,
+    bit_len: 1023,
+    hash: &ALL_ONES_CELL_HASH,
+};
 
 const ALL_ONES_CELL_DATA: [u8; 128] = [0xff; 128];
 
