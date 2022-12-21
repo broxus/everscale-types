@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use super::{
     EmptyOrdinaryCell, HeaderWithData, LibraryReference, OrdinaryCell, OrdinaryCellHeader,
-    PrunedBranch, PrunedBranchHeader, VirtualCell,
+    PrunedBranch, PrunedBranchHeader, VirtualCell, ALL_ONES_CELL, ALL_ZEROS_CELL,
 };
 use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 use crate::cell::{Cell, CellContainer, CellFamily, CellHash, CellType};
@@ -17,6 +17,14 @@ impl CellFamily for ArcCellFamily {
 
     fn empty_cell() -> CellContainer<Self> {
         Arc::new(EmptyOrdinaryCell)
+    }
+
+    fn all_zeros_ref() -> &'static dyn Cell<Self> {
+        &ALL_ZEROS_CELL
+    }
+
+    fn all_ones_ref() -> &'static dyn Cell<Self> {
+        &ALL_ONES_CELL
     }
 
     fn virtualize(cell: CellContainer<Self>) -> CellContainer<Self> {

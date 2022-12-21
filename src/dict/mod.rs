@@ -64,7 +64,7 @@ fn write_label<C: CellFamily>(
         }
     }
 
-    if hml_short_len <= MAX_BIT_LEN && hml_short_len < hml_long_len {
+    if hml_short_len <= MAX_BIT_LEN && hml_short_len <= hml_long_len {
         write_hml_short(key, label)
     } else if hml_long_len <= MAX_BIT_LEN {
         write_hml_long(key, bits_for_len, label)
@@ -129,4 +129,24 @@ fn write_hml_same<C: CellFamily>(
     label: &mut CellBuilder<C>,
 ) -> bool {
     label.store_small_uint(0b110 | bit as u8, 3) && label.store_uint(len as u64, bits_for_len)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::RcCellBuilder;
+
+    #[test]
+    fn labels() {
+        let mut key = RcCellBuilder::new();
+        key.store_zeros(5);
+        key.store_bit_true();
+        let key = key.build().unwrap();
+
+        let mut label = RcCellBuilder::new();
+        assert!(write_label(&key.as_slice(), 40, &mut label));
+        let label = label.build().unwrap();
+
+        println!("{}", label.display_tree());
+    }
 }

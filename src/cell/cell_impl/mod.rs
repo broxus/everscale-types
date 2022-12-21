@@ -85,6 +85,119 @@ impl<C: CellFamily> Cell<C> for EmptyOrdinaryCell {
     }
 }
 
+static ALL_ZEROS_CELL: AllZerosCell = AllZerosCell;
+
+struct AllZerosCell;
+
+impl<C: CellFamily> Cell<C> for AllZerosCell {
+    fn descriptor(&self) -> CellDescriptor {
+        CellDescriptor::new([0, 0xff])
+    }
+
+    fn data(&self) -> &[u8] {
+        &ALL_ZEROS_CELL_DATA
+    }
+
+    fn bit_len(&self) -> u16 {
+        1023
+    }
+
+    fn reference(&self, _: u8) -> Option<&dyn Cell<C>> {
+        None
+    }
+
+    fn reference_cloned(&self, _: u8) -> Option<CellContainer<C>> {
+        None
+    }
+
+    fn virtualize(&self) -> &dyn Cell<C> {
+        self
+    }
+
+    fn hash(&self, _: u8) -> &CellHash {
+        &ALL_ZEROS_CELL_HASH
+    }
+
+    fn depth(&self, _: u8) -> u16 {
+        0
+    }
+
+    fn stats(&self) -> CellTreeStats {
+        CellTreeStats {
+            bit_count: 1023,
+            cell_count: 1,
+        }
+    }
+}
+
+const ALL_ZEROS_CELL_DATA: [u8; 128] = [
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+];
+
+const ALL_ZEROS_CELL_HASH: [u8; 32] = [
+    0xba, 0x03, 0x8d, 0x92, 0x4d, 0xa0, 0xb4, 0x2c, 0x44, 0x76, 0x62, 0xe6, 0xb8, 0xa5, 0x3f, 0x15,
+    0x88, 0x9e, 0xbd, 0xf9, 0xd3, 0xb2, 0xf0, 0x1d, 0xbf, 0x94, 0x2c, 0x29, 0xbc, 0x48, 0x98, 0x71,
+];
+
+static ALL_ONES_CELL: AllOnesCell = AllOnesCell;
+
+struct AllOnesCell;
+
+impl<C: CellFamily> Cell<C> for AllOnesCell {
+    fn descriptor(&self) -> CellDescriptor {
+        CellDescriptor::new([0, 0xff])
+    }
+
+    fn data(&self) -> &[u8] {
+        &ALL_ONES_CELL_DATA
+    }
+
+    fn bit_len(&self) -> u16 {
+        1023
+    }
+
+    fn reference(&self, _: u8) -> Option<&dyn Cell<C>> {
+        None
+    }
+
+    fn reference_cloned(&self, _: u8) -> Option<CellContainer<C>> {
+        None
+    }
+
+    fn virtualize(&self) -> &dyn Cell<C> {
+        self
+    }
+
+    fn hash(&self, _: u8) -> &CellHash {
+        &ALL_ONES_CELL_HASH
+    }
+
+    fn depth(&self, _: u8) -> u16 {
+        0
+    }
+
+    fn stats(&self) -> CellTreeStats {
+        CellTreeStats {
+            bit_count: 1023,
+            cell_count: 1,
+        }
+    }
+}
+
+const ALL_ONES_CELL_DATA: [u8; 128] = [0xff; 128];
+
+const ALL_ONES_CELL_HASH: [u8; 32] = [
+    0x82, 0x97, 0x0d, 0x46, 0x64, 0xb7, 0x68, 0x3c, 0x3d, 0x14, 0xd4, 0x9b, 0x1f, 0x9f, 0xf3, 0x49,
+    0x66, 0x12, 0x81, 0x70, 0x30, 0x1a, 0x7b, 0xec, 0xc2, 0x7a, 0xf1, 0xad, 0xbe, 0x6a, 0x31, 0xc9,
+];
+
 type OrdinaryCell<C, const N: usize> = HeaderWithData<OrdinaryCellHeader<C>, N>;
 
 struct OrdinaryCellHeader<C: CellFamily> {
@@ -411,5 +524,38 @@ fn aligned_leaf_stats(descriptor: CellDescriptor) -> CellTreeStats {
     CellTreeStats {
         bit_count: descriptor.byte_len() as u64 * 8,
         cell_count: 1,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::boc::Boc;
+    use crate::cell::{CellBuilder, DefaultFinalizer};
+    use crate::{ArcCellFamily, RcCellFamily};
+
+    #[test]
+    fn static_cells() {
+        fn check_static_cells<C>()
+        where
+            for<'a> C: DefaultFinalizer + 'a,
+        {
+            let mut builder = CellBuilder::<C>::new();
+            assert!(builder.store_zeros(1023));
+            let cell = builder.build().unwrap();
+            let all_zeros = C::all_zeros_ref();
+            assert_eq!(cell.as_ref().repr_hash(), all_zeros.repr_hash());
+            assert_eq!(cell.as_ref().data(), all_zeros.data());
+            assert_eq!(Boc::encode(cell.as_ref()), Boc::encode(all_zeros));
+
+            let builder = CellBuilder::<C>::from_raw_data(&[0xff; 128], 1023).unwrap();
+            let cell = builder.build().unwrap();
+            let all_ones = C::all_ones_ref();
+            assert_eq!(cell.as_ref().repr_hash(), all_ones.repr_hash());
+            assert_eq!(cell.as_ref().data(), all_ones.data());
+            assert_eq!(Boc::encode(cell.as_ref()), Boc::encode(all_ones));
+        }
+
+        check_static_cells::<ArcCellFamily>();
+        check_static_cells::<RcCellFamily>();
     }
 }
