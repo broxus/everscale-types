@@ -239,6 +239,140 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
         }
     }
 
+    /// Returns a slice starting at the same bits and refs offsets,
+    /// and containing no more than `bits` of data and `refs` of children.
+    pub fn get_prefix(&self, bits: u16, refs: u8) -> Self {
+        Self {
+            cell: self.cell,
+            bits_window_start: self.bits_window_start,
+            bits_window_end: std::cmp::min(self.bits_window_start + bits, self.bits_window_end),
+            refs_window_start: self.refs_window_start,
+            refs_window_end: std::cmp::min(self.refs_window_start + refs, self.refs_window_end),
+        }
+    }
+
+    /// Returns a subslice with the data prefix removed.
+    ///
+    /// If the slice starts with `prefix`, returns the subslice after the prefix, wrapped in `Some`.
+    /// If `prefix` is empty, simply returns the original slice.
+    ///
+    /// If the slice does not start with `prefix`, returns `None`.
+    pub fn strip_data_prefix(&self, prefix: &Self) -> Option<Self> {
+        let prefix_len = prefix.remaining_bits();
+        if prefix_len == 0 {
+            return Some(*self);
+        } else if self.remaining_bits() < prefix_len {
+            return None;
+        } else {
+            let mut result = *self;
+            let lcp = self.longest_common_data_prefix(prefix);
+            if prefix_len <= lcp.remaining_bits() && result.try_advance(prefix_len, 0) {
+                Some(result)
+            } else {
+                None
+            }
+        }
+    }
+
+    /// Returns the longest common data prefix.
+    ///
+    /// NOTE: The returned subslice will be a subslice of the current slice.
+    pub fn longest_common_data_prefix(&self, other: &Self) -> Self {
+        /// XOR  | BITS
+        /// 0000 | 4
+        /// 0001 | 3
+        /// 001x | 2
+        /// 01xx | 1
+        /// 1xxx | 0
+        const BITS: [u8; 16] = [4, 3, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0];
+
+        if self.bits_window_start >= self.bits_window_end
+            || other.bits_window_start >= other.bits_window_end
+        {
+            return *self;
+        }
+        let mut self_remaining_bits = self.bits_window_end - self.bits_window_start;
+        let self_data = self.cell.data();
+        let mut other_remaining_bits = other.bits_window_end - other.bits_window_start;
+        let other_data = other.cell.data();
+        let mut max_bit_len = std::cmp::min(self_remaining_bits, other_remaining_bits);
+
+        let self_r = self.bits_window_start % 8;
+        let self_q = (self.bits_window_start / 8) as usize;
+        let other_r = other.bits_window_start % 8;
+        let other_q = (other.bits_window_start / 8) as usize;
+
+        // Handle case with possibly incorrect data
+        if self_remaining_bits
+
+        unsafe {
+            let mut self_data_ptr = self_data.as_ptr().add(self_q);
+            let mut other_data_ptr = other_data.as_ptr().add(other_q);
+
+            let self_first_byte = *self_data_ptr;
+            let other_first_byte = *other_data_ptr;
+
+            let self_first_byte_mask: u8 = 0xff >> self_r;
+            let other_first_byte_mask: u8 = 0xff >> other_r;
+
+            // ___xxxxx|xxxx....
+            // ___yyyyy|yyyy....
+
+            // ___xxxxx|xxxx...
+            // ______yy|yyyy...
+
+            // ______xx|xxxx...
+            // ___yyyyy|xxxx...
+
+            /*
+            match key1[i] ^ key2[i] {
+                0 => result += 8,
+                x => {
+                    if x & 0xf0 == 0 {
+                        result += BITS[(x & 0x0f) as usize] + 4;
+                    } else {
+                        result += BITS[(x >> 4) as usize]
+                    }
+                    break;
+                }
+            }
+            */
+
+            let last_byte_mask: u8 = 0xff << (8 - (remaining_bits + r) % 8);
+
+            if r + remaining_bits <= 8 {
+                // Special case if all remaining_bits are in the first byte
+                if ((first_byte ^ target) & first_byte_mask & last_byte_mask) != 0 {
+                    return None;
+                }
+            } else {
+                // Check the first byte
+                if (first_byte ^ target) & first_byte_mask != 0 {
+                    return None;
+                }
+
+                // Check all full bytes
+                remaining_bits -= 8 - r;
+                for _ in 0..(remaining_bits / 8) {
+                    data_ptr = data_ptr.add(1);
+                    if *data_ptr != target {
+                        return None;
+                    }
+                }
+
+                // Check the last byte (if not aligned)
+                if remaining_bits % 8 != 0 {
+                    data_ptr = data_ptr.add(1);
+                    if (*data_ptr ^ target) & last_byte_mask != 0 {
+                        return None;
+                    }
+                }
+            }
+
+            Some(target != 0)
+        }
+    }
+
     /// Checks whether the current slice consists of the same bits,
     /// returns `None` if there are 0s and 1s, returns `Some(bit)` otherwise.
     ///
@@ -288,7 +422,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
             let target = ((first_byte >> (7 - r)) & 1) * u8::MAX;
             let first_byte_mask: u8 = 0xff >> r;
-            let last_byte_mask: u8 = 0xff << (8 - (remaining_bits + 8 - r) % 8);
+            let last_byte_mask: u8 = 0xff << (8 - (remaining_bits + r) % 8);
 
             if r + remaining_bits <= 8 {
                 // Special case if all remaining_bits are in the first byte
@@ -346,57 +480,16 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
         }
     }
 
-    /// Returns a small subset of `bits` (0..=8) starting from the `offset`.
-    pub fn get_bits(&self, offset: u16, bits: u8) -> Option<u8> {
-        debug_assert!(bits <= 8);
-
-        let bits = bits as u16;
-        if self.bits_window_start + offset + bits <= self.bits_window_end {
-            let index = self.bits_window_start + offset;
-
-            let r = index % 8;
-            let q = (index / 8) as usize;
-            let byte = *self.cell.data().get(q)?;
-
-            if r == 0 {
-                // xxx_____ -> _____xxx
-                //^r
-                Some(byte >> (8 - bits))
-            } else if bits <= (8 - r) {
-                // __xxx___ -> _____xxx
-                // r^
-                Some((byte >> (8 - r - bits)) & ((1 << bits) - 1))
-            } else {
-                // ______xx|y_______ -> _____xxy
-                //     r^
-
-                let mut res = (byte as u16) << 8;
-                res |= *self.cell.data().get(q + 1)? as u16;
-                Some((res >> (8 - r)) as u8 >> (8 - bits))
-            }
-        } else {
-            None
-        }
-    }
-
-    /// Tries to read the next small subset of `bits` (0..=8), incrementing the bits window start.
-    #[inline]
-    pub fn load_bits(&mut self, bits: u8) -> Option<u8> {
-        let res = self.get_bits(0, bits)?;
-        self.bits_window_start += bits as u16;
-        Some(res)
-    }
-
     /// Reads `u8` starting from the `offset`.
     #[inline]
     pub fn get_u8(&self, offset: u16) -> Option<u8> {
-        self.get_bits(offset, 8)
+        self.get_small_uint(offset, 8)
     }
 
     /// Tries to read the next `u8`, incrementing the bits window start.
     #[inline]
     pub fn load_u8(&mut self) -> Option<u8> {
-        self.load_bits(8)
+        self.load_small_uint(8)
     }
 
     /// Reads `u16` starting from the `offset`.
@@ -651,6 +744,119 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
         Some(res)
     }
 
+    /// Returns a small subset of `bits` (0..=8) starting from the `offset`.
+    ///
+    /// NOTE: Reading zero bits always succeeds,
+    /// and reading more than 8 bits always fails.
+    pub fn get_small_uint(&self, offset: u16, bits: u16) -> Option<u8> {
+        if bits == 0 {
+            return Some(0);
+        }
+
+        if bits <= 8 && self.bits_window_start + offset + bits <= self.bits_window_end {
+            let index = self.bits_window_start + offset;
+
+            let r = index % 8;
+            let q = (index / 8) as usize;
+            let byte = *self.cell.data().get(q)?;
+
+            if r == 0 {
+                // xxx_____ -> _____xxx
+                //^r
+                Some(byte >> (8 - bits))
+            } else if bits <= (8 - r) {
+                // __xxx___ -> _____xxx
+                // r^
+                Some((byte >> (8 - r - bits)) & ((1 << bits) - 1))
+            } else {
+                // ______xx|y_______ -> _____xxy
+                //     r^
+
+                let mut res = (byte as u16) << 8;
+                res |= *self.cell.data().get(q + 1)? as u16;
+                Some((res >> (8 - r)) as u8 >> (8 - bits))
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Tries to read the next small subset of `bits` (0..=8), incrementing the bits window start.
+    ///
+    /// NOTE: Reading zero bits always succeeds,
+    /// and reading more than 8 bits always fails.
+    #[inline]
+    pub fn load_small_uint(&mut self, bits: u16) -> Option<u8> {
+        let res = self.get_small_uint(0, bits)?;
+        self.bits_window_start += bits;
+        Some(res)
+    }
+
+    /// Reads `u64` from the cell (but only the specified number of bits)
+    /// starting from the `offset`.
+    ///
+    /// NOTE: Reading zero bits always succeeds,
+    /// and reading more than 64 bits always fails.
+    pub fn get_uint(&mut self, offset: u16, mut bits: u16) -> Option<u64> {
+        if bits == 0 {
+            return Some(0);
+        }
+
+        if bits <= 64 && self.bits_window_start + offset + bits <= self.bits_window_end {
+            let index = self.bits_window_start + offset;
+            let data = self.cell.data();
+            let data_len = data.len();
+
+            // Check if data is enough
+            if (self.bits_window_end + 7) / 8 < data_len as u16 {
+                return None;
+            }
+
+            let r = index % 8;
+            let q = (index / 8) as usize;
+
+            unsafe {
+                let data_ptr = data.as_ptr().add(q);
+                let first_byte = *data_ptr & (0xff >> r);
+
+                let right_shift = 8 - (bits + r) % 8;
+
+                if r + bits <= 8 {
+                    // Special case if all remaining_bits are in the first byte
+                    Some((first_byte >> right_shift) as u64)
+                } else {
+                    let mut bytes = [0u8; 8];
+
+                    // Copy remaining bytes
+                    bits -= 8 - r;
+                    std::ptr::copy_nonoverlapping(
+                        data_ptr.add(1),
+                        bytes.as_mut_ptr(),
+                        ((bits + 7) / 8) as usize,
+                    );
+
+                    let mut result = u64::from_be_bytes(bytes) >> (64 - bits);
+                    result |= (first_byte as u64) << bits;
+                    Some(result)
+                }
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Tries to read the next `u64` (but only the specified number of bits),
+    /// incrementing the bits window start.
+    ///
+    /// NOTE: Reading zero bits always succeeds,
+    /// and reading more than 64 bits always fails.
+    #[inline]
+    pub fn load_uint(&mut self, bits: u16) -> Option<u64> {
+        let res = self.get_uint(0, bits)?;
+        self.bits_window_start += bits;
+        Some(res)
+    }
+
     /// Reads the specified number of bits to the taret starting from the `offset`.
     pub fn get_raw<'b>(
         &'_ self,
@@ -757,6 +963,13 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
         self.references()
     }
 
+    /// Returins this slice, but with references skipped.
+    #[inline]
+    pub fn without_references(mut self) -> Self {
+        self.refs_window_start = self.refs_window_end;
+        self
+    }
+
     /// Returns a reference to the next child cell (relative to this slice's refs window),
     /// incrementing the refs window start.
     pub fn load_reference(&mut self) -> Option<&'a dyn Cell<C>> {
@@ -811,6 +1024,21 @@ mod tests {
                 slice.get_raw(offset, &mut data, bits).unwrap();
             }
         }
+    }
+
+    #[test]
+    fn get_uint() {
+        let cell = {
+            let mut builder = RcCellBuilder::new();
+            builder.store_u64(0xfafafafafafafafa);
+            builder.build().unwrap()
+        };
+
+        let mut slice = cell.as_slice();
+        assert_eq!(slice.get_uint(0, 3), Some(0b111));
+        assert_eq!(slice.get_uint(0, 11), Some(0b11111010111));
+        assert_eq!(slice.get_uint(1, 11), Some(0b11110101111));
+        assert_eq!(slice.get_uint(8, 3), Some(0b111));
     }
 
     #[test]

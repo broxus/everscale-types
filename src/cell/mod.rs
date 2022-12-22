@@ -29,6 +29,9 @@ pub trait CellFamily {
     /// NOTE: in most cases empty cell is ZST.
     fn empty_cell() -> CellContainer<Self>;
 
+    /// Returns a static reference to the empty cell
+    fn empty_cell_ref() -> &'static dyn Cell<Self>;
+
     /// Returns a static reference to the cell with all zeros.
     fn all_zeros_ref() -> &'static dyn Cell<Self>;
 

@@ -85,8 +85,8 @@ mod tests {
 
         assert_eq!(slice.get_bit(0), Some(true));
         assert_eq!(slice.load_bit(), Some(true));
-        assert_eq!(slice.get_bits(0, 8), Some(123));
-        assert_eq!(slice.get_bits(8, 8), Some(111));
+        assert_eq!(slice.get_small_uint(0, 8), Some(123));
+        assert_eq!(slice.get_small_uint(8, 8), Some(111));
         assert_eq!(slice.load_u16(), Some(0x7b6f));
         assert_eq!(slice.get_u32(0), Some(0x00006ffa));
         assert_eq!(slice.get_u32(32), Some(0xd60473b3));
@@ -99,7 +99,7 @@ mod tests {
                 0xe7, 0x9b, 0xc1, 0x6f,
             ])
         );
-        assert_eq!(slice.get_bits(0, 1), None);
+        assert_eq!(slice.get_small_uint(0, 1), None);
     }
 
     #[test]

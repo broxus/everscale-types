@@ -42,16 +42,15 @@ impl<C: CellFamily> HashmapE<C> {
     }
 }
 
-fn write_label<C: CellFamily>(
+pub fn write_label<C: CellFamily>(
     key: &CellSlice<C>,
-    key_bit_len: u16,
+    bits_for_len: u16,
     label: &mut CellBuilder<C>,
 ) -> bool {
-    if key_bit_len == 0 || key.is_data_empty() {
+    if bits_for_len == 0 || key.is_data_empty() {
         return write_hml_empty(label);
     }
 
-    let bits_for_len = (16 - key_bit_len.leading_zeros()) as u16;
     let remaining_bits = key.remaining_bits();
 
     let hml_short_len = 2 + 2 * remaining_bits;
@@ -70,6 +69,24 @@ fn write_label<C: CellFamily>(
         write_hml_long(key, bits_for_len, label)
     } else {
         false
+    }
+}
+
+pub fn read_label<'a, C>(
+    label: &mut CellSlice<'a, C>,
+    bits_for_len: u16,
+) -> Option<CellSlice<'a, C>>
+where
+    for<'c> C: CellFamily + 'c,
+{
+    if label.is_data_empty() && bits_for_len == 0 {
+        Some(label.get_prefix(0, 0))
+    } else if !label.load_bit()? {
+        read_hml_short(label)
+    } else if !label.load_bit()? {
+        read_hml_long(label, bits_for_len)
+    } else {
+        read_hml_same(label, bits_for_len)
     }
 }
 
@@ -99,10 +116,23 @@ fn write_hml_short<C: CellFamily>(key: &CellSlice<C>, label: &mut CellBuilder<C>
     }
 
     let rem = len % 32;
-    if rem != 0 && !label.store_uint(rem as u64, rem) {
+    if rem != 0 && !label.store_uint(u64::MAX, rem) {
         return false;
     }
     label.store_bit_zero() && label.store_slice_data(key)
+}
+
+fn read_hml_short<'a, C: CellFamily>(label: &mut CellSlice<'a, C>) -> Option<CellSlice<'a, C>> {
+    let mut len = 0;
+    while label.load_bit()? {
+        len += 1;
+    }
+    let result = *label;
+    if label.try_advance(len, 0) {
+        Some(result.get_prefix(len, 0))
+    } else {
+        None
+    }
 }
 
 /// ```ignore
@@ -119,6 +149,19 @@ fn write_hml_long<C: CellFamily>(
         && label.store_slice_data(key)
 }
 
+fn read_hml_long<'a, C: CellFamily>(
+    label: &mut CellSlice<'a, C>,
+    bits_for_len: u16,
+) -> Option<CellSlice<'a, C>> {
+    let len = label.load_uint(bits_for_len)? as u16;
+    let result = *label;
+    if label.try_advance(len, 0) {
+        Some(result.get_prefix(len, 0))
+    } else {
+        None
+    }
+}
+
 /// ```ignore
 /// hml_same$11 {m:#} v:Bit n:(#<= m) = HmLabel ~n m;
 /// ```
@@ -131,6 +174,18 @@ fn write_hml_same<C: CellFamily>(
     label.store_small_uint(0b110 | bit as u8, 3) && label.store_uint(len as u64, bits_for_len)
 }
 
+fn read_hml_same<'a, C>(label: &mut CellSlice<'a, C>, bits_for_len: u16) -> Option<CellSlice<'a, C>>
+where
+    for<'c> C: CellFamily + 'c,
+{
+    let cell = match label.load_bit()? {
+        false => C::all_zeros_ref(),
+        true => C::all_ones_ref(),
+    };
+    let len = label.load_uint(bits_for_len)? as u16;
+    Some(cell.as_slice().get_prefix(len, 0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,15 +193,32 @@ mod tests {
 
     #[test]
     fn labels() {
-        let mut key = RcCellBuilder::new();
-        key.store_zeros(5);
-        key.store_bit_true();
-        let key = key.build().unwrap();
+        let bits_for_len = 3;
 
-        let mut label = RcCellBuilder::new();
-        assert!(write_label(&key.as_slice(), 40, &mut label));
-        let label = label.build().unwrap();
+        // Build key
+        let key = {
+            let mut builder = RcCellBuilder::new();
+            builder.store_zeros(5);
+            builder.store_bit_true();
+            builder.build().unwrap()
+        };
 
-        println!("{}", label.display_tree());
+        // Build label
+        let label = {
+            let mut builder = RcCellBuilder::new();
+            assert!(write_label(&key.as_slice(), bits_for_len, &mut builder));
+            builder.build().unwrap()
+        };
+
+        // Parse label
+        let parsed_key = read_label(&mut label.as_slice(), bits_for_len).unwrap();
+        let parsed_key = {
+            let mut builder = RcCellBuilder::new();
+            builder.store_slice(&parsed_key);
+            builder.build().unwrap()
+        };
+
+        // Parsed key should be equal to the original
+        assert_eq!(key.as_ref(), parsed_key.as_ref());
     }
 }

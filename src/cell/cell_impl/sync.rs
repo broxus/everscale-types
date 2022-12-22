@@ -19,6 +19,10 @@ impl CellFamily for ArcCellFamily {
         Arc::new(EmptyOrdinaryCell)
     }
 
+    fn empty_cell_ref() -> &'static dyn Cell<Self> {
+        &EmptyOrdinaryCell
+    }
+
     fn all_zeros_ref() -> &'static dyn Cell<Self> {
         &ALL_ZEROS_CELL
     }
