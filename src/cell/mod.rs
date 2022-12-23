@@ -156,7 +156,7 @@ impl<C: CellFamily> dyn Cell<C> + '_ {
 
     /// Returns this cell as a cell slice.
     #[inline]
-    pub fn as_slice(&self) -> CellSlice<'_, C> {
+    pub fn as_slice(&'_ self) -> CellSlice<'_, C> {
         CellSlice::new(self)
     }
 

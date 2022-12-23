@@ -278,7 +278,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     /// let without_prefix = slice.strip_data_prefix(&prefix.as_slice()).unwrap();
     /// assert_eq!(without_prefix.get_u16(0), Some(0xbeaf));
     /// ```
-    pub fn strip_data_prefix(&self, prefix: &Self) -> Option<Self> {
+    pub fn strip_data_prefix(&self, prefix: &CellSlice<'a, C>) -> Option<CellSlice<'a, C>> {
         let prefix_len = prefix.remaining_bits();
         if prefix_len == 0 {
             return Some(*self);
@@ -345,17 +345,17 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
         let other_r = other.bits_window_start % 8;
         let other_q = (other.bits_window_start / 8) as usize;
 
+        // Compute remaining bytes to check
+        let self_bytes = (((self_r + max_bit_len) + 7) / 8) as usize;
+        debug_assert!((self_q + self_bytes) <= self_data.len());
+        let other_bytes = (((other_r + max_bit_len) + 7) / 8) as usize;
+        debug_assert!((other_q + other_bytes) <= other_data.len());
+
+        let aligned_bytes = std::cmp::min(self_bytes, other_bytes);
+
         let mut prefix_len: u16 = 0;
 
         unsafe {
-            // Compute remaining bytes to check
-            let self_bytes = (((self_r + max_bit_len) + 7) / 8) as usize;
-            debug_assert!((self_q + self_bytes) <= self_data.len());
-            let other_bytes = (((other_r + max_bit_len) + 7) / 8) as usize;
-            debug_assert!((other_q + other_bytes) <= other_data.len());
-
-            let aligned_bytes = std::cmp::min(self_bytes, other_bytes);
-
             let self_data_ptr = self_data.as_ptr().add(self_q);
             let other_data_ptr = other_data.as_ptr().add(other_q);
 
@@ -366,6 +366,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
                 // For all aligned bytes except the first
                 for i in 1..aligned_bytes {
                     // Concat previous bits with current bits
+                    // NOTE: shift as `u16` to allow overflow
                     let next_self_byte = *self_data_ptr.add(i);
                     self_byte |= ((next_self_byte as u16) >> (8 - self_r)) as u8;
                     let next_other_byte = *other_data_ptr.add(i);
@@ -856,7 +857,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
                 let data_ptr = data.as_ptr().add(q);
                 let first_byte = *data_ptr & (0xff >> r);
 
-                let right_shift = 8 - (bits + r) % 8;
+                let right_shift = (8 - (bits + r) % 8) % 8;
 
                 if r + bits <= 8 {
                     // Special case if all remaining_bits are in the first byte
