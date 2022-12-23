@@ -278,99 +278,89 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     ///
     /// NOTE: The returned subslice will be a subslice of the current slice.
     pub fn longest_common_data_prefix(&self, other: &Self) -> Self {
-        /// XOR  | BITS
-        /// 0000 | 4
-        /// 0001 | 3
-        /// 001x | 2
-        /// 01xx | 1
-        /// 1xxx | 0
-        const BITS: [u8; 16] = [4, 3, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0];
-
         if self.bits_window_start >= self.bits_window_end
             || other.bits_window_start >= other.bits_window_end
         {
             return *self;
         }
-        let mut self_remaining_bits = self.bits_window_end - self.bits_window_start;
+        let self_remaining_bits = self.bits_window_end - self.bits_window_start;
         let self_data = self.cell.data();
-        let mut other_remaining_bits = other.bits_window_end - other.bits_window_start;
+        let other_remaining_bits = other.bits_window_end - other.bits_window_start;
         let other_data = other.cell.data();
-        let mut max_bit_len = std::cmp::min(self_remaining_bits, other_remaining_bits);
 
+        // Compute max prefix length in bits
+        let max_bit_len = std::cmp::min(self_remaining_bits, other_remaining_bits);
+
+        // Compute shifts and data offsets
         let self_r = self.bits_window_start % 8;
         let self_q = (self.bits_window_start / 8) as usize;
         let other_r = other.bits_window_start % 8;
         let other_q = (other.bits_window_start / 8) as usize;
 
-        // Handle case with possibly incorrect data
-        if self_remaining_bits
+        let mut prefix_len: u16 = 0;
 
-        unsafe {
-            let mut self_data_ptr = self_data.as_ptr().add(self_q);
-            let mut other_data_ptr = other_data.as_ptr().add(other_q);
+        'outer: {
+            unsafe {
+                // Compute remaining bytes to check
+                let self_bytes = (((self_r + max_bit_len) + 7) / 8) as usize;
+                debug_assert!((self_q + self_bytes) <= self_data.len());
+                let other_bytes = (((other_r + max_bit_len) + 7) / 8) as usize;
+                debug_assert!((other_q + other_bytes) <= other_data.len());
 
-            let self_first_byte = *self_data_ptr;
-            let other_first_byte = *other_data_ptr;
+                let aligned_bytes = std::cmp::min(self_bytes, other_bytes);
 
-            let self_first_byte_mask: u8 = 0xff >> self_r;
-            let other_first_byte_mask: u8 = 0xff >> other_r;
+                let self_data_ptr = self_data.as_ptr().add(self_q);
+                let other_data_ptr = other_data.as_ptr().add(other_q);
 
-            // ___xxxxx|xxxx....
-            // ___yyyyy|yyyy....
+                // Get first bytes aligned to the left
+                let mut self_byte = *self_data_ptr << self_r;
+                let mut other_byte = *other_data_ptr << other_r;
+                if aligned_bytes > 1 {
+                    // For all aligned bytes except the first
+                    for i in 1..aligned_bytes {
+                        // Concat previous bits with current bits
+                        let next_self_byte = *self_data_ptr.add(i);
+                        self_byte |= next_self_byte >> ((8 - self_r) % 8);
+                        let next_other_byte = *other_data_ptr.add(i);
+                        other_byte |= next_other_byte >> ((8 - other_r) % 8);
 
-            // ___xxxxx|xxxx...
-            // ______yy|yyyy...
-
-            // ______xx|xxxx...
-            // ___yyyyy|xxxx...
-
-            /*
-            match key1[i] ^ key2[i] {
-                0 => result += 8,
-                x => {
-                    if x & 0xf0 == 0 {
-                        result += BITS[(x & 0x0f) as usize] + 4;
-                    } else {
-                        result += BITS[(x >> 4) as usize]
+                        // XOR bytes to check equality
+                        match self_byte ^ other_byte {
+                            // All bits are equal, update current bytes and move forward
+                            0 => {
+                                prefix_len += 8;
+                                self_byte = next_self_byte << self_r;
+                                other_byte = next_other_byte << other_r;
+                            }
+                            // Some bits are not equal
+                            x => {
+                                // Number of leading zeros is the number of equal bits
+                                prefix_len += x.leading_zeros() as u16;
+                                break 'outer;
+                            }
+                        }
                     }
-                    break;
+
+                    // Concat remaining bits
+                    if self_r > 0 {
+                        self_byte |= *self_data_ptr.add(aligned_bytes) >> (8 - self_r);
+                    }
+                    if other_r > 0 {
+                        other_byte = *other_data_ptr.add(aligned_bytes) >> (8 - other_r);
+                    }
                 }
+
+                // Apply last byte mask
+                self_byte &= 0xff << ((8 - (max_bit_len + self_r) % 8) % 8);
+                other_byte &= 0xff << ((8 - (max_bit_len + other_r) % 8) % 8);
+
+                // Count the number of remaining equal bits
+                prefix_len += (self_byte ^ other_byte).leading_zeros() as u16;
             }
-            */
+        };
 
-            let last_byte_mask: u8 = 0xff << (8 - (remaining_bits + r) % 8);
-
-            if r + remaining_bits <= 8 {
-                // Special case if all remaining_bits are in the first byte
-                if ((first_byte ^ target) & first_byte_mask & last_byte_mask) != 0 {
-                    return None;
-                }
-            } else {
-                // Check the first byte
-                if (first_byte ^ target) & first_byte_mask != 0 {
-                    return None;
-                }
-
-                // Check all full bytes
-                remaining_bits -= 8 - r;
-                for _ in 0..(remaining_bits / 8) {
-                    data_ptr = data_ptr.add(1);
-                    if *data_ptr != target {
-                        return None;
-                    }
-                }
-
-                // Check the last byte (if not aligned)
-                if remaining_bits % 8 != 0 {
-                    data_ptr = data_ptr.add(1);
-                    if (*data_ptr ^ target) & last_byte_mask != 0 {
-                        return None;
-                    }
-                }
-            }
-
-            Some(target != 0)
-        }
+        // Remove the longest prefix (without equal bits from the last byte mask)
+        self.get_prefix(std::cmp::min(prefix_len, max_bit_len), 0)
     }
 
     /// Checks whether the current slice consists of the same bits,
@@ -1024,6 +1014,34 @@ mod tests {
                 slice.get_raw(offset, &mut data, bits).unwrap();
             }
         }
+    }
+
+    #[test]
+    fn longest_common_data_prefix() {
+        let cell1 = {
+            let mut builder = RcCellBuilder::new();
+            builder.store_u64(0xffffffff00000000);
+            builder.build().unwrap()
+        };
+        let mut slice1 = cell1.as_slice();
+        slice1.try_advance(1, 0);
+
+        let cell2 = {
+            let mut builder = RcCellBuilder::new();
+            builder.store_u64(0xfffffff000000000);
+            builder.build().unwrap()
+        };
+        let mut slice2 = cell2.as_slice();
+        slice2.try_advance(6, 0);
+
+        let prefix = slice1.longest_common_data_prefix(&slice2);
+
+        let mut builder = RcCellBuilder::new();
+        builder.store_slice(&prefix);
+        let prefix = builder.build().unwrap();
+        println!("{}", prefix.display_root());
+        assert_eq!(prefix.data(), [0xff, 0xff, 0xfe]);
+        assert_eq!(prefix.bit_len(), 22);
     }
 
     #[test]
