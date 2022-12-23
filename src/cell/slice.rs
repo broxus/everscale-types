@@ -257,6 +257,27 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     /// If `prefix` is empty, simply returns the original slice.
     ///
     /// If the slice does not start with `prefix`, returns `None`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use everscale_types::{RcCellBuilder};
+    /// let cell = {
+    ///     let mut builder = RcCellBuilder::new();
+    ///     builder.store_u32(0xdeadbeaf);
+    ///     builder.build().unwrap()
+    /// };
+    /// let slice = cell.as_slice();
+    ///
+    /// let prefix = {
+    ///     let mut builder = RcCellBuilder::new();
+    ///     builder.store_u16(0xdead);
+    ///     builder.build().unwrap()
+    /// };
+    ///
+    /// let without_prefix = slice.strip_data_prefix(&prefix.as_slice()).unwrap();
+    /// assert_eq!(without_prefix.get_u16(0), Some(0xbeaf));
+    /// ```
     pub fn strip_data_prefix(&self, prefix: &Self) -> Option<Self> {
         let prefix_len = prefix.remaining_bits();
         if prefix_len == 0 {
@@ -265,8 +286,8 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
             return None;
         } else {
             let mut result = *self;
-            let lcp = self.longest_common_data_prefix(prefix);
-            if prefix_len <= lcp.remaining_bits() && result.try_advance(prefix_len, 0) {
+            let lcp = self.longest_common_data_prefix_impl(prefix, prefix_len);
+            if prefix_len <= lcp && result.try_advance(prefix_len, 0) {
                 Some(result)
             } else {
                 None
@@ -277,11 +298,38 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     /// Returns the longest common data prefix.
     ///
     /// NOTE: The returned subslice will be a subslice of the current slice.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use everscale_types::{RcCellBuilder};
+    /// let cell = {
+    ///     let mut builder = RcCellBuilder::new();
+    ///     builder.store_u32(0xdeadbeaf);
+    ///     builder.build().unwrap()
+    /// };
+    /// let slice = cell.as_slice();
+    ///
+    /// let prefix = {
+    ///     let mut builder = RcCellBuilder::new();
+    ///     builder.store_u16(0xdead);
+    ///     builder.build().unwrap()
+    /// };
+    ///
+    /// let lcp = slice.longest_common_data_prefix(&prefix.as_slice());
+    /// assert_eq!(lcp.get_u16(0), Some(0xdead));
+    /// assert_eq!(lcp.remaining_bits(), 16);
+    /// ```
     pub fn longest_common_data_prefix(&self, other: &Self) -> Self {
+        let prefix_len = self.longest_common_data_prefix_impl(other, u16::MAX);
+        self.get_prefix(prefix_len, 0)
+    }
+
+    fn longest_common_data_prefix_impl(&self, other: &Self, max_hint: u16) -> u16 {
         if self.bits_window_start >= self.bits_window_end
             || other.bits_window_start >= other.bits_window_end
         {
-            return *self;
+            return 0;
         }
         let self_remaining_bits = self.bits_window_end - self.bits_window_start;
         let self_data = self.cell.data();
@@ -289,7 +337,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
         let other_data = other.cell.data();
 
         // Compute max prefix length in bits
-        let max_bit_len = std::cmp::min(self_remaining_bits, other_remaining_bits);
+        let max_bit_len = std::cmp::min(self_remaining_bits, other_remaining_bits).min(max_hint);
 
         // Compute shifts and data offsets
         let self_r = self.bits_window_start % 8;
@@ -299,68 +347,67 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
         let mut prefix_len: u16 = 0;
 
-        'outer: {
-            unsafe {
-                // Compute remaining bytes to check
-                let self_bytes = (((self_r + max_bit_len) + 7) / 8) as usize;
-                debug_assert!((self_q + self_bytes) <= self_data.len());
-                let other_bytes = (((other_r + max_bit_len) + 7) / 8) as usize;
-                debug_assert!((other_q + other_bytes) <= other_data.len());
+        unsafe {
+            // Compute remaining bytes to check
+            let self_bytes = (((self_r + max_bit_len) + 7) / 8) as usize;
+            debug_assert!((self_q + self_bytes) <= self_data.len());
+            let other_bytes = (((other_r + max_bit_len) + 7) / 8) as usize;
+            debug_assert!((other_q + other_bytes) <= other_data.len());
 
-                let aligned_bytes = std::cmp::min(self_bytes, other_bytes);
+            let aligned_bytes = std::cmp::min(self_bytes, other_bytes);
 
-                let self_data_ptr = self_data.as_ptr().add(self_q);
-                let other_data_ptr = other_data.as_ptr().add(other_q);
+            let self_data_ptr = self_data.as_ptr().add(self_q);
+            let other_data_ptr = other_data.as_ptr().add(other_q);
 
-                // Get first bytes aligned to the left
-                let mut self_byte = *self_data_ptr << self_r;
-                let mut other_byte = *other_data_ptr << other_r;
-                if aligned_bytes > 1 {
-                    // For all aligned bytes except the first
-                    for i in 1..aligned_bytes {
-                        // Concat previous bits with current bits
-                        let next_self_byte = *self_data_ptr.add(i);
-                        self_byte |= next_self_byte >> ((8 - self_r) % 8);
-                        let next_other_byte = *other_data_ptr.add(i);
-                        other_byte |= next_other_byte >> ((8 - other_r) % 8);
+            // Get first bytes aligned to the left
+            let mut self_byte = *self_data_ptr << self_r;
+            let mut other_byte = *other_data_ptr << other_r;
+            if aligned_bytes > 1 {
+                // For all aligned bytes except the first
+                for i in 1..aligned_bytes {
+                    // Concat previous bits with current bits
+                    let next_self_byte = *self_data_ptr.add(i);
+                    self_byte |= ((next_self_byte as u16) >> (8 - self_r)) as u8;
+                    let next_other_byte = *other_data_ptr.add(i);
+                    other_byte |= ((next_other_byte as u16) >> (8 - other_r)) as u8;
 
-                        // XOR bytes to check equality
-                        match self_byte ^ other_byte {
-                            // All bits are equal, update current bytes and move forward
-                            0 => {
-                                prefix_len += 8;
-                                self_byte = next_self_byte << self_r;
-                                other_byte = next_other_byte << other_r;
-                            }
-                            // Some bits are not equal
-                            x => {
-                                // Number of leading zeros is the number of equal bits
-                                prefix_len += x.leading_zeros() as u16;
-                                break 'outer;
-                            }
+                    // XOR bytes to check equality
+                    match self_byte ^ other_byte {
+                        // All bits are equal, update current bytes and move forward
+                        0 => {
+                            prefix_len += 8;
+                            self_byte = next_self_byte << self_r;
+                            other_byte = next_other_byte << other_r;
                         }
-                    }
-
-                    // Concat remaining bits
-                    if self_r > 0 {
-                        self_byte |= *self_data_ptr.add(aligned_bytes) >> (8 - self_r);
-                    }
-                    if other_r > 0 {
-                        other_byte = *other_data_ptr.add(aligned_bytes) >> (8 - other_r);
+                        // Some bits are not equal
+                        x => {
+                            // Number of leading zeros is the number of equal bits
+                            return prefix_len + x.leading_zeros() as u16;
+                        }
                     }
                 }
 
-                // Apply last byte mask
-                self_byte &= 0xff << ((8 - (max_bit_len + self_r) % 8) % 8);
-                other_byte &= 0xff << ((8 - (max_bit_len + other_r) % 8) % 8);
-
-                // Count the number of remaining equal bits
-                prefix_len += (self_byte ^ other_byte).leading_zeros() as u16;
+                // Concat remaining bits
+                if self_r > 0 {
+                    self_byte |= *self_data_ptr.add(aligned_bytes) >> (8 - self_r);
+                }
+                if other_r > 0 {
+                    other_byte |= *other_data_ptr.add(aligned_bytes) >> (8 - other_r);
+                }
             }
-        };
 
-        // Remove the longest prefix (without equal bits from the last byte mask)
-        self.get_prefix(std::cmp::min(prefix_len, max_bit_len), 0)
+            // Apply last byte mask
+            // NOTE: shift as `u16` to allow overflow
+            let last_byte_mask = (0xffu16 << (8 - max_bit_len % 8)) as u8;
+            self_byte &= last_byte_mask;
+            other_byte &= last_byte_mask;
+
+            // Count the number of remaining equal bits
+            prefix_len += (self_byte ^ other_byte).leading_zeros() as u16;
+        }
+
+        // Return the longest prefix (without equal bits from the last byte mask)
+        std::cmp::min(prefix_len, max_bit_len)
     }
 
     /// Checks whether the current slice consists of the same bits,
@@ -987,7 +1034,17 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
 #[cfg(test)]
 mod tests {
-    use crate::RcCellBuilder;
+    use crate::{RcCell, RcCellBuilder, RcCellSlice};
+
+    fn build_cell(slice: RcCellSlice) -> RcCell {
+        let mut builder = RcCellBuilder::new();
+        builder.store_slice(&slice);
+        builder.build().unwrap()
+    }
+
+    fn print_slice(name: &str, slice: RcCellSlice) {
+        println!("{name}: {}", build_cell(slice).display_tree());
+    }
 
     #[test]
     #[cfg_attr(miri, ignore)] // takes too long to execute on miri
@@ -1017,6 +1074,36 @@ mod tests {
     }
 
     #[test]
+    fn split_data_prefix() {
+        let cell1 = {
+            let mut builder = RcCellBuilder::new();
+            builder.store_u16(0xabcd);
+            builder.store_bit_zero();
+            builder.store_u16(0xffff);
+            builder.build().unwrap()
+        };
+        let mut slice1 = cell1.as_slice();
+        slice1.try_advance(4, 0);
+
+        let cell2 = {
+            let mut builder = RcCellBuilder::new();
+            builder.store_uint(0xbcd, 12);
+            builder.store_bit_zero();
+            builder.build().unwrap()
+        };
+
+        print_slice("A", slice1);
+        print_slice("B", cell2.as_slice());
+        print_slice("LCP", slice1.longest_common_data_prefix(&cell2.as_slice()));
+
+        let mut without_prefix = slice1.strip_data_prefix(&cell2.as_slice()).unwrap();
+        print_slice("Result", without_prefix);
+
+        assert_eq!(without_prefix.load_u16(), Some(0xffff));
+        assert!(without_prefix.is_data_empty());
+    }
+
+    #[test]
     fn longest_common_data_prefix() {
         let cell1 = {
             let mut builder = RcCellBuilder::new();
@@ -1036,9 +1123,7 @@ mod tests {
 
         let prefix = slice1.longest_common_data_prefix(&slice2);
 
-        let mut builder = RcCellBuilder::new();
-        builder.store_slice(&prefix);
-        let prefix = builder.build().unwrap();
+        let prefix = build_cell(prefix);
         println!("{}", prefix.display_root());
         assert_eq!(prefix.data(), [0xff, 0xff, 0xfe]);
         assert_eq!(prefix.bit_len(), 22);

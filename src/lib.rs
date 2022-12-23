@@ -35,10 +35,6 @@ pub mod dict;
 pub mod merkle;
 pub mod util;
 
-pub fn emit<'a>(a: &RcCellSlice<'a>, b: &RcCellSlice<'a>) -> RcCellSlice<'a> {
-    a.longest_common_data_prefix(b)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
