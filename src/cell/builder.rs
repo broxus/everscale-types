@@ -179,6 +179,16 @@ impl<C: CellFamily> CellBuilder<C> {
         }
     }
 
+    /// Tries to store one bit in the cell,
+    /// returning `false` if there is not enough remaining capacity.
+    pub fn store_bit(&mut self, value: bool) -> bool {
+        if value {
+            self.store_bit_true()
+        } else {
+            self.store_bit_zero()
+        }
+    }
+
     /// Tries to store `u8` in the cell,
     /// returning `false` if there is not enough remaining capacity.
     pub fn store_u8(&mut self, value: u8) -> bool {

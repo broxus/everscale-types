@@ -835,7 +835,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     ///
     /// NOTE: Reading zero bits always succeeds,
     /// and reading more than 64 bits always fails.
-    pub fn get_uint(&mut self, offset: u16, mut bits: u16) -> Option<u64> {
+    pub fn get_uint(&self, offset: u16, mut bits: u16) -> Option<u64> {
         if bits == 0 {
             return Some(0);
         }
@@ -853,6 +853,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
             let r = index % 8;
             let q = (index / 8) as usize;
 
+            // SAFETY: remaining bits are at least enough for `data_len`
             unsafe {
                 let data_ptr = data.as_ptr().add(q);
                 let first_byte = *data_ptr & (0xff >> r);
@@ -1138,11 +1139,12 @@ mod tests {
             builder.build().unwrap()
         };
 
-        let mut slice = cell.as_slice();
+        let slice = cell.as_slice();
         assert_eq!(slice.get_uint(0, 3), Some(0b111));
         assert_eq!(slice.get_uint(0, 11), Some(0b11111010111));
         assert_eq!(slice.get_uint(1, 11), Some(0b11110101111));
         assert_eq!(slice.get_uint(8, 3), Some(0b111));
+        assert_eq!(slice.get_uint(0, 16), Some(0xfafa));
     }
 
     #[test]
@@ -1150,6 +1152,13 @@ mod tests {
         let cell = {
             let mut builder = RcCellBuilder::new();
             builder.store_zeros(10);
+            builder.build().unwrap()
+        };
+        assert_eq!(cell.as_slice().test_uniform(), Some(false));
+
+        let cell = {
+            let mut builder = RcCellBuilder::new();
+            builder.store_u16(123);
             builder.build().unwrap()
         };
         assert_eq!(cell.as_slice().test_uniform(), Some(false));

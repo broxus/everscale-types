@@ -57,6 +57,141 @@ where
     pub fn get<'a: 'b, 'b>(&'a self, key: CellSlice<'b, C>) -> Option<CellSlice<'a, C>> {
         hashmap_get(&self.0, N, key)
     }
+
+    pub fn iter<'a>(&'a self) -> HashmapIter<'a, C> {
+        HashmapIter::new(&self.0, N)
+    }
+
+    pub fn values<'a>(&'a self) -> HashmapValuesIter<'a, C> {
+        HashmapValuesIter::new(&self.0, N)
+    }
+}
+
+pub struct HashmapIter<'a, C: CellFamily> {
+    // TODO: replace `Vec` with on-stack stuff
+    segments: Vec<HashmapIterSegment<'a, C>>,
+}
+
+impl<'a, C: CellFamily> HashmapIter<'a, C> {
+    pub fn new(root: &'a Option<CellContainer<C>>, bit_len: u16) -> Self {
+        let mut segments = Vec::new();
+        if let Some(root) = root {
+            segments.push(HashmapIterSegment {
+                data: root.as_ref(),
+                remaining_bit_len: bit_len,
+                key: CellBuilder::<C>::new(),
+            });
+        }
+        Self { segments }
+    }
+}
+
+impl<'a, C> Iterator for HashmapIter<'a, C>
+where
+    for<'c> C: CellFamily + 'c,
+{
+    type Item = (CellBuilder<C>, CellSlice<'a, C>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(mut segment) = self.segments.pop() {
+            let mut data = segment.data.as_slice();
+            let prefix = read_label(&mut data, count_bits(segment.remaining_bit_len))?;
+            segment.remaining_bit_len -= prefix.remaining_bits();
+            if segment.remaining_bit_len == 0 {
+                return Some((segment.key, data));
+            }
+
+            let left_child = data.cell().reference(0)?;
+            let right_child = data.cell().reference(1)?;
+
+            self.segments.reserve(2);
+
+            self.segments.push(HashmapIterSegment {
+                data: right_child,
+                remaining_bit_len: segment.remaining_bit_len - 1,
+                key: {
+                    let mut key = segment.key.clone();
+                    key.store_bit_true();
+                    key
+                },
+            });
+
+            self.segments.push(HashmapIterSegment {
+                data: left_child,
+                remaining_bit_len: segment.remaining_bit_len - 1,
+                key: {
+                    segment.key.store_bit_zero();
+                    segment.key
+                },
+            });
+        }
+
+        None
+    }
+}
+
+struct HashmapIterSegment<'a, C: CellFamily> {
+    data: &'a dyn Cell<C>,
+    remaining_bit_len: u16,
+    key: CellBuilder<C>,
+}
+
+pub struct HashmapValuesIter<'a, C: CellFamily> {
+    // TODO: replace `Vec` with on-stack stuff
+    segments: Vec<HashmapValuesIterSegment<'a, C>>,
+}
+
+impl<'a, C: CellFamily> HashmapValuesIter<'a, C> {
+    pub fn new(root: &'a Option<CellContainer<C>>, bit_len: u16) -> Self {
+        let mut segments = Vec::new();
+        if let Some(root) = root {
+            segments.push(HashmapValuesIterSegment {
+                data: root.as_ref(),
+                remaining_bit_len: bit_len,
+            });
+        }
+        Self { segments }
+    }
+}
+
+impl<'a, C> Iterator for HashmapValuesIter<'a, C>
+where
+    for<'c> C: CellFamily + 'c,
+{
+    type Item = CellSlice<'a, C>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(mut segment) = self.segments.pop() {
+            let mut data = segment.data.as_slice();
+            let prefix = read_label(&mut data, count_bits(segment.remaining_bit_len))?;
+            segment.remaining_bit_len -= prefix.remaining_bits();
+            if segment.remaining_bit_len == 0 {
+                return Some(data);
+            }
+
+            let left_child = data.cell().reference(0)?;
+            let right_child = data.cell().reference(1)?;
+
+            self.segments.reserve(2);
+
+            self.segments.push(HashmapValuesIterSegment {
+                data: right_child,
+                remaining_bit_len: segment.remaining_bit_len - 1,
+            });
+
+            self.segments.push(HashmapValuesIterSegment {
+                data: left_child,
+                remaining_bit_len: segment.remaining_bit_len - 1,
+            });
+        }
+
+        None
+    }
+}
+
+struct HashmapValuesIterSegment<'a, C: CellFamily> {
+    data: &'a dyn Cell<C>,
+    remaining_bit_len: u16,
 }
 
 pub fn hashmap_get<'a: 'b, 'b, C>(
@@ -70,22 +205,31 @@ where
     let data = root.as_ref()?;
     let mut data = data.as_ref().as_slice();
 
+    // Read the key part written in the root cell
     let mut prefix = read_label(&mut data, count_bits(key_bit_len))?;
+
+    // Strip the key part from the specified key
     while let Some(stripped_key) = key.strip_data_prefix(&prefix) {
         if stripped_key.is_data_empty() {
-            break;
+            break; // break if all parts were collected
         } else if data.remaining_refs() < 2 {
-            return None;
+            return None; // break on leaf
         } else {
             key = stripped_key;
         }
 
+        // Load next child based on the next bit
         let child_index = key.load_bit()? as u8;
         data = data.cell().reference(child_index)?.as_slice();
+
+        // Reduce the remaining key bit len
         key_bit_len = key_bit_len.checked_sub(prefix.remaining_bits() + 1)?;
+
+        // Read the key part written in the child cell
         prefix = read_label(&mut data, count_bits(key_bit_len))?;
     }
 
+    // Return the last slice as data
     Some(data)
 }
 
@@ -294,5 +438,8 @@ mod tests {
             builder.build().unwrap()
         };
         println!("{}", value.display_tree());
+
+        let size = map.values().count();
+        println!("SIZE: {size}");
     }
 }
