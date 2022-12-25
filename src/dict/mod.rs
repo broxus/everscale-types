@@ -50,33 +50,74 @@ impl<C, const N: u16> HashmapE<C, N>
 where
     for<'c> C: CellFamily + 'c,
 {
+    /// Returns `true` if the map contains no elements.
     pub fn is_empty(&self) -> bool {
         self.0.is_none()
     }
 
+    /// Returns a `CellSlice` of the value corresponding to the key.
     pub fn get<'a: 'b, 'b>(&'a self, key: CellSlice<'b, C>) -> Option<CellSlice<'a, C>> {
         hashmap_get(&self.0, N, key)
     }
 
-    pub fn iter<'a>(&'a self) -> HashmapIter<'a, C> {
-        HashmapIter::new(&self.0, N)
+    /// Gets an iterator over the entries of the map, sorted by key.
+    /// The iterator element type is `(CellBuilder<C>, CellSlice<C>)`.
+    ///
+    /// # Performance
+    ///
+    /// In the current implementation, iterating over map builds a key
+    /// for each element. Use [`values`] if you don't need keys from an iterator.
+    ///
+    /// [`values`]: HashmapE::values
+    pub fn iter<'a>(&'a self) -> Iter<'a, C> {
+        Iter::new(&self.0, N)
     }
 
-    pub fn values<'a>(&'a self) -> HashmapValuesIter<'a, C> {
-        HashmapValuesIter::new(&self.0, N)
+    /// Gets an iterator over the keys of the map, in sorted order.
+    /// The iterator element type is `CellBuilder<C>`.
+    ///
+    /// # Performance
+    ///
+    /// In the current implementation, iterating over map builds a key
+    /// for each element. Use [`values`] if you don't need keys from an iterator.
+    ///
+    /// [`values`]: HashmapE::values
+    pub fn keys<'a>(&'a self) -> Keys<'a, C> {
+        Keys {
+            inner: Iter::new(&self.0, N),
+        }
+    }
+
+    /// Gets an iterator over the values of the map, in order by key.
+    /// The iterator element type is `CellSlice<C>`.
+    pub fn values<'a>(&'a self) -> Values<'a, C> {
+        Values::new(&self.0, N)
     }
 }
 
-pub struct HashmapIter<'a, C: CellFamily> {
+/// An iterator over the entries of a `HashmapE`.
+///
+/// This struct is created by the [`iter`] method on `HashmapE`. See its documentation for more.
+///
+/// [`iter`]: fn@crate::dict::HashmapE::iter
+pub struct Iter<'a, C: CellFamily> {
     // TODO: replace `Vec` with on-stack stuff
-    segments: Vec<HashmapIterSegment<'a, C>>,
+    segments: Vec<IterSegment<'a, C>>,
 }
 
-impl<'a, C: CellFamily> HashmapIter<'a, C> {
+impl<C: CellFamily> Clone for Iter<'_, C> {
+    fn clone(&self) -> Self {
+        Self {
+            segments: self.segments.clone(),
+        }
+    }
+}
+
+impl<'a, C: CellFamily> Iter<'a, C> {
     pub fn new(root: &'a Option<CellContainer<C>>, bit_len: u16) -> Self {
         let mut segments = Vec::new();
         if let Some(root) = root {
-            segments.push(HashmapIterSegment {
+            segments.push(IterSegment {
                 data: root.as_ref(),
                 remaining_bit_len: bit_len,
                 key: CellBuilder::<C>::new(),
@@ -86,7 +127,7 @@ impl<'a, C: CellFamily> HashmapIter<'a, C> {
     }
 }
 
-impl<'a, C> Iterator for HashmapIter<'a, C>
+impl<'a, C> Iterator for Iter<'a, C>
 where
     for<'c> C: CellFamily + 'c,
 {
@@ -106,7 +147,7 @@ where
 
             self.segments.reserve(2);
 
-            self.segments.push(HashmapIterSegment {
+            self.segments.push(IterSegment {
                 data: right_child,
                 remaining_bit_len: segment.remaining_bit_len - 1,
                 key: {
@@ -116,7 +157,7 @@ where
                 },
             });
 
-            self.segments.push(HashmapIterSegment {
+            self.segments.push(IterSegment {
                 data: left_child,
                 remaining_bit_len: segment.remaining_bit_len - 1,
                 key: {
@@ -130,22 +171,74 @@ where
     }
 }
 
-struct HashmapIterSegment<'a, C: CellFamily> {
+struct IterSegment<'a, C: CellFamily> {
     data: &'a dyn Cell<C>,
     remaining_bit_len: u16,
     key: CellBuilder<C>,
 }
 
-pub struct HashmapValuesIter<'a, C: CellFamily> {
-    // TODO: replace `Vec` with on-stack stuff
-    segments: Vec<HashmapValuesIterSegment<'a, C>>,
+impl<C: CellFamily> Clone for IterSegment<'_, C> {
+    fn clone(&self) -> Self {
+        Self {
+            data: self.data,
+            remaining_bit_len: self.remaining_bit_len,
+            key: self.key.clone(),
+        }
+    }
 }
 
-impl<'a, C: CellFamily> HashmapValuesIter<'a, C> {
-    pub fn new(root: &'a Option<CellContainer<C>>, bit_len: u16) -> Self {
+/// An iterator over the keys of a `HashmapE`.
+///
+/// This struct is created by the [`keys`] method on [`HashmapE`]. See its
+/// documentation for more.
+///
+/// [`keys`]: BTreeMap::keys
+pub struct Keys<'a, C: CellFamily> {
+    inner: Iter<'a, C>,
+}
+
+impl<C: CellFamily> Clone for Keys<'_, C> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<'a, C> Iterator for Keys<'a, C>
+where
+    for<'c> C: CellFamily + 'c,
+{
+    type Item = CellBuilder<C>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(self.inner.next()?.0)
+    }
+}
+
+/// An iterator over the values of a `HashmapE`.
+///
+/// This struct is created by the [`values`] method on [`HashmapE`]. See its documentation for more.
+///
+/// [`values`]: HashmapE::values
+pub struct Values<'a, C: CellFamily> {
+    // TODO: replace `Vec` with on-stack stuff
+    segments: Vec<ValuesSegment<'a, C>>,
+}
+
+impl<C: CellFamily> Clone for Values<'_, C> {
+    fn clone(&self) -> Self {
+        Self {
+            segments: self.segments.clone(),
+        }
+    }
+}
+
+impl<'a, C: CellFamily> Values<'a, C> {
+    fn new(root: &'a Option<CellContainer<C>>, bit_len: u16) -> Self {
         let mut segments = Vec::new();
         if let Some(root) = root {
-            segments.push(HashmapValuesIterSegment {
+            segments.push(ValuesSegment {
                 data: root.as_ref(),
                 remaining_bit_len: bit_len,
             });
@@ -154,7 +247,7 @@ impl<'a, C: CellFamily> HashmapValuesIter<'a, C> {
     }
 }
 
-impl<'a, C> Iterator for HashmapValuesIter<'a, C>
+impl<'a, C> Iterator for Values<'a, C>
 where
     for<'c> C: CellFamily + 'c,
 {
@@ -174,12 +267,12 @@ where
 
             self.segments.reserve(2);
 
-            self.segments.push(HashmapValuesIterSegment {
+            self.segments.push(ValuesSegment {
                 data: right_child,
                 remaining_bit_len: segment.remaining_bit_len - 1,
             });
 
-            self.segments.push(HashmapValuesIterSegment {
+            self.segments.push(ValuesSegment {
                 data: left_child,
                 remaining_bit_len: segment.remaining_bit_len - 1,
             });
@@ -189,9 +282,19 @@ where
     }
 }
 
-struct HashmapValuesIterSegment<'a, C: CellFamily> {
+struct ValuesSegment<'a, C: CellFamily> {
     data: &'a dyn Cell<C>,
     remaining_bit_len: u16,
+}
+
+impl<C: CellFamily> Copy for ValuesSegment<'_, C> {}
+impl<C: CellFamily> Clone for ValuesSegment<'_, C> {
+    fn clone(&self) -> Self {
+        Self {
+            data: self.data,
+            remaining_bit_len: self.remaining_bit_len,
+        }
+    }
 }
 
 pub fn hashmap_get<'a: 'b, 'b, C>(

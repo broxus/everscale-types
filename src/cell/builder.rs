@@ -653,7 +653,7 @@ where
     ///
     /// See [`default_finalizer`]
     ///
-    /// [`default_finalizer`]: fn@crate::cell::finalizer::DefaultFinalizer::default_finalizer
+    /// [`default_finalizer`]: fn@crate::cell::DefaultFinalizer::default_finalizer
     pub fn build(self) -> Option<CellContainer<C>> {
         self.build_ext(&mut C::default_finalizer())
     }
