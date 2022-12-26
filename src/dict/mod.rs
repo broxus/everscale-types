@@ -76,7 +76,7 @@ where
     /// for each element. Use [`values`] if you don't need keys from an iterator.
     ///
     /// [`values`]: HashmapE::values
-    pub fn iter<'a>(&'a self) -> Iter<'a, C> {
+    pub fn iter(&'_ self) -> Iter<'_, C> {
         Iter::new(&self.0, N)
     }
 
@@ -92,7 +92,7 @@ where
     /// for each element. Use [`values`] if you don't need keys from an iterator.
     ///
     /// [`values`]: HashmapE::values
-    pub fn keys<'a>(&'a self) -> Keys<'a, C> {
+    pub fn keys(&'_ self) -> Keys<'_, C> {
         Keys {
             inner: Iter::new(&self.0, N),
         }
@@ -103,7 +103,7 @@ where
     ///
     /// If the map is invalid, finishes after the first invalid element,
     /// returning an error.
-    pub fn values<'a>(&'a self) -> Values<'a, C> {
+    pub fn values(&'_ self) -> Values<'_, C> {
         Values::new(&self.0, N)
     }
 }

@@ -281,9 +281,9 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     pub fn strip_data_prefix(&self, prefix: &CellSlice<'a, C>) -> Option<CellSlice<'a, C>> {
         let prefix_len = prefix.remaining_bits();
         if prefix_len == 0 {
-            return Some(*self);
+            Some(*self)
         } else if self.remaining_bits() < prefix_len {
-            return None;
+            None
         } else {
             let mut result = *self;
             let lcp = self.longest_common_data_prefix_impl(prefix, prefix_len);
