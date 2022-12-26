@@ -460,7 +460,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
             let target = ((first_byte >> (7 - r)) & 1) * u8::MAX;
             let first_byte_mask: u8 = 0xff >> r;
-            let last_byte_mask: u8 = 0xff << (8 - (remaining_bits + r) % 8);
+            let last_byte_mask: u8 = 0xff << ((8 - (remaining_bits + r) % 8) % 8);
 
             if r + remaining_bits <= 8 {
                 // Special case if all remaining_bits are in the first byte
@@ -1038,14 +1038,17 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 mod tests {
     use crate::{RcCell, RcCellBuilder, RcCellSlice};
 
-    fn build_cell(slice: RcCellSlice) -> RcCell {
+    fn build_cell<F: FnOnce(&mut RcCellBuilder) -> bool>(f: F) -> RcCell {
         let mut builder = RcCellBuilder::new();
-        builder.store_slice(&slice);
+        assert!(f(&mut builder));
         builder.build().unwrap()
     }
 
     fn print_slice(name: &str, slice: RcCellSlice) {
-        println!("{name}: {}", build_cell(slice).display_tree());
+        println!(
+            "{name}: {}",
+            build_cell(|b| b.store_slice(&slice)).display_tree()
+        );
     }
 
     #[test]
@@ -1077,22 +1080,12 @@ mod tests {
 
     #[test]
     fn split_data_prefix() {
-        let cell1 = {
-            let mut builder = RcCellBuilder::new();
-            builder.store_u16(0xabcd);
-            builder.store_bit_zero();
-            builder.store_u16(0xffff);
-            builder.build().unwrap()
-        };
+        let cell1 =
+            build_cell(|b| b.store_u16(0xabcd) && b.store_bit_zero() && b.store_u16(0xffff));
         let mut slice1 = cell1.as_slice();
         slice1.try_advance(4, 0);
 
-        let cell2 = {
-            let mut builder = RcCellBuilder::new();
-            builder.store_uint(0xbcd, 12);
-            builder.store_bit_zero();
-            builder.build().unwrap()
-        };
+        let cell2 = build_cell(|b| b.store_uint(0xbcd, 12) && b.store_bit_zero());
 
         print_slice("A", slice1);
         print_slice("B", cell2.as_slice());
@@ -1107,25 +1100,17 @@ mod tests {
 
     #[test]
     fn longest_common_data_prefix() {
-        let cell1 = {
-            let mut builder = RcCellBuilder::new();
-            builder.store_u64(0xffffffff00000000);
-            builder.build().unwrap()
-        };
+        let cell1 = build_cell(|b| b.store_u64(0xffffffff00000000));
         let mut slice1 = cell1.as_slice();
         slice1.try_advance(1, 0);
 
-        let cell2 = {
-            let mut builder = RcCellBuilder::new();
-            builder.store_u64(0xfffffff000000000);
-            builder.build().unwrap()
-        };
+        let cell2 = build_cell(|b| b.store_u64(0xfffffff000000000));
         let mut slice2 = cell2.as_slice();
         slice2.try_advance(6, 0);
 
         let prefix = slice1.longest_common_data_prefix(&slice2);
 
-        let prefix = build_cell(prefix);
+        let prefix = build_cell(|b| b.store_slice(&prefix));
         println!("{}", prefix.display_root());
         assert_eq!(prefix.data(), [0xff, 0xff, 0xfe]);
         assert_eq!(prefix.bit_len(), 22);
@@ -1133,11 +1118,7 @@ mod tests {
 
     #[test]
     fn get_uint() {
-        let cell = {
-            let mut builder = RcCellBuilder::new();
-            builder.store_u64(0xfafafafafafafafa);
-            builder.build().unwrap()
-        };
+        let cell = build_cell(|b| b.store_u64(0xfafafafafafafafa));
 
         let slice = cell.as_slice();
         assert_eq!(slice.get_uint(0, 3), Some(0b111));
@@ -1149,42 +1130,25 @@ mod tests {
 
     #[test]
     fn test_uniform() {
-        let cell = {
-            let mut builder = RcCellBuilder::new();
-            builder.store_zeros(10);
-            builder.build().unwrap()
-        };
+        let cell = build_cell(|b| b.store_zeros(10));
         assert_eq!(cell.as_slice().test_uniform(), Some(false));
 
-        let cell = {
-            let mut builder = RcCellBuilder::new();
-            builder.store_u16(123);
-            builder.build().unwrap()
-        };
-        assert_eq!(cell.as_slice().test_uniform(), Some(false));
+        let cell = build_cell(|b| b.store_u8(0xff));
+        assert_eq!(cell.as_slice().test_uniform(), Some(true));
 
-        let cell = {
-            let mut builder = RcCellBuilder::new();
-            builder.store_zeros(9);
-            builder.store_bit_true();
-            builder.build().unwrap()
-        };
+        let cell = build_cell(|b| b.store_u8(123));
         assert_eq!(cell.as_slice().test_uniform(), None);
 
-        let cell = {
-            let mut builder = RcCellBuilder::new();
-            builder.store_zeros(20);
-            builder.store_bit_true();
-            builder.build().unwrap()
-        };
+        let cell = build_cell(|b| b.store_u16(123));
         assert_eq!(cell.as_slice().test_uniform(), None);
 
-        let cell = {
-            let mut builder = RcCellBuilder::new();
-            builder.store_bit_zero();
-            builder.store_uint(u64::MAX, 29);
-            builder.build().unwrap()
-        };
+        let cell = build_cell(|b| b.store_zeros(9) && b.store_bit_true());
+        assert_eq!(cell.as_slice().test_uniform(), None);
+
+        let cell = build_cell(|b| b.store_zeros(20) && b.store_bit_true());
+        assert_eq!(cell.as_slice().test_uniform(), None);
+
+        let cell = build_cell(|b| b.store_bit_zero() && b.store_uint(u64::MAX, 29));
         let mut slice = cell.as_slice();
         slice.try_advance(1, 0);
         assert_eq!(slice.test_uniform(), Some(true));
