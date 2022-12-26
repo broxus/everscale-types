@@ -1,4 +1,5 @@
 use crate::cell::*;
+use crate::util::unlikely;
 
 pub struct HashmapE<C: CellFamily, const N: u16>(Option<CellContainer<C>>);
 
@@ -56,12 +57,18 @@ where
     }
 
     /// Returns a `CellSlice` of the value corresponding to the key.
-    pub fn get<'a: 'b, 'b>(&'a self, key: CellSlice<'b, C>) -> Option<CellSlice<'a, C>> {
+    pub fn get<'a: 'b, 'b>(
+        &'a self,
+        key: CellSlice<'b, C>,
+    ) -> Result<Option<CellSlice<'a, C>>, Error> {
         hashmap_get(&self.0, N, key)
     }
 
     /// Gets an iterator over the entries of the map, sorted by key.
-    /// The iterator element type is `(CellBuilder<C>, CellSlice<C>)`.
+    /// The iterator element type is `Result<(CellBuilder<C>, CellSlice<C>)>`.
+    ///
+    /// If the map is invalid, finishes after the first invalid element,
+    /// returning an error.
     ///
     /// # Performance
     ///
@@ -74,7 +81,10 @@ where
     }
 
     /// Gets an iterator over the keys of the map, in sorted order.
-    /// The iterator element type is `CellBuilder<C>`.
+    /// The iterator element type is `Result<CellBuilder<C>>`.
+    ///
+    /// If the map is invalid, finishes after the first invalid element,
+    /// returning an error.
     ///
     /// # Performance
     ///
@@ -89,7 +99,10 @@ where
     }
 
     /// Gets an iterator over the values of the map, in order by key.
-    /// The iterator element type is `CellSlice<C>`.
+    /// The iterator element type is `Result<CellSlice<C>>`.
+    ///
+    /// If the map is invalid, finishes after the first invalid element,
+    /// returning an error.
     pub fn values<'a>(&'a self) -> Values<'a, C> {
         Values::new(&self.0, N)
     }
@@ -103,12 +116,14 @@ where
 pub struct Iter<'a, C: CellFamily> {
     // TODO: replace `Vec` with on-stack stuff
     segments: Vec<IterSegment<'a, C>>,
+    broken: bool,
 }
 
 impl<C: CellFamily> Clone for Iter<'_, C> {
     fn clone(&self) -> Self {
         Self {
             segments: self.segments.clone(),
+            broken: self.broken,
         }
     }
 }
@@ -116,6 +131,8 @@ impl<C: CellFamily> Clone for Iter<'_, C> {
 impl<'a, C: CellFamily> Iter<'a, C> {
     pub fn new(root: &'a Option<CellContainer<C>>, bit_len: u16) -> Self {
         let mut segments = Vec::new();
+
+        // Push root segment if any
         if let Some(root) = root {
             segments.push(IterSegment {
                 data: root.as_ref(),
@@ -123,7 +140,17 @@ impl<'a, C: CellFamily> Iter<'a, C> {
                 key: CellBuilder::<C>::new(),
             });
         }
-        Self { segments }
+
+        Self {
+            segments,
+            broken: false,
+        }
+    }
+
+    #[inline]
+    fn finish(&mut self, err: Error) -> Error {
+        self.broken = true;
+        err
     }
 }
 
@@ -131,22 +158,70 @@ impl<'a, C> Iterator for Iter<'a, C>
 where
     for<'c> C: CellFamily + 'c,
 {
-    type Item = (CellBuilder<C>, CellSlice<'a, C>);
+    type Item = Result<(CellBuilder<C>, CellSlice<'a, C>), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.broken {
+            return None;
+        }
+
         while let Some(mut segment) = self.segments.pop() {
             let mut data = segment.data.as_slice();
-            let prefix = read_label(&mut data, count_bits(segment.remaining_bit_len))?;
-            segment.remaining_bit_len -= prefix.remaining_bits();
-            if segment.remaining_bit_len == 0 {
-                return Some((segment.key, data));
-            }
 
-            let left_child = data.cell().reference(0)?;
-            let right_child = data.cell().reference(1)?;
+            // Read the next key part from the latest segment
+            let prefix = match read_label(&mut data, count_bits(segment.remaining_bit_len)) {
+                Some(prefix) => prefix,
+                None => return Some(Err(self.finish(Error::CellUnderflow))),
+            };
 
+            // Check remaining bits
+            segment.remaining_bit_len = match segment
+                .remaining_bit_len
+                .checked_sub(prefix.remaining_bits())
+            {
+                // Well-formed `HashmapE` should have the required number of bits
+                // for each value
+                Some(remaining) => {
+                    // Try to store the next prefix into the segment key
+                    if unlikely(!segment.key.store_slice_data(&prefix)) {
+                        return Some(Err(self.finish(Error::CellOverflow)));
+                    } else if remaining == 0 {
+                        // Return the next entry if there are no remaining bits to read
+                        return Some(Ok((segment.key, data)));
+                    } else {
+                        // Continue reading
+                        remaining
+                    }
+                }
+                None => return Some(Err(self.finish(Error::CellUnderflow))),
+            };
+
+            // Trying to load the left child cell
+            let left_child = match data.cell().reference(0) {
+                Some(child) => {
+                    // Handle pruned branch access
+                    if unlikely(child.descriptor().is_pruned_branch()) {
+                        return Some(Err(self.finish(Error::PrunedBranchAccess)));
+                    }
+                    child
+                }
+                None => return Some(Err(self.finish(Error::CellUnderflow))),
+            };
+
+            // Trying to load the right child cell
+            let right_child = match data.cell().reference(1) {
+                Some(child) => {
+                    // Handle pruned branch access
+                    if unlikely(child.descriptor().is_pruned_branch()) {
+                        return Some(Err(self.finish(Error::PrunedBranchAccess)));
+                    }
+                    child
+                }
+                None => return Some(Err(self.finish(Error::CellUnderflow))),
+            };
+
+            // Push cells in reverse order
             self.segments.reserve(2);
-
             self.segments.push(IterSegment {
                 data: right_child,
                 remaining_bit_len: segment.remaining_bit_len - 1,
@@ -156,7 +231,6 @@ where
                     key
                 },
             });
-
             self.segments.push(IterSegment {
                 data: left_child,
                 remaining_bit_len: segment.remaining_bit_len - 1,
@@ -167,6 +241,7 @@ where
             });
         }
 
+        // No segments left
         None
     }
 }
@@ -209,10 +284,13 @@ impl<'a, C> Iterator for Keys<'a, C>
 where
     for<'c> C: CellFamily + 'c,
 {
-    type Item = CellBuilder<C>;
+    type Item = Result<CellBuilder<C>, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        Some(self.inner.next()?.0)
+        match self.inner.next()? {
+            Ok((key, _)) => Some(Ok(key)),
+            Err(e) => Some(Err(e)),
+        }
     }
 }
 
@@ -224,12 +302,14 @@ where
 pub struct Values<'a, C: CellFamily> {
     // TODO: replace `Vec` with on-stack stuff
     segments: Vec<ValuesSegment<'a, C>>,
+    broken: bool,
 }
 
 impl<C: CellFamily> Clone for Values<'_, C> {
     fn clone(&self) -> Self {
         Self {
             segments: self.segments.clone(),
+            broken: self.broken,
         }
     }
 }
@@ -243,7 +323,16 @@ impl<'a, C: CellFamily> Values<'a, C> {
                 remaining_bit_len: bit_len,
             });
         }
-        Self { segments }
+        Self {
+            segments,
+            broken: false,
+        }
+    }
+
+    #[inline]
+    fn finish(&mut self, err: Error) -> Error {
+        self.broken = true;
+        err
     }
 }
 
@@ -251,27 +340,66 @@ impl<'a, C> Iterator for Values<'a, C>
 where
     for<'c> C: CellFamily + 'c,
 {
-    type Item = CellSlice<'a, C>;
+    type Item = Result<CellSlice<'a, C>, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.broken {
+            return None;
+        }
+
         while let Some(mut segment) = self.segments.pop() {
             let mut data = segment.data.as_slice();
-            let prefix = read_label(&mut data, count_bits(segment.remaining_bit_len))?;
-            segment.remaining_bit_len -= prefix.remaining_bits();
-            if segment.remaining_bit_len == 0 {
-                return Some(data);
-            }
 
-            let left_child = data.cell().reference(0)?;
-            let right_child = data.cell().reference(1)?;
+            // Read the next key part from the latest segment
+            let prefix = match read_label(&mut data, count_bits(segment.remaining_bit_len)) {
+                Some(prefix) => prefix,
+                None => return Some(Err(self.finish(Error::CellUnderflow))),
+            };
 
+            // Check remaining bits
+            segment.remaining_bit_len = match segment
+                .remaining_bit_len
+                .checked_sub(prefix.remaining_bits())
+            {
+                // Return the next value if there are no remaining bits to read
+                Some(0) => return Some(Ok(data)),
+                // Continue reading
+                Some(bit_len) => bit_len,
+                // Well-formed `HashmapE` should have the required number of bits
+                // for each value
+                None => return Some(Err(self.finish(Error::CellUnderflow))),
+            };
+
+            // Trying to load the left child cell
+            let left_child = match data.cell().reference(0) {
+                Some(child) => {
+                    // Handle pruned branch access
+                    if unlikely(child.descriptor().is_pruned_branch()) {
+                        return Some(Err(self.finish(Error::PrunedBranchAccess)));
+                    }
+                    child
+                }
+                None => return Some(Err(self.finish(Error::CellUnderflow))),
+            };
+
+            // Trying to load the right child cell
+            let right_child = match data.cell().reference(1) {
+                Some(child) => {
+                    // Handle pruned branch access
+                    if unlikely(child.descriptor().is_pruned_branch()) {
+                        return Some(Err(self.finish(Error::PrunedBranchAccess)));
+                    }
+                    child
+                }
+                None => return Some(Err(self.finish(Error::CellUnderflow))),
+            };
+
+            // Push cells in reverse order
             self.segments.reserve(2);
-
             self.segments.push(ValuesSegment {
                 data: right_child,
                 remaining_bit_len: segment.remaining_bit_len - 1,
             });
-
             self.segments.push(ValuesSegment {
                 data: left_child,
                 remaining_bit_len: segment.remaining_bit_len - 1,
@@ -301,39 +429,60 @@ pub fn hashmap_get<'a: 'b, 'b, C>(
     root: &'a Option<CellContainer<C>>,
     mut key_bit_len: u16,
     mut key: CellSlice<'b, C>,
-) -> Option<CellSlice<'a, C>>
+) -> Result<Option<CellSlice<'a, C>>, Error>
 where
     for<'c> C: CellFamily + 'c,
 {
-    let data = root.as_ref()?;
+    let data = match root.as_ref() {
+        Some(data) => data,
+        None => return Ok(None),
+    };
     let mut data = data.as_ref().as_slice();
 
     // Read the key part written in the root cell
-    let mut prefix = read_label(&mut data, count_bits(key_bit_len))?;
+    let mut prefix = match read_label(&mut data, count_bits(key_bit_len)) {
+        Some(prefix) => prefix,
+        None => return Err(Error::CellUnderflow),
+    };
 
     // Strip the key part from the specified key
     while let Some(stripped_key) = key.strip_data_prefix(&prefix) {
         if stripped_key.is_data_empty() {
             break; // break if all parts were collected
         } else if data.remaining_refs() < 2 {
-            return None; // break on leaf
+            return Ok(None); // break on leaf
         } else {
             key = stripped_key;
         }
 
         // Load next child based on the next bit
-        let child_index = key.load_bit()? as u8;
-        data = data.cell().reference(child_index)?.as_slice();
+        let child_index = match key.load_bit() {
+            Some(index) => index as u8,
+            None => return Err(Error::CellUnderflow),
+        };
+        data = match data.cell().reference(child_index) {
+            Some(child) if unlikely(child.descriptor().is_pruned_branch()) => {
+                return Err(Error::PrunedBranchAccess)
+            }
+            Some(child) => child.as_slice(),
+            None => return Err(Error::CellUnderflow),
+        };
 
         // Reduce the remaining key bit len
-        key_bit_len = key_bit_len.checked_sub(prefix.remaining_bits() + 1)?;
+        key_bit_len = match key_bit_len.checked_sub(prefix.remaining_bits() + 1) {
+            Some(bit_len) => bit_len,
+            None => return Err(Error::CellUnderflow),
+        };
 
         // Read the key part written in the child cell
-        prefix = read_label(&mut data, count_bits(key_bit_len))?;
+        prefix = match read_label(&mut data, count_bits(key_bit_len)) {
+            Some(prefix) => prefix,
+            None => return Err(Error::CellUnderflow),
+        };
     }
 
     // Return the last slice as data
-    Some(data)
+    Ok(Some(data))
 }
 
 fn count_bits(key_len: u16) -> u16 {
@@ -484,6 +633,16 @@ where
     Some(cell.as_slice().get_prefix(len, 0))
 }
 
+#[derive(Debug, Copy, Clone, thiserror::Error)]
+pub enum Error {
+    #[error("cell underflow")]
+    CellUnderflow,
+    #[error("cell overflow")]
+    CellOverflow,
+    #[error("pruned branch access")]
+    PrunedBranchAccess,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -524,7 +683,6 @@ mod tests {
     fn hashmap_get() {
         let boc =
             RcBoc::decode_base64("te6ccgECOwEAASoAAQHAAQIBIBACAgEgAwMCASAEBAIBIAUFAgEgBgYCASAHBwIBIAgIAgEgCQkCASAoCgIBIAsZAgEgDBsCASArDQIBIA4fAgEgLQ8CASAuIQIBIBERAgEgEhICASATEwIBIBQUAgEgFRUCASAWFgIBIBcXAgEgKBgCASAaGQIBIBsbAgEgHRsCASAcHAIBIB8fAgEgKx4CASAiHwIBICAgAgEgISECASAlJQIBIC0jAgEgLiQCASAvJQIBIDMmAgFiNicCAUg4OAIBICkpAgEgKioCASArKwIBICwsAgEgLS0CASAuLgIBIC8vAgEgMzACAWI2MQIBIDcyAAnWAAAmbwIBIDQ0AgEgNTUCASA2NgIBIDc3AgEgODgCASA5OQIBIDo6AAnQAAAmbw==").unwrap();
-        println!("{}", boc.reference(0).unwrap().display_root());
 
         let map = HashmapE::<RcCellFamily, 32>::load_from(&mut boc.as_slice()).unwrap();
 
@@ -533,7 +691,7 @@ mod tests {
             builder.store_u32(0x123);
             builder.build().unwrap()
         };
-        let value = map.get(key.as_slice()).unwrap();
+        let value = map.get(key.as_slice()).unwrap().unwrap();
 
         let value = {
             let mut builder = RcCellBuilder::new();
@@ -541,8 +699,24 @@ mod tests {
             builder.build().unwrap()
         };
         println!("{}", value.display_tree());
+    }
+
+    #[test]
+    fn hashmap_iter() {
+        let boc = RcBoc::decode_base64("te6ccgEBFAEAeAABAcABAgPOQAUCAgHUBAMACQAAAI3gAAkAAACjoAIBIA0GAgEgCgcCASAJCAAJAAAAciAACQAAAIfgAgEgDAsACQAAAFZgAAkAAABsIAIBIBEOAgEgEA8ACQAAADqgAAkAAABQYAIBIBMSAAkAAAAe4AAJAAAAv2A=").unwrap();
+        let map = HashmapE::<RcCellFamily, 32>::load_from(&mut boc.as_slice()).unwrap();
 
         let size = map.values().count();
-        println!("SIZE: {size}");
+        assert_eq!(size, 10);
+
+        for (i, entry) in map.iter().enumerate() {
+            let (key, _) = entry.unwrap();
+
+            let key = {
+                let key_cell = key.build().unwrap();
+                key_cell.as_slice().load_uint(key_cell.bit_len()).unwrap()
+            };
+            assert_eq!(key, i as u64);
+        }
     }
 }

@@ -471,9 +471,15 @@ impl CellDescriptor {
         self.d1 & Self::IS_EXOTIC_MASK != 0
     }
 
+    /// Returns whether this cell is a pruned branch cell
+    #[inline(always)]
+    pub const fn is_pruned_branch(self) -> bool {
+        self.is_exotic() && self.reference_count() == 0 && !self.level_mask().is_empty()
+    }
+
     /// Returns whether this cell refers to some external data.
     #[inline(always)]
-    pub fn is_absent(self) -> bool {
+    pub const fn is_absent(self) -> bool {
         self.d1 == (Self::REF_COUNT_MASK | Self::IS_EXOTIC_MASK)
     }
 
