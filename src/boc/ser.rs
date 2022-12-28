@@ -1,11 +1,12 @@
-use rustc_hash::FxHashMap;
+use std::collections::HashMap;
+use std::hash::BuildHasher;
 
 use super::BocTag;
 use crate::cell::{Cell, CellDescriptor, CellFamily, CellHash};
 
-pub struct BocHeader<'a, C> {
+pub struct BocHeader<'a, C, S = ahash::RandomState> {
     root_rev_indices: Vec<u32>,
-    rev_indices: FxHashMap<CellHash, u32>,
+    rev_indices: HashMap<CellHash, u32, S>,
     rev_cells: Vec<&'a dyn Cell<C>>,
     total_data_size: u64,
     reference_count: u64,
@@ -14,7 +15,10 @@ pub struct BocHeader<'a, C> {
     include_crc: bool,
 }
 
-impl<'a, C: CellFamily> BocHeader<'a, C> {
+impl<'a, C: CellFamily, S> BocHeader<'a, C, S>
+where
+    S: BuildHasher + Default,
+{
     pub fn new(root: &'a dyn Cell<C>) -> Self {
         let mut res = Self {
             root_rev_indices: Default::default(),
@@ -29,7 +33,12 @@ impl<'a, C: CellFamily> BocHeader<'a, C> {
         res.add_root(root);
         res
     }
+}
 
+impl<'a, C: CellFamily, S> BocHeader<'a, C, S>
+where
+    S: BuildHasher,
+{
     pub fn add_root(&mut self, root: &'a dyn Cell<C>) {
         let root_rev_index = self.fill(root);
         self.root_rev_indices.push(root_rev_index);

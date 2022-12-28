@@ -10,10 +10,10 @@ include = ["src/**/*.rs", "LICENSE-*", "README.md"]
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+ahash = "0.8"
 base64 = { version = "0.13", optional = true }
 hex = "0.4"
 once_cell = "1.16"
-rustc-hash = "1.1.0"
 sha2 = "0.10"
 smallvec = { version = "1.9", features = ["union"] }
 thiserror = "1.0"

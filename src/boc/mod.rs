@@ -51,14 +51,14 @@ impl<C: CellFamily> Boc<C> {
     // TODO: somehow use Borrow with GATs
     pub fn encode(cell: &dyn Cell<C>) -> Vec<u8> {
         let mut result = Vec::new();
-        ser::BocHeader::new(cell).encode(&mut result);
+        ser::BocHeader::<C>::new(cell).encode(&mut result);
         result
     }
 
     // TODO: somehow use Borrow with GATs
     pub fn encode_pair((cell1, cell2): (&dyn Cell<C>, &dyn Cell<C>)) -> Vec<u8> {
         let mut result = Vec::new();
-        let mut encoder = ser::BocHeader::new(cell1);
+        let mut encoder = ser::BocHeader::<C>::new(cell1);
         encoder.add_root(cell2);
         encoder.encode(&mut result);
         result

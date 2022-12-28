@@ -428,7 +428,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     /// let non_uniform_cell = {
     ///     let mut builder = RcCellBuilder::new();
     ///     builder.store_zeros(9);
-    ///     builder.store_bit_true();
+    ///     builder.store_bit_one();
     ///     builder.build().unwrap()
     /// };
     /// assert_eq!(non_uniform_cell.as_slice().test_uniform(), None);

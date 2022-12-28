@@ -1,4 +1,5 @@
-use rustc_hash::{FxHashMap, FxHashSet};
+use std::collections::{HashMap, HashSet};
+use std::hash::BuildHasher;
 
 use super::make_pruned_branch;
 use crate::cell::*;
@@ -84,7 +85,33 @@ impl<C: CellFamily> MerkleProof<C> {
     pub const BITS: u16 = 8 + 256 + 16;
     pub const REFS: u8 = 1;
 
-    pub fn create<'a, F>(root: &'a dyn Cell<C>, f: F) -> MerkleProofBuilder<'a, C>
+    pub fn create<'a, F, S>(root: &'a dyn Cell<C>, f: F) -> MerkleProofBuilder<'a, C>
+    where
+        F: FnMut(&CellHash) -> bool + 'a,
+    {
+        MerkleProofBuilder::new(root, f)
+    }
+
+    pub fn create_for_cell<'a>(
+        root: &'a dyn Cell<C>,
+        child_hash: &'a CellHash,
+    ) -> MerkleProofBuilder<'a, C> {
+        MerkleProofBuilder::new_for_cell(root, child_hash)
+    }
+}
+
+pub struct MerkleProofBuilder<'a, C: CellFamily, S = ahash::RandomState> {
+    root: &'a dyn Cell<C>,
+    predicate: Box<dyn FnMut(&CellHash) -> bool + 'a>,
+    cells: HashMap<CellHash, CellContainer<C>, S>,
+    pruned_branches: Option<&'a mut HashSet<CellHash, S>>,
+}
+
+impl<'a, C: CellFamily, S> MerkleProofBuilder<'a, C, S>
+where
+    S: BuildHasher + Default,
+{
+    pub fn new<F>(root: &'a dyn Cell<C>, f: F) -> Self
     where
         F: FnMut(&CellHash) -> bool + 'a,
     {
@@ -96,10 +123,7 @@ impl<C: CellFamily> MerkleProof<C> {
         }
     }
 
-    pub fn create_for_cell<'a>(
-        root: &'a dyn Cell<C>,
-        child_hash: &'a CellHash,
-    ) -> MerkleProofBuilder<'a, C> {
+    pub fn new_for_cell(root: &'a dyn Cell<C>, child_hash: &'a CellHash) -> Self {
         let repr_hash = *root.repr_hash();
         MerkleProofBuilder {
             root,
@@ -110,15 +134,11 @@ impl<C: CellFamily> MerkleProof<C> {
     }
 }
 
-pub struct MerkleProofBuilder<'a, C: CellFamily> {
-    root: &'a dyn Cell<C>,
-    predicate: Box<dyn FnMut(&CellHash) -> bool + 'a>,
-    cells: FxHashMap<CellHash, CellContainer<C>>,
-    pruned_branches: Option<&'a mut FxHashSet<CellHash>>,
-}
-
-impl<'a, C: CellFamily> MerkleProofBuilder<'a, C> {
-    pub fn track_pruned_branches(mut self, pruned_branches: &'a mut FxHashSet<CellHash>) -> Self {
+impl<'a, C: CellFamily, S> MerkleProofBuilder<'a, C, S>
+where
+    S: BuildHasher,
+{
+    pub fn track_pruned_branches(mut self, pruned_branches: &'a mut HashSet<CellHash, S>) -> Self {
         self.pruned_branches = Some(pruned_branches);
         self
     }
@@ -178,7 +198,10 @@ impl<'a, C: CellFamily> MerkleProofBuilder<'a, C> {
     }
 }
 
-impl<'a, C: DefaultFinalizer> MerkleProofBuilder<'a, C> {
+impl<'a, C: DefaultFinalizer, S> MerkleProofBuilder<'a, C, S>
+where
+    S: BuildHasher,
+{
     pub fn build(self) -> Option<MerkleProof<C>> {
         self.build_ext(&mut C::default_finalizer())
     }
