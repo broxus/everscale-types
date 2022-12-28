@@ -1173,10 +1173,10 @@ mod tests {
         let cell = build_cell(|b| b.store_u16(123));
         assert_eq!(cell.as_slice().test_uniform(), None);
 
-        let cell = build_cell(|b| b.store_zeros(9) && b.store_bit_true());
+        let cell = build_cell(|b| b.store_zeros(9) && b.store_bit_one());
         assert_eq!(cell.as_slice().test_uniform(), None);
 
-        let cell = build_cell(|b| b.store_zeros(20) && b.store_bit_true());
+        let cell = build_cell(|b| b.store_zeros(20) && b.store_bit_one());
         assert_eq!(cell.as_slice().test_uniform(), None);
 
         let cell = build_cell(|b| b.store_bit_zero() && b.store_uint(u64::MAX, 29));

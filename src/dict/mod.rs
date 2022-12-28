@@ -18,7 +18,7 @@ impl<C: CellFamily, const N: u16> Store<C> for HashmapE<C, N> {
     fn store_into(&self, b: &mut CellBuilder<C>) -> bool {
         match &self.0 {
             None => b.store_bit_zero(),
-            Some(cell) => b.store_bit_true() && b.store_reference(cell.clone()),
+            Some(cell) => b.store_bit_one() && b.store_reference(cell.clone()),
         }
     }
 }
@@ -338,7 +338,7 @@ where
                 remaining_bit_len: segment.remaining_bit_len - 1,
                 key: {
                     let mut key = segment.key.clone();
-                    key.store_bit_true();
+                    key.store_bit_one();
                     key
                 },
             });
@@ -970,7 +970,7 @@ fn write_hml_long<C: CellFamily>(
     bits_for_len: u16,
     label: &mut CellBuilder<C>,
 ) -> bool {
-    label.store_bit_true()
+    label.store_bit_one()
         && label.store_bit_zero()
         && label.store_uint(key.remaining_bits() as u64, bits_for_len)
         && label.store_slice_data(key)
@@ -1042,7 +1042,7 @@ mod tests {
         let key = {
             let mut builder = RcCellBuilder::new();
             builder.store_zeros(5);
-            builder.store_bit_true();
+            builder.store_bit_one();
             builder.build().unwrap()
         };
 
@@ -1111,7 +1111,7 @@ mod tests {
 
     #[test]
     fn hashmap_set_complex() {
-        let value = build_cell(|b| b.store_bit_true());
+        let value = build_cell(|b| b.store_bit_one());
 
         let mut map = HashmapE::<RcCellFamily, 32>::new();
         for i in 0..520 {
@@ -1130,6 +1130,64 @@ mod tests {
             }
             assert_eq!(total, i + 1);
         }
+    }
+
+    #[test]
+    fn hashmap_replace() {
+        let mut map = HashmapE::<RcCellFamily, 32>::new();
+
+        //
+        map.replace(
+            build_cell(|b| b.store_u32(123)).as_slice(),
+            build_cell(|b| b.store_bit_zero()).as_slice(),
+        )
+        .unwrap();
+        assert!(!map
+            .contains_key(build_cell(|b| b.store_u32(123)).as_slice())
+            .unwrap());
+
+        //
+        map.set(
+            build_cell(|b| b.store_u32(123)).as_slice(),
+            build_cell(|b| b.store_bit_zero()).as_slice(),
+        )
+        .unwrap();
+        map.replace(
+            build_cell(|b| b.store_u32(123)).as_slice(),
+            build_cell(|b| b.store_bit_one()).as_slice(),
+        )
+        .unwrap();
+
+        let mut value = map
+            .get(build_cell(|b| b.store_u32(123)).as_slice())
+            .unwrap()
+            .unwrap();
+        assert_eq!(value.remaining_bits(), 1);
+        assert_eq!(value.load_bit(), Some(true));
+    }
+
+    #[test]
+    fn hashmap_add() {
+        let mut map = HashmapE::<RcCellFamily, 32>::new();
+
+        let key = build_cell(|b| b.store_u32(123));
+
+        //
+        map.add(
+            key.as_slice(),
+            build_cell(|b| b.store_bit_zero()).as_slice(),
+        )
+        .unwrap();
+        let mut value = map.get(key.as_slice()).unwrap().unwrap();
+        assert_eq!(value.remaining_bits(), 1);
+        assert_eq!(value.load_bit(), Some(false));
+
+        //
+        map.add(key.as_slice(), build_cell(|b| b.store_bit_one()).as_slice())
+            .unwrap();
+        let mut value = map.get(key.as_slice()).unwrap().unwrap();
+        assert_eq!(value.remaining_bits(), 1);
+        assert_eq!(value.load_bit(), Some(false));
     }
 
     #[test]

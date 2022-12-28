@@ -108,10 +108,10 @@ mod tests {
         let parsed_cell = Boc::<RcCellFamily>::decode(data).unwrap();
 
         let mut builder = CellBuilder::<RcCellFamily>::new();
-        assert!(builder.store_bit_true());
+        assert!(builder.store_bit_one());
         assert!(builder.store_bit_zero());
-        assert!(builder.store_bit_true());
-        assert!(builder.store_bit_true());
+        assert!(builder.store_bit_one());
+        assert!(builder.store_bit_one());
         assert!(builder.store_bit_zero());
         assert!(builder.store_bit_zero());
         assert!(builder.store_bit_zero());
@@ -124,20 +124,20 @@ mod tests {
 
         let mut builder = RcCellBuilder::new();
         for _ in 0..cell::MAX_BIT_LEN {
-            assert!(builder.store_bit_true());
+            assert!(builder.store_bit_one());
         }
-        assert!(!builder.store_bit_true());
+        assert!(!builder.store_bit_one());
         let built_cell = builder.build().unwrap();
 
         assert_eq!(parsed_cell.repr_hash(), built_cell.repr_hash());
 
         let mut builder = RcCellBuilder::new();
-        assert!(builder.store_bit_true());
+        assert!(builder.store_bit_one());
         assert!(builder.store_u128(0xaaffaaffaaffaaffaaffaaffaaffaaff));
         let cell = builder.build().unwrap();
 
         let mut builder = RcCellBuilder::new();
-        assert!(builder.store_bit_true());
+        assert!(builder.store_bit_one());
         assert!(builder.store_u64(0xaaffaaffaaffaaff));
         assert!(builder.store_u64(0xaaffaaffaaffaaff));
         assert_eq!(cell.as_ref(), builder.build().unwrap().as_ref());
