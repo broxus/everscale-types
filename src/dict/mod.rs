@@ -214,14 +214,14 @@ where
 pub struct Iter<'a, C: CellFamily> {
     // TODO: replace `Vec` with on-stack stuff
     segments: Vec<IterSegment<'a, C>>,
-    broken: bool,
+    status: IterStatus,
 }
 
 impl<C: CellFamily> Clone for Iter<'_, C> {
     fn clone(&self) -> Self {
         Self {
             segments: self.segments.clone(),
-            broken: self.broken,
+            status: self.status,
         }
     }
 }
@@ -232,8 +232,16 @@ impl<'a, C: CellFamily> Iter<'a, C> {
 
         // Push root segment if any
         if let Some(root) = root {
+            let data = root.as_ref();
+            if unlikely(data.descriptor().is_pruned_branch()) {
+                return Self {
+                    segments: Vec::new(),
+                    status: IterStatus::Pruned,
+                };
+            }
+
             segments.push(IterSegment {
-                data: root.as_ref(),
+                data,
                 remaining_bit_len: bit_len,
                 key: CellBuilder::<C>::new(),
             });
@@ -241,13 +249,13 @@ impl<'a, C: CellFamily> Iter<'a, C> {
 
         Self {
             segments,
-            broken: false,
+            status: IterStatus::Valid,
         }
     }
 
     #[inline]
     fn finish(&mut self, err: Error) -> Error {
-        self.broken = true;
+        self.status = IterStatus::Broken;
         err
     }
 }
@@ -259,8 +267,13 @@ where
     type Item = Result<(CellBuilder<C>, CellSlice<'a, C>), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.broken {
-            return None;
+        if unlikely(!self.status.is_valid()) {
+            return if self.status.is_pruned() {
+                self.status = IterStatus::Broken;
+                Some(Err(Error::PrunedBranchAccess))
+            } else {
+                None
+            };
         }
 
         while let Some(mut segment) = self.segments.pop() {
@@ -400,14 +413,14 @@ where
 pub struct Values<'a, C: CellFamily> {
     // TODO: replace `Vec` with on-stack stuff
     segments: Vec<ValuesSegment<'a, C>>,
-    broken: bool,
+    status: IterStatus,
 }
 
 impl<C: CellFamily> Clone for Values<'_, C> {
     fn clone(&self) -> Self {
         Self {
             segments: self.segments.clone(),
-            broken: self.broken,
+            status: self.status,
         }
     }
 }
@@ -416,20 +429,28 @@ impl<'a, C: CellFamily> Values<'a, C> {
     fn new(root: &'a Option<CellContainer<C>>, bit_len: u16) -> Self {
         let mut segments = Vec::new();
         if let Some(root) = root {
+            let data = root.as_ref();
+            if unlikely(data.descriptor().is_pruned_branch()) {
+                return Self {
+                    segments: Vec::new(),
+                    status: IterStatus::Pruned,
+                };
+            }
+
             segments.push(ValuesSegment {
-                data: root.as_ref(),
+                data,
                 remaining_bit_len: bit_len,
             });
         }
         Self {
             segments,
-            broken: false,
+            status: IterStatus::Valid,
         }
     }
 
     #[inline]
     fn finish(&mut self, err: Error) -> Error {
-        self.broken = true;
+        self.status = IterStatus::Broken;
         err
     }
 }
@@ -441,8 +462,13 @@ where
     type Item = Result<CellSlice<'a, C>, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.broken {
-            return None;
+        if unlikely(!self.status.is_valid()) {
+            return if self.status.is_pruned() {
+                self.status = IterStatus::Broken;
+                Some(Err(Error::PrunedBranchAccess))
+            } else {
+                None
+            };
         }
 
         while let Some(mut segment) = self.segments.pop() {
@@ -520,6 +546,28 @@ impl<C: CellFamily> Clone for ValuesSegment<'_, C> {
             data: self.data,
             remaining_bit_len: self.remaining_bit_len,
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum IterStatus {
+    /// Iterator is still valid.
+    Valid,
+    /// Iterator started with a pruned branch cell.
+    Pruned,
+    /// `HashmapE` has invalid structure.
+    Broken,
+}
+
+impl IterStatus {
+    #[inline]
+    pub const fn is_valid(self) -> bool {
+        matches!(self, Self::Valid)
+    }
+
+    #[inline]
+    pub const fn is_pruned(self) -> bool {
+        matches!(self, Self::Pruned)
     }
 }
 
@@ -643,14 +691,18 @@ where
     }
 
     let data = match root.as_ref() {
-        Some(data) => data,
+        Some(data) => data.as_ref(),
         None if mode.can_add() => {
             let data = ok!(make_leaf(key, key_bit_len, value, finalizer));
             return Ok(Some(data));
         }
         None => return Ok(None),
     };
-    let mut data = data.as_ref().as_slice();
+    // Handle pruned branch access
+    if unlikely(data.descriptor().is_pruned_branch()) {
+        return Err(Error::PrunedBranchAccess);
+    }
+    let mut data = data.as_slice();
 
     let mut stack = Vec::<Segment<C>>::new();
 
@@ -701,9 +753,12 @@ where
                     None => return Err(Error::CellUnderflow),
                 };
 
-                // TODO: handle pruned branch
                 match data.cell().reference(next_branch as u8) {
                     Some(child) => {
+                        // Handle pruned branch access
+                        if unlikely(child.descriptor().is_pruned_branch()) {
+                            return Err(Error::PrunedBranchAccess);
+                        }
                         // Push an intermediate edge to the stack
                         stack.push(Segment { data, next_branch });
                         data = child.as_slice()
@@ -751,7 +806,7 @@ where
 
 pub fn hashmap_get<'a: 'b, 'b, C>(
     root: &'a Option<CellContainer<C>>,
-    mut key_bit_len: u16,
+    key_bit_len: u16,
     mut key: CellSlice<'b, C>,
 ) -> Result<Option<CellSlice<'a, C>>, Error>
 where
@@ -762,15 +817,19 @@ where
     }
 
     let data = match root.as_ref() {
-        Some(data) => data,
+        Some(data) => data.as_ref(),
         None => return Ok(None),
     };
-    let mut data = data.as_ref().as_slice();
+    // Handle pruned branch acces
+    if unlikely(data.descriptor().is_pruned_branch()) {
+        return Err(Error::PrunedBranchAccess);
+    }
+    let mut data = data.as_slice();
 
     // Try to find the required leaf
     let is_key_empty = loop {
         // Read the key part written in the current edge
-        let prefix = match read_label(&mut data, key_bit_len) {
+        let prefix = match read_label(&mut data, key.remaining_bits()) {
             Some(prefix) => prefix,
             None => return Err(Error::CellUnderflow),
         };
@@ -801,12 +860,6 @@ where
                 return Err(Error::PrunedBranchAccess)
             }
             Some(child) => child.as_slice(),
-            None => return Err(Error::CellUnderflow),
-        };
-
-        // Reduce the remaining key bit len
-        key_bit_len = match key_bit_len.checked_sub(prefix.remaining_bits() + 1) {
-            Some(bit_len) => bit_len,
             None => return Err(Error::CellUnderflow),
         };
     };
