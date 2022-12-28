@@ -29,6 +29,9 @@ pub trait CellFamily {
     /// NOTE: in most cases empty cell is ZST.
     fn empty_cell() -> CellContainer<Self>;
 
+    /// Returns a static reference to the empty cell
+    fn empty_cell_ref() -> &'static dyn Cell<Self>;
+
     /// Returns a static reference to the cell with all zeros.
     fn all_zeros_ref() -> &'static dyn Cell<Self>;
 
@@ -153,7 +156,7 @@ impl<C: CellFamily> dyn Cell<C> + '_ {
 
     /// Returns this cell as a cell slice.
     #[inline]
-    pub fn as_slice(&self) -> CellSlice<'_, C> {
+    pub fn as_slice(&'_ self) -> CellSlice<'_, C> {
         CellSlice::new(self)
     }
 
@@ -468,9 +471,15 @@ impl CellDescriptor {
         self.d1 & Self::IS_EXOTIC_MASK != 0
     }
 
+    /// Returns whether this cell is a pruned branch cell
+    #[inline(always)]
+    pub const fn is_pruned_branch(self) -> bool {
+        self.is_exotic() && self.reference_count() == 0 && !self.level_mask().is_empty()
+    }
+
     /// Returns whether this cell refers to some external data.
     #[inline(always)]
-    pub fn is_absent(self) -> bool {
+    pub const fn is_absent(self) -> bool {
         self.d1 == (Self::REF_COUNT_MASK | Self::IS_EXOTIC_MASK)
     }
 

@@ -13,6 +13,7 @@ pub use self::cell::sync::{ArcCell, ArcCellFamily};
 pub use self::cell::{
     Cell, CellBuilder, CellDescriptor, CellFamily, CellHash, CellSlice, CellType, LevelMask,
 };
+pub use self::dict::Dict;
 
 /// BOC (Bag Of Cells) helper for the `Arc` family of cells.
 pub type ArcBoc = Boc<ArcCellFamily>;
@@ -28,6 +29,11 @@ pub type RcCellBuilder = CellBuilder<RcCellFamily>;
 pub type ArcCellSlice<'a> = CellSlice<'a, ArcCellFamily>;
 /// A read-only view for the `Rc` family of cells.
 pub type RcCellSlice<'a> = CellSlice<'a, RcCellFamily>;
+
+/// An ordinary dictionary with fixed length keys for the `Arc` family of cells.
+pub type ArcDict<const N: u16> = Dict<ArcCellFamily, N>;
+/// An ordinary dictionary with fixed length keys for the `Rc` family of cells.
+pub type RcDict<const N: u16> = Dict<RcCellFamily, N>;
 
 pub mod boc;
 pub mod cell;
@@ -85,8 +91,8 @@ mod tests {
 
         assert_eq!(slice.get_bit(0), Some(true));
         assert_eq!(slice.load_bit(), Some(true));
-        assert_eq!(slice.get_bits(0, 8), Some(123));
-        assert_eq!(slice.get_bits(8, 8), Some(111));
+        assert_eq!(slice.get_small_uint(0, 8), Some(123));
+        assert_eq!(slice.get_small_uint(8, 8), Some(111));
         assert_eq!(slice.load_u16(), Some(0x7b6f));
         assert_eq!(slice.get_u32(0), Some(0x00006ffa));
         assert_eq!(slice.get_u32(32), Some(0xd60473b3));
@@ -99,7 +105,7 @@ mod tests {
                 0xe7, 0x9b, 0xc1, 0x6f,
             ])
         );
-        assert_eq!(slice.get_bits(0, 1), None);
+        assert_eq!(slice.get_small_uint(0, 1), None);
     }
 
     #[test]
@@ -108,10 +114,10 @@ mod tests {
         let parsed_cell = Boc::<RcCellFamily>::decode(data).unwrap();
 
         let mut builder = CellBuilder::<RcCellFamily>::new();
-        assert!(builder.store_bit_true());
+        assert!(builder.store_bit_one());
         assert!(builder.store_bit_zero());
-        assert!(builder.store_bit_true());
-        assert!(builder.store_bit_true());
+        assert!(builder.store_bit_one());
+        assert!(builder.store_bit_one());
         assert!(builder.store_bit_zero());
         assert!(builder.store_bit_zero());
         assert!(builder.store_bit_zero());
@@ -124,20 +130,20 @@ mod tests {
 
         let mut builder = RcCellBuilder::new();
         for _ in 0..cell::MAX_BIT_LEN {
-            assert!(builder.store_bit_true());
+            assert!(builder.store_bit_one());
         }
-        assert!(!builder.store_bit_true());
+        assert!(!builder.store_bit_one());
         let built_cell = builder.build().unwrap();
 
         assert_eq!(parsed_cell.repr_hash(), built_cell.repr_hash());
 
         let mut builder = RcCellBuilder::new();
-        assert!(builder.store_bit_true());
+        assert!(builder.store_bit_one());
         assert!(builder.store_u128(0xaaffaaffaaffaaffaaffaaffaaffaaff));
         let cell = builder.build().unwrap();
 
         let mut builder = RcCellBuilder::new();
-        assert!(builder.store_bit_true());
+        assert!(builder.store_bit_one());
         assert!(builder.store_u64(0xaaffaaffaaffaaff));
         assert!(builder.store_u64(0xaaffaaffaaffaaff));
         assert_eq!(cell.as_ref(), builder.build().unwrap().as_ref());

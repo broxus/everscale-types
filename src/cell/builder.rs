@@ -167,7 +167,7 @@ impl<C: CellFamily> CellBuilder<C> {
 
     /// Tries to store one non-zero bit in the cell,
     /// returning `false` if there is not enough remaining capacity.
-    pub fn store_bit_true(&mut self) -> bool {
+    pub fn store_bit_one(&mut self) -> bool {
         if self.bit_len < MAX_BIT_LEN {
             let q = (self.bit_len / 8) as usize;
             let r = self.bit_len % 8;
@@ -176,6 +176,16 @@ impl<C: CellFamily> CellBuilder<C> {
             true
         } else {
             false
+        }
+    }
+
+    /// Tries to store one bit in the cell,
+    /// returning `false` if there is not enough remaining capacity.
+    pub fn store_bit(&mut self, value: bool) -> bool {
+        if value {
+            self.store_bit_one()
+        } else {
+            self.store_bit_zero()
         }
     }
 
@@ -643,7 +653,7 @@ where
     ///
     /// See [`default_finalizer`]
     ///
-    /// [`default_finalizer`]: fn@crate::cell::finalizer::DefaultFinalizer::default_finalizer
+    /// [`default_finalizer`]: fn@crate::cell::DefaultFinalizer::default_finalizer
     pub fn build(self) -> Option<CellContainer<C>> {
         self.build_ext(&mut C::default_finalizer())
     }
