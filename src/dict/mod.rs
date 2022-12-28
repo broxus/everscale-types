@@ -1,9 +1,35 @@
 use crate::cell::*;
 use crate::util::unlikely;
 
-pub struct HashmapE<C: CellFamily, const N: u16>(Option<CellContainer<C>>);
+/// Dictionary with fixed length keys (where `N` is a number of bits in each key).
+///
+/// # TLB scheme
+///
+/// ```text
+/// // ordinary Hashmap / HashmapE, with fixed length keys
+///
+/// hm_edge#_ {n:#} {X:Type} {l:#} {m:#} label:(HmLabel ~l n)
+///           {n = (~m) + l} node:(HashmapNode m X) = Hashmap n X;
+///
+/// hmn_leaf#_ {X:Type} value:X = HashmapNode 0 X;
+/// hmn_fork#_ {n:#} {X:Type} left:^(Hashmap n X)
+///            right:^(Hashmap n X) = HashmapNode (n + 1) X;
+///
+/// hml_short$0 {m:#} {n:#} len:(Unary ~n) {n <= m} s:(n * Bit) = HmLabel ~n m;
+/// hml_long$10 {m:#} n:(#<= m) s:(n * Bit) = HmLabel ~n m;
+/// hml_same$11 {m:#} v:Bit n:(#<= m) = HmLabel ~n m;
+///
+/// hme_empty$0 {n:#} {X:Type} = HashmapE n X;
+/// hme_root$1 {n:#} {X:Type} root:^(Hashmap n X) = HashmapE n X;
+///
+/// unary_zero$0 = Unary ~0;
+/// unary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);
+///
+/// bit$_ (## 1) = Bit;
+/// ```
+pub struct Dict<C: CellFamily, const N: u16>(Option<CellContainer<C>>);
 
-impl<'a, C: CellFamily, const N: u16> Load<'a, C> for HashmapE<C, N> {
+impl<'a, C: CellFamily, const N: u16> Load<'a, C> for Dict<C, N> {
     fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
         if slice.load_bit()? {
             let root = slice.load_reference_cloned()?;
@@ -14,7 +40,7 @@ impl<'a, C: CellFamily, const N: u16> Load<'a, C> for HashmapE<C, N> {
     }
 }
 
-impl<C: CellFamily, const N: u16> Store<C> for HashmapE<C, N> {
+impl<C: CellFamily, const N: u16> Store<C> for Dict<C, N> {
     fn store_into(&self, b: &mut CellBuilder<C>) -> bool {
         match &self.0 {
             None => b.store_bit_zero(),
@@ -23,21 +49,21 @@ impl<C: CellFamily, const N: u16> Store<C> for HashmapE<C, N> {
     }
 }
 
-impl<C: CellFamily, const N: u16> Default for HashmapE<C, N> {
+impl<C: CellFamily, const N: u16> Default for Dict<C, N> {
     #[inline]
     fn default() -> Self {
         Self(None)
     }
 }
 
-impl<C: CellFamily, const N: u16> Clone for HashmapE<C, N> {
+impl<C: CellFamily, const N: u16> Clone for Dict<C, N> {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
 
-impl<C: CellFamily, const N: u16> Eq for HashmapE<C, N> {}
-impl<C: CellFamily, const N: u16> PartialEq for HashmapE<C, N> {
+impl<C: CellFamily, const N: u16> Eq for Dict<C, N> {}
+impl<C: CellFamily, const N: u16> PartialEq for Dict<C, N> {
     fn eq(&self, other: &Self) -> bool {
         match (&self.0, &other.0) {
             (Some(this), Some(other)) => this.as_ref() == other.as_ref(),
@@ -47,27 +73,28 @@ impl<C: CellFamily, const N: u16> PartialEq for HashmapE<C, N> {
     }
 }
 
-impl<C: CellFamily, const N: u16> From<Option<CellContainer<C>>> for HashmapE<C, N> {
+impl<C: CellFamily, const N: u16> From<Option<CellContainer<C>>> for Dict<C, N> {
     #[inline]
     fn from(value: Option<CellContainer<C>>) -> Self {
         Self(value)
     }
 }
 
-impl<C: CellFamily, const N: u16> HashmapE<C, N> {
-    const _ASSERT: () = assert!(N > 0, "HashmapE with 0-bit key is invalid");
+impl<C: CellFamily, const N: u16> Dict<C, N> {
+    const _ASSERT: () = assert!(N > 0, "Dict with 0-bit key is invalid");
 
+    /// Creates an empty dictionary.
     pub fn new() -> Self {
         Self(None)
     }
 
-    /// Returns `true` if the map contains no elements.
+    /// Returns `true` if the dictionary contains no elements.
     pub fn is_empty(&self) -> bool {
         self.0.is_none()
     }
 }
 
-impl<C, const N: u16> HashmapE<C, N>
+impl<C, const N: u16> Dict<C, N>
 where
     for<'c> C: CellFamily + 'c,
 {
@@ -76,12 +103,12 @@ where
         &'a self,
         key: CellSlice<'b, C>,
     ) -> Result<Option<CellSlice<'a, C>>, Error> {
-        hashmap_get(&self.0, N, key)
+        dict_get(&self.0, N, key)
     }
 
-    /// Returns `true` if the map contains a value for the specified key.
+    /// Returns `true` if the dictionary contains a value for the specified key.
     pub fn contains_key(&self, key: CellSlice<'_, C>) -> Result<bool, Error> {
-        Ok(ok!(hashmap_get(&self.0, N, key)).is_some())
+        Ok(ok!(dict_get(&self.0, N, key)).is_some())
     }
 
     /// Sets the value associated with the key in the dictionary.
@@ -91,7 +118,7 @@ where
         value: CellSlice<'_, C>,
         finalizer: &mut dyn Finalizer<C>,
     ) -> Result<(), Error> {
-        self.0 = ok!(hashmap_insert(
+        self.0 = ok!(dict_insert(
             &self.0,
             &mut key,
             N,
@@ -110,7 +137,7 @@ where
         value: CellSlice<'_, C>,
         finalizer: &mut dyn Finalizer<C>,
     ) -> Result<(), Error> {
-        self.0 = ok!(hashmap_insert(
+        self.0 = ok!(dict_insert(
             &self.0,
             &mut key,
             N,
@@ -129,7 +156,7 @@ where
         value: CellSlice<'_, C>,
         finalizer: &mut dyn Finalizer<C>,
     ) -> Result<(), Error> {
-        self.0 = ok!(hashmap_insert(
+        self.0 = ok!(dict_insert(
             &self.0,
             &mut key,
             N,
@@ -140,77 +167,89 @@ where
         Ok(())
     }
 
-    /// Gets an iterator over the entries of the map, sorted by key.
+    /// Gets an iterator over the entries of the dictionary, sorted by key.
     /// The iterator element type is `Result<(CellBuilder<C>, CellSlice<C>)>`.
     ///
-    /// If the map is invalid, finishes after the first invalid element,
+    /// If the dictionary is invalid, finishes after the first invalid element,
     /// returning an error.
     ///
     /// # Performance
     ///
-    /// In the current implementation, iterating over map builds a key
+    /// In the current implementation, iterating over dictionary builds a key
     /// for each element. Use [`values`] if you don't need keys from an iterator.
     ///
-    /// [`values`]: HashmapE::values
+    /// [`values`]: Dict::values
     pub fn iter(&'_ self) -> Iter<'_, C> {
         Iter::new(&self.0, N)
     }
 
-    /// Gets an iterator over the keys of the map, in sorted order.
+    /// Gets an iterator over the keys of the dictionary, in sorted order.
     /// The iterator element type is `Result<CellBuilder<C>>`.
     ///
-    /// If the map is invalid, finishes after the first invalid element,
+    /// If the dictionary is invalid, finishes after the first invalid element,
     /// returning an error.
     ///
     /// # Performance
     ///
-    /// In the current implementation, iterating over map builds a key
+    /// In the current implementation, iterating over dictionary builds a key
     /// for each element. Use [`values`] if you don't need keys from an iterator.
     ///
-    /// [`values`]: HashmapE::values
+    /// [`values`]: Dict::values
     pub fn keys(&'_ self) -> Keys<'_, C> {
         Keys {
             inner: Iter::new(&self.0, N),
         }
     }
 
-    /// Gets an iterator over the values of the map, in order by key.
+    /// Gets an iterator over the values of the dictionary, in order by key.
     /// The iterator element type is `Result<CellSlice<C>>`.
     ///
-    /// If the map is invalid, finishes after the first invalid element,
+    /// If the dictionary is invalid, finishes after the first invalid element,
     /// returning an error.
     pub fn values(&'_ self) -> Values<'_, C> {
         Values::new(&self.0, N)
     }
 }
 
-impl<C, const N: u16> HashmapE<C, N>
+impl<C, const N: u16> Dict<C, N>
 where
     for<'c> C: DefaultFinalizer + 'c,
 {
     /// Sets the value associated with the key in the dictionary.
+    ///
+    /// Use [`set_ext`] if you need to use a custom finalizer.
+    ///
+    /// [`set_ext`]: Dict::set_ext
     pub fn set(&mut self, key: CellSlice<'_, C>, value: CellSlice<'_, C>) -> Result<(), Error> {
         self.set_ext(key, value, &mut C::default_finalizer())
     }
 
     /// Sets the value associated with the key in the dictionary
     /// only if the key was already present in it.
+    ///
+    /// Use [`replace_ext`] if you need to use a custom finalizer.
+    ///
+    /// [`replace_ext`]: Dict::replace_ext
     pub fn replace(&mut self, key: CellSlice<'_, C>, value: CellSlice<'_, C>) -> Result<(), Error> {
         self.replace_ext(key, value, &mut C::default_finalizer())
     }
 
     /// Sets the value associated with key in dictionary,
     /// but only if it is not already present.
+    ///
+    /// Use [`add_ext`] if you need to use a custom finalizer.
+    ///
+    /// [`add_ext`]: Dict::add_ext
     pub fn add(&mut self, key: CellSlice<'_, C>, value: CellSlice<'_, C>) -> Result<(), Error> {
         self.add_ext(key, value, &mut C::default_finalizer())
     }
 }
 
-/// An iterator over the entries of a `HashmapE`.
+/// An iterator over the entries of a `Dict`.
 ///
-/// This struct is created by the [`iter`] method on `HashmapE`. See its documentation for more.
+/// This struct is created by the [`iter`] method on `Dict`. See its documentation for more.
 ///
-/// [`iter`]: fn@crate::dict::HashmapE::iter
+/// [`iter`]: fn@crate::dict::Dict::iter
 pub struct Iter<'a, C: CellFamily> {
     // TODO: replace `Vec` with on-stack stuff
     segments: Vec<IterSegment<'a, C>>,
@@ -290,7 +329,7 @@ where
                 .remaining_bit_len
                 .checked_sub(prefix.remaining_bits())
             {
-                // Well-formed `HashmapE` should have the required number of bits
+                // Well-formed `Dict` should have the required number of bits
                 // for each value
                 Some(remaining) => {
                     // Try to store the next prefix into the segment key
@@ -373,12 +412,12 @@ impl<C: CellFamily> Clone for IterSegment<'_, C> {
     }
 }
 
-/// An iterator over the keys of a `HashmapE`.
+/// An iterator over the keys of a `Dict`.
 ///
-/// This struct is created by the [`keys`] method on [`HashmapE`]. See its
+/// This struct is created by the [`keys`] method on [`Dict`]. See its
 /// documentation for more.
 ///
-/// [`keys`]: BTreeMap::keys
+/// [`keys`]: Dict::keys
 pub struct Keys<'a, C: CellFamily> {
     inner: Iter<'a, C>,
 }
@@ -405,11 +444,11 @@ where
     }
 }
 
-/// An iterator over the values of a `HashmapE`.
+/// An iterator over the values of a `Dict`.
 ///
-/// This struct is created by the [`values`] method on [`HashmapE`]. See its documentation for more.
+/// This struct is created by the [`values`] method on [`Dict`]. See its documentation for more.
 ///
-/// [`values`]: HashmapE::values
+/// [`values`]: Dict::values
 pub struct Values<'a, C: CellFamily> {
     // TODO: replace `Vec` with on-stack stuff
     segments: Vec<ValuesSegment<'a, C>>,
@@ -489,7 +528,7 @@ where
                 Some(0) => return Some(Ok(data)),
                 // Continue reading
                 Some(bit_len) => bit_len,
-                // Well-formed `HashmapE` should have the required number of bits
+                // Well-formed `Dict` should have the required number of bits
                 // for each value
                 None => return Some(Err(self.finish(Error::CellUnderflow))),
             };
@@ -555,7 +594,7 @@ enum IterStatus {
     Valid,
     /// Iterator started with a pruned branch cell.
     Pruned,
-    /// `HashmapE` has invalid structure.
+    /// `Dict` has invalid structure.
     Broken,
 }
 
@@ -596,7 +635,7 @@ impl SetMode {
     }
 }
 
-pub fn hashmap_insert<'a, C>(
+pub fn dict_insert<'a, C>(
     root: &'a Option<CellContainer<C>>,
     key: &mut CellSlice<C>,
     key_bit_len: u16,
@@ -804,7 +843,7 @@ where
     Ok(Some(leaf))
 }
 
-pub fn hashmap_get<'a: 'b, 'b, C>(
+pub fn dict_get<'a: 'b, 'b, C>(
     root: &'a Option<CellContainer<C>>,
     key_bit_len: u16,
     mut key: CellSlice<'b, C>,
@@ -868,7 +907,7 @@ where
     Ok(if is_key_empty { Some(data) } else { None })
 }
 
-pub fn write_label<C: CellFamily>(
+fn write_label<C: CellFamily>(
     key: &CellSlice<C>,
     key_bit_len: u16,
     label: &mut CellBuilder<C>,
@@ -900,7 +939,7 @@ pub fn write_label<C: CellFamily>(
     }
 }
 
-pub fn read_label<'a, C>(label: &mut CellSlice<'a, C>, key_bit_len: u16) -> Option<CellSlice<'a, C>>
+fn read_label<'a, C>(label: &mut CellSlice<'a, C>, key_bit_len: u16) -> Option<CellSlice<'a, C>>
 where
     for<'c> C: CellFamily + 'c,
 {
@@ -1075,8 +1114,8 @@ mod tests {
     }
 
     #[test]
-    fn hashmap_set() {
-        let mut map = HashmapE::<RcCellFamily, 32>::new();
+    fn dict_set() {
+        let mut dict = Dict::<RcCellFamily, 32>::new();
 
         let key = {
             let mut builder = RcCellBuilder::new();
@@ -1091,17 +1130,18 @@ mod tests {
             builder.build().unwrap()
         };
 
-        map.set(key.as_slice(), empty_value.as_slice()).unwrap();
+        dict.set(key.as_slice(), empty_value.as_slice()).unwrap();
         {
-            let mut values = map.values();
+            let mut values = dict.values();
             let value = values.next().unwrap().unwrap();
             assert!(value.is_data_empty() && value.is_refs_empty());
             assert!(values.next().is_none());
         }
 
-        map.set(key.as_slice(), not_empty_value.as_slice()).unwrap();
+        dict.set(key.as_slice(), not_empty_value.as_slice())
+            .unwrap();
         {
-            let mut values = map.values();
+            let mut values = dict.values();
             let mut value = values.next().unwrap().unwrap();
             assert_eq!(value.load_u16(), Some(0xffff));
             assert!(value.is_data_empty() && value.is_refs_empty());
@@ -1110,16 +1150,16 @@ mod tests {
     }
 
     #[test]
-    fn hashmap_set_complex() {
+    fn dict_set_complex() {
         let value = build_cell(|b| b.store_bit_one());
 
-        let mut map = HashmapE::<RcCellFamily, 32>::new();
+        let mut dict = Dict::<RcCellFamily, 32>::new();
         for i in 0..520 {
             let key = build_cell(|b| b.store_u32(i));
-            map.set(key.as_slice(), value.as_slice()).unwrap();
+            dict.set(key.as_slice(), value.as_slice()).unwrap();
 
             let mut total = 0;
-            for (i, item) in map.iter().enumerate() {
+            for (i, item) in dict.iter().enumerate() {
                 total += 1;
                 let (key, value) = item.unwrap();
                 let key = key.build().unwrap();
@@ -1133,32 +1173,32 @@ mod tests {
     }
 
     #[test]
-    fn hashmap_replace() {
-        let mut map = HashmapE::<RcCellFamily, 32>::new();
+    fn dict_replace() {
+        let mut dict = Dict::<RcCellFamily, 32>::new();
 
         //
-        map.replace(
+        dict.replace(
             build_cell(|b| b.store_u32(123)).as_slice(),
             build_cell(|b| b.store_bit_zero()).as_slice(),
         )
         .unwrap();
-        assert!(!map
+        assert!(!dict
             .contains_key(build_cell(|b| b.store_u32(123)).as_slice())
             .unwrap());
 
         //
-        map.set(
+        dict.set(
             build_cell(|b| b.store_u32(123)).as_slice(),
             build_cell(|b| b.store_bit_zero()).as_slice(),
         )
         .unwrap();
-        map.replace(
+        dict.replace(
             build_cell(|b| b.store_u32(123)).as_slice(),
             build_cell(|b| b.store_bit_one()).as_slice(),
         )
         .unwrap();
 
-        let mut value = map
+        let mut value = dict
             .get(build_cell(|b| b.store_u32(123)).as_slice())
             .unwrap()
             .unwrap();
@@ -1167,42 +1207,42 @@ mod tests {
     }
 
     #[test]
-    fn hashmap_add() {
-        let mut map = HashmapE::<RcCellFamily, 32>::new();
+    fn dict_add() {
+        let mut dict = Dict::<RcCellFamily, 32>::new();
 
         let key = build_cell(|b| b.store_u32(123));
 
         //
-        map.add(
+        dict.add(
             key.as_slice(),
             build_cell(|b| b.store_bit_zero()).as_slice(),
         )
         .unwrap();
-        let mut value = map.get(key.as_slice()).unwrap().unwrap();
+        let mut value = dict.get(key.as_slice()).unwrap().unwrap();
         assert_eq!(value.remaining_bits(), 1);
         assert_eq!(value.load_bit(), Some(false));
 
         //
-        map.add(key.as_slice(), build_cell(|b| b.store_bit_one()).as_slice())
+        dict.add(key.as_slice(), build_cell(|b| b.store_bit_one()).as_slice())
             .unwrap();
-        let mut value = map.get(key.as_slice()).unwrap().unwrap();
+        let mut value = dict.get(key.as_slice()).unwrap().unwrap();
         assert_eq!(value.remaining_bits(), 1);
         assert_eq!(value.load_bit(), Some(false));
     }
 
     #[test]
-    fn hashmap_get() {
+    fn dict_get() {
         let boc =
             RcBoc::decode_base64("te6ccgECOwEAASoAAQHAAQIBIBACAgEgAwMCASAEBAIBIAUFAgEgBgYCASAHBwIBIAgIAgEgCQkCASAoCgIBIAsZAgEgDBsCASArDQIBIA4fAgEgLQ8CASAuIQIBIBERAgEgEhICASATEwIBIBQUAgEgFRUCASAWFgIBIBcXAgEgKBgCASAaGQIBIBsbAgEgHRsCASAcHAIBIB8fAgEgKx4CASAiHwIBICAgAgEgISECASAlJQIBIC0jAgEgLiQCASAvJQIBIDMmAgFiNicCAUg4OAIBICkpAgEgKioCASArKwIBICwsAgEgLS0CASAuLgIBIC8vAgEgMzACAWI2MQIBIDcyAAnWAAAmbwIBIDQ0AgEgNTUCASA2NgIBIDc3AgEgODgCASA5OQIBIDo6AAnQAAAmbw==").unwrap();
 
-        let map = HashmapE::<RcCellFamily, 32>::load_from(&mut boc.as_slice()).unwrap();
+        let dict = Dict::<RcCellFamily, 32>::load_from(&mut boc.as_slice()).unwrap();
 
         let key = {
             let mut builder = RcCellBuilder::new();
             builder.store_u32(u32::from_be_bytes(123u32.to_le_bytes()));
             builder.build().unwrap()
         };
-        let value = map.get(key.as_slice()).unwrap().unwrap();
+        let value = dict.get(key.as_slice()).unwrap().unwrap();
 
         let value = {
             let mut builder = RcCellBuilder::new();
@@ -1213,14 +1253,14 @@ mod tests {
     }
 
     #[test]
-    fn hashmap_iter() {
+    fn dict_iter() {
         let boc = RcBoc::decode_base64("te6ccgEBFAEAeAABAcABAgPOQAUCAgHUBAMACQAAAI3gAAkAAACjoAIBIA0GAgEgCgcCASAJCAAJAAAAciAACQAAAIfgAgEgDAsACQAAAFZgAAkAAABsIAIBIBEOAgEgEA8ACQAAADqgAAkAAABQYAIBIBMSAAkAAAAe4AAJAAAAv2A=").unwrap();
-        let map = HashmapE::<RcCellFamily, 32>::load_from(&mut boc.as_slice()).unwrap();
+        let dict = Dict::<RcCellFamily, 32>::load_from(&mut boc.as_slice()).unwrap();
 
-        let size = map.values().count();
+        let size = dict.values().count();
         assert_eq!(size, 10);
 
-        for (i, entry) in map.iter().enumerate() {
+        for (i, entry) in dict.iter().enumerate() {
             let (key, _) = entry.unwrap();
 
             let key = {

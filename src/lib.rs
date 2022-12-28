@@ -13,6 +13,7 @@ pub use self::cell::sync::{ArcCell, ArcCellFamily};
 pub use self::cell::{
     Cell, CellBuilder, CellDescriptor, CellFamily, CellHash, CellSlice, CellType, LevelMask,
 };
+pub use self::dict::Dict;
 
 /// BOC (Bag Of Cells) helper for the `Arc` family of cells.
 pub type ArcBoc = Boc<ArcCellFamily>;
@@ -28,6 +29,11 @@ pub type RcCellBuilder = CellBuilder<RcCellFamily>;
 pub type ArcCellSlice<'a> = CellSlice<'a, ArcCellFamily>;
 /// A read-only view for the `Rc` family of cells.
 pub type RcCellSlice<'a> = CellSlice<'a, RcCellFamily>;
+
+/// An ordinary dictionary with fixed length keys for the `Arc` family of cells.
+pub type ArcDict<const N: u16> = Dict<ArcCellFamily, N>;
+/// An ordinary dictionary with fixed length keys for the `Rc` family of cells.
+pub type RcDict<const N: u16> = Dict<RcCellFamily, N>;
 
 pub mod boc;
 pub mod cell;
