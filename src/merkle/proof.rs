@@ -1,7 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::hash::BuildHasher;
 
-use super::make_pruned_branch;
+use super::{make_pruned_branch, MerkleFilter};
 use crate::cell::*;
 
 pub struct MerkleProof<C: CellFamily> {
@@ -85,9 +85,9 @@ impl<C: CellFamily> MerkleProof<C> {
     pub const BITS: u16 = 8 + 256 + 16;
     pub const REFS: u8 = 1;
 
-    pub fn create<'a, F, S>(root: &'a dyn Cell<C>, f: F) -> MerkleProofBuilder<'a, C>
+    pub fn create<'a, F, S>(root: &'a dyn Cell<C>, f: F) -> MerkleProofBuilder<'a, C, F>
     where
-        F: FnMut(&CellHash) -> bool + 'a,
+        F: MerkleFilter + 'a,
     {
         MerkleProofBuilder::new(root, f)
     }
@@ -95,72 +95,117 @@ impl<C: CellFamily> MerkleProof<C> {
     pub fn create_for_cell<'a>(
         root: &'a dyn Cell<C>,
         child_hash: &'a CellHash,
-    ) -> MerkleProofBuilder<'a, C> {
-        MerkleProofBuilder::new_for_cell(root, child_hash)
+    ) -> MerkleProofBuilder<'a, C, impl MerkleFilter + 'a> {
+        #[derive(Clone, Copy)]
+        struct RootOrChild<'a> {
+            root_hash: &'a CellHash,
+            child_hash: &'a CellHash,
+        }
+
+        impl MerkleFilter for RootOrChild<'_> {
+            fn contains(&self, cell: &CellHash) -> bool {
+                cell == self.child_hash || cell == self.root_hash
+            }
+        }
+
+        MerkleProofBuilder::new(
+            root,
+            RootOrChild {
+                root_hash: root.repr_hash(),
+                child_hash,
+            },
+        )
     }
 }
 
-pub struct MerkleProofBuilder<'a, C: CellFamily, S = ahash::RandomState> {
+pub struct MerkleProofBuilder<'a, C: CellFamily, F, S = ahash::RandomState> {
     root: &'a dyn Cell<C>,
-    predicate: Box<dyn FnMut(&CellHash) -> bool + 'a>,
-    cells: HashMap<CellHash, CellContainer<C>, S>,
-    pruned_branches: Option<&'a mut HashSet<CellHash, S>>,
+    filter: F,
+    pruned_branches: Option<&'a mut HashMap<CellHash, bool, S>>,
 }
 
-impl<'a, C: CellFamily, S> MerkleProofBuilder<'a, C, S>
+impl<'a, C: CellFamily, F, S> MerkleProofBuilder<'a, C, F, S>
 where
+    F: MerkleFilter,
     S: BuildHasher + Default,
 {
-    pub fn new<F>(root: &'a dyn Cell<C>, f: F) -> Self
-    where
-        F: FnMut(&CellHash) -> bool + 'a,
-    {
+    pub fn new(root: &'a dyn Cell<C>, f: F) -> Self {
         MerkleProofBuilder {
             root,
-            predicate: Box::new(f),
-            cells: Default::default(),
+            filter: f,
             pruned_branches: None,
         }
     }
 
-    pub fn new_for_cell(root: &'a dyn Cell<C>, child_hash: &'a CellHash) -> Self {
-        let repr_hash = *root.repr_hash();
-        MerkleProofBuilder {
-            root,
-            predicate: Box::new(move |hash| hash == &repr_hash || hash == child_hash),
-            cells: Default::default(),
-            pruned_branches: None,
-        }
-    }
-}
-
-impl<'a, C: CellFamily, S> MerkleProofBuilder<'a, C, S>
-where
-    S: BuildHasher,
-{
-    pub fn track_pruned_branches(mut self, pruned_branches: &'a mut HashSet<CellHash, S>) -> Self {
+    pub fn track_pruned_branches(
+        mut self,
+        pruned_branches: &'a mut HashMap<CellHash, bool, S>,
+    ) -> Self {
         self.pruned_branches = Some(pruned_branches);
         self
     }
 
-    pub fn build_ext(mut self, finalizer: &mut dyn Finalizer<C>) -> Option<MerkleProof<C>> {
-        if !(self.predicate)(self.root.repr_hash()) {
-            return None;
+    pub fn build_ext(self, finalizer: &mut dyn Finalizer<C>) -> Option<MerkleProof<C>> {
+        let root = self.root;
+
+        let cell = BuilderImpl {
+            root,
+            filter: &self.filter,
+            cells: Default::default(),
+            pruned_branches: self.pruned_branches,
+            finalizer,
         }
-        let cell = self.fill(self.root, 0, finalizer)?;
+        .build()?;
+
         Some(MerkleProof {
-            hash: *self.root.repr_hash(),
-            depth: self.root.repr_depth(),
+            hash: *root.repr_hash(),
+            depth: root.repr_depth(),
             cell,
         })
     }
 
-    fn fill(
-        &mut self,
-        cell: &dyn Cell<C>,
-        merkle_depth: u8,
-        finalizer: &mut dyn Finalizer<C>,
-    ) -> Option<CellContainer<C>> {
+    pub fn build_raw_ext(self, finalizer: &mut dyn Finalizer<C>) -> Option<CellContainer<C>> {
+        BuilderImpl {
+            root: self.root,
+            filter: &self.filter,
+            cells: Default::default(),
+            pruned_branches: self.pruned_branches,
+            finalizer,
+        }
+        .build()
+    }
+}
+
+impl<'a, C: DefaultFinalizer, F, S> MerkleProofBuilder<'a, C, F, S>
+where
+    F: MerkleFilter,
+    S: BuildHasher + Default,
+{
+    pub fn build(self) -> Option<MerkleProof<C>> {
+        self.build_ext(&mut C::default_finalizer())
+    }
+}
+
+struct BuilderImpl<'a, 'b, C: CellFamily, S> {
+    root: &'a dyn Cell<C>,
+    filter: &'b dyn MerkleFilter,
+    cells: HashMap<CellHash, CellContainer<C>, S>,
+    pruned_branches: Option<&'a mut HashMap<CellHash, bool, S>>,
+    finalizer: &'b mut dyn Finalizer<C>,
+}
+
+impl<'a: 'b, 'b, C: CellFamily, S> BuilderImpl<'a, 'b, C, S>
+where
+    S: BuildHasher + Default,
+{
+    fn build(mut self) -> Option<CellContainer<C>> {
+        if !self.filter.contains(self.root.repr_hash()) {
+            return None;
+        }
+        self.fill(self.root, 0)
+    }
+
+    fn fill(&mut self, cell: &dyn Cell<C>, merkle_depth: u8) -> Option<CellContainer<C>> {
         let descriptor = cell.descriptor();
         let merkle_offset = descriptor.cell_type().is_merkle() as u8;
         let child_merkle_depth = merkle_depth + merkle_offset;
@@ -174,12 +219,13 @@ where
 
             let child = if let Some(child) = self.cells.get(child_repr_hash) {
                 child.clone()
-            } else if child.as_ref().reference_count() == 0 || (self.predicate)(child_repr_hash) {
-                self.fill(child.as_ref(), child_merkle_depth, finalizer)?
+            } else if child.as_ref().reference_count() == 0 || self.filter.contains(child_repr_hash)
+            {
+                self.fill(child.as_ref(), child_merkle_depth)?
             } else {
-                let child = make_pruned_branch(child.as_ref(), merkle_depth, finalizer)?;
+                let child = make_pruned_branch(child.as_ref(), merkle_depth, self.finalizer)?;
                 if let Some(pruned_branch) = &mut self.pruned_branches {
-                    pruned_branch.insert(*child_repr_hash);
+                    pruned_branch.insert(*child_repr_hash, false);
                 }
                 child
             };
@@ -191,19 +237,10 @@ where
         result.set_level_mask(children_mask.virtualize(merkle_offset));
         result.store_slice_data(&cell.as_slice());
 
-        let proof_cell = result.build_ext(finalizer)?;
+        let proof_cell = result.build_ext(self.finalizer)?;
         self.cells.insert(*cell.repr_hash(), proof_cell.clone());
 
         Some(proof_cell)
-    }
-}
-
-impl<'a, C: DefaultFinalizer, S> MerkleProofBuilder<'a, C, S>
-where
-    S: BuildHasher,
-{
-    pub fn build(self) -> Option<MerkleProof<C>> {
-        self.build_ext(&mut C::default_finalizer())
     }
 }
 

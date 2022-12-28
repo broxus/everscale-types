@@ -1,3 +1,7 @@
+use std::collections::{HashMap, HashSet};
+use std::hash::BuildHasher;
+
+use super::{make_pruned_branch, MerkleFilter, MerkleProofBuilder};
 use crate::cell::*;
 
 pub struct MerkleUpdate<C: CellFamily> {
@@ -101,6 +105,190 @@ impl<C: CellFamily> Store<C> for MerkleUpdate<C> {
 impl<C: CellFamily> MerkleUpdate<C> {
     pub const BITS: u16 = 8 + (256 + 16) * 2;
     pub const REFS: u8 = 2;
+
+    pub fn create<'a, F>(
+        old: &'a dyn Cell<C>,
+        new: &'a dyn Cell<C>,
+        f: F,
+    ) -> MerkleUpdateBuilder<'a, C, F>
+    where
+        F: MerkleFilter + 'a,
+    {
+        MerkleUpdateBuilder::new(old, new, f)
+    }
+}
+
+pub struct MerkleUpdateBuilder<'a, C: CellFamily, F, S = ahash::RandomState> {
+    old: &'a dyn Cell<C>,
+    new: &'a dyn Cell<C>,
+    filter: F,
+    _marker: std::marker::PhantomData<S>,
+}
+
+impl<'a, C: CellFamily, S, F> MerkleUpdateBuilder<'a, C, F, S>
+where
+    F: MerkleFilter,
+    S: BuildHasher + Default,
+{
+    pub fn new(old: &'a dyn Cell<C>, new: &'a dyn Cell<C>, f: F) -> Self {
+        Self {
+            old,
+            new,
+            filter: f,
+            _marker: std::marker::PhantomData::<S>,
+        }
+    }
+
+    pub fn build_ext(self, finalizer: &mut dyn Finalizer<C>) -> Option<MerkleUpdate<C>> {
+        BuilderImpl {
+            old: self.old,
+            new: self.new,
+            filter: &self.filter,
+            finalizer,
+            _marker: std::marker::PhantomData::<S>,
+        }
+        .build()
+    }
+}
+
+impl<'a, C: DefaultFinalizer, F, S> MerkleUpdateBuilder<'a, C, F, S>
+where
+    F: MerkleFilter,
+    S: BuildHasher + Default,
+{
+    pub fn build(self) -> Option<MerkleUpdate<C>> {
+        self.build_ext(&mut C::default_finalizer())
+    }
+}
+
+struct BuilderImpl<'a, 'b, C: CellFamily, S> {
+    old: &'a dyn Cell<C>,
+    new: &'a dyn Cell<C>,
+    filter: &'b dyn MerkleFilter,
+    finalizer: &'b mut dyn Finalizer<C>,
+    _marker: std::marker::PhantomData<S>,
+}
+
+impl<'a: 'b, 'b, C: CellFamily, S> BuilderImpl<'a, 'b, C, S>
+where
+    S: BuildHasher + Default,
+{
+    fn build(self) -> Option<MerkleUpdate<C>> {
+        struct Resolver<'a, S> {
+            pruned_branches: HashMap<CellHash, bool, S>,
+            visited: HashSet<&'a CellHash, S>,
+            filter: &'a dyn MerkleFilter,
+            changed_cells: HashSet<&'a CellHash, S>,
+        }
+
+        impl<'a, S> Resolver<'a, S>
+        where
+            S: BuildHasher,
+        {
+            fn fill<C: CellFamily>(&mut self, cell: &'a dyn Cell<C>) -> bool {
+                let repr_hash = cell.repr_hash();
+
+                // Skip visited cells
+                if self.visited.contains(repr_hash) {
+                    return false;
+                }
+                self.visited.insert(repr_hash);
+
+                let is_pruned = match self.pruned_branches.get_mut(repr_hash) {
+                    Some(true) => return false,
+                    Some(visited) => {
+                        *visited = true;
+                        true
+                    }
+                    None => false,
+                };
+
+                let mut result = false;
+                if self.filter.contains(repr_hash) {
+                    for child in cell.references() {
+                        result |= self.fill(child);
+                    }
+
+                    if result {
+                        self.changed_cells.insert(repr_hash);
+                    }
+                }
+
+                result | is_pruned
+            }
+        }
+
+        struct InvertedFilter<F>(F);
+
+        impl<F: MerkleFilter> MerkleFilter for InvertedFilter<F> {
+            #[inline]
+            fn contains(&self, cell: &CellHash) -> bool {
+                !self.0.contains(cell)
+            }
+        }
+
+        #[derive(Clone, Copy)]
+        struct ChangedCellsFilter<'a, S>(&'a HashSet<&'a CellHash, S>);
+
+        impl<S: BuildHasher> MerkleFilter for ChangedCellsFilter<'_, S> {
+            fn contains(&self, cell: &CellHash) -> bool {
+                self.0.contains(cell)
+            }
+        }
+
+        let old_hash = self.old.repr_hash();
+        let old_depth = self.old.repr_depth();
+        let new_hash = self.new.repr_hash();
+        let new_depth = self.new.repr_depth();
+
+        // Handle the simplest case with empty merkle update
+        if old_hash != new_hash {
+            let pruned = make_pruned_branch(self.old, 0, self.finalizer)?;
+            return Some(MerkleUpdate {
+                old_hash: *old_hash,
+                new_hash: *old_hash,
+                old_depth,
+                new_depth: old_depth,
+                old: pruned.clone(),
+                new: pruned,
+            });
+        }
+
+        // Prepare cell diff resolver
+        let mut resolver = Resolver::<S> {
+            pruned_branches: Default::default(),
+            visited: Default::default(),
+            filter: self.filter,
+            changed_cells: Default::default(),
+        };
+
+        // Create merkle proof cell which contains only new cells
+        let new = MerkleProofBuilder::<C, _, S>::new(self.new, InvertedFilter(self.filter))
+            .track_pruned_branches(&mut resolver.pruned_branches)
+            .build_raw_ext(self.finalizer)?;
+
+        // Find all changed cells in the old cell tree
+        if resolver.fill(self.old) {
+            resolver.changed_cells.insert(old_hash);
+        }
+
+        // Create merkle proof cell which contains only changed cells
+        let old = MerkleProofBuilder::<C, _, S>::new(
+            self.old,
+            ChangedCellsFilter(&resolver.changed_cells),
+        )
+        .build_raw_ext(self.finalizer)?;
+
+        // Done
+        Some(MerkleUpdate {
+            old_hash: *old_hash,
+            new_hash: *new_hash,
+            old_depth,
+            new_depth,
+            old,
+            new,
+        })
+    }
 }
 
 #[cfg(test)]

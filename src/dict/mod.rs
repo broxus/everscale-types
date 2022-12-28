@@ -956,19 +956,10 @@ where
     }
 }
 
-/// ```ignore
-/// hml_short$0 {m:#} {n:#} len:(Unary ~n) {n <= m} s:(n * Bit) = HmLabel ~n m;
-/// where n = 0
-/// ```
 fn write_hml_empty<C: CellFamily>(label: &mut CellBuilder<C>) -> bool {
     label.store_zeros(2)
 }
 
-/// ```ignore
-/// hml_short$0 {m:#} {n:#} len:(Unary ~n) {n <= m} s:(n * Bit) = HmLabel ~n m;
-/// unary_zero$0 = Unary ~0;
-/// unary_succ$1 {n:#} x:(Unary ~n) = Unary ~(n + 1);
-/// ```
 fn write_hml_short<C: CellFamily>(key: &CellSlice<C>, label: &mut CellBuilder<C>) -> bool {
     if !label.store_bit_zero() {
         return false;
@@ -1001,9 +992,6 @@ fn read_hml_short<'a, C: CellFamily>(label: &mut CellSlice<'a, C>) -> Option<Cel
     }
 }
 
-/// ```ignore
-/// hml_long$10 {m:#} n:(#<= m) s:(n * Bit) = HmLabel ~n m;
-/// ```
 fn write_hml_long<C: CellFamily>(
     key: &CellSlice<C>,
     bits_for_len: u16,
@@ -1028,9 +1016,6 @@ fn read_hml_long<'a, C: CellFamily>(
     }
 }
 
-/// ```ignore
-/// hml_same$11 {m:#} v:Bit n:(#<= m) = HmLabel ~n m;
-/// ```
 fn write_hml_same<C: CellFamily>(
     bit: bool,
     len: u16,
