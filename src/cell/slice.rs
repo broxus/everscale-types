@@ -362,44 +362,42 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
             // Get first bytes aligned to the left
             let mut self_byte = *self_data_ptr << self_r;
             let mut other_byte = *other_data_ptr << other_r;
-            if aligned_bytes > 1 {
-                // For all aligned bytes except the first
-                for i in 1..aligned_bytes {
-                    // Concat previous bits with current bits
-                    // NOTE: shift as `u16` to allow overflow
-                    let next_self_byte = *self_data_ptr.add(i);
-                    self_byte |= ((next_self_byte as u16) >> (8 - self_r)) as u8;
-                    let next_other_byte = *other_data_ptr.add(i);
-                    other_byte |= ((next_other_byte as u16) >> (8 - other_r)) as u8;
 
-                    // XOR bytes to check equality
-                    match self_byte ^ other_byte {
-                        // All bits are equal, update current bytes and move forward
-                        0 => {
-                            prefix_len += 8;
-                            self_byte = next_self_byte << self_r;
-                            other_byte = next_other_byte << other_r;
-                        }
-                        // Some bits are not equal
-                        x => {
-                            // Number of leading zeros is the number of equal bits
-                            return prefix_len + x.leading_zeros() as u16;
-                        }
+            // For all aligned bytes except the first
+            for i in 1..aligned_bytes {
+                // Concat previous bits with current bits
+                // NOTE: shift as `u16` to allow overflow
+                let next_self_byte = *self_data_ptr.add(i);
+                self_byte |= ((next_self_byte as u16) >> (8 - self_r)) as u8;
+                let next_other_byte = *other_data_ptr.add(i);
+                other_byte |= ((next_other_byte as u16) >> (8 - other_r)) as u8;
+
+                // XOR bytes to check equality
+                match self_byte ^ other_byte {
+                    // All bits are equal, update current bytes and move forward
+                    0 => {
+                        prefix_len += 8;
+                        self_byte = next_self_byte << self_r;
+                        other_byte = next_other_byte << other_r;
                     }
-                }
-
-                // Concat remaining bits
-                if self_r > 0 {
-                    self_byte |= *self_data_ptr.add(aligned_bytes) >> (8 - self_r);
-                }
-                if other_r > 0 {
-                    other_byte |= *other_data_ptr.add(aligned_bytes) >> (8 - other_r);
+                    // Some bits are not equal
+                    x => {
+                        // Number of leading zeros is the number of equal bits
+                        return prefix_len + x.leading_zeros() as u16;
+                    }
                 }
             }
 
+            // Concat remaining bits
+            if self_r > 0 && aligned_bytes < self_bytes {
+                self_byte |= *self_data_ptr.add(aligned_bytes) >> (8 - self_r);
+            }
+            if other_r > 0 && aligned_bytes < other_bytes {
+                other_byte |= *other_data_ptr.add(aligned_bytes) >> (8 - other_r);
+            }
+
             // Apply last byte mask
-            // NOTE: shift as `u16` to allow overflow
-            let last_byte_mask = (0xffu16 << (8 - max_bit_len % 8)) as u8;
+            let last_byte_mask = 0xff << ((8 - max_bit_len % 8) % 8);
             self_byte &= last_byte_mask;
             other_byte &= last_byte_mask;
 
@@ -447,7 +445,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
         let data = self.cell.data();
 
         // Check if data is enough
-        if (self.bits_window_end + 7) / 8 < data.len() as u16 {
+        if (self.bits_window_end + 7) / 8 > data.len() as u16 {
             return None;
         }
 
@@ -846,7 +844,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
             let data_len = data.len();
 
             // Check if data is enough
-            if (self.bits_window_end + 7) / 8 < data_len as u16 {
+            if (self.bits_window_end + 7) / 8 > data_len as u16 {
                 return None;
             }
 
@@ -1079,7 +1077,7 @@ mod tests {
     }
 
     #[test]
-    fn split_data_prefix() {
+    fn strip_data_prefix() {
         let cell1 =
             build_cell(|b| b.store_u16(0xabcd) && b.store_bit_zero() && b.store_u16(0xffff));
         let mut slice1 = cell1.as_slice();
@@ -1114,6 +1112,39 @@ mod tests {
         println!("{}", prefix.display_root());
         assert_eq!(prefix.data(), [0xff, 0xff, 0xfe]);
         assert_eq!(prefix.bit_len(), 22);
+
+        //
+        let cell1 = build_cell(|b| b.store_u32(0));
+        let cell2 = build_cell(|b| b.store_u32(1));
+        let prefix = cell1
+            .as_slice()
+            .longest_common_data_prefix(&cell2.as_slice());
+        assert_eq!(prefix.remaining_bits(), 31);
+
+        //
+        let cell1 = build_cell(|b| b.store_raw(&[0, 0, 2, 2], 32));
+        let mut slice1 = cell1.as_slice();
+        slice1.try_advance(23, 0);
+
+        let cell2 = build_cell(|b| b.store_raw(&[0; 128], 1023));
+        let slice2 = cell2.as_slice().get_prefix(8, 0);
+
+        let prefix = slice1.longest_common_data_prefix(&slice2);
+        assert_eq!(prefix.remaining_bits(), 7);
+
+        //
+        let cell1 = build_cell(|b| b.store_u16(0));
+        let mut slice1 = cell1.as_slice();
+        slice1.try_advance(5, 0);
+
+        let cell2 = build_cell(|b| b.store_u8(0));
+        let mut slice2 = cell2.as_slice();
+        slice2.try_advance(2, 0);
+
+        let prefix = slice1
+            .get_prefix(5, 0)
+            .longest_common_data_prefix(&slice2.get_prefix(5, 0));
+        assert_eq!(prefix.remaining_bits(), 5);
     }
 
     #[test]

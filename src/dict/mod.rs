@@ -47,21 +47,97 @@ impl<C: CellFamily, const N: u16> PartialEq for HashmapE<C, N> {
     }
 }
 
-impl<C, const N: u16> HashmapE<C, N>
-where
-    for<'c> C: CellFamily + 'c,
-{
+impl<C: CellFamily, const N: u16> From<Option<CellContainer<C>>> for HashmapE<C, N> {
+    #[inline]
+    fn from(value: Option<CellContainer<C>>) -> Self {
+        Self(value)
+    }
+}
+
+impl<C: CellFamily, const N: u16> HashmapE<C, N> {
+    const _ASSERT: () = assert!(N > 0, "HashmapE with 0-bit key is invalid");
+
+    pub fn new() -> Self {
+        Self(None)
+    }
+
     /// Returns `true` if the map contains no elements.
     pub fn is_empty(&self) -> bool {
         self.0.is_none()
     }
+}
 
+impl<C, const N: u16> HashmapE<C, N>
+where
+    for<'c> C: CellFamily + 'c,
+{
     /// Returns a `CellSlice` of the value corresponding to the key.
     pub fn get<'a: 'b, 'b>(
         &'a self,
         key: CellSlice<'b, C>,
     ) -> Result<Option<CellSlice<'a, C>>, Error> {
         hashmap_get(&self.0, N, key)
+    }
+
+    /// Returns `true` if the map contains a value for the specified key.
+    pub fn contains_key(&self, key: CellSlice<'_, C>) -> Result<bool, Error> {
+        Ok(ok!(hashmap_get(&self.0, N, key)).is_some())
+    }
+
+    /// Sets the value associated with the key in the dictionary.
+    pub fn set_ext(
+        &mut self,
+        mut key: CellSlice<'_, C>,
+        value: CellSlice<'_, C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
+        self.0 = ok!(hashmap_insert(
+            &self.0,
+            &mut key,
+            N,
+            &value,
+            SetMode::Set,
+            finalizer
+        ));
+        Ok(())
+    }
+
+    /// Sets the value associated with the key in the dictionary
+    /// only if the key was already present in it.
+    pub fn replace_ext(
+        &mut self,
+        mut key: CellSlice<'_, C>,
+        value: CellSlice<'_, C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
+        self.0 = ok!(hashmap_insert(
+            &self.0,
+            &mut key,
+            N,
+            &value,
+            SetMode::Replace,
+            finalizer
+        ));
+        Ok(())
+    }
+
+    /// Sets the value associated with key in dictionary,
+    /// but only if it is not already present.
+    pub fn add_ext(
+        &mut self,
+        mut key: CellSlice<'_, C>,
+        value: CellSlice<'_, C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
+        self.0 = ok!(hashmap_insert(
+            &self.0,
+            &mut key,
+            N,
+            &value,
+            SetMode::Add,
+            finalizer
+        ));
+        Ok(())
     }
 
     /// Gets an iterator over the entries of the map, sorted by key.
@@ -105,6 +181,28 @@ where
     /// returning an error.
     pub fn values(&'_ self) -> Values<'_, C> {
         Values::new(&self.0, N)
+    }
+}
+
+impl<C, const N: u16> HashmapE<C, N>
+where
+    for<'c> C: DefaultFinalizer + 'c,
+{
+    /// Sets the value associated with the key in the dictionary.
+    pub fn set(&mut self, key: CellSlice<'_, C>, value: CellSlice<'_, C>) -> Result<(), Error> {
+        self.set_ext(key, value, &mut C::default_finalizer())
+    }
+
+    /// Sets the value associated with the key in the dictionary
+    /// only if the key was already present in it.
+    pub fn replace(&mut self, key: CellSlice<'_, C>, value: CellSlice<'_, C>) -> Result<(), Error> {
+        self.replace_ext(key, value, &mut C::default_finalizer())
+    }
+
+    /// Sets the value associated with key in dictionary,
+    /// but only if it is not already present.
+    pub fn add(&mut self, key: CellSlice<'_, C>, value: CellSlice<'_, C>) -> Result<(), Error> {
+        self.add_ext(key, value, &mut C::default_finalizer())
     }
 }
 
@@ -169,7 +267,7 @@ where
             let mut data = segment.data.as_slice();
 
             // Read the next key part from the latest segment
-            let prefix = match read_label(&mut data, count_bits(segment.remaining_bit_len)) {
+            let prefix = match read_label(&mut data, segment.remaining_bit_len) {
                 Some(prefix) => prefix,
                 None => return Some(Err(self.finish(Error::CellUnderflow))),
             };
@@ -351,7 +449,7 @@ where
             let mut data = segment.data.as_slice();
 
             // Read the next key part from the latest segment
-            let prefix = match read_label(&mut data, count_bits(segment.remaining_bit_len)) {
+            let prefix = match read_label(&mut data, segment.remaining_bit_len) {
                 Some(prefix) => prefix,
                 None => return Some(Err(self.finish(Error::CellUnderflow))),
             };
@@ -425,6 +523,232 @@ impl<C: CellFamily> Clone for ValuesSegment<'_, C> {
     }
 }
 
+/// Dictionary insection mode.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum SetMode {
+    /// Sets the value associated with the key in the dictionary.
+    Set = 0b11,
+    /// Sets the value associated with the key in the dictionary
+    /// only if the key was already present in it.
+    Replace = 0b01,
+    /// Sets the value associated with key in dictionary,
+    /// but only if it is not already present.
+    Add = 0b10,
+}
+
+impl SetMode {
+    #[inline]
+    pub const fn can_replace(self) -> bool {
+        self as u8 & 0b01 != 0
+    }
+
+    #[inline]
+    pub const fn can_add(self) -> bool {
+        self as u8 & 0b10 != 0
+    }
+}
+
+pub fn hashmap_insert<'a, C>(
+    root: &'a Option<CellContainer<C>>,
+    key: &mut CellSlice<C>,
+    key_bit_len: u16,
+    value: &CellSlice<C>,
+    mode: SetMode,
+    finalizer: &mut dyn Finalizer<C>,
+) -> Result<Option<CellContainer<C>>, Error>
+where
+    for<'c> C: CellFamily + 'c,
+{
+    // Creates a leaf node
+    fn make_leaf<C: CellFamily>(
+        key: &CellSlice<C>,
+        key_bit_len: u16,
+        value: &CellSlice<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<CellContainer<C>, Error> {
+        let mut builder = CellBuilder::<C>::new();
+        if write_label(key, key_bit_len, &mut builder) && builder.store_slice(value) {
+            match builder.build_ext(finalizer) {
+                Some(data) => Ok(data),
+                None => Err(Error::CellOverflow), // TODO: use errors in finalizer
+            }
+        } else {
+            Err(Error::CellOverflow)
+        }
+    }
+
+    // Splits an edge or leaf
+    fn split<C: CellFamily>(
+        data: &CellSlice<C>,
+        prefix: &mut CellSlice<C>,
+        lcp: &CellSlice<C>,
+        key: &mut CellSlice<C>,
+        value: &CellSlice<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<CellContainer<C>, Error> {
+        // Advance the key
+        let prev_key_bit_len = key.remaining_bits();
+        if !key.try_advance(lcp.remaining_bits() + 1, 0) {
+            return Err(Error::CellUnderflow);
+        }
+
+        // Read the next bit from the data
+        prefix.try_advance(lcp.remaining_bits(), 0);
+        let old_to_right = match prefix.load_bit() {
+            Some(bit) => bit,
+            None => return Err(Error::CellUnderflow),
+        };
+
+        // Create a leaf for the old value
+        let mut left = ok!(make_leaf(prefix, key.remaining_bits(), data, finalizer));
+        // Create a leaf for the right value
+        let mut right = ok!(make_leaf(key, key.remaining_bits(), value, finalizer));
+
+        // The part that starts with 1 goes to the right cell
+        if old_to_right {
+            std::mem::swap(&mut left, &mut right);
+        }
+
+        // Create fork
+        let mut builder = CellBuilder::<C>::new();
+        if write_label(lcp, prev_key_bit_len, &mut builder)
+            && builder.store_reference(left)
+            && builder.store_reference(right)
+        {
+            match builder.build_ext(finalizer) {
+                Some(data) => Ok(data),
+                None => Err(Error::CellOverflow), // TODO: use errors in finalizer
+            }
+        } else {
+            Err(Error::CellOverflow)
+        }
+    }
+
+    #[derive(Clone, Copy, Eq, PartialEq)]
+    enum Branch {
+        // Branch for a key part that starts with bit 0
+        Left = 0,
+        // Branch for a key part that starts with bit 1
+        Right = 1,
+    }
+
+    #[derive(Clone, Copy)]
+    struct Segment<'a, C: CellFamily> {
+        data: CellSlice<'a, C>,
+        next_branch: Branch,
+    }
+
+    if key.remaining_bits() != key_bit_len {
+        return Err(Error::CellUnderflow);
+    }
+
+    let data = match root.as_ref() {
+        Some(data) => data,
+        None if mode.can_add() => {
+            let data = ok!(make_leaf(key, key_bit_len, value, finalizer));
+            return Ok(Some(data));
+        }
+        None => return Ok(None),
+    };
+    let mut data = data.as_ref().as_slice();
+
+    let mut stack = Vec::<Segment<C>>::new();
+
+    let mut leaf = loop {
+        let mut remaining_data = data;
+
+        // Read the next part of the key from the current data
+        let prefix = &mut match read_label(&mut remaining_data, key.remaining_bits()) {
+            Some(prefix) => prefix,
+            None => return Err(Error::CellUnderflow),
+        };
+
+        // Match the prefix with the key
+        let lcp = key.longest_common_data_prefix(prefix);
+        match lcp.remaining_bits().cmp(&key.remaining_bits()) {
+            // If all bits match, an existing value was found
+            std::cmp::Ordering::Equal => {
+                // Check if we can replace the value
+                if !mode.can_replace() {
+                    return Ok(root.clone());
+                }
+                // Replace the existing value
+                break ok!(make_leaf(prefix, key.remaining_bits(), value, finalizer));
+            }
+            // LCP is less than prefix, an edge to slice was found
+            std::cmp::Ordering::Less if lcp.remaining_bits() < prefix.remaining_bits() => {
+                // Check if we can add a new value
+                if !mode.can_add() {
+                    return Ok(root.clone());
+                }
+                break ok!(split(&remaining_data, prefix, &lcp, key, value, finalizer));
+            }
+            // The key contains the entire prefix, but there are still some bits left
+            std::cmp::Ordering::Less => {
+                // Fail fast if there are not enough references in the fork
+                let cell = data.cell();
+                if cell.reference_count() != 2 {
+                    return Err(Error::CellUnderflow);
+                }
+
+                // Remove the LCP from the key
+                key.try_advance(lcp.remaining_bits(), 0);
+
+                // Load the next branch
+                let next_branch = match key.load_bit() {
+                    Some(false) => Branch::Left,
+                    Some(true) => Branch::Right,
+                    None => return Err(Error::CellUnderflow),
+                };
+
+                // TODO: handle pruned branch
+                match data.cell().reference(next_branch as u8) {
+                    Some(child) => {
+                        // Push an intermediate edge to the stack
+                        stack.push(Segment { data, next_branch });
+                        data = child.as_slice()
+                    }
+                    None => return Err(Error::CellUnderflow),
+                }
+            }
+            std::cmp::Ordering::Greater => {
+                debug_assert!(false, "LCP of prefix and key can't be greater than key");
+                unsafe { std::hint::unreachable_unchecked() };
+            }
+        }
+    };
+
+    // Rebuild the tree starting from leaves
+    while let Some(last) = stack.pop() {
+        // Load the opposite branch
+        let (left, right) = match last.next_branch {
+            Branch::Left => match last.data.cell().reference_cloned(1) {
+                Some(cell) => (leaf, cell),
+                None => return Err(Error::CellUnderflow),
+            },
+            Branch::Right => match last.data.cell().reference_cloned(0) {
+                Some(cell) => (cell, leaf),
+                None => return Err(Error::CellUnderflow),
+            },
+        };
+
+        let mut builder = CellBuilder::<C>::new();
+        if builder.store_slice_data(&last.data)
+            && builder.store_reference(left)
+            && builder.store_reference(right)
+        {
+            leaf = match builder.build_ext(finalizer) {
+                Some(data) => data,
+                None => return Err(Error::CellOverflow), // TODO: use errors in finalizer
+            };
+        } else {
+            return Err(Error::CellOverflow);
+        }
+    }
+
+    Ok(Some(leaf))
+}
+
 pub fn hashmap_get<'a: 'b, 'b, C>(
     root: &'a Option<CellContainer<C>>,
     mut key_bit_len: u16,
@@ -433,26 +757,38 @@ pub fn hashmap_get<'a: 'b, 'b, C>(
 where
     for<'c> C: CellFamily + 'c,
 {
+    if key.remaining_bits() != key_bit_len {
+        return Err(Error::CellUnderflow);
+    }
+
     let data = match root.as_ref() {
         Some(data) => data,
         None => return Ok(None),
     };
     let mut data = data.as_ref().as_slice();
 
-    // Read the key part written in the root cell
-    let mut prefix = match read_label(&mut data, count_bits(key_bit_len)) {
-        Some(prefix) => prefix,
-        None => return Err(Error::CellUnderflow),
-    };
+    // Try to find the required leaf
+    let is_key_empty = loop {
+        // Read the key part written in the current edge
+        let prefix = match read_label(&mut data, key_bit_len) {
+            Some(prefix) => prefix,
+            None => return Err(Error::CellUnderflow),
+        };
 
-    // Strip the key part from the specified key
-    while let Some(stripped_key) = key.strip_data_prefix(&prefix) {
-        if stripped_key.is_data_empty() {
-            break; // break if all parts were collected
-        } else if data.remaining_refs() < 2 {
-            return Ok(None); // break on leaf
-        } else {
-            key = stripped_key;
+        // Remove this prefix from the key
+        match key.strip_data_prefix(&prefix) {
+            Some(stripped_key) => {
+                if stripped_key.is_data_empty() {
+                    // All key parts were collected <=> value found
+                    break true;
+                } else if data.remaining_refs() < 2 {
+                    // Reached leaf while key was not fully constructed
+                    return Ok(None);
+                } else {
+                    key = stripped_key;
+                }
+            }
+            None => break key.is_data_empty(),
         }
 
         // Load next child based on the next bit
@@ -473,30 +809,22 @@ where
             Some(bit_len) => bit_len,
             None => return Err(Error::CellUnderflow),
         };
-
-        // Read the key part written in the child cell
-        prefix = match read_label(&mut data, count_bits(key_bit_len)) {
-            Some(prefix) => prefix,
-            None => return Err(Error::CellUnderflow),
-        };
-    }
+    };
 
     // Return the last slice as data
-    Ok(Some(data))
-}
-
-fn count_bits(key_len: u16) -> u16 {
-    (16 - key_len.leading_zeros()) as u16
+    Ok(if is_key_empty { Some(data) } else { None })
 }
 
 pub fn write_label<C: CellFamily>(
     key: &CellSlice<C>,
-    bits_for_len: u16,
+    key_bit_len: u16,
     label: &mut CellBuilder<C>,
 ) -> bool {
-    if bits_for_len == 0 || key.is_data_empty() {
+    if key_bit_len == 0 || key.is_data_empty() {
         return write_hml_empty(label);
     }
+
+    let bits_for_len = (16 - key_bit_len.leading_zeros()) as u16;
 
     let remaining_bits = key.remaining_bits();
 
@@ -519,13 +847,12 @@ pub fn write_label<C: CellFamily>(
     }
 }
 
-pub fn read_label<'a, C>(
-    label: &mut CellSlice<'a, C>,
-    bits_for_len: u16,
-) -> Option<CellSlice<'a, C>>
+pub fn read_label<'a, C>(label: &mut CellSlice<'a, C>, key_bit_len: u16) -> Option<CellSlice<'a, C>>
 where
     for<'c> C: CellFamily + 'c,
 {
+    let bits_for_len = (16 - key_bit_len.leading_zeros()) as u16;
+
     if label.is_data_empty() && bits_for_len == 0 {
         Some(label.get_prefix(0, 0))
     } else if !label.load_bit()? {
@@ -646,11 +973,17 @@ pub enum Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{RcBoc, RcCellBuilder, RcCellFamily};
+    use crate::{RcBoc, RcCell, RcCellBuilder, RcCellFamily};
+
+    fn build_cell<F: FnOnce(&mut RcCellBuilder) -> bool>(f: F) -> RcCell {
+        let mut builder = RcCellBuilder::new();
+        assert!(f(&mut builder));
+        builder.build().unwrap()
+    }
 
     #[test]
     fn labels() {
-        let bits_for_len = 3;
+        let key_bit_len = 6;
 
         // Build key
         let key = {
@@ -663,12 +996,12 @@ mod tests {
         // Build label
         let label = {
             let mut builder = RcCellBuilder::new();
-            assert!(write_label(&key.as_slice(), bits_for_len, &mut builder));
+            assert!(write_label(&key.as_slice(), key_bit_len, &mut builder));
             builder.build().unwrap()
         };
 
         // Parse label
-        let parsed_key = read_label(&mut label.as_slice(), bits_for_len).unwrap();
+        let parsed_key = read_label(&mut label.as_slice(), key_bit_len).unwrap();
         let parsed_key = {
             let mut builder = RcCellBuilder::new();
             builder.store_slice(&parsed_key);
@@ -677,6 +1010,73 @@ mod tests {
 
         // Parsed key should be equal to the original
         assert_eq!(key.as_ref(), parsed_key.as_ref());
+
+        let label = RcCellBuilder::from_raw_data(&[0xcc, 0x40], 9)
+            .unwrap()
+            .build()
+            .unwrap();
+        let prefix = read_label(&mut label.as_slice(), 32).unwrap();
+
+        println!("{}", build_cell(|b| b.store_slice(&prefix)).display_tree());
+        assert_eq!(prefix.test_uniform(), Some(false));
+    }
+
+    #[test]
+    fn hashmap_set() {
+        let mut map = HashmapE::<RcCellFamily, 32>::new();
+
+        let key = {
+            let mut builder = RcCellBuilder::new();
+            builder.store_u32(123);
+            builder.build().unwrap()
+        };
+
+        let empty_value = RcCellFamily::empty_cell();
+        let not_empty_value = {
+            let mut builder = RcCellBuilder::new();
+            builder.store_u16(0xffff);
+            builder.build().unwrap()
+        };
+
+        map.set(key.as_slice(), empty_value.as_slice()).unwrap();
+        {
+            let mut values = map.values();
+            let value = values.next().unwrap().unwrap();
+            assert!(value.is_data_empty() && value.is_refs_empty());
+            assert!(values.next().is_none());
+        }
+
+        map.set(key.as_slice(), not_empty_value.as_slice()).unwrap();
+        {
+            let mut values = map.values();
+            let mut value = values.next().unwrap().unwrap();
+            assert_eq!(value.load_u16(), Some(0xffff));
+            assert!(value.is_data_empty() && value.is_refs_empty());
+            assert!(values.next().is_none());
+        }
+    }
+
+    #[test]
+    fn hashmap_set_complex() {
+        let value = build_cell(|b| b.store_bit_true());
+
+        let mut map = HashmapE::<RcCellFamily, 32>::new();
+        for i in 0..520 {
+            let key = build_cell(|b| b.store_u32(i));
+            map.set(key.as_slice(), value.as_slice()).unwrap();
+
+            let mut total = 0;
+            for (i, item) in map.iter().enumerate() {
+                total += 1;
+                let (key, value) = item.unwrap();
+                let key = key.build().unwrap();
+                assert_eq!(value.remaining_bits(), 1);
+                assert_eq!(key.bit_len(), 32);
+                let key = key.as_slice().load_u32().unwrap();
+                assert_eq!(key, i as u32);
+            }
+            assert_eq!(total, i + 1);
+        }
     }
 
     #[test]
@@ -688,7 +1088,7 @@ mod tests {
 
         let key = {
             let mut builder = RcCellBuilder::new();
-            builder.store_u32(0x123);
+            builder.store_u32(u32::from_be_bytes(123u32.to_le_bytes()));
             builder.build().unwrap()
         };
         let value = map.get(key.as_slice()).unwrap().unwrap();
@@ -714,9 +1114,9 @@ mod tests {
 
             let key = {
                 let key_cell = key.build().unwrap();
-                key_cell.as_slice().load_uint(key_cell.bit_len()).unwrap()
+                key_cell.as_slice().load_u32().unwrap()
             };
-            assert_eq!(key, i as u64);
+            assert_eq!(key, i as u32);
         }
     }
 }
