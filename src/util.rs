@@ -11,7 +11,7 @@ pub const fn unlikely(b: bool) -> bool {
     }
 }
 
-/// Helper struct to prerry-print hash.
+/// Helper struct to pretty-print hash.
 #[derive(Clone, Copy)]
 pub struct DisplayHash<'a>(pub &'a [u8; 32]);
 
@@ -33,7 +33,7 @@ impl std::fmt::Debug for DisplayHash<'_> {
     }
 }
 
-/// Small on-stack vector of max lenth N.
+/// Small on-stack vector of max length N.
 pub struct ArrayVec<T, const N: usize> {
     inner: [MaybeUninit<T>; N],
     len: u8,

@@ -98,6 +98,11 @@ impl<C, const N: u16> Dict<C, N>
 where
     for<'c> C: CellFamily + 'c,
 {
+    #[inline]
+    pub fn raw(&self) -> &Option<CellContainer<C>> {
+        &self.0
+    }
+
     /// Returns a `CellSlice` of the value corresponding to the key.
     pub fn get<'a: 'b, 'b>(
         &'a self,
@@ -610,7 +615,7 @@ impl IterStatus {
     }
 }
 
-/// Dictionary insection mode.
+/// Dictionary insertion mode.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum SetMode {
     /// Sets the value associated with the key in the dictionary.
@@ -859,7 +864,7 @@ where
         Some(data) => data.as_ref(),
         None => return Ok(None),
     };
-    // Handle pruned branch acces
+    // Handle pruned branch access
     if unlikely(data.descriptor().is_pruned_branch()) {
         return Err(Error::PrunedBranchAccess);
     }

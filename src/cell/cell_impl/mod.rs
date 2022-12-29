@@ -411,11 +411,11 @@ impl<C: CellFamily, const N: usize> Cell<C> for PrunedBranch<N> {
 }
 
 #[repr(transparent)]
-struct VirtualCell<T>(T);
+pub struct VirtualCell<T>(T);
 
 impl<C, T> Cell<C> for VirtualCell<T>
 where
-    for<'a> C: CellFamily + 'a,
+    for<'c> C: CellFamily + 'c,
     T: AsRef<dyn Cell<C>>,
 {
     fn descriptor(&self) -> CellDescriptor {
@@ -458,7 +458,7 @@ where
 }
 
 #[repr(transparent)]
-struct VirtualCellWrapper<T>(T);
+pub struct VirtualCellWrapper<T>(T);
 
 impl<T> VirtualCellWrapper<T> {
     pub fn wrap(value: &T) -> &Self {

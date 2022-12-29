@@ -7,6 +7,7 @@ pub use self::builder::{CellBuilder, Store};
 pub use self::cell_impl::{rc, sync, StaticCell};
 pub use self::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 pub use self::slice::{CellSlice, Load};
+pub use self::usage_tree::{RcUsageTree, UsageTreeMode};
 
 /// Generic cell implementation.
 mod cell_impl;
@@ -19,6 +20,8 @@ mod slice;
 
 /// Cell creation utils.
 mod builder;
+
+mod usage_tree;
 
 /// Cell implementation family.
 pub trait CellFamily {
@@ -55,7 +58,7 @@ pub trait Cell<C: CellFamily> {
     /// # See also
     ///
     /// Cell descriptor contains some tightly packed info about the cell.
-    /// If you want convinient methods to access it use:
+    /// If you want convenient methods to access it use:
     /// [`cell_type`], [`level_mask`], [`reference_count`], [`is_exotic`]
     ///
     /// [`cell_type`]: fn@crate::cell::CellDescriptor::cell_type
@@ -509,7 +512,7 @@ impl CellDescriptor {
     }
 }
 
-/// _de Brujn_ level presense bitset.
+/// _de Brujn_ level presence bitset.
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct LevelMask(u8);
 

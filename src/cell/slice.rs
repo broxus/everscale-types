@@ -118,7 +118,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
         self.bits_window_start >= self.bits_window_end
     }
 
-    /// Returns whether threre are no references left.
+    /// Returns whether there are no references left.
     ///
     /// # Examples
     ///
@@ -894,7 +894,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
         Some(res)
     }
 
-    /// Reads the specified number of bits to the taret starting from the `offset`.
+    /// Reads the specified number of bits to the target starting from the `offset`.
     pub fn get_raw<'b>(
         &'_ self,
         offset: u16,
@@ -1000,7 +1000,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
         self.references()
     }
 
-    /// Returins this slice, but with references skipped.
+    /// Returns this slice, but with references skipped.
     #[inline]
     pub fn without_references(mut self) -> Self {
         self.refs_window_start = self.refs_window_end;

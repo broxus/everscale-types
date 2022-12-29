@@ -12,6 +12,7 @@ pub use self::cell::rc::{RcCell, RcCellFamily};
 pub use self::cell::sync::{ArcCell, ArcCellFamily};
 pub use self::cell::{
     Cell, CellBuilder, CellDescriptor, CellFamily, CellHash, CellSlice, CellType, LevelMask,
+    RcUsageTree, UsageTreeMode,
 };
 pub use self::dict::Dict;
 

@@ -1,4 +1,4 @@
-use crate::cell::CellHash;
+use crate::cell::{CellHash, RcUsageTree};
 
 pub use self::proof::{MerkleProof, MerkleProofBuilder};
 pub use self::pruned_branch::make_pruned_branch;
@@ -16,5 +16,11 @@ impl<T: MerkleFilter + ?Sized> MerkleFilter for &T {
     #[inline]
     fn contains(&self, cell: &CellHash) -> bool {
         <T as MerkleFilter>::contains(self, cell)
+    }
+}
+
+impl MerkleFilter for RcUsageTree {
+    fn contains(&self, cell: &CellHash) -> bool {
+        self.contains(cell)
     }
 }

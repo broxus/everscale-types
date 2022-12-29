@@ -85,7 +85,7 @@ impl<C: CellFamily> MerkleProof<C> {
     pub const BITS: u16 = 8 + 256 + 16;
     pub const REFS: u8 = 1;
 
-    pub fn create<'a, F, S>(root: &'a dyn Cell<C>, f: F) -> MerkleProofBuilder<'a, C, F>
+    pub fn create<'a, F>(root: &'a dyn Cell<C>, f: F) -> MerkleProofBuilder<'a, C, F>
     where
         F: MerkleFilter + 'a,
     {
@@ -246,7 +246,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{RcBoc, RcCellBuilder, RcCellFamily};
+    use crate::{RcBoc, RcCell, RcCellBuilder, RcCellFamily, RcDict};
 
     use super::*;
 
@@ -276,5 +276,51 @@ mod tests {
 
         assert_eq!(root.repr_hash(), virtual_root.repr_hash());
         assert_eq!(root.repr_depth(), virtual_root.repr_depth());
+    }
+
+    #[test]
+    fn simple_update() {
+        fn build_u32(key: u32) -> RcCell {
+            let mut builder = RcCellBuilder::new();
+            builder.store_u32(key);
+            builder.build().unwrap()
+        }
+
+        fn serialize_dict(dict: RcDict<32>) -> RcCell {
+            let mut builder = RcCellBuilder::new();
+            dict.store_into(&mut builder);
+            builder.build().unwrap()
+        }
+
+        // Create dict with keys 0..10
+        let mut dict = RcDict::<32>::new();
+
+        for i in 0..10 {
+            let key = build_u32(i);
+            let value = build_u32(i * 10);
+            dict.add(key.as_slice(), value.as_slice()).unwrap();
+        }
+
+        // Create a usage tree for accessing an element with keys 0 and 9
+        let usage_tree = RcUsageTree::new(UsageTreeMode::OnDataAccess);
+        let tracked_cell = usage_tree.track(&serialize_dict(dict));
+        let tracked_dict = RcDict::<32>::load_from(&mut tracked_cell.as_slice()).unwrap();
+        tracked_dict.get(build_u32(0).as_slice()).unwrap().unwrap();
+        tracked_dict.get(build_u32(9).as_slice()).unwrap().unwrap();
+
+        // Create proof from the usage tree
+        let merkle_proof = MerkleProof::create(tracked_cell.as_ref(), usage_tree)
+            .build()
+            .unwrap();
+
+        // Try to read some keys
+        let dict = RcDict::<32>::load_from(&mut merkle_proof.cell.virtualize().as_slice()).unwrap();
+        dict.get(build_u32(0).as_slice()).unwrap().unwrap();
+        dict.get(build_u32(9).as_slice()).unwrap().unwrap();
+
+        assert!(matches!(
+            dict.get(build_u32(5).as_slice()),
+            Err(crate::dict::Error::PrunedBranchAccess)
+        ));
     }
 }
