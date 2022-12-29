@@ -242,7 +242,7 @@ where
         let new_depth = self.new.repr_depth();
 
         // Handle the simplest case with empty merkle update
-        if old_hash != new_hash {
+        if old_hash == new_hash {
             let pruned = make_pruned_branch(self.old, 0, self.finalizer)?;
             return Some(MerkleUpdate {
                 old_hash: *old_hash,
@@ -293,7 +293,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{RcCellBuilder, RcCellFamily};
+    use crate::{RcCell, RcCellBuilder, RcCellFamily, RcDict};
 
     use super::*;
 
@@ -307,5 +307,72 @@ mod tests {
 
         let parsed = MerkleUpdate::load_from(&mut cell.as_slice()).unwrap();
         assert_eq!(default, parsed);
+    }
+
+    #[test]
+    fn dict_merkle_update() {
+        fn build_u32(key: u32) -> RcCell {
+            let mut builder = RcCellBuilder::new();
+            builder.store_u32(key);
+            builder.build().unwrap()
+        }
+
+        fn serialize_dict(dict: RcDict<32>) -> RcCell {
+            let mut builder = RcCellBuilder::new();
+            dict.store_into(&mut builder);
+            builder.build().unwrap()
+        }
+
+        fn visit_all_cells(cell: &RcCell) -> ahash::HashSet<&CellHash> {
+            let mut result = ahash::HashSet::default();
+
+            let mut stack = vec![cell.as_ref()];
+            while let Some(cell) = stack.pop() {
+                let repr_hash = cell.repr_hash();
+                if !result.insert(repr_hash) {
+                    continue;
+                }
+
+                for child in cell.references() {
+                    stack.push(child);
+                }
+            }
+
+            result
+        }
+
+        // Create dict with keys 0..10
+        let mut dict = RcDict::<32>::new();
+
+        for i in 0..10 {
+            let key = build_u32(i);
+            let value = build_u32(i * 10);
+            dict.add(key.as_slice(), value.as_slice()).unwrap();
+        }
+
+        // Serialize old dict
+        let old_dict_cell = serialize_dict(dict.clone());
+        let old_dict_hashes = visit_all_cells(&old_dict_cell);
+        println!("OLD: {}", old_dict_cell.display_tree());
+
+        // Serialize new dict
+        dict.set(build_u32(0).as_slice(), build_u32(1).as_slice())
+            .unwrap();
+        let new_dict_cell = serialize_dict(dict);
+        println!("NEW: {}", new_dict_cell.display_tree());
+
+        // Create merkle update
+        let merkle_update = MerkleUpdate::create(
+            old_dict_cell.as_ref(),
+            new_dict_cell.as_ref(),
+            old_dict_hashes,
+        )
+        .build()
+        .unwrap();
+
+        let mut builder = RcCellBuilder::new();
+        merkle_update.store_into(&mut builder);
+        let merkle_update = builder.build().unwrap();
+        println!("{}", merkle_update.display_tree());
     }
 }

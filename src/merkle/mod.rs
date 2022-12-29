@@ -1,3 +1,7 @@
+use std::borrow::Borrow;
+use std::collections::HashSet;
+use std::hash::{BuildHasher, Hash};
+
 use crate::cell::{CellHash, RcUsageTree};
 
 pub use self::proof::{MerkleProof, MerkleProofBuilder};
@@ -21,6 +25,18 @@ impl<T: MerkleFilter + ?Sized> MerkleFilter for &T {
 
 impl MerkleFilter for RcUsageTree {
     fn contains(&self, cell: &CellHash) -> bool {
-        self.contains(cell)
+        RcUsageTree::contains(self, cell)
+    }
+}
+
+impl<S: BuildHasher> MerkleFilter for HashSet<CellHash, S> {
+    fn contains(&self, cell: &CellHash) -> bool {
+        HashSet::contains(self, cell)
+    }
+}
+
+impl<S: BuildHasher> MerkleFilter for HashSet<&CellHash, S> {
+    fn contains(&self, cell: &CellHash) -> bool {
+        HashSet::contains(self, cell)
     }
 }

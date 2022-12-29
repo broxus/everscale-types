@@ -279,7 +279,7 @@ mod tests {
     }
 
     #[test]
-    fn simple_update() {
+    fn create_proof_for_dict() {
         fn build_u32(key: u32) -> RcCell {
             let mut builder = RcCellBuilder::new();
             builder.store_u32(key);
