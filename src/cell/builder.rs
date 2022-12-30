@@ -552,6 +552,12 @@ impl<C: CellFamily> CellBuilder<C> {
         }
     }
 
+    /// Sets children of the cell,
+    /// returning `false` if there is not enough remaining capacity.
+    pub fn set_references(&mut self, refs: CellRefsBuilder<C>) {
+        self.references = refs.0;
+    }
+
     /// Tries to append a builder (its data and references),
     /// returning `false` if there is not enough remaining capacity.
     pub fn store_builder(&mut self, builder: &Self) -> bool {
@@ -663,6 +669,30 @@ where
     /// [`default_finalizer`]: fn@crate::cell::DefaultFinalizer::default_finalizer
     pub fn build(self) -> Option<CellContainer<C>> {
         self.build_ext(&mut C::default_finalizer())
+    }
+}
+
+#[repr(transparent)]
+pub struct CellRefsBuilder<C: CellFamily>(ArrayVec<CellContainer<C>, MAX_REF_COUNT>);
+
+impl<C: CellFamily> Default for CellRefsBuilder<C> {
+    #[inline]
+    fn default() -> Self {
+        Self(ArrayVec::default())
+    }
+}
+
+impl<C: CellFamily> CellRefsBuilder<C> {
+    /// Tries to store a child in the cell,
+    /// returning `false` if there is not enough remaining capacity.
+    pub fn store_reference(&mut self, cell: CellContainer<C>) -> bool {
+        if self.0.len() < MAX_REF_COUNT {
+            // SAFETY: reference count is in the valid range
+            unsafe { self.0.push(cell) }
+            true
+        } else {
+            false
+        }
     }
 }
 

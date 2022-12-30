@@ -2,7 +2,7 @@ use std::ops::{BitOr, BitOrAssign};
 
 use crate::util::DisplayHash;
 
-pub use self::builder::{CellBuilder, Store};
+pub use self::builder::{CellBuilder, CellRefsBuilder, Store};
 pub use self::cell_impl::{rc, sync, StaticCell};
 pub use self::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 pub use self::slice::{CellSlice, Load};
@@ -223,12 +223,22 @@ impl<C: CellFamily> std::fmt::Debug for DebugCell<'_, C> {
 }
 
 /// An iterator through child nodes.
-#[derive(Clone)]
 #[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct RefsIter<'a, C> {
     cell: &'a dyn Cell<C>,
     len: u8,
     index: u8,
+}
+
+impl<C> Clone for RefsIter<'_, C> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self {
+            cell: self.cell,
+            len: self.len,
+            index: self.index,
+        }
+    }
 }
 
 impl<'a, C: CellFamily> RefsIter<'a, C> {

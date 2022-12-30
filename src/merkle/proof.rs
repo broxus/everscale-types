@@ -119,45 +119,29 @@ impl<C: CellFamily> MerkleProof<C> {
     }
 }
 
-pub struct MerkleProofBuilder<'a, C: CellFamily, F, S = ahash::RandomState> {
+pub struct MerkleProofBuilder<'a, C: CellFamily, F> {
     root: &'a dyn Cell<C>,
     filter: F,
-    pruned_branches: Option<&'a mut HashMap<CellHash, bool, S>>,
 }
 
-impl<'a, C: CellFamily, F, S> MerkleProofBuilder<'a, C, F, S>
+impl<'a, C: CellFamily, F> MerkleProofBuilder<'a, C, F>
 where
     F: MerkleFilter,
-    S: BuildHasher + Default,
 {
     pub fn new(root: &'a dyn Cell<C>, f: F) -> Self {
-        MerkleProofBuilder {
-            root,
-            filter: f,
-            pruned_branches: None,
-        }
+        Self { root, filter: f }
     }
 
-    pub fn track_pruned_branches(
-        mut self,
-        pruned_branches: &'a mut HashMap<CellHash, bool, S>,
-    ) -> Self {
-        self.pruned_branches = Some(pruned_branches);
-        self
+    pub fn track_pruned_branches(self) -> RawMerkleProofBuilder<'a, C, F> {
+        RawMerkleProofBuilder {
+            root: self.root,
+            filter: self.filter,
+        }
     }
 
     pub fn build_ext(self, finalizer: &mut dyn Finalizer<C>) -> Option<MerkleProof<C>> {
         let root = self.root;
-
-        let cell = BuilderImpl {
-            root,
-            filter: &self.filter,
-            cells: Default::default(),
-            pruned_branches: self.pruned_branches,
-            finalizer,
-        }
-        .build()?;
-
+        let cell = self.build_raw_ext(finalizer)?;
         Some(MerkleProof {
             hash: *root.repr_hash(),
             depth: root.repr_depth(),
@@ -166,83 +150,121 @@ where
     }
 
     pub fn build_raw_ext(self, finalizer: &mut dyn Finalizer<C>) -> Option<CellContainer<C>> {
-        BuilderImpl {
+        BuilderImpl::<C, ahash::RandomState> {
             root: self.root,
             filter: &self.filter,
             cells: Default::default(),
-            pruned_branches: self.pruned_branches,
+            pruned_branches: None,
+            builder: CellBuilder::new(),
             finalizer,
         }
         .build()
     }
 }
 
-impl<'a, C: DefaultFinalizer, F, S> MerkleProofBuilder<'a, C, F, S>
+impl<'a, C: DefaultFinalizer, F> MerkleProofBuilder<'a, C, F>
 where
     F: MerkleFilter,
-    S: BuildHasher + Default,
 {
     pub fn build(self) -> Option<MerkleProof<C>> {
         self.build_ext(&mut C::default_finalizer())
     }
 }
 
-struct BuilderImpl<'a, 'b, C: CellFamily, S> {
+pub struct RawMerkleProofBuilder<'a, C: CellFamily, F> {
+    root: &'a dyn Cell<C>,
+    filter: F,
+}
+
+impl<'a, C: CellFamily, F> RawMerkleProofBuilder<'a, C, F>
+where
+    F: MerkleFilter,
+{
+    pub fn build_raw_ext(
+        self,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Option<(CellContainer<C>, ahash::HashMap<&'a CellHash, bool>)> {
+        let mut builder = BuilderImpl {
+            root: self.root,
+            filter: &self.filter,
+            cells: Default::default(),
+            pruned_branches: Some(Default::default()),
+            builder: CellBuilder::new(),
+            finalizer,
+        };
+        let cell = builder.build()?;
+        let pruned_branches = builder.pruned_branches?;
+        Some((cell, pruned_branches))
+    }
+}
+
+pub struct BuilderImpl<'a, 'b, C: CellFamily, S> {
     root: &'a dyn Cell<C>,
     filter: &'b dyn MerkleFilter,
-    cells: HashMap<CellHash, CellContainer<C>, S>,
-    pruned_branches: Option<&'a mut HashMap<CellHash, bool, S>>,
+    cells: HashMap<&'a CellHash, CellContainer<C>, S>,
+    pruned_branches: Option<HashMap<&'a CellHash, bool, S>>,
+    builder: CellBuilder<C>,
     finalizer: &'b mut dyn Finalizer<C>,
 }
 
-impl<'a: 'b, 'b, C: CellFamily, S> BuilderImpl<'a, 'b, C, S>
+impl<'a, 'b, C: CellFamily, S> BuilderImpl<'a, 'b, C, S>
 where
     S: BuildHasher + Default,
 {
-    fn build(mut self) -> Option<CellContainer<C>> {
+    fn build(&mut self) -> Option<CellContainer<C>> {
         if !self.filter.contains(self.root.repr_hash()) {
             return None;
         }
         self.fill(self.root, 0)
     }
 
-    fn fill(&mut self, cell: &dyn Cell<C>, merkle_depth: u8) -> Option<CellContainer<C>> {
+    fn fill(&mut self, cell: &'a dyn Cell<C>, merkle_depth: u8) -> Option<CellContainer<C>> {
         let descriptor = cell.descriptor();
         let merkle_offset = descriptor.cell_type().is_merkle() as u8;
         let child_merkle_depth = merkle_depth + merkle_offset;
 
-        let mut result = CellBuilder::<C>::new();
-        result.set_exotic(descriptor.is_exotic());
+        let mut children = CellRefsBuilder::<C>::default();
 
         let mut children_mask = descriptor.level_mask();
-        for child in cell.references().cloned() {
-            let child_repr_hash = child.as_ref().repr_hash();
+        for child in cell.references() {
+            let child_repr_hash = child.repr_hash();
 
             let child = if let Some(child) = self.cells.get(child_repr_hash) {
                 child.clone()
-            } else if child.as_ref().reference_count() == 0 || self.filter.contains(child_repr_hash)
-            {
-                self.fill(child.as_ref(), child_merkle_depth)?
+            } else if child.reference_count() == 0 || self.filter.contains(child_repr_hash) {
+                self.fill(child, child_merkle_depth)?
             } else {
-                let child = make_pruned_branch(child.as_ref(), merkle_depth, self.finalizer)?;
+                let child = make_pruned_branch_cold(child, merkle_depth, self.finalizer)?;
                 if let Some(pruned_branch) = &mut self.pruned_branches {
-                    pruned_branch.insert(*child_repr_hash, false);
+                    pruned_branch.insert(child_repr_hash, false);
                 }
                 child
             };
 
             children_mask |= child.as_ref().level_mask();
-            result.store_reference(child);
+            children.store_reference(child);
         }
 
-        result.set_level_mask(children_mask.virtualize(merkle_offset));
-        result.store_slice_data(&cell.as_slice());
+        self.builder.set_exotic(descriptor.is_exotic());
+        self.builder
+            .set_level_mask(children_mask.virtualize(merkle_offset));
+        self.builder.store_slice_data(&cell.as_slice());
+        self.builder.set_references(children);
 
-        let proof_cell = result.build_ext(self.finalizer)?;
-        self.cells.insert(*cell.repr_hash(), proof_cell.clone());
+        let proof_cell = std::mem::take(&mut self.builder).build_ext(self.finalizer)?;
+        self.cells.insert(cell.repr_hash(), proof_cell.clone());
 
         Some(proof_cell)
     }
+}
+
+#[cold]
+fn make_pruned_branch_cold<C: CellFamily>(
+    cell: &dyn Cell<C>,
+    merkle_depth: u8,
+    finalizer: &mut dyn Finalizer<C>,
+) -> Option<CellContainer<C>> {
+    make_pruned_branch(cell, merkle_depth, finalizer)
 }
 
 #[cfg(test)]
@@ -277,6 +299,21 @@ mod tests {
 
         assert_eq!(root.repr_hash(), virtual_root.repr_hash());
         assert_eq!(root.repr_depth(), virtual_root.repr_depth());
+    }
+
+    #[test]
+    fn create_proof_for_deep_cell() {
+        let mut builder = RcCellBuilder::new();
+        let mut cell = RcCellFamily::empty_cell();
+        for i in 0..3000 {
+            builder.store_u32(i);
+            builder.store_reference(cell);
+            cell = std::mem::take(&mut builder).build().unwrap();
+        }
+
+        MerkleProof::create_for_cell(cell.as_ref(), &EMPTY_CELL_HASH)
+            .build()
+            .unwrap();
     }
 
     #[test]
