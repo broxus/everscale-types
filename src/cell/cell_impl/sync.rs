@@ -103,6 +103,7 @@ unsafe fn make_cell(
         _ => Some(make_ordinary_cell(
             OrdinaryCellHeader {
                 bit_len: ctx.bit_len,
+                #[cfg(feature = "stats")]
                 stats: ctx.stats,
                 hashes,
                 descriptor: ctx.descriptor,

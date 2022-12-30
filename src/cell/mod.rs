@@ -1,4 +1,3 @@
-use std::ops::{Add, AddAssign};
 use std::ops::{BitOr, BitOrAssign};
 
 use crate::util::DisplayHash;
@@ -94,6 +93,7 @@ pub trait Cell<C: CellFamily> {
 
     /// Returns the sum of all bits and cells of all elements in the cell tree
     /// (including this cell).
+    #[cfg(feature = "stats")]
     fn stats(&self) -> CellTreeStats;
 }
 
@@ -627,6 +627,7 @@ impl std::fmt::Debug for LevelMask {
 ///
 /// NOTE: identical cells are counted each time they occur in the tree.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(feature = "stats")]
 pub struct CellTreeStats {
     /// Total number of bits in tree.
     pub bit_count: u64,
@@ -634,7 +635,8 @@ pub struct CellTreeStats {
     pub cell_count: u64,
 }
 
-impl Add for CellTreeStats {
+#[cfg(feature = "stats")]
+impl std::ops::Add for CellTreeStats {
     type Output = Self;
 
     #[inline]
@@ -646,7 +648,8 @@ impl Add for CellTreeStats {
     }
 }
 
-impl AddAssign for CellTreeStats {
+#[cfg(feature = "stats")]
+impl std::ops::AddAssign for CellTreeStats {
     #[inline]
     fn add_assign(&mut self, rhs: Self) {
         self.bit_count = self.bit_count.saturating_add(rhs.bit_count);

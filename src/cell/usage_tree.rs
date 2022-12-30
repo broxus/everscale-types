@@ -2,7 +2,10 @@ use std::rc::{Rc, Weak};
 
 use super::cell_impl::VirtualCellWrapper;
 use super::rc::{RcCell, RcCellFamily};
-use super::{Cell, CellDescriptor, CellHash, CellTreeStats};
+use super::{Cell, CellDescriptor, CellHash};
+
+#[cfg(feature = "stats")]
+use super::CellTreeStats;
 
 /// Rule for including cells in the usage tree.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -142,6 +145,7 @@ impl Cell<RcCellFamily> for RcUsageCell {
         self.cell.as_ref().depth(level)
     }
 
+    #[cfg(feature = "stats")]
     fn stats(&self) -> CellTreeStats {
         self.cell.as_ref().stats()
     }

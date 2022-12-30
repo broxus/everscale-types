@@ -24,6 +24,7 @@ base64 = "0.13"
 
 [features]
 default = ["base64"]
+stats = []
 
 [profile.release]
 debug = true

@@ -5,6 +5,7 @@ use crate::cell::{CellContainer, CellFamily, LevelMask, MAX_BIT_LEN, MAX_REF_COU
 use crate::util::ArrayVec;
 use crate::{CellDescriptor, CellSlice};
 
+#[cfg(feature = "stats")]
 use super::CellTreeStats;
 
 pub trait Store<C: CellFamily> {
@@ -592,6 +593,7 @@ impl<C: CellFamily> CellBuilder<C> {
         debug_assert!(self.bit_len <= MAX_BIT_LEN);
         debug_assert!(self.references.len() <= MAX_REF_COUNT);
 
+        #[cfg(feature = "stats")]
         let mut stats = CellTreeStats {
             bit_count: self.bit_len as u64,
             cell_count: 1,
@@ -601,7 +603,11 @@ impl<C: CellFamily> CellBuilder<C> {
         for child in self.references.as_ref() {
             let child = child.as_ref();
             children_mask |= child.descriptor().level_mask();
-            stats += child.stats();
+
+            #[cfg(feature = "stats")]
+            {
+                stats += child.stats();
+            }
         }
 
         let is_exotic = self.is_exotic;
@@ -634,6 +640,7 @@ impl<C: CellFamily> CellBuilder<C> {
         let data = &self.data[..std::cmp::min(byte_len as usize, 128)];
 
         let cell_parts: CellParts<C> = CellParts {
+            #[cfg(feature = "stats")]
             stats,
             bit_len: self.bit_len,
             descriptor: CellDescriptor { d1, d2 },

@@ -1,8 +1,9 @@
 use std::mem::MaybeUninit;
 
+#[cfg(feature = "stats")]
+use super::CellTreeStats;
 use super::{
-    Cell, CellContainer, CellDescriptor, CellFamily, CellHash, CellTreeStats, EMPTY_CELL_HASH,
-    MAX_REF_COUNT,
+    Cell, CellContainer, CellDescriptor, CellFamily, CellHash, EMPTY_CELL_HASH, MAX_REF_COUNT,
 };
 
 macro_rules! define_gen_vtable_ptr {
@@ -77,6 +78,7 @@ impl<C: CellFamily> Cell<C> for EmptyOrdinaryCell {
         0
     }
 
+    #[cfg(feature = "stats")]
     fn stats(&self) -> CellTreeStats {
         CellTreeStats {
             bit_count: 0,
@@ -146,6 +148,7 @@ impl<C: CellFamily> Cell<C> for StaticCell {
         0
     }
 
+    #[cfg(feature = "stats")]
     fn stats(&self) -> CellTreeStats {
         CellTreeStats {
             bit_count: self.bit_len as u64,
@@ -195,6 +198,7 @@ type OrdinaryCell<C, const N: usize> = HeaderWithData<OrdinaryCellHeader<C>, N>;
 
 struct OrdinaryCellHeader<C: CellFamily> {
     bit_len: u16,
+    #[cfg(feature = "stats")]
     stats: CellTreeStats,
     hashes: Vec<(CellHash, u16)>,
     descriptor: CellDescriptor,
@@ -274,6 +278,7 @@ impl<C: CellFamily, const N: usize> Cell<C> for OrdinaryCell<C, N> {
         self.header.level_descr(level).1
     }
 
+    #[cfg(feature = "stats")]
     fn stats(&self) -> CellTreeStats {
         self.header.stats
     }
@@ -323,6 +328,7 @@ impl<C: CellFamily> Cell<C> for LibraryReference {
         self.repr_depth
     }
 
+    #[cfg(feature = "stats")]
     fn stats(&self) -> CellTreeStats {
         CellTreeStats {
             bit_count: LibraryReference::BIT_LEN as u64,
@@ -405,6 +411,7 @@ impl<C: CellFamily, const N: usize> Cell<C> for PrunedBranch<N> {
         }
     }
 
+    #[cfg(feature = "stats")]
     fn stats(&self) -> CellTreeStats {
         aligned_leaf_stats(self.header.descriptor)
     }
@@ -452,6 +459,7 @@ where
         cell.depth(virtual_hash_index(cell.descriptor(), level))
     }
 
+    #[cfg(feature = "stats")]
     fn stats(&self) -> CellTreeStats {
         self.0.as_ref().stats()
     }
@@ -500,6 +508,7 @@ impl<C: CellFamily, T: Cell<C>> Cell<C> for VirtualCellWrapper<T> {
         self.0.depth(virtual_hash_index(self.0.descriptor(), level))
     }
 
+    #[cfg(feature = "stats")]
     fn stats(&self) -> CellTreeStats {
         self.0.stats()
     }
@@ -513,6 +522,7 @@ fn hash_index(descriptor: CellDescriptor, level: u8) -> u8 {
     descriptor.level_mask().hash_index(level)
 }
 
+#[cfg(feature = "stats")]
 fn aligned_leaf_stats(descriptor: CellDescriptor) -> CellTreeStats {
     CellTreeStats {
         bit_count: descriptor.byte_len() as u64 * 8,

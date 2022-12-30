@@ -1,10 +1,12 @@
 use sha2::Digest;
 
 use crate::cell::{
-    CellContainer, CellDescriptor, CellFamily, CellHash, CellTreeStats, CellType, LevelMask,
-    MAX_REF_COUNT,
+    CellContainer, CellDescriptor, CellFamily, CellHash, CellType, LevelMask, MAX_REF_COUNT,
 };
 use crate::util::{unlikely, ArrayVec};
+
+#[cfg(feature = "stats")]
+use crate::cell::CellTreeStats;
 
 /// A trait for describing cell finalization logic.
 pub trait Finalizer<C: CellFamily + ?Sized> {
@@ -31,6 +33,7 @@ pub trait DefaultFinalizer: CellFamily {
 /// Partially assembled cell.
 pub struct CellParts<'a, C: CellFamily + ?Sized> {
     /// Cell tree storage stats.
+    #[cfg(feature = "stats")]
     pub stats: CellTreeStats,
 
     /// Length of this cell's data in bits.

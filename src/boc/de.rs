@@ -4,10 +4,12 @@ use smallvec::SmallVec;
 
 use super::BocTag;
 use crate::cell::{
-    CellContainer, CellDescriptor, CellFamily, CellParts, CellTreeStats, Finalizer, LevelMask,
-    MAX_REF_COUNT,
+    CellContainer, CellDescriptor, CellFamily, CellParts, Finalizer, LevelMask, MAX_REF_COUNT,
 };
 use crate::util::{unlikely, ArrayVec};
+
+#[cfg(feature = "stats")]
+use crate::cell::CellTreeStats;
 
 #[derive(Debug, Default, Clone)]
 pub struct Options {
@@ -301,6 +303,8 @@ impl<'a> BocHeader<'a> {
 
                 let mut references = ArrayVec::<CellContainer<C>, MAX_REF_COUNT>::default();
                 let mut children_mask = LevelMask::EMPTY;
+
+                #[cfg(feature = "stats")]
                 let mut stats = CellTreeStats {
                     bit_count: bit_len as u64,
                     cell_count: 1,
@@ -320,7 +324,10 @@ impl<'a> BocHeader<'a> {
                     {
                         let child = child.as_ref();
                         children_mask |= child.descriptor().level_mask();
-                        stats += child.stats();
+                        #[cfg(feature = "stats")]
+                        {
+                            stats += child.stats();
+                        }
                     }
                     references.push(child);
 
@@ -328,6 +335,7 @@ impl<'a> BocHeader<'a> {
                 }
 
                 let ctx = CellParts {
+                    #[cfg(feature = "stats")]
                     stats,
                     bit_len,
                     descriptor,
