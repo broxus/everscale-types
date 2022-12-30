@@ -1,6 +1,5 @@
-use std::borrow::Borrow;
 use std::collections::HashSet;
-use std::hash::{BuildHasher, Hash};
+use std::hash::BuildHasher;
 
 use crate::cell::{CellHash, RcUsageTree};
 

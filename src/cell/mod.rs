@@ -480,6 +480,12 @@ impl CellDescriptor {
         self.is_exotic() && self.reference_count() == 0 && !self.level_mask().is_empty()
     }
 
+    /// Returns whether this cell type is Merkle proof or Merkle update.
+    #[inline(always)]
+    pub const fn is_merkle(self) -> bool {
+        self.is_exotic() && self.reference_count() != 0
+    }
+
     /// Returns whether this cell refers to some external data.
     #[inline(always)]
     pub const fn is_absent(self) -> bool {

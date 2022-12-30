@@ -21,6 +21,7 @@ impl<C: CellFamily> std::fmt::Debug for MerkleProof<C> {
 }
 
 impl<C: CellFamily> Eq for MerkleProof<C> {}
+
 impl<C: CellFamily> PartialEq for MerkleProof<C> {
     fn eq(&self, other: &Self) -> bool {
         self.hash == other.hash

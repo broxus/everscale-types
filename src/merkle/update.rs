@@ -116,6 +116,184 @@ impl<C: CellFamily> MerkleUpdate<C> {
     {
         MerkleUpdateBuilder::new(old, new, f)
     }
+
+    pub fn apply_ext(
+        &self,
+        old: &CellContainer<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Option<CellContainer<C>> {
+        if old.as_ref().repr_hash() != &self.old_hash {
+            return None;
+        }
+
+        if self.old_hash == self.new_hash {
+            return Some(old.clone());
+        }
+
+        struct Applier<'a, C: CellFamily> {
+            old_cells: ahash::HashMap<CellHash, CellContainer<C>>,
+            new_cells: ahash::HashMap<CellHash, CellContainer<C>>,
+            finalizer: &'a mut dyn Finalizer<C>,
+        }
+
+        impl<C: CellFamily> Applier<'_, C> {
+            fn run(&mut self, cell: &dyn Cell<C>, merkle_depth: u8) -> Option<CellContainer<C>> {
+                let descriptor = cell.descriptor();
+                let merkle_offset = descriptor.cell_type().is_merkle() as u8;
+                let child_merkle_depth = merkle_depth + merkle_offset;
+
+                // Start building a new cell
+                let mut result = CellBuilder::<C>::new();
+                result.set_exotic(descriptor.is_exotic());
+
+                // Build all child cells
+                let mut children_mask = LevelMask::EMPTY;
+                for child in cell.references().cloned() {
+                    let child_descriptor = child.as_ref().descriptor();
+
+                    let child = if child_descriptor.is_pruned_branch() {
+                        // Replace pruned branches with old cells
+                        let mask = child_descriptor.level_mask();
+                        if mask.to_byte() & (1 << child_merkle_depth) != 0 {
+                            // Use original hash for pruned branches
+                            let child_hash = child.as_ref().hash(mask.level() - 1);
+                            self.old_cells.get(child_hash)?.clone()
+                        } else {
+                            child
+                        }
+                    } else {
+                        // Build a child cell if it hasn't been built before
+                        let child_hash = child.as_ref().hash(child_merkle_depth);
+                        if let Some(child) = self.new_cells.get(child_hash) {
+                            child.clone()
+                        } else {
+                            let child = self.run(child.as_ref(), child_merkle_depth)?;
+                            self.new_cells.insert(*child_hash, child.clone());
+                            child
+                        }
+                    };
+
+                    children_mask |= child.as_ref().level_mask();
+                    result.store_reference(child);
+                }
+
+                result.set_level_mask(children_mask.virtualize(merkle_offset));
+                result.store_slice_data(&cell.as_slice());
+
+                result.build_ext(self.finalizer)
+            }
+        }
+
+        // Collect old cells
+        let old_cells = {
+            // Collect and check old cells tree
+            let old_cell_hashes = self.find_old_cells()?;
+
+            let mut visited = ahash::HashSet::default();
+            let mut stack = Vec::new();
+            let mut old_cells = ahash::HashMap::default();
+
+            stack.push((old.clone(), 0));
+            while let Some((cell, mut merkle_depth)) = stack.pop() {
+                if !visited.insert(*cell.as_ref().repr_hash()) {
+                    continue;
+                }
+
+                let hash = cell.as_ref().hash(merkle_depth);
+                if old_cell_hashes.contains(hash) {
+                    merkle_depth += cell.as_ref().descriptor().is_merkle() as u8;
+                    for child in cell.as_ref().references().cloned() {
+                        stack.push((child, merkle_depth));
+                    }
+                    old_cells.insert(*hash, cell);
+                }
+            }
+
+            old_cells
+        };
+
+        // Apply changed cells
+        let new = Applier {
+            old_cells,
+            new_cells: Default::default(),
+            finalizer,
+        }
+        .run(self.new.as_ref(), 0)?;
+
+        if new.as_ref().repr_hash() == &self.new_hash {
+            Some(new)
+        } else {
+            println!("MISMATCH");
+            None
+        }
+    }
+
+    fn find_old_cells(&self) -> Option<ahash::HashSet<&CellHash>> {
+        let mut visited = ahash::HashSet::default();
+        let mut old_cells = ahash::HashSet::default();
+
+        // Traverse old cells
+        let mut stack = vec![(self.old.as_ref(), 0)];
+        while let Some((cell, mut merkle_depth)) = stack.pop() {
+            // Skip visited cells
+            if !visited.insert(cell.repr_hash()) {
+                continue;
+            }
+
+            // Store cell with original merkle depth
+            old_cells.insert(cell.hash(merkle_depth));
+
+            // Skip children for pruned branches
+            let descriptor = cell.descriptor();
+            if descriptor.is_pruned_branch() {
+                continue;
+            }
+
+            // Traverse children as virtualized cells
+            merkle_depth += descriptor.is_merkle() as u8;
+            for child in cell.references() {
+                stack.push((child, merkle_depth));
+            }
+        }
+
+        // Reset temp state
+        visited.clear();
+        stack.clear();
+
+        // Traverse new cells
+        stack.push((self.new.as_ref(), 0));
+        while let Some((cell, mut merkle_depth)) = stack.pop() {
+            // Skip visited cells
+            if !visited.insert(cell.repr_hash()) {
+                continue;
+            }
+
+            // Unchanged cells (as pruned branches) must be presented in the old tree
+            let descriptor = cell.descriptor();
+            if descriptor.is_pruned_branch() {
+                if descriptor.level_mask().level() == merkle_depth + 1
+                    && !old_cells.contains(cell.hash(merkle_depth))
+                {
+                    return None;
+                }
+            } else {
+                // Traverse children as virtualized cells
+                merkle_depth += descriptor.is_merkle() as u8;
+                for child in cell.references() {
+                    stack.push((child, merkle_depth));
+                }
+            }
+        }
+
+        // Done
+        Some(old_cells)
+    }
+}
+
+impl<C: DefaultFinalizer> MerkleUpdate<C> {
+    pub fn apply(&self, old: &CellContainer<C>) -> Option<CellContainer<C>> {
+        self.apply_ext(old, &mut C::default_finalizer())
+    }
 }
 
 pub struct MerkleUpdateBuilder<'a, C: CellFamily, F, S = ahash::RandomState> {
@@ -353,13 +531,13 @@ mod tests {
         // Serialize old dict
         let old_dict_cell = serialize_dict(dict.clone());
         let old_dict_hashes = visit_all_cells(&old_dict_cell);
-        println!("OLD: {}", old_dict_cell.display_tree());
 
         // Serialize new dict
         dict.set(build_u32(0).as_slice(), build_u32(1).as_slice())
             .unwrap();
         let new_dict_cell = serialize_dict(dict);
-        println!("NEW: {}", new_dict_cell.display_tree());
+
+        assert_ne!(old_dict_cell.as_ref(), new_dict_cell.as_ref());
 
         // Create merkle update
         let merkle_update = MerkleUpdate::create(
@@ -370,9 +548,7 @@ mod tests {
         .build()
         .unwrap();
 
-        let mut builder = RcCellBuilder::new();
-        merkle_update.store_into(&mut builder);
-        let merkle_update = builder.build().unwrap();
-        println!("{}", merkle_update.display_tree());
+        let after_apply = merkle_update.apply(&old_dict_cell).unwrap();
+        assert_eq!(after_apply.as_ref(), new_dict_cell.as_ref());
     }
 }
