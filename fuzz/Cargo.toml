@@ -20,13 +20,13 @@ members = ["."]
 
 [[bin]]
 name = "boc_arc_decode"
-path = "fuzz_targets/boc_arc_decode.rs"
+path = "fuzz_targets/boc_rc_decode.rs"
 test = false
 doc = false
 
 [[bin]]
 name = "boc_arc_decode_pair"
-path = "fuzz_targets/boc_arc_decode_pair.rs"
+path = "fuzz_targets/boc_rc_decode_pair.rs"
 test = false
 doc = false
 
