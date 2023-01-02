@@ -71,7 +71,7 @@ impl<C: CellFamily> Cell<C> for EmptyOrdinaryCell {
     }
 
     fn hash(&self, _: u8) -> &CellHash {
-        &EMPTY_CELL_HASH
+        EMPTY_CELL_HASH
     }
 
     fn depth(&self, _: u8) -> u16 {

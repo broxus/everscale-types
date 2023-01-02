@@ -1,3 +1,5 @@
+//! General stuff.
+
 use std::mem::MaybeUninit;
 
 /// Brings [unlikely](core::intrinsics::unlikely) to stable rust.

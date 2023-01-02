@@ -4,6 +4,7 @@ use std::hash::BuildHasher;
 use super::BocTag;
 use crate::cell::{Cell, CellDescriptor, CellFamily, CellHash};
 
+/// Intermediate BOC serializer state.
 pub struct BocHeader<'a, C, S = ahash::RandomState> {
     root_rev_indices: Vec<u32>,
     rev_indices: HashMap<CellHash, u32, S>,
@@ -19,6 +20,7 @@ impl<'a, C: CellFamily, S> BocHeader<'a, C, S>
 where
     S: BuildHasher + Default,
 {
+    /// Creates an intermediate BOC serializer state with a single root.
     pub fn new(root: &'a dyn Cell<C>) -> Self {
         let mut res = Self {
             root_rev_indices: Default::default(),
@@ -39,23 +41,29 @@ impl<'a, C: CellFamily, S> BocHeader<'a, C, S>
 where
     S: BuildHasher,
 {
+    /// Adds an additional root to the state.
     pub fn add_root(&mut self, root: &'a dyn Cell<C>) {
         let root_rev_index = self.fill(root);
         self.root_rev_indices.push(root_rev_index);
     }
 
+    /// Includes CRC bytes in the encoded BOC.
     #[inline]
     pub fn with_crc(mut self, include_ctc: bool) -> Self {
         self.include_crc = include_ctc;
         self
     }
 
+    /// Prevents hashes from being stored in the encoded BOC.
+    ///
+    /// (overwrites descriptor flag `store_hashes` during serialization).
     #[inline]
     pub fn without_hashes(mut self, without_hashes: bool) -> Self {
         self.without_hashes = without_hashes;
         self
     }
 
+    /// Encodes cell trees into bytes.
     pub fn encode(self, target: &mut Vec<u8>) {
         let root_count = self.root_rev_indices.len();
 

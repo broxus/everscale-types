@@ -1,3 +1,5 @@
+//! Cell tree implementation.
+
 use std::ops::{BitOr, BitOrAssign};
 
 use crate::util::DisplayHash;
@@ -24,6 +26,7 @@ mod usage_tree;
 
 /// Cell implementation family.
 pub trait CellFamily {
+    /// Owning container with cell tree node.
     type Container<T: ?Sized>: AsRef<T> + Clone;
 
     /// Creates an empty cell.
@@ -144,7 +147,7 @@ impl<C: CellFamily> dyn Cell<C> + '_ {
 
     /// Returns true if the cell is empty (no bits, no refs).
     pub fn is_empty(&self) -> bool {
-        self.hash(LevelMask::MAX_LEVEL) == &EMPTY_CELL_HASH
+        self.hash(LevelMask::MAX_LEVEL) == EMPTY_CELL_HASH
     }
 
     /// Creates an iterator through child nodes.
@@ -209,16 +212,6 @@ impl<C1: CellFamily, C2: CellFamily> PartialEq<dyn Cell<C2> + '_> for dyn Cell<C
     #[inline]
     fn eq(&self, other: &dyn Cell<C2>) -> bool {
         self.repr_hash() == other.repr_hash()
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct DebugCell<'a, C: CellFamily>(&'a dyn Cell<C>);
-
-impl<C: CellFamily> std::fmt::Debug for DebugCell<'_, C> {
-    #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
     }
 }
 
@@ -361,7 +354,7 @@ impl<C: CellFamily> ExactSizeIterator for ClonedRefsIter<'_, C> {
 pub type CellHash = [u8; 32];
 
 /// Hash of an empty (0 bits of data, no refs) ordinary cell.
-pub const EMPTY_CELL_HASH: CellHash = [
+pub static EMPTY_CELL_HASH: &CellHash = &[
     0x96, 0xa2, 0x96, 0xd2, 0x24, 0xf2, 0x85, 0xc6, 0x7b, 0xee, 0x93, 0xc3, 0x0f, 0x8a, 0x30, 0x91,
     0x57, 0xf0, 0xda, 0xa3, 0x5d, 0xc5, 0xb8, 0x7e, 0x41, 0x0b, 0x78, 0x63, 0x0a, 0x09, 0xcf, 0xc7,
 ];
@@ -433,9 +426,13 @@ pub struct CellDescriptor {
 }
 
 impl CellDescriptor {
+    /// Bit mask to store the number of references in the descriptor.
     pub const REF_COUNT_MASK: u8 = 0b0000_0111;
+    /// Bit mask to store the `is_exotic` flag in the descriptor.
     pub const IS_EXOTIC_MASK: u8 = 0b0000_1000;
+    /// Bit mask to store the `store_hashes` flag in the descriptor.
     pub const STORE_HASHES_MASK: u8 = 0b0001_0000;
+    /// _de Brujn_ level presence mask in the descriptor.
     pub const LEVEL_MASK: u8 = 0b1110_0000;
 
     /// Computes d1 descriptor byte from parts
@@ -686,6 +683,17 @@ impl std::ops::AddAssign for CellTreeStats {
     fn add_assign(&mut self, rhs: Self) {
         self.bit_count = self.bit_count.saturating_add(rhs.bit_count);
         self.cell_count = self.cell_count.saturating_add(rhs.cell_count);
+    }
+}
+
+/// Helper struct to debug print the root cell.
+#[derive(Clone, Copy)]
+pub struct DebugCell<'a, C: CellFamily>(&'a dyn Cell<C>);
+
+impl<C: CellFamily> std::fmt::Debug for DebugCell<'_, C> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
     }
 }
 

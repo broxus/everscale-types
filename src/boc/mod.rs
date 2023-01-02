@@ -1,3 +1,5 @@
+//! BOC (Bag Of Cells) implementation.
+
 use crate::cell::{Cell, CellContainer, CellFamily, DefaultFinalizer, Finalizer};
 
 /// BOC decoder implementation.
@@ -8,8 +10,11 @@ pub mod ser;
 /// BOC file magic number.
 #[derive(Default, Copy, Clone, Eq, PartialEq)]
 pub enum BocTag {
+    /// Single root, cells index, no CRC32.
     Indexed,
+    /// Single root, cells index, with CRC32.
     IndexedCrc32,
+    /// Multiple roots, optional cells index, optional CRC32.
     #[default]
     Generic,
 }
@@ -19,6 +24,7 @@ impl BocTag {
     const INDEXED_CRC32: [u8; 4] = [0xac, 0xc3, 0xa7, 0x28];
     const GENERIC: [u8; 4] = [0xb5, 0xee, 0x9c, 0x72];
 
+    /// Tries to match bytes with BOC tag.
     pub const fn from_bytes(data: [u8; 4]) -> Option<Self> {
         match data {
             Self::GENERIC => Some(Self::Generic),
@@ -28,6 +34,7 @@ impl BocTag {
         }
     }
 
+    /// Converts BOC tag to bytes.
     pub const fn to_bytes(self) -> [u8; 4] {
         match self {
             Self::Indexed => Self::INDEXED,
@@ -43,11 +50,14 @@ pub struct Boc<C> {
 }
 
 impl<C: CellFamily> Boc<C> {
+    /// Encodes the specified cell tree as BOC and
+    /// returns the `base64` encoded bytes as a string.
     #[cfg(feature = "base64")]
     pub fn encode_base64(cell: &dyn Cell<C>) -> String {
         base64::encode(Self::encode(cell))
     }
 
+    /// Encodes the specified cell tree as BOC.
     // TODO: somehow use Borrow with GATs
     pub fn encode(cell: &dyn Cell<C>) -> Vec<u8> {
         let mut result = Vec::new();
@@ -55,6 +65,7 @@ impl<C: CellFamily> Boc<C> {
         result
     }
 
+    /// Encodes a pair of cell trees as BOC.
     // TODO: somehow use Borrow with GATs
     pub fn encode_pair((cell1, cell2): (&dyn Cell<C>, &dyn Cell<C>)) -> Vec<u8> {
         let mut result = Vec::new();
@@ -66,6 +77,8 @@ impl<C: CellFamily> Boc<C> {
 }
 
 impl<C: DefaultFinalizer> Boc<C> {
+    /// Decodes a `base64` encoded BOC into a cell tree
+    /// using the default Cell family finalizer.
     #[cfg(feature = "base64")]
     #[inline]
     pub fn decode_base64<T: AsRef<[u8]>>(data: T) -> Result<CellContainer<C>, de::Error> {

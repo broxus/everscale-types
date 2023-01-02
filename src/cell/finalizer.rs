@@ -23,10 +23,12 @@ where
     }
 }
 
-/// Cell implementation family extension.
+/// Cell family with known default finalizer (noop in most cases).
 pub trait DefaultFinalizer: CellFamily {
+    /// The default finalizer type.
     type Finalizer: Finalizer<Self>;
 
+    /// Creates a default finalizer.
     fn default_finalizer() -> Self::Finalizer;
 }
 

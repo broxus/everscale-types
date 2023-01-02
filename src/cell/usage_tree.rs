@@ -22,15 +22,18 @@ pub struct RcUsageTree {
 }
 
 impl RcUsageTree {
-    pub fn new(tracked_context: UsageTreeMode) -> Self {
+    /// Creates a usage tree with the specified tracking mode.
+    pub fn new(mode: UsageTreeMode) -> Self {
         RcUsageTree {
             state: Rc::new(RcUsageTreeState {
-                tracked_context,
+                mode,
                 visited: Default::default(),
             }),
         }
     }
 
+    /// Wraps the specified cell in a usage cell to keep track
+    /// of the data or links being accessed.
     pub fn track(&self, cell: &RcCell) -> RcCell {
         self.state.insert(cell, UsageTreeMode::OnLoad);
         Rc::new(RcUsageCell {
@@ -40,6 +43,8 @@ impl RcUsageTree {
         })
     }
 
+    /// Returns `true` if the cell with the specified representation hash
+    /// is present in this usage tree.
     pub fn contains(&self, repr_hash: &CellHash) -> bool {
         if let Some(cell) = self.state.visited.borrow().get(repr_hash) {
             cell.include
@@ -50,7 +55,7 @@ impl RcUsageTree {
 }
 
 struct RcUsageTreeState {
-    tracked_context: UsageTreeMode,
+    mode: UsageTreeMode,
     visited: std::cell::RefCell<ahash::HashMap<CellHash, VisitedCell>>,
 }
 
@@ -60,12 +65,12 @@ impl RcUsageTreeState {
         let mut visited = self.visited.borrow_mut();
 
         if let Some(visited) = visited.get_mut(repr_hash) {
-            visited.include |= self.tracked_context == ctx;
+            visited.include |= self.mode == ctx;
         } else {
             visited.insert(
                 *repr_hash,
                 VisitedCell {
-                    include: self.tracked_context == ctx,
+                    include: self.mode == ctx,
                     _cell: cell.clone(),
                 },
             );

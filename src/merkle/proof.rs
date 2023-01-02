@@ -4,9 +4,15 @@ use std::hash::BuildHasher;
 use super::{make_pruned_branch, MerkleFilter};
 use crate::cell::*;
 
+/// Parsed Merkle proof representation.
+///
+/// NOTE: Serialized into `MerkleProof` cell.
 pub struct MerkleProof<C: CellFamily> {
+    /// Representation hash of the original cell.
     pub hash: CellHash,
+    /// Representation depth of the origin cell.
     pub depth: u16,
+    /// Partially pruned tree with the contents of the original cell.
     pub cell: CellContainer<C>,
 }
 
@@ -33,7 +39,7 @@ impl<C: CellFamily> PartialEq for MerkleProof<C> {
 impl<C: CellFamily> Default for MerkleProof<C> {
     fn default() -> Self {
         Self {
-            hash: EMPTY_CELL_HASH,
+            hash: *EMPTY_CELL_HASH,
             depth: 0,
             cell: C::empty_cell(),
         }
@@ -83,9 +89,13 @@ impl<C: CellFamily> Store<C> for MerkleProof<C> {
 }
 
 impl<C: CellFamily> MerkleProof<C> {
+    /// The number of data bits that the Merkle proof occupies.
     pub const BITS: u16 = 8 + 256 + 16;
+    /// The number of references that the Merkle proof occupies.
     pub const REFS: u8 = 1;
 
+    /// Starts building a Merkle proof for the specified root,
+    /// using cells determined by filter.
     pub fn create<'a, F>(root: &'a dyn Cell<C>, f: F) -> MerkleProofBuilder<'a, C, F>
     where
         F: MerkleFilter + 'a,
@@ -93,6 +103,12 @@ impl<C: CellFamily> MerkleProof<C> {
         MerkleProofBuilder::new(root, f)
     }
 
+    /// Create a Merkle proof for the single cell with the specified
+    /// representation hash.
+    ///
+    /// Only ancestors of the first occurrence are included in the proof.
+    ///
+    /// Proof creation will fail if the specified child is not found.
     pub fn create_for_cell<'a>(
         root: &'a dyn Cell<C>,
         child_hash: &'a CellHash,
@@ -128,6 +144,7 @@ impl<C: CellFamily> MerkleProof<C> {
     }
 }
 
+/// Helper struct to build a Merkle proof.
 pub struct MerkleProofBuilder<'a, C: CellFamily, F> {
     root: &'a dyn Cell<C>,
     filter: F,
@@ -137,17 +154,22 @@ impl<'a, C: CellFamily, F> MerkleProofBuilder<'a, C, F>
 where
     F: MerkleFilter,
 {
+    /// Creates a new Merkle proof builder for the tree with the specified root,
+    /// using cells determined by filter.
     pub fn new(root: &'a dyn Cell<C>, f: F) -> Self {
         Self { root, filter: f }
     }
 
-    pub fn track_pruned_branches(self) -> RawMerkleProofBuilder<'a, C, F> {
-        RawMerkleProofBuilder {
+    /// Extends the builder to additionally save all hashes
+    /// of cells not included in Merkle proof.
+    pub fn track_pruned_branches(self) -> MerkleProofExtBuilder<'a, C, F> {
+        MerkleProofExtBuilder {
             root: self.root,
             filter: self.filter,
         }
     }
 
+    /// Builds a Merkle proof using the specified finalizer.
     pub fn build_ext(self, finalizer: &mut dyn Finalizer<C>) -> Option<MerkleProof<C>> {
         let root = self.root;
         let cell = self.build_raw_ext(finalizer)?;
@@ -158,6 +180,7 @@ where
         })
     }
 
+    /// Builds a Merkle proof child cell using the specified finalizer.
     pub fn build_raw_ext(self, finalizer: &mut dyn Finalizer<C>) -> Option<CellContainer<C>> {
         BuilderImpl::<C, ahash::RandomState> {
             root: self.root,
@@ -175,20 +198,23 @@ impl<'a, C: DefaultFinalizer, F> MerkleProofBuilder<'a, C, F>
 where
     F: MerkleFilter,
 {
+    /// Builds a Merkle proof using the default finalizer.
     pub fn build(self) -> Option<MerkleProof<C>> {
         self.build_ext(&mut C::default_finalizer())
     }
 }
 
-pub struct RawMerkleProofBuilder<'a, C: CellFamily, F> {
+/// Helper struct to build a Merkle proof and keep track of all pruned cells.
+pub struct MerkleProofExtBuilder<'a, C: CellFamily, F> {
     root: &'a dyn Cell<C>,
     filter: F,
 }
 
-impl<'a, C: CellFamily, F> RawMerkleProofBuilder<'a, C, F>
+impl<'a, C: CellFamily, F> MerkleProofExtBuilder<'a, C, F>
 where
     F: MerkleFilter,
 {
+    /// Builds a Merkle proof child cell using the specified finalizer.
     pub fn build_raw_ext(
         self,
         finalizer: &mut dyn Finalizer<C>,
@@ -207,7 +233,7 @@ where
     }
 }
 
-pub struct BuilderImpl<'a, 'b, C: CellFamily, S> {
+struct BuilderImpl<'a, 'b, C: CellFamily, S> {
     root: &'a dyn Cell<C>,
     filter: &'b dyn MerkleFilter,
     cells: HashMap<&'a CellHash, CellContainer<C>, S>,
@@ -320,7 +346,7 @@ mod tests {
             cell = builder.build().unwrap();
         }
 
-        MerkleProof::create_for_cell(cell.as_ref(), &EMPTY_CELL_HASH)
+        MerkleProof::create_for_cell(cell.as_ref(), EMPTY_CELL_HASH)
             .build()
             .unwrap();
     }
@@ -367,7 +393,7 @@ mod tests {
 
         assert!(matches!(
             dict.get(build_u32(5).as_slice()),
-            Err(crate::dict::Error::PrunedBranchAccess)
+            Err(crate::Error::PrunedBranchAccess)
         ));
     }
 }

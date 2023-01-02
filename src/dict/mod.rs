@@ -1,5 +1,8 @@
+//! Dictionary implementation.
+
 use crate::cell::*;
 use crate::util::unlikely;
+use crate::Error;
 
 /// Dictionary with fixed length keys (where `N` is a number of bits in each key).
 ///
@@ -98,6 +101,7 @@ impl<C, const N: u16> Dict<C, N>
 where
     for<'c> C: CellFamily + 'c,
 {
+    /// Returns the underlying root cell of the dictionary.
     #[inline]
     pub fn raw(&self) -> &Option<CellContainer<C>> {
         &self.0
@@ -201,9 +205,7 @@ where
     ///
     /// [`values`]: Dict::values
     pub fn keys(&'_ self) -> Keys<'_, C> {
-        Keys {
-            inner: Iter::new(&self.0, N),
-        }
+        Keys::new(&self.0, N)
     }
 
     /// Gets an iterator over the values of the dictionary, in order by key.
@@ -250,9 +252,9 @@ where
     }
 }
 
-/// An iterator over the entries of a `Dict`.
+/// An iterator over the entries of a [`Dict`].
 ///
-/// This struct is created by the [`iter`] method on `Dict`. See its documentation for more.
+/// This struct is created by the [`iter`] method on [`Dict`]. See its documentation for more.
 ///
 /// [`iter`]: fn@crate::dict::Dict::iter
 pub struct Iter<'a, C: CellFamily> {
@@ -271,6 +273,7 @@ impl<C: CellFamily> Clone for Iter<'_, C> {
 }
 
 impl<'a, C: CellFamily> Iter<'a, C> {
+    /// Creates an iterator over the entires of a dictionary.
     pub fn new(root: &'a Option<CellContainer<C>>, bit_len: u16) -> Self {
         let mut segments = Vec::new();
 
@@ -417,7 +420,7 @@ impl<C: CellFamily> Clone for IterSegment<'_, C> {
     }
 }
 
-/// An iterator over the keys of a `Dict`.
+/// An iterator over the keys of a [`Dict`].
 ///
 /// This struct is created by the [`keys`] method on [`Dict`]. See its
 /// documentation for more.
@@ -425,6 +428,15 @@ impl<C: CellFamily> Clone for IterSegment<'_, C> {
 /// [`keys`]: Dict::keys
 pub struct Keys<'a, C: CellFamily> {
     inner: Iter<'a, C>,
+}
+
+impl<'a, C: CellFamily> Keys<'a, C> {
+    /// Creates an iterator over the values of a dictionary.
+    pub fn new(root: &'a Option<CellContainer<C>>, bit_len: u16) -> Self {
+        Self {
+            inner: Iter::new(root, bit_len),
+        }
+    }
 }
 
 impl<C: CellFamily> Clone for Keys<'_, C> {
@@ -449,7 +461,7 @@ where
     }
 }
 
-/// An iterator over the values of a `Dict`.
+/// An iterator over the values of a [`Dict`].
 ///
 /// This struct is created by the [`values`] method on [`Dict`]. See its documentation for more.
 ///
@@ -470,7 +482,8 @@ impl<C: CellFamily> Clone for Values<'_, C> {
 }
 
 impl<'a, C: CellFamily> Values<'a, C> {
-    fn new(root: &'a Option<CellContainer<C>>, bit_len: u16) -> Self {
+    /// Creates an iterator over the values of a dictionary.
+    pub fn new(root: &'a Option<CellContainer<C>>, bit_len: u16) -> Self {
         let mut segments = Vec::new();
         if let Some(root) = root {
             let data = root.as_ref();
@@ -629,17 +642,21 @@ pub enum SetMode {
 }
 
 impl SetMode {
+    /// Returns `true` if the new value can replace the old value for the same key.
     #[inline]
     pub const fn can_replace(self) -> bool {
         self as u8 & 0b01 != 0
     }
 
+    /// Returns `true` if inserting a value can add a new key to the dictionary.
     #[inline]
     pub const fn can_add(self) -> bool {
         self as u8 & 0b10 != 0
     }
 }
 
+/// Inserts the value associated with key in dictionary
+/// in accordance with the logic of the specified [`SetMode`].
 pub fn dict_insert<'a, C>(
     root: &'a Option<CellContainer<C>>,
     key: &mut CellSlice<C>,
@@ -848,6 +865,7 @@ where
     Ok(Some(leaf))
 }
 
+/// Returns a `CellSlice` of the value corresponding to the key.
 pub fn dict_get<'a: 'b, 'b, C>(
     root: &'a Option<CellContainer<C>>,
     key_bit_len: u16,
@@ -1040,16 +1058,6 @@ where
     };
     let len = label.load_uint(bits_for_len)? as u16;
     Some(cell.as_slice().get_prefix(len, 0))
-}
-
-#[derive(Debug, Copy, Clone, thiserror::Error)]
-pub enum Error {
-    #[error("cell underflow")]
-    CellUnderflow,
-    #[error("cell overflow")]
-    CellOverflow,
-    #[error("pruned branch access")]
-    PrunedBranchAccess,
 }
 
 #[cfg(test)]

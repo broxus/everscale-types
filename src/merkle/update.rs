@@ -4,12 +4,21 @@ use std::hash::BuildHasher;
 use super::{make_pruned_branch, MerkleFilter, MerkleProofBuilder};
 use crate::cell::*;
 
+/// Parsed Merkle update representation.
+///
+/// NOTE: Serialized into `MerkleUpdate` cell.
 pub struct MerkleUpdate<C: CellFamily> {
+    /// Representation hash of the original cell.
     pub old_hash: CellHash,
+    /// Representation hash of the updated cell.
     pub new_hash: CellHash,
+    /// Representation depth of the original cell.
     pub old_depth: u16,
+    /// Representation depth of the updated cell.
     pub new_depth: u16,
+    /// Partially pruned tree with unchanged cells of the origin cell.
     pub old: CellContainer<C>,
+    /// Partially pruned tree with all cells that are not in the original cell.
     pub new: CellContainer<C>,
 }
 
@@ -42,8 +51,8 @@ impl<C: CellFamily> Default for MerkleUpdate<C> {
     fn default() -> Self {
         let empty_cell = C::empty_cell();
         Self {
-            old_hash: EMPTY_CELL_HASH,
-            new_hash: EMPTY_CELL_HASH,
+            old_hash: *EMPTY_CELL_HASH,
+            new_hash: *EMPTY_CELL_HASH,
             old_depth: 0,
             new_depth: 0,
             old: empty_cell.clone(),
@@ -103,9 +112,13 @@ impl<C: CellFamily> Store<C> for MerkleUpdate<C> {
 }
 
 impl<C: CellFamily> MerkleUpdate<C> {
+    /// The number of data bits that the Merkle update occupies.
     pub const BITS: u16 = 8 + (256 + 16) * 2;
+    /// The number of references that the Merkle update occupies.
     pub const REFS: u8 = 2;
 
+    /// Starts building a Merkle update between the specified cells,
+    /// using old cells determined by filter.
     pub fn create<'a, F>(
         old: &'a dyn Cell<C>,
         new: &'a dyn Cell<C>,
@@ -117,6 +130,8 @@ impl<C: CellFamily> MerkleUpdate<C> {
         MerkleUpdateBuilder::new(old, new, f)
     }
 
+    /// Tries to apply this Merkle update to the specified cell,
+    /// producing a new cell and using the specified finalizer.
     pub fn apply_ext(
         &self,
         old: &CellContainer<C>,
@@ -223,7 +238,6 @@ impl<C: CellFamily> MerkleUpdate<C> {
         if new.as_ref().repr_hash() == &self.new_hash {
             Some(new)
         } else {
-            println!("MISMATCH");
             None
         }
     }
@@ -291,11 +305,14 @@ impl<C: CellFamily> MerkleUpdate<C> {
 }
 
 impl<C: DefaultFinalizer> MerkleUpdate<C> {
+    /// Tries to apply this Merkle update to the specified cell,
+    /// producing a new cell and using the default finalizer.
     pub fn apply(&self, old: &CellContainer<C>) -> Option<CellContainer<C>> {
         self.apply_ext(old, &mut C::default_finalizer())
     }
 }
 
+/// Helper struct to build a Merkle update.
 pub struct MerkleUpdateBuilder<'a, C: CellFamily, F> {
     old: &'a dyn Cell<C>,
     new: &'a dyn Cell<C>,
@@ -306,6 +323,8 @@ impl<'a, C: CellFamily, F> MerkleUpdateBuilder<'a, C, F>
 where
     F: MerkleFilter,
 {
+    /// Creates a new Merkle update between the specified cells,
+    /// using old cells determined by filter.
     pub fn new(old: &'a dyn Cell<C>, new: &'a dyn Cell<C>, f: F) -> Self {
         Self {
             old,
@@ -314,6 +333,7 @@ where
         }
     }
 
+    /// Builds a Merkle update using the specified finalizer.
     pub fn build_ext(self, finalizer: &mut dyn Finalizer<C>) -> Option<MerkleUpdate<C>> {
         BuilderImpl {
             old: self.old,
@@ -329,6 +349,7 @@ impl<'a, C: DefaultFinalizer, F> MerkleUpdateBuilder<'a, C, F>
 where
     F: MerkleFilter,
 {
+    /// Builds a Merkle update using the default finalizer.
     pub fn build(self) -> Option<MerkleUpdate<C>> {
         self.build_ext(&mut C::default_finalizer())
     }
@@ -396,21 +417,12 @@ impl<'a: 'b, 'b, C: CellFamily> BuilderImpl<'a, 'b, C> {
             }
         }
 
-        #[derive(Clone, Copy)]
-        struct ChangedCellsFilter<'a, S>(&'a HashSet<&'a CellHash, S>);
-
-        impl<S: BuildHasher> MerkleFilter for ChangedCellsFilter<'_, S> {
-            fn contains(&self, cell: &CellHash) -> bool {
-                self.0.contains(cell)
-            }
-        }
-
         let old_hash = self.old.repr_hash();
         let old_depth = self.old.repr_depth();
         let new_hash = self.new.repr_hash();
         let new_depth = self.new.repr_depth();
 
-        // Handle the simplest case with empty merkle update
+        // Handle the simplest case with empty Merkle update
         if old_hash == new_hash {
             let pruned = make_pruned_branch(self.old, 0, self.finalizer)?;
             return Some(MerkleUpdate {
@@ -423,7 +435,7 @@ impl<'a: 'b, 'b, C: CellFamily> BuilderImpl<'a, 'b, C> {
             });
         }
 
-        // Create merkle proof cell which contains only new cells
+        // Create Merkle proof cell which contains only new cells
         let (new, pruned_branches) =
             MerkleProofBuilder::<C, _>::new(self.new, InvertedFilter(self.filter))
                 .track_pruned_branches()
@@ -442,10 +454,9 @@ impl<'a: 'b, 'b, C: CellFamily> BuilderImpl<'a, 'b, C> {
             resolver.changed_cells.insert(old_hash);
         }
 
-        // Create merkle proof cell which contains only changed cells
-        let old =
-            MerkleProofBuilder::<C, _>::new(self.old, ChangedCellsFilter(&resolver.changed_cells))
-                .build_raw_ext(self.finalizer)?;
+        // Create Merkle proof cell which contains only changed cells
+        let old = MerkleProofBuilder::<C, _>::new(self.old, resolver.changed_cells)
+            .build_raw_ext(self.finalizer)?;
 
         // Done
         Some(MerkleUpdate {

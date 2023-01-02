@@ -1,3 +1,8 @@
+#![warn(missing_docs)]
+
+//! Everscale types
+
+/// Prevents using `From::from` for plain error conversion.
 macro_rules! ok {
     ($e:expr $(,)?) => {
         match $e {
@@ -15,6 +20,7 @@ pub use self::cell::{
     RcUsageTree, Store, UsageTreeMode,
 };
 pub use self::dict::Dict;
+pub use self::error::Error;
 
 /// BOC (Bag Of Cells) helper for the `Arc` family of cells.
 pub type ArcBoc = Boc<ArcCellFamily>;
@@ -65,6 +71,8 @@ pub mod cell;
 pub mod dict;
 pub mod merkle;
 pub mod util;
+
+mod error;
 
 #[cfg(test)]
 mod tests {

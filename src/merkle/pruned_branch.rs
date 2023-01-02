@@ -1,5 +1,6 @@
 use crate::cell::*;
 
+/// Creates a pruned branch cell with the specified merkle depth.
 pub fn make_pruned_branch<C: CellFamily>(
     cell: &dyn Cell<C>,
     merkle_depth: u8,

@@ -1,9 +1,11 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::cell::{Cell, CellContainer, CellFamily, CellType, LevelMask, RefsIter};
+use crate::cell::{Cell, CellContainer, CellFamily, CellHash, CellType, LevelMask, RefsIter};
 
+/// A data structure that can be deserialized from cells.
 pub trait Load<'a, C: CellFamily>: Sized {
+    /// Tries to load itself from a cell slice.
     fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self>;
 }
 
@@ -51,6 +53,7 @@ impl_primitive_loads! {
     i64 => |s| Some(s.load_u64()? as i64),
     u128 => |s| s.load_u128(),
     i128 => |s| Some(s.load_u128()? as i128),
+    CellHash => |s| s.load_u256(),
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for &'a dyn Cell<C> {

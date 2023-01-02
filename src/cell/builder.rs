@@ -3,14 +3,16 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
-use crate::cell::{CellContainer, CellFamily, LevelMask, MAX_BIT_LEN, MAX_REF_COUNT};
+use crate::cell::{CellContainer, CellFamily, CellHash, LevelMask, MAX_BIT_LEN, MAX_REF_COUNT};
 use crate::util::ArrayVec;
 use crate::{CellDescriptor, CellSlice};
 
 #[cfg(feature = "stats")]
 use super::CellTreeStats;
 
+/// A data structure that can be serialized into cells.
 pub trait Store<C: CellFamily> {
+    /// Tries to store itself into the cell builder.
     fn store_into(&self, builder: &mut CellBuilder<C>) -> bool;
 }
 
@@ -66,6 +68,7 @@ impl_primitive_store! {
     i64 => |b, v| b.store_u64(*v as u64),
     u128 => |b, v| b.store_u128(*v),
     i128 => |b, v| b.store_u128(*v as u128),
+    CellHash => |b, v| b.store_u256(v),
 }
 
 /// Builder for constructing cells with densely packed data.
@@ -570,7 +573,7 @@ impl<C: CellFamily> CellBuilder<C> {
         self.compute_level_mask().level()
     }
 
-    // Computes the cell level mask from children.
+    /// Computes the cell level mask from children.
     pub fn compute_level_mask(&self) -> LevelMask {
         if let Some(level_mask) = self.level_mask {
             level_mask
@@ -721,6 +724,9 @@ where
     }
 }
 
+/// Builder for constructing cell references array.
+///
+/// Can be used later for [`CellBuilder::set_references`].
 #[repr(transparent)]
 pub struct CellRefsBuilder<C: CellFamily>(ArrayVec<CellContainer<C>, MAX_REF_COUNT>);
 
