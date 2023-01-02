@@ -230,6 +230,20 @@ pub struct RefsIter<'a, C> {
     index: u8,
 }
 
+impl<'a, C: CellFamily> RefsIter<'a, C> {
+    /// Returns a cell by children of which we are iterating.
+    #[inline]
+    pub fn cell(&self) -> &'a dyn Cell<C> {
+        self.cell
+    }
+
+    /// Creates an iterator through child nodes which produces cloned references.
+    #[inline]
+    pub fn cloned(self) -> ClonedRefsIter<'a, C> {
+        ClonedRefsIter { inner: self }
+    }
+}
+
 impl<C> Clone for RefsIter<'_, C> {
     #[inline]
     fn clone(&self) -> Self {
@@ -238,14 +252,6 @@ impl<C> Clone for RefsIter<'_, C> {
             len: self.len,
             index: self.index,
         }
-    }
-}
-
-impl<'a, C: CellFamily> RefsIter<'a, C> {
-    /// Creates an iterator through child nodes which produces cloned references.
-    #[inline]
-    pub fn cloned(self) -> ClonedRefsIter<'a, C> {
-        ClonedRefsIter { inner: self }
     }
 }
 
@@ -290,10 +296,26 @@ impl<C: CellFamily> ExactSizeIterator for RefsIter<'_, C> {
 }
 
 /// An iterator through child nodes which produces cloned references.
-#[derive(Clone)]
 #[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct ClonedRefsIter<'a, C> {
     inner: RefsIter<'a, C>,
+}
+
+impl<'a, C: CellFamily> ClonedRefsIter<'a, C> {
+    /// Returns a cell by children of which we are iterating.
+    #[inline]
+    pub fn cell(&self) -> &'a dyn Cell<C> {
+        self.inner.cell
+    }
+}
+
+impl<C> Clone for ClonedRefsIter<'_, C> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
 }
 
 impl<'a, C: CellFamily> Iterator for ClonedRefsIter<'a, C> {

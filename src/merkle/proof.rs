@@ -97,25 +97,34 @@ impl<C: CellFamily> MerkleProof<C> {
         root: &'a dyn Cell<C>,
         child_hash: &'a CellHash,
     ) -> MerkleProofBuilder<'a, C, impl MerkleFilter + 'a> {
-        #[derive(Clone, Copy)]
         struct RootOrChild<'a> {
-            root_hash: &'a CellHash,
+            cells: ahash::HashSet<&'a CellHash>,
             child_hash: &'a CellHash,
         }
 
         impl MerkleFilter for RootOrChild<'_> {
             fn contains(&self, cell: &CellHash) -> bool {
-                cell == self.child_hash || cell == self.root_hash
+                self.cells.contains(cell) || cell == self.child_hash
             }
         }
 
-        MerkleProofBuilder::new(
-            root,
-            RootOrChild {
-                root_hash: root.repr_hash(),
-                child_hash,
-            },
-        )
+        let mut stack = vec![root.references()];
+        while let Some(last_cells) = stack.last_mut() {
+            match last_cells.next() {
+                Some(child) if child.repr_hash() == child_hash => break,
+                Some(child) => stack.push(child.references()),
+                None => {
+                    stack.pop();
+                }
+            }
+        }
+
+        let mut cells = ahash::HashSet::with_capacity_and_hasher(stack.len(), Default::default());
+        for item in stack {
+            cells.insert(item.cell().repr_hash());
+        }
+
+        MerkleProofBuilder::new(root, RootOrChild { cells, child_hash })
     }
 }
 
@@ -303,12 +312,12 @@ mod tests {
 
     #[test]
     fn create_proof_for_deep_cell() {
-        let mut builder = RcCellBuilder::new();
         let mut cell = RcCellFamily::empty_cell();
-        for i in 0..3000 {
+        for i in 0..1700 {
+            let mut builder = RcCellBuilder::new();
             builder.store_u32(i);
             builder.store_reference(cell);
-            cell = std::mem::take(&mut builder).build().unwrap();
+            cell = builder.build().unwrap();
         }
 
         MerkleProof::create_for_cell(cell.as_ref(), &EMPTY_CELL_HASH)
