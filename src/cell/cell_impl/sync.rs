@@ -76,7 +76,6 @@ unsafe fn make_cell(
             Some(make_pruned_branch(
                 PrunedBranchHeader {
                     repr_hash: repr.0,
-                    repr_depth: repr.1,
                     level: ctx.descriptor.level_mask().level(),
                     descriptor: ctx.descriptor,
                 },
@@ -92,7 +91,6 @@ unsafe fn make_cell(
 
             Some(Arc::new(LibraryReference {
                 repr_hash: repr.0,
-                repr_depth: repr.1,
                 descriptor: ctx.descriptor,
                 data: *(ctx.data.as_ptr() as *const [u8; 33]),
             }))

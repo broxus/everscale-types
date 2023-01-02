@@ -286,7 +286,6 @@ impl<C: CellFamily, const N: usize> Cell<C> for OrdinaryCell<C, N> {
 
 struct LibraryReference {
     repr_hash: CellHash,
-    repr_depth: u16,
     descriptor: CellDescriptor,
     data: [u8; 33],
 }
@@ -325,7 +324,7 @@ impl<C: CellFamily> Cell<C> for LibraryReference {
     }
 
     fn depth(&self, _: u8) -> u16 {
-        self.repr_depth
+        0
     }
 
     #[cfg(feature = "stats")]
@@ -341,7 +340,6 @@ type PrunedBranch<const N: usize> = HeaderWithData<PrunedBranchHeader, N>;
 
 struct PrunedBranchHeader {
     repr_hash: CellHash,
-    repr_depth: u16,
     level: u8,
     descriptor: CellDescriptor,
 }
@@ -399,7 +397,7 @@ impl<C: CellFamily, const N: usize> Cell<C> for PrunedBranch<N> {
     fn depth(&self, level: u8) -> u16 {
         let hash_index = hash_index(self.header.descriptor, level);
         if hash_index == self.header.level {
-            self.header.repr_depth
+            0
         } else {
             let offset = 2 + self.header.level as usize * 32 + hash_index as usize * 2;
             debug_assert!(offset + 2 <= self.header.descriptor.byte_len() as usize);
