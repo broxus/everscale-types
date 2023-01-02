@@ -230,6 +230,46 @@ impl<'a, C: CellFamily> RefsIter<'a, C> {
         self.cell
     }
 
+    /// Returns a reference to the next() value without advancing the iterator.
+    #[inline]
+    pub fn peek(&self) -> Option<&'a dyn Cell<C>> {
+        if self.index >= self.len {
+            None
+        } else {
+            self.cell.reference(self.index)
+        }
+    }
+
+    /// Returns a cloned reference to the next() value without advancing the iterator.
+    #[inline]
+    pub fn peek_cloned(&self) -> Option<CellContainer<C>> {
+        if self.index >= self.len {
+            None
+        } else {
+            self.cell.reference_cloned(self.index)
+        }
+    }
+
+    /// Returns a reference to the next_back() value without advancing the iterator.
+    #[inline]
+    pub fn peek_prev(&self) -> Option<&'a dyn Cell<C>> {
+        if self.index > 0 {
+            self.cell.reference(self.index - 1)
+        } else {
+            None
+        }
+    }
+
+    /// Returns a cloned reference to the next_back() value without advancing the iterator.
+    #[inline]
+    pub fn peek_prev_cloned(&self) -> Option<CellContainer<C>> {
+        if self.index > 0 {
+            self.cell.reference_cloned(self.index - 1)
+        } else {
+            None
+        }
+    }
+
     /// Creates an iterator through child nodes which produces cloned references.
     #[inline]
     pub fn cloned(self) -> ClonedRefsIter<'a, C> {
@@ -299,6 +339,18 @@ impl<'a, C: CellFamily> ClonedRefsIter<'a, C> {
     #[inline]
     pub fn cell(&self) -> &'a dyn Cell<C> {
         self.inner.cell
+    }
+
+    /// Returns a reference to the next() value without advancing the iterator.
+    #[inline]
+    pub fn peek(&self) -> Option<CellContainer<C>> {
+        self.inner.peek_cloned()
+    }
+
+    /// Returns a reference to the next_back() value without advancing the iterator.
+    #[inline]
+    pub fn peek_prev(&self) -> Option<CellContainer<C>> {
+        self.inner.peek_prev_cloned()
     }
 }
 

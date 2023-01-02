@@ -191,7 +191,6 @@ where
             filter: &self.filter,
             cells: Default::default(),
             pruned_branches: None,
-            builder: CellBuilder::new(),
             finalizer,
         }
         .build()
@@ -228,7 +227,6 @@ where
             filter: &self.filter,
             cells: Default::default(),
             pruned_branches: Some(Default::default()),
-            builder: CellBuilder::new(),
             finalizer,
         };
         let cell = builder.build()?;
@@ -242,7 +240,6 @@ struct BuilderImpl<'a, 'b, C: CellFamily, S = ahash::RandomState> {
     filter: &'b dyn MerkleFilter,
     cells: HashMap<&'a CellHash, CellContainer<C>, S>,
     pruned_branches: Option<HashMap<&'a CellHash, bool, S>>,
-    builder: CellBuilder<C>,
     finalizer: &'b mut dyn Finalizer<C>,
 }
 
@@ -251,56 +248,111 @@ where
     S: BuildHasher + Default,
 {
     fn build(&mut self) -> Option<CellContainer<C>> {
+        struct Node<'a, C: CellFamily> {
+            references: RefsIter<'a, C>,
+            descriptor: CellDescriptor,
+            merkle_depth: u8,
+            children: CellRefsBuilder<C>,
+        }
+
         if self.filter.check(self.root.repr_hash()) == FilterAction::Skip {
             return None;
         }
-        self.fill(self.root, 0)
-    }
 
-    fn fill(&mut self, cell: &'a dyn Cell<C>, merkle_depth: u8) -> Option<CellContainer<C>> {
-        let descriptor = cell.descriptor();
-        let merkle_offset = descriptor.cell_type().is_merkle() as u8;
-        let child_merkle_depth = merkle_depth + merkle_offset;
+        let mut stack = Vec::with_capacity(self.root.repr_depth() as usize);
 
-        let mut children = CellRefsBuilder::<C>::default();
+        // Push root node
+        let root_descriptor = self.root.descriptor();
+        stack.push(Node {
+            references: self.root.references(),
+            descriptor: root_descriptor,
+            merkle_depth: root_descriptor.is_merkle() as u8,
+            children: CellRefsBuilder::default(),
+        });
 
-        let mut children_mask = descriptor.level_mask();
-        for (i, child) in cell.references().enumerate() {
-            let child_repr_hash = child.repr_hash();
+        while let Some(last) = stack.last_mut() {
+            if let Some(child) = last.references.next() {
+                // Process children if they are left
 
-            let child = if let Some(child) = self.cells.get(child_repr_hash) {
-                child.clone()
-            } else {
-                match self.filter.check(child_repr_hash) {
-                    // Replace all skipped subtrees with pruned branch cells
-                    FilterAction::Skip if child.reference_count() > 0 => {
-                        let child = make_pruned_branch_cold(child, merkle_depth, self.finalizer)?;
-                        if let Some(pruned_branch) = &mut self.pruned_branches {
-                            pruned_branch.insert(child_repr_hash, false);
+                let child_repr_hash = child.repr_hash();
+                let child = if let Some(child) = self.cells.get(child_repr_hash) {
+                    // Reused processed cells
+                    child.clone()
+                } else {
+                    // Fetch child descriptor
+                    let descriptor = child.descriptor();
+
+                    // Check if child is in a tree
+                    match self.filter.check(child_repr_hash) {
+                        // Replace all skipped subtrees with pruned branch cells
+                        FilterAction::Skip if descriptor.reference_count() > 0 => {
+                            // Create pruned branch
+                            let child =
+                                make_pruned_branch_cold(child, last.merkle_depth, self.finalizer)?;
+
+                            // Insert pruned branch for the current cell
+                            if let Some(pruned_branch) = &mut self.pruned_branches {
+                                pruned_branch.insert(child_repr_hash, false);
+                            }
+
+                            // Use new pruned branch as a child
+                            child
                         }
-                        child
-                    }
-                    // Included subtrees are used as is
-                    FilterAction::IncludeSubtree => cell.reference_cloned(i as u8)?,
-                    // All other cells
-                    _ => self.fill(child, child_merkle_depth)?,
-                }
-            };
+                        // Included subtrees are used as is
+                        FilterAction::IncludeSubtree => last.references.peek_prev_cloned()?,
+                        // All other cells will be included in a different branch
+                        _ => {
+                            // Add merkle offset to the current merkle depth
+                            let merkle_depth = last.merkle_depth + descriptor.is_merkle() as u8;
 
-            children_mask |= child.as_ref().level_mask();
-            children.store_reference(child);
+                            // Push child node and start processing its references
+                            stack.push(Node {
+                                references: child.references(),
+                                descriptor,
+                                merkle_depth,
+                                children: CellRefsBuilder::default(),
+                            });
+                            continue;
+                        }
+                    }
+                };
+
+                // Add child to the references builder
+                last.children.store_reference(child);
+            } else if let Some(last) = stack.pop() {
+                // Build a new cell if there are no child nodes left to process
+
+                let cell = last.references.cell();
+
+                // Compute children mask
+                let children_mask =
+                    last.descriptor.level_mask() | last.children.compute_level_mask();
+                let merkle_offset = last.descriptor.is_merkle() as u8;
+
+                // Build the cell
+                let mut builder = CellBuilder::<C>::new();
+                builder.set_exotic(last.descriptor.is_exotic());
+                builder.set_level_mask(children_mask.virtualize(merkle_offset));
+                builder.store_cell_data(cell);
+                builder.set_references(last.children);
+                let proof_cell = builder.build_ext(self.finalizer)?;
+
+                // Save this cell as processed cell
+                self.cells.insert(cell.repr_hash(), proof_cell.clone());
+
+                match stack.last_mut() {
+                    // Append this cell to the ancestor
+                    Some(last) => {
+                        last.children.store_reference(proof_cell);
+                    }
+                    // Or return it as a result (for the root node)
+                    None => return Some(proof_cell),
+                }
+            }
         }
 
-        self.builder.set_exotic(descriptor.is_exotic());
-        self.builder
-            .set_level_mask(children_mask.virtualize(merkle_offset));
-        self.builder.store_slice_data(&cell.as_slice());
-        self.builder.set_references(children);
-
-        let proof_cell = std::mem::take(&mut self.builder).build_ext(self.finalizer)?;
-        self.cells.insert(cell.repr_hash(), proof_cell.clone());
-
-        Some(proof_cell)
+        // Something is wrong if we are here
+        None
     }
 }
 
@@ -350,7 +402,7 @@ mod tests {
     #[test]
     fn create_proof_for_deep_cell() {
         let mut cell = RcCellFamily::empty_cell();
-        for i in 0..1500 {
+        for i in 0..3000 {
             let mut builder = RcCellBuilder::new();
             builder.store_u32(i);
             builder.store_reference(cell);

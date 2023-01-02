@@ -3,7 +3,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
-use crate::cell::{CellContainer, CellFamily, CellHash, LevelMask, MAX_BIT_LEN, MAX_REF_COUNT};
+use crate::cell::{
+    Cell, CellContainer, CellFamily, CellHash, LevelMask, MAX_BIT_LEN, MAX_REF_COUNT,
+};
 use crate::util::ArrayVec;
 use crate::{CellDescriptor, CellSlice};
 
@@ -449,6 +451,17 @@ impl<C: CellFamily> CellBuilder<C> {
         store_raw(&mut self.data, &mut self.bit_len, value, bits)
     }
 
+    /// Tries to store all data bits of the specified cell in the current cell,
+    /// returning `false` if there is not enough remaining capacity.
+    pub fn store_cell_data<C1: CellFamily>(&mut self, value: &dyn Cell<C1>) -> bool {
+        store_raw(
+            &mut self.data,
+            &mut self.bit_len,
+            value.data(),
+            value.bit_len(),
+        )
+    }
+
     /// Tries to store the remaining slice data in the cell,
     /// returning `false` if there is not enough remaining capacity.
     pub fn store_slice_data<C1: CellFamily>(&mut self, value: &CellSlice<'_, C1>) -> bool {
@@ -747,6 +760,15 @@ impl<C: CellFamily> CellRefsBuilder<C> {
         } else {
             false
         }
+    }
+
+    /// Computes children level mask as a combination of all level masks.
+    pub fn compute_level_mask(&self) -> LevelMask {
+        let mut result = LevelMask::EMPTY;
+        for child in self.0.as_ref() {
+            result |= child.as_ref().level_mask();
+        }
+        result
     }
 }
 

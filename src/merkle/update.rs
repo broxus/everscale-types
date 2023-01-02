@@ -193,7 +193,7 @@ impl<C: CellFamily> MerkleUpdate<C> {
                 }
 
                 result.set_level_mask(children_mask.virtualize(merkle_offset));
-                result.store_slice_data(&cell.as_slice());
+                result.store_cell_data(cell);
 
                 result.build_ext(self.finalizer)
             }
