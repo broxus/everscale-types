@@ -319,7 +319,7 @@ impl<C> Clone for ClonedRefsIter<'_, C> {
 }
 
 impl<'a, C: CellFamily> Iterator for ClonedRefsIter<'a, C> {
-    type Item = C::Container<dyn Cell<C>>;
+    type Item = CellContainer<C>;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {

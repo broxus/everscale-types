@@ -1,7 +1,31 @@
+use std::rc::Rc;
+use std::sync::Arc;
+
 use crate::cell::{Cell, CellContainer, CellFamily, CellType, LevelMask, RefsIter};
 
 pub trait Load<'a, C: CellFamily>: Sized {
     fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self>;
+}
+
+impl<'a, C: CellFamily, T: Load<'a, C>> Load<'a, C> for Box<T> {
+    #[inline]
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+        Some(Box::new(<T as Load<C>>::load_from(slice)?))
+    }
+}
+
+impl<'a, C: CellFamily, T: Load<'a, C>> Load<'a, C> for Arc<T> {
+    #[inline]
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+        Some(Arc::new(<T as Load<C>>::load_from(slice)?))
+    }
+}
+
+impl<'a, C: CellFamily, T: Load<'a, C>> Load<'a, C> for Rc<T> {
+    #[inline]
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+        Some(Rc::new(<T as Load<C>>::load_from(slice)?))
+    }
 }
 
 macro_rules! impl_primitive_loads {

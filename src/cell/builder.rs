@@ -1,4 +1,6 @@
 use std::mem::MaybeUninit;
+use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 use crate::cell::{CellContainer, CellFamily, LevelMask, MAX_BIT_LEN, MAX_REF_COUNT};
@@ -17,6 +19,53 @@ impl<C: CellFamily, T: Store<C> + ?Sized> Store<C> for &T {
     fn store_into(&self, builder: &mut CellBuilder<C>) -> bool {
         <T as Store<C>>::store_into(self, builder)
     }
+}
+
+impl<C: CellFamily, T: Store<C> + ?Sized> Store<C> for Box<T> {
+    #[inline]
+    fn store_into(&self, builder: &mut CellBuilder<C>) -> bool {
+        <T as Store<C>>::store_into(self.as_ref(), builder)
+    }
+}
+
+impl<C: CellFamily, T: Store<C> + ?Sized> Store<C> for Arc<T> {
+    #[inline]
+    fn store_into(&self, builder: &mut CellBuilder<C>) -> bool {
+        <T as Store<C>>::store_into(self.as_ref(), builder)
+    }
+}
+
+impl<C: CellFamily, T: Store<C> + ?Sized> Store<C> for Rc<T> {
+    #[inline]
+    fn store_into(&self, builder: &mut CellBuilder<C>) -> bool {
+        <T as Store<C>>::store_into(self.as_ref(), builder)
+    }
+}
+
+macro_rules! impl_primitive_store {
+    ($($type:ty => |$b:ident, $v:ident| $expr:expr),*$(,)?) => {
+        $(impl<C: CellFamily> Store<C> for $type {
+            #[inline]
+            fn store_into(&self, $b: &mut CellBuilder<C>) -> bool {
+                let $v = self;
+                $expr
+            }
+        })*
+    };
+}
+
+impl_primitive_store! {
+    bool => |b, v| b.store_bit(*v),
+    u8 => |b, v| b.store_u8(*v),
+    i8 => |b, v| b.store_u8(*v as u8),
+    u16 => |b, v| b.store_u16(*v),
+    i16 => |b, v| b.store_u16(*v as u16),
+    u32 => |b, v| b.store_u32(*v),
+    i32 => |b, v| b.store_u32(*v as u32),
+    u64 => |b, v| b.store_u64(*v),
+    i64 => |b, v| b.store_u64(*v as u64),
+    u128 => |b, v| b.store_u128(*v),
+    i128 => |b, v| b.store_u128(*v as u128),
 }
 
 /// Builder for constructing cells with densely packed data.

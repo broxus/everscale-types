@@ -11,8 +11,8 @@ pub use self::boc::Boc;
 pub use self::cell::rc::{RcCell, RcCellFamily};
 pub use self::cell::sync::{ArcCell, ArcCellFamily};
 pub use self::cell::{
-    Cell, CellBuilder, CellDescriptor, CellFamily, CellHash, CellSlice, CellType, LevelMask,
-    RcUsageTree, UsageTreeMode,
+    Cell, CellBuilder, CellDescriptor, CellFamily, CellHash, CellSlice, CellType, LevelMask, Load,
+    RcUsageTree, Store, UsageTreeMode,
 };
 pub use self::dict::Dict;
 
@@ -35,6 +35,30 @@ pub type RcCellSlice<'a> = CellSlice<'a, RcCellFamily>;
 pub type ArcDict<const N: u16> = Dict<ArcCellFamily, N>;
 /// An ordinary dictionary with fixed length keys for the `Rc` family of cells.
 pub type RcDict<const N: u16> = Dict<RcCellFamily, N>;
+
+impl Store<RcCellFamily> for RcCell {
+    fn store_into(&self, builder: &mut RcCellBuilder) -> bool {
+        builder.store_reference(self.clone())
+    }
+}
+
+impl Store<ArcCellFamily> for ArcCell {
+    fn store_into(&self, builder: &mut CellBuilder<ArcCellFamily>) -> bool {
+        builder.store_reference(self.clone())
+    }
+}
+
+impl<'a> Load<'a, RcCellFamily> for RcCell {
+    fn load_from(slice: &mut CellSlice<'a, RcCellFamily>) -> Option<Self> {
+        slice.load_reference_cloned()
+    }
+}
+
+impl<'a> Load<'a, ArcCellFamily> for ArcCell {
+    fn load_from(slice: &mut CellSlice<'a, ArcCellFamily>) -> Option<Self> {
+        slice.load_reference_cloned()
+    }
+}
 
 pub mod boc;
 pub mod cell;
