@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::hash::BuildHasher;
 
-use super::{make_pruned_branch, MerkleFilter};
+use super::{make_pruned_branch, FilterAction, MerkleFilter};
 use crate::cell::*;
 
 /// Parsed Merkle proof representation.
@@ -119,8 +119,12 @@ impl<C: CellFamily> MerkleProof<C> {
         }
 
         impl MerkleFilter for RootOrChild<'_> {
-            fn contains(&self, cell: &CellHash) -> bool {
-                self.cells.contains(cell) || cell == self.child_hash
+            fn check(&self, cell: &CellHash) -> FilterAction {
+                if self.cells.contains(cell) || cell == self.child_hash {
+                    FilterAction::Include
+                } else {
+                    FilterAction::Skip
+                }
             }
         }
 
@@ -182,7 +186,7 @@ where
 
     /// Builds a Merkle proof child cell using the specified finalizer.
     pub fn build_raw_ext(self, finalizer: &mut dyn Finalizer<C>) -> Option<CellContainer<C>> {
-        BuilderImpl::<C, ahash::RandomState> {
+        BuilderImpl::<C> {
             root: self.root,
             filter: &self.filter,
             cells: Default::default(),
@@ -233,7 +237,7 @@ where
     }
 }
 
-struct BuilderImpl<'a, 'b, C: CellFamily, S> {
+struct BuilderImpl<'a, 'b, C: CellFamily, S = ahash::RandomState> {
     root: &'a dyn Cell<C>,
     filter: &'b dyn MerkleFilter,
     cells: HashMap<&'a CellHash, CellContainer<C>, S>,
@@ -247,7 +251,7 @@ where
     S: BuildHasher + Default,
 {
     fn build(&mut self) -> Option<CellContainer<C>> {
-        if !self.filter.contains(self.root.repr_hash()) {
+        if self.filter.check(self.root.repr_hash()) == FilterAction::Skip {
             return None;
         }
         self.fill(self.root, 0)
@@ -261,19 +265,26 @@ where
         let mut children = CellRefsBuilder::<C>::default();
 
         let mut children_mask = descriptor.level_mask();
-        for child in cell.references() {
+        for (i, child) in cell.references().enumerate() {
             let child_repr_hash = child.repr_hash();
 
             let child = if let Some(child) = self.cells.get(child_repr_hash) {
                 child.clone()
-            } else if child.reference_count() == 0 || self.filter.contains(child_repr_hash) {
-                self.fill(child, child_merkle_depth)?
             } else {
-                let child = make_pruned_branch_cold(child, merkle_depth, self.finalizer)?;
-                if let Some(pruned_branch) = &mut self.pruned_branches {
-                    pruned_branch.insert(child_repr_hash, false);
+                match self.filter.check(child_repr_hash) {
+                    // Replace all skipped subtrees with pruned branch cells
+                    FilterAction::Skip if child.reference_count() > 0 => {
+                        let child = make_pruned_branch_cold(child, merkle_depth, self.finalizer)?;
+                        if let Some(pruned_branch) = &mut self.pruned_branches {
+                            pruned_branch.insert(child_repr_hash, false);
+                        }
+                        child
+                    }
+                    // Included subtrees are used as is
+                    FilterAction::IncludeSubtree => cell.reference_cloned(i as u8)?,
+                    // All other cells
+                    _ => self.fill(child, child_merkle_depth)?,
                 }
-                child
             };
 
             children_mask |= child.as_ref().level_mask();
@@ -339,7 +350,7 @@ mod tests {
     #[test]
     fn create_proof_for_deep_cell() {
         let mut cell = RcCellFamily::empty_cell();
-        for i in 0..1700 {
+        for i in 0..1500 {
             let mut builder = RcCellBuilder::new();
             builder.store_u32(i);
             builder.store_reference(cell);

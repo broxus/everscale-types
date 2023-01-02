@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasher;
 
-use super::{make_pruned_branch, MerkleFilter, MerkleProofBuilder};
+use super::{make_pruned_branch, FilterAction, MerkleFilter, MerkleProofBuilder};
 use crate::cell::*;
 
 /// Parsed Merkle update representation.
@@ -375,7 +375,11 @@ impl<'a: 'b, 'b, C: CellFamily> BuilderImpl<'a, 'b, C> {
         where
             S: BuildHasher,
         {
-            fn fill<C: CellFamily>(&mut self, cell: &'a dyn Cell<C>) -> bool {
+            fn fill<C: CellFamily>(
+                &mut self,
+                cell: &'a dyn Cell<C>,
+                mut skip_filter: bool,
+            ) -> bool {
                 let repr_hash = cell.repr_hash();
 
                 // Skip visited cells
@@ -393,10 +397,23 @@ impl<'a: 'b, 'b, C: CellFamily> BuilderImpl<'a, 'b, C> {
                     None => false,
                 };
 
+                let process_children = if skip_filter {
+                    true
+                } else {
+                    match self.filter.check(repr_hash) {
+                        FilterAction::Skip => false,
+                        FilterAction::Include => true,
+                        FilterAction::IncludeSubtree => {
+                            skip_filter = true;
+                            true
+                        }
+                    }
+                };
+
                 let mut result = false;
-                if self.filter.contains(repr_hash) {
+                if process_children {
                     for child in cell.references() {
-                        result |= self.fill(child);
+                        result |= self.fill(child, skip_filter);
                     }
 
                     if result {
@@ -412,8 +429,14 @@ impl<'a: 'b, 'b, C: CellFamily> BuilderImpl<'a, 'b, C> {
 
         impl<F: MerkleFilter> MerkleFilter for InvertedFilter<F> {
             #[inline]
-            fn contains(&self, cell: &CellHash) -> bool {
-                !self.0.contains(cell)
+            fn check(&self, cell: &CellHash) -> FilterAction {
+                if self.0.check(cell) == FilterAction::Skip {
+                    // TODO: check if FilterAction::IncludeSubtree is correct,
+                    // because it is more optimal to just include the new subtree
+                    FilterAction::Include
+                } else {
+                    FilterAction::Skip
+                }
             }
         }
 
@@ -450,7 +473,7 @@ impl<'a: 'b, 'b, C: CellFamily> BuilderImpl<'a, 'b, C> {
         };
 
         // Find all changed cells in the old cell tree
-        if resolver.fill(self.old) {
+        if resolver.fill(self.old, false) {
             resolver.changed_cells.insert(old_hash);
         }
 

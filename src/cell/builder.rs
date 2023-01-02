@@ -604,8 +604,7 @@ impl<C: CellFamily> CellBuilder<C> {
         }
     }
 
-    /// Sets children of the cell,
-    /// returning `false` if there is not enough remaining capacity.
+    /// Sets children of the cell.
     pub fn set_references(&mut self, refs: CellRefsBuilder<C>) {
         self.references = refs.0;
     }
