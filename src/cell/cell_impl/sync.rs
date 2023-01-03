@@ -10,10 +10,11 @@ use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 use crate::cell::{Cell, CellContainer, CellFamily, CellHash, CellType};
 
 /// Thread-safe cell family.
+#[derive(Debug)]
 pub struct ArcCellFamily;
 
 impl CellFamily for ArcCellFamily {
-    type Container<T: ?Sized> = Arc<T>;
+    type Container = Arc<dyn Cell<Self>>;
 
     fn empty_cell() -> CellContainer<Self> {
         Arc::new(EmptyOrdinaryCell)

@@ -9,10 +9,11 @@ use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 use crate::cell::{Cell, CellContainer, CellFamily, CellHash, CellType};
 
 /// Single-threaded cell family.
+#[derive(Debug)]
 pub struct RcCellFamily;
 
 impl CellFamily for RcCellFamily {
-    type Container<T: ?Sized> = Rc<T>;
+    type Container = Rc<dyn Cell<Self>>;
 
     fn empty_cell() -> CellContainer<Self> {
         Rc::new(EmptyOrdinaryCell)

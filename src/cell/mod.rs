@@ -27,7 +27,7 @@ mod usage_tree;
 /// Cell implementation family.
 pub trait CellFamily {
     /// Owning container with cell tree node.
-    type Container<T: ?Sized>: AsRef<T> + Clone;
+    type Container: AsRef<dyn Cell<Self>> + Clone + std::fmt::Debug;
 
     /// Creates an empty cell.
     ///
@@ -48,7 +48,7 @@ pub trait CellFamily {
 }
 
 /// Type alias for a cell family container.
-pub type CellContainer<C> = <C as CellFamily>::Container<dyn Cell<C>>;
+pub type CellContainer<C> = <C as CellFamily>::Container;
 
 /// Represents the interface of a well-formed cell.
 ///
