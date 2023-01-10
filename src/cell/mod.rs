@@ -1,5 +1,6 @@
 //! Cell tree implementation.
 
+use std::borrow::Borrow;
 use std::ops::{BitOr, BitOrAssign};
 
 use crate::util::DisplayHash;
@@ -27,7 +28,7 @@ mod usage_tree;
 /// Cell implementation family.
 pub trait CellFamily {
     /// Owning container with cell tree node.
-    type Container: AsRef<dyn Cell<Self>> + Clone + std::fmt::Debug;
+    type Container: AsRef<dyn Cell<Self>> + Borrow<dyn Cell<Self>> + Clone + std::fmt::Debug;
 
     /// Creates an empty cell.
     ///

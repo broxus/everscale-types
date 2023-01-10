@@ -17,14 +17,17 @@ once_cell = "1.16"
 sha2 = "0.10"
 smallvec = { version = "1.9", features = ["union"] }
 thiserror = "1.0"
+serde = { version = "1", optional = true }
 
 [dev-dependencies]
 libc = "0.2"
 base64 = "0.13"
+serde = { version = "1", features = ["derive"] }
 
 [features]
-default = ["base64"]
+default = ["base64", "serde"]
 stats = []
+serde = ["dep:serde", "base64"]
 
 [profile.release]
 debug = true

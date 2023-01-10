@@ -44,7 +44,7 @@ impl<'a, C: CellFamily, const N: u16> Load<'a, C> for Dict<C, N> {
 }
 
 impl<C: CellFamily, const N: u16> Store<C> for Dict<C, N> {
-    fn store_into(&self, b: &mut CellBuilder<C>) -> bool {
+    fn store_into(&self, b: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
         match &self.0 {
             None => b.store_bit_zero(),
             Some(cell) => b.store_bit_one() && b.store_reference(cell.clone()),
@@ -341,7 +341,7 @@ where
                 // for each value
                 Some(remaining) => {
                     // Try to store the next prefix into the segment key
-                    if unlikely(!segment.key.store_slice_data(&prefix)) {
+                    if unlikely(!segment.key.store_slice_data(prefix)) {
                         return Some(Err(self.finish(Error::CellOverflow)));
                     } else if remaining == 0 {
                         // Return the next entry if there are no remaining bits to read
@@ -849,7 +849,7 @@ where
         };
 
         let mut builder = CellBuilder::<C>::new();
-        if builder.store_slice_data(&last.data)
+        if builder.store_slice_data(last.data)
             && builder.store_reference(left)
             && builder.store_reference(right)
         {
@@ -1094,7 +1094,7 @@ mod tests {
         let parsed_key = read_label(&mut label.as_slice(), key_bit_len).unwrap();
         let parsed_key = {
             let mut builder = RcCellBuilder::new();
-            builder.store_slice(&parsed_key);
+            builder.store_slice(parsed_key);
             builder.build().unwrap()
         };
 
@@ -1107,7 +1107,7 @@ mod tests {
             .unwrap();
         let prefix = read_label(&mut label.as_slice(), 32).unwrap();
 
-        println!("{}", build_cell(|b| b.store_slice(&prefix)).display_tree());
+        println!("{}", build_cell(|b| b.store_slice(prefix)).display_tree());
         assert_eq!(prefix.test_uniform(), Some(false));
     }
 
@@ -1244,7 +1244,7 @@ mod tests {
 
         let value = {
             let mut builder = RcCellBuilder::new();
-            builder.store_slice(&value);
+            builder.store_slice(value);
             builder.build().unwrap()
         };
         println!("{}", value.display_tree());

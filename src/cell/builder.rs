@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::mem::MaybeUninit;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -15,34 +16,34 @@ use super::CellTreeStats;
 /// A data structure that can be serialized into cells.
 pub trait Store<C: CellFamily> {
     /// Tries to store itself into the cell builder.
-    fn store_into(&self, builder: &mut CellBuilder<C>) -> bool;
+    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool;
 }
 
 impl<C: CellFamily, T: Store<C> + ?Sized> Store<C> for &T {
     #[inline]
-    fn store_into(&self, builder: &mut CellBuilder<C>) -> bool {
-        <T as Store<C>>::store_into(self, builder)
+    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+        <T as Store<C>>::store_into(self, builder, finalizer)
     }
 }
 
 impl<C: CellFamily, T: Store<C> + ?Sized> Store<C> for Box<T> {
     #[inline]
-    fn store_into(&self, builder: &mut CellBuilder<C>) -> bool {
-        <T as Store<C>>::store_into(self.as_ref(), builder)
+    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+        <T as Store<C>>::store_into(self.as_ref(), builder, finalizer)
     }
 }
 
 impl<C: CellFamily, T: Store<C> + ?Sized> Store<C> for Arc<T> {
     #[inline]
-    fn store_into(&self, builder: &mut CellBuilder<C>) -> bool {
-        <T as Store<C>>::store_into(self.as_ref(), builder)
+    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+        <T as Store<C>>::store_into(self.as_ref(), builder, finalizer)
     }
 }
 
 impl<C: CellFamily, T: Store<C> + ?Sized> Store<C> for Rc<T> {
     #[inline]
-    fn store_into(&self, builder: &mut CellBuilder<C>) -> bool {
-        <T as Store<C>>::store_into(self.as_ref(), builder)
+    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+        <T as Store<C>>::store_into(self.as_ref(), builder, finalizer)
     }
 }
 
@@ -50,7 +51,7 @@ macro_rules! impl_primitive_store {
     ($($type:ty => |$b:ident, $v:ident| $expr:expr),*$(,)?) => {
         $(impl<C: CellFamily> Store<C> for $type {
             #[inline]
-            fn store_into(&self, $b: &mut CellBuilder<C>) -> bool {
+            fn store_into(&self, $b: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
                 let $v = self;
                 $expr
             }
@@ -453,30 +454,56 @@ impl<C: CellFamily> CellBuilder<C> {
 
     /// Tries to store all data bits of the specified cell in the current cell,
     /// returning `false` if there is not enough remaining capacity.
-    pub fn store_cell_data<C1: CellFamily>(&mut self, value: &dyn Cell<C1>) -> bool {
-        store_raw(
-            &mut self.data,
-            &mut self.bit_len,
-            value.data(),
-            value.bit_len(),
-        )
+    #[inline]
+    pub fn store_cell_data<'a, T, C1: CellFamily>(&mut self, value: T) -> bool
+    where
+        T: Borrow<dyn Cell<C1> + 'a>,
+    {
+        fn store_cell_data_impl<C1, C2>(builder: &mut CellBuilder<C1>, value: &dyn Cell<C2>) -> bool
+        where
+            C1: CellFamily,
+            C2: CellFamily,
+        {
+            store_raw(
+                &mut builder.data,
+                &mut builder.bit_len,
+                value.data(),
+                value.bit_len(),
+            )
+        }
+        store_cell_data_impl(self, value.borrow())
     }
 
     /// Tries to store the remaining slice data in the cell,
     /// returning `false` if there is not enough remaining capacity.
-    pub fn store_slice_data<C1: CellFamily>(&mut self, value: &CellSlice<'_, C1>) -> bool {
-        let bits = value.remaining_bits();
-        if self.bit_len + bits <= MAX_BIT_LEN {
-            let mut slice_data = MaybeUninit::<[u8; 128]>::uninit();
-            let slice_data = unsafe { &mut *(slice_data.as_mut_ptr() as *mut [u8; 128]) };
-            let Some(slice_data) = value.get_raw(0, slice_data, bits) else {
-                return false;
-            };
+    #[inline]
+    pub fn store_slice_data<'a, T, C1>(&mut self, value: T) -> bool
+    where
+        T: Borrow<CellSlice<'a, C1>>,
+        C1: CellFamily + 'a,
+    {
+        fn store_slice_data_impl<'a, C1, C2>(
+            builder: &mut CellBuilder<C1>,
+            value: &CellSlice<'a, C2>,
+        ) -> bool
+        where
+            C1: CellFamily,
+            C2: CellFamily,
+        {
+            let bits = value.remaining_bits();
+            if builder.bit_len + bits <= MAX_BIT_LEN {
+                let mut slice_data = MaybeUninit::<[u8; 128]>::uninit();
+                let slice_data = unsafe { &mut *(slice_data.as_mut_ptr() as *mut [u8; 128]) };
+                let Some(slice_data) = value.get_raw(0, slice_data, bits) else {
+                    return false;
+                };
 
-            self.store_raw(slice_data, bits)
-        } else {
-            false
+                builder.store_raw(slice_data, bits)
+            } else {
+                false
+            }
         }
+        store_slice_data_impl(self, value.borrow())
     }
 
     /// Tries to prepend bytes to the cell data (but only the specified number of bits),
@@ -642,20 +669,31 @@ impl<C: CellFamily> CellBuilder<C> {
 
     /// Tries to append a cell slice (its data and references),
     /// returning `false` if there is not enough remaining capacity.
-    pub fn store_slice<'a>(&mut self, value: &CellSlice<'a, C>) -> bool {
-        if self.bit_len + value.remaining_bits() <= MAX_BIT_LEN
-            && self.references.len() + value.remaining_refs() as usize <= MAX_REF_COUNT
-            && self.store_slice_data(value)
-        {
-            for cell in value.references().cloned() {
-                if !self.store_reference(cell) {
-                    return false;
+    #[inline]
+    pub fn store_slice<'a, T>(&mut self, value: T) -> bool
+    where
+        T: Borrow<CellSlice<'a, C>>,
+        C: 'a,
+    {
+        fn store_slice_impl<'a, C: CellFamily>(
+            builder: &mut CellBuilder<C>,
+            value: &CellSlice<'a, C>,
+        ) -> bool {
+            if builder.bit_len + value.remaining_bits() <= MAX_BIT_LEN
+                && builder.references.len() + value.remaining_refs() as usize <= MAX_REF_COUNT
+                && builder.store_slice_data(value)
+            {
+                for cell in value.references().cloned() {
+                    if !builder.store_reference(cell) {
+                        return false;
+                    }
                 }
+                true
+            } else {
+                false
             }
-            true
-        } else {
-            false
         }
+        store_slice_impl(self, value.borrow())
     }
 
     /// Tries to build a new cell using the specified finalizer.
@@ -832,7 +870,7 @@ mod tests {
         let mut builder = RcCellBuilder::new();
         let mut slice = cell.as_slice();
         assert!(slice.try_advance(3, 0));
-        assert!(builder.store_slice(&slice));
+        assert!(builder.store_slice(slice));
         let cell = builder.build().unwrap();
         println!("{}", cell.display_tree());
         assert_eq!(cell.data(), SOME_HASH);

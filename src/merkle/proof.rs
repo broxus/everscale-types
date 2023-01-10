@@ -73,7 +73,7 @@ impl<C: CellFamily> Load<'_, C> for MerkleProof<C> {
 }
 
 impl<C: CellFamily> Store<C> for MerkleProof<C> {
-    fn store_into(&self, b: &mut CellBuilder<C>) -> bool {
+    fn store_into(&self, b: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
         if !b.has_capacity(Self::BITS, Self::REFS) {
             return false;
         }
@@ -376,7 +376,7 @@ mod tests {
         let default = MerkleProof::<RcCellFamily>::default();
 
         let mut builder = RcCellBuilder::new();
-        assert!(default.store_into(&mut builder));
+        assert!(default.store_into(&mut builder, &mut RcCellFamily::default_finalizer()));
         let cell = builder.build().unwrap();
 
         let parsed = MerkleProof::load_from(&mut cell.as_slice()).unwrap();
@@ -424,7 +424,7 @@ mod tests {
 
         fn serialize_dict(dict: RcDict<32>) -> RcCell {
             let mut builder = RcCellBuilder::new();
-            dict.store_into(&mut builder);
+            dict.store_into(&mut builder, &mut RcCellFamily::default_finalizer());
             builder.build().unwrap()
         }
 

@@ -1072,7 +1072,7 @@ mod tests {
     fn print_slice(name: &str, slice: RcCellSlice) {
         println!(
             "{name}: {}",
-            build_cell(|b| b.store_slice(&slice)).display_tree()
+            build_cell(|b| b.store_slice(slice)).display_tree()
         );
     }
 
@@ -1135,7 +1135,7 @@ mod tests {
 
         let prefix = slice1.longest_common_data_prefix(&slice2);
 
-        let prefix = build_cell(|b| b.store_slice(&prefix));
+        let prefix = build_cell(|b| b.store_slice(prefix));
         println!("{}", prefix.display_root());
         assert_eq!(prefix.data(), [0xff, 0xff, 0xfe]);
         assert_eq!(prefix.bit_len(), 22);

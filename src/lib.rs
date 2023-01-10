@@ -43,13 +43,21 @@ pub type ArcDict<const N: u16> = Dict<ArcCellFamily, N>;
 pub type RcDict<const N: u16> = Dict<RcCellFamily, N>;
 
 impl Store<RcCellFamily> for RcCell {
-    fn store_into(&self, builder: &mut RcCellBuilder) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut RcCellBuilder,
+        _: &mut dyn cell::Finalizer<RcCellFamily>,
+    ) -> bool {
         builder.store_reference(self.clone())
     }
 }
 
 impl Store<ArcCellFamily> for ArcCell {
-    fn store_into(&self, builder: &mut CellBuilder<ArcCellFamily>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<ArcCellFamily>,
+        _: &mut dyn cell::Finalizer<ArcCellFamily>,
+    ) -> bool {
         builder.store_reference(self.clone())
     }
 }
@@ -71,6 +79,9 @@ pub mod cell;
 pub mod dict;
 pub mod merkle;
 pub mod util;
+
+#[cfg(feature = "serde")]
+mod serde;
 
 mod error;
 
@@ -210,7 +221,7 @@ mod tests {
         let cell = builder.build().unwrap();
 
         let mut builder = RcCellBuilder::new();
-        assert!(builder.store_slice(&cell.as_slice()));
+        assert!(builder.store_slice(cell.as_slice()));
         let cell = builder.build().unwrap();
         println!("{}", cell.display_tree());
     }
