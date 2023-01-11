@@ -8,14 +8,14 @@ use crate::cell::*;
 use crate::util::unlikely;
 
 macro_rules! impl_var_uints {
-    ($(#[doc = $doc:expr] $vis:vis struct $ident:ident($inner:ty[..$max_bytes:literal]);)*) => {
+    ($($(#[doc = $doc:expr])* $vis:vis struct $ident:ident($inner:ty[..$max_bytes:literal]);)*) => {
         $(
-            impl_var_uints!{@impl #[doc = $doc] $vis $ident $inner, $max_bytes}
+            impl_var_uints!{@impl $(#[doc = $doc])* $vis $ident $inner, $max_bytes}
         )*
     };
 
-    (@impl #[doc = $doc:expr] $vis:vis $ident:ident $inner:ty, $max_bytes:literal) => {
-        #[doc = $doc]
+    (@impl $(#[doc = $doc:expr])* $vis:vis $ident:ident $inner:ty, $max_bytes:literal) => {
+        $(#[doc = $doc])*
         #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
         #[repr(transparent)]
         $vis struct $ident($inner);
@@ -315,13 +315,19 @@ macro_rules! impl_var_uints {
 }
 
 impl_var_uints! {
-    /// Variable-length u24.
+    /// Variable-length integer similar to `u24`.
+    ///
+    /// Stored as 2 bits of `len` (`0..=3`), followed by `len` bytes.
     pub struct VarUint3(u32[..3]);
 
-    /// Variable-length u56.
+    /// Variable-length integer similar to `u56`.
+    ///
+    /// Stored as 3 bits of `len` (`0..=7`), followed by `len` bytes.
     pub struct VarUint7(u64[..7]);
 
-    /// Variable-length u120.
+    /// Variable-length integer similar to `u120`. Used for native currencies.
+    ///
+    /// Stored as 4 bits of `len` (`0..=15`), followed by `len` bytes.
     pub struct Tokens(u128[..15]);
 }
 
@@ -368,35 +374,182 @@ impl<'a, C: CellFamily> Load<'a, C> for VarUint7 {
 impl<C: CellFamily> Store<C> for Tokens {
     fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
         let bytes = (16 - self.0.leading_zeros() / 8) as u8;
-        let mut bits = bytes as u16 * 8;
+        let bits = bytes as u16 * 8;
 
         if unlikely(bytes > 15 || !builder.has_capacity(Self::LEN_BITS + bits, 0)) {
             return false;
         }
 
-        builder.store_small_uint(bytes, Self::LEN_BITS);
-        if let Some(high_bits) = bits.checked_sub(64) {
-            builder.store_uint((self.0 >> 64) as u64, high_bits);
-            bits -= high_bits;
-        }
-        builder.store_uint(self.0 as u64, bits)
+        builder.store_small_uint(bytes, Self::LEN_BITS) && store_u128(builder, self.0, bits)
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for Tokens {
     fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+        let bytes = slice.load_small_uint(Self::LEN_BITS)?;
+        Some(Self(load_u128(slice, bytes)?))
+    }
+}
+
+/// Variable-length integer similar to `u248`.
+///
+/// Stored as 5 bits of `len` (`0..=31`), followed by `len` bytes.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct VarUint31([u128; 2]);
+
+impl VarUint31 {
+    /// The multiplicative identity for this integer type, i.e. `1`.
+    pub const ONE: Self = Self([0; 2]);
+
+    /// The smallest value that can be represented by this integer type.
+    pub const MIN: Self = Self::new(1);
+
+    /// The largest value that can be represented by this integer type.
+    pub const MAX: Self = Self::from_words(u128::MAX >> 8, u128::MAX);
+
+    /// The number of data bits that the length occupies.
+    pub const LEN_BITS: u16 = 5;
+
+    /// The maximum number of data bits that this struct occupies.
+    pub const MAX_BITS: u16 = Self::LEN_BITS + 31 * 8;
+
+    /// Creates a new integer value from a primitive integer.
+    #[inline]
+    pub const fn new(value: u128) -> Self {
+        Self::from_words(0, value)
+    }
+
+    /// Constructs self from a pair of high and low underlying integers.
+    #[inline]
+    pub const fn from_words(hi: u128, lo: u128) -> Self {
+        #[cfg(target_endian = "little")]
+        {
+            Self([lo, hi])
+        }
+        #[cfg(target_endian = "big")]
+        {
+            Self([hi, lo])
+        }
+    }
+
+    /// Returns a tuple of high and low underlying integers.
+    #[inline]
+    pub const fn into_words(self) -> (u128, u128) {
+        #[cfg(target_endian = "little")]
+        {
+            (self.0[1], self.0[0])
+        }
+        #[cfg(target_endian = "big")]
+        {
+            (self.0[0], self.0[1])
+        }
+    }
+
+    /// Returns `true` if an underlying primitive integer is zero.
+    #[inline]
+    pub const fn is_zero(&self) -> bool {
+        self.0[0] == 0 && self.0[1] == 0
+    }
+
+    /// Returns `true` if an underlying primitive integer fits into the repr.
+    #[inline]
+    pub const fn is_valid(&self) -> bool {
+        self.into_words().0 <= (u128::MAX >> 8)
+    }
+
+    /// Returns number of data bits that this struct occupies.
+    /// Returns `None` if an underlying primitive integer is too large.
+    pub const fn bit_len(&self) -> Option<u16> {
+        let bytes = (32 - self.leading_zeros() / 8) as u8;
+        if unlikely(bytes > 31) {
+            None
+        } else {
+            Some(Self::LEN_BITS + bytes as u16 * 8)
+        }
+    }
+
+    /// Returns the number of leading zeros in the binary representation of self.
+    pub const fn leading_zeros(&self) -> u32 {
+        let (hi, lo) = self.into_words();
+        if hi == 0 {
+            128 + lo.leading_zeros()
+        } else {
+            hi.leading_zeros()
+        }
+    }
+}
+
+impl Ord for VarUint31 {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.into_words().cmp(&other.into_words())
+    }
+}
+
+impl PartialOrd for VarUint31 {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<C: CellFamily> Store<C> for VarUint31 {
+    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+        let bytes = (32 - self.leading_zeros() / 8) as u8;
+        let mut bits = bytes as u16 * 8;
+
+        if unlikely(bytes > 31 || !builder.has_capacity(Self::LEN_BITS + bits, 0)) {
+            return false;
+        }
+
+        builder.store_small_uint(bytes, Self::LEN_BITS);
+
+        let (hi, lo) = self.into_words();
+        if let Some(high_bits) = bits.checked_sub(128) {
+            store_u128(builder, hi, high_bits);
+            bits -= high_bits;
+        }
+        store_u128(builder, lo, bits)
+    }
+}
+
+impl<'a, C: CellFamily> Load<'a, C> for VarUint31 {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
         let mut bytes = slice.load_small_uint(Self::LEN_BITS)?;
 
-        let mut result: u128 = 0;
-        if let Some(high_bytes) = bytes.checked_sub(8) {
+        let mut hi: u128 = 0;
+        if let Some(high_bytes) = bytes.checked_sub(16) {
             if high_bytes > 0 {
-                result = (slice.load_uint(high_bytes as u16 * 8)? as u128) << 64;
+                hi = load_u128(slice, high_bytes)?;
                 bytes -= high_bytes;
             }
         }
-        result |= slice.load_uint(bytes as u16 * 8)? as u128;
-        Some(Self(result))
+
+        let lo = load_u128(slice, bytes)?;
+        Some(Self::from_words(hi, lo))
     }
+}
+
+fn store_u128<C: CellFamily>(builder: &mut CellBuilder<C>, value: u128, mut bits: u16) -> bool {
+    if let Some(high_bits) = bits.checked_sub(64) {
+        if !builder.store_uint((value >> 64) as u64, high_bits) {
+            return false;
+        }
+        bits -= high_bits;
+    }
+    builder.store_uint(value as u64, bits)
+}
+
+fn load_u128<'a, C: CellFamily>(slice: &mut CellSlice<'a, C>, mut bytes: u8) -> Option<u128> {
+    let mut result: u128 = 0;
+    if let Some(high_bytes) = bytes.checked_sub(8) {
+        if high_bytes > 0 {
+            result = (slice.load_uint(high_bytes as u16 * 8)? as u128) << 64;
+            bytes -= high_bytes;
+        }
+    }
+    result |= slice.load_uint(bytes as u16 * 8)? as u128;
+    Some(result)
 }
 
 #[cfg(test)]
@@ -556,5 +709,39 @@ mod tests {
     #[test]
     fn tokens_deserialization() {
         impl_deserialization_tests!(Tokens, 120, 0xabcdef89abcdefdeadbeeffafacafe);
+    }
+
+    #[test]
+    fn var_uint31_serialization() {
+        let finalizer = &mut RcCellFamily::default_finalizer();
+
+        for i in 0..128 {
+            let lo = 1u128 << i;
+            let mut builder = RcCellBuilder::new();
+
+            let value = VarUint31::new(lo);
+            assert!(value.store_into(&mut builder, finalizer));
+            let cell = builder.build().unwrap();
+            assert_eq!(value.bit_len().unwrap(), cell.bit_len());
+        }
+    }
+
+    #[test]
+    fn var_uint31_deserialization() {
+        let finalizer = &mut RcCellFamily::default_finalizer();
+
+        let mut lo: u128 = 0xababcdef89abcdefdeadbeeffafacafe;
+        for _ in 0..=128 {
+            let value = VarUint31::new(lo);
+
+            let mut builder = RcCellBuilder::new();
+            assert!(value.store_into(&mut builder, finalizer));
+            let cell = builder.build().unwrap();
+
+            let parsed_value = VarUint31::load_from(&mut cell.as_slice()).unwrap();
+            assert_eq!(parsed_value, value);
+
+            lo >>= 1;
+        }
     }
 }
