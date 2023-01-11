@@ -315,23 +315,23 @@ macro_rules! impl_var_uints {
 }
 
 impl_var_uints! {
-    /// Variable-length integer similar to `u24`.
+    /// Variable-length 24-bit integer.
     ///
     /// Stored as 2 bits of `len` (`0..=3`), followed by `len` bytes.
-    pub struct VarUint3(u32[..3]);
+    pub struct VarUint24(u32[..3]);
 
-    /// Variable-length integer similar to `u56`.
+    /// Variable-length 56-bit integer.
     ///
     /// Stored as 3 bits of `len` (`0..=7`), followed by `len` bytes.
-    pub struct VarUint7(u64[..7]);
+    pub struct VarUint56(u64[..7]);
 
-    /// Variable-length integer similar to `u120`. Used for native currencies.
+    /// Variable-length 120-bit integer. Used for native currencies.
     ///
     /// Stored as 4 bits of `len` (`0..=15`), followed by `len` bytes.
     pub struct Tokens(u128[..15]);
 }
 
-impl<C: CellFamily> Store<C> for VarUint3 {
+impl<C: CellFamily> Store<C> for VarUint24 {
     fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
         let bytes = (4 - self.0.leading_zeros() / 8) as u8;
         let bits = bytes as u16 * 8;
@@ -344,14 +344,14 @@ impl<C: CellFamily> Store<C> for VarUint3 {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for VarUint3 {
+impl<'a, C: CellFamily> Load<'a, C> for VarUint24 {
     fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
         let bytes = slice.load_small_uint(Self::LEN_BITS)?;
         Some(Self(slice.load_uint(bytes as u16 * 8)? as u32))
     }
 }
 
-impl<C: CellFamily> Store<C> for VarUint7 {
+impl<C: CellFamily> Store<C> for VarUint56 {
     fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
         let bytes = (8 - self.0.leading_zeros() / 8) as u8;
         let bits = bytes as u16 * 8;
@@ -364,7 +364,7 @@ impl<C: CellFamily> Store<C> for VarUint7 {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for VarUint7 {
+impl<'a, C: CellFamily> Load<'a, C> for VarUint56 {
     fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
         let bytes = slice.load_small_uint(Self::LEN_BITS)?;
         Some(Self(slice.load_uint(bytes as u16 * 8)?))
@@ -391,14 +391,14 @@ impl<'a, C: CellFamily> Load<'a, C> for Tokens {
     }
 }
 
-/// Variable-length integer similar to `u248`.
+/// Variable-length 248-bit integer.
 ///
 /// Stored as 5 bits of `len` (`0..=31`), followed by `len` bytes.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
-pub struct VarUint31([u128; 2]);
+pub struct VarUint248([u128; 2]);
 
-impl VarUint31 {
+impl VarUint248 {
     /// The multiplicative identity for this integer type, i.e. `1`.
     pub const ONE: Self = Self([0; 2]);
 
@@ -480,20 +480,20 @@ impl VarUint31 {
     }
 }
 
-impl Ord for VarUint31 {
+impl Ord for VarUint248 {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.into_words().cmp(&other.into_words())
     }
 }
 
-impl PartialOrd for VarUint31 {
+impl PartialOrd for VarUint248 {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<C: CellFamily> Store<C> for VarUint31 {
+impl<C: CellFamily> Store<C> for VarUint248 {
     fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
         let bytes = (32 - self.leading_zeros() / 8) as u8;
         let mut bits = bytes as u16 * 8;
@@ -513,7 +513,7 @@ impl<C: CellFamily> Store<C> for VarUint31 {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for VarUint31 {
+impl<'a, C: CellFamily> Load<'a, C> for VarUint248 {
     fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
         let mut bytes = slice.load_small_uint(Self::LEN_BITS)?;
 
@@ -668,12 +668,12 @@ mod tests {
 
     #[test]
     fn var_uint3_operations() {
-        impl_operation_tests!(VarUint3);
+        impl_operation_tests!(VarUint24);
     }
 
     #[test]
     fn var_uint7_operations() {
-        impl_operation_tests!(VarUint7);
+        impl_operation_tests!(VarUint56);
     }
 
     #[test]
@@ -683,12 +683,12 @@ mod tests {
 
     #[test]
     fn var_uint3_serialization() {
-        impl_serialization_tests!(VarUint3, 32);
+        impl_serialization_tests!(VarUint24, 32);
     }
 
     #[test]
     fn var_uint7_serialization() {
-        impl_serialization_tests!(VarUint7, 64);
+        impl_serialization_tests!(VarUint56, 64);
     }
 
     #[test]
@@ -698,12 +698,12 @@ mod tests {
 
     #[test]
     fn var_uint3_deserialization() {
-        impl_deserialization_tests!(VarUint3, 24, 0xabcdef);
+        impl_deserialization_tests!(VarUint24, 24, 0xabcdef);
     }
 
     #[test]
     fn var_uint7_deserialization() {
-        impl_deserialization_tests!(VarUint7, 56, 0xabcdef89abcdef);
+        impl_deserialization_tests!(VarUint56, 56, 0xabcdef89abcdef);
     }
 
     #[test]
@@ -719,7 +719,7 @@ mod tests {
             let lo = 1u128 << i;
             let mut builder = RcCellBuilder::new();
 
-            let value = VarUint31::new(lo);
+            let value = VarUint248::new(lo);
             assert!(value.store_into(&mut builder, finalizer));
             let cell = builder.build().unwrap();
             assert_eq!(value.bit_len().unwrap(), cell.bit_len());
@@ -732,13 +732,13 @@ mod tests {
 
         let mut lo: u128 = 0xababcdef89abcdefdeadbeeffafacafe;
         for _ in 0..=128 {
-            let value = VarUint31::new(lo);
+            let value = VarUint248::new(lo);
 
             let mut builder = RcCellBuilder::new();
             assert!(value.store_into(&mut builder, finalizer));
             let cell = builder.build().unwrap();
 
-            let parsed_value = VarUint31::load_from(&mut cell.as_slice()).unwrap();
+            let parsed_value = VarUint248::load_from(&mut cell.as_slice()).unwrap();
             assert_eq!(parsed_value, value);
 
             lo >>= 1;
