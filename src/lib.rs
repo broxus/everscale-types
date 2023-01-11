@@ -78,6 +78,7 @@ pub mod boc;
 pub mod cell;
 pub mod dict;
 pub mod merkle;
+pub mod num;
 pub mod util;
 
 #[cfg(feature = "serde")]

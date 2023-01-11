@@ -1,0 +1,560 @@
+//! Integer types used in blockchain models.
+
+use std::ops::{
+    Add, AddAssign, Div, DivAssign, Mul, MulAssign, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
+};
+
+use crate::cell::*;
+use crate::util::unlikely;
+
+macro_rules! impl_var_uints {
+    ($(#[doc = $doc:expr] $vis:vis struct $ident:ident($inner:ty[..$max_bytes:literal]);)*) => {
+        $(
+            impl_var_uints!{@impl #[doc = $doc] $vis $ident $inner, $max_bytes}
+        )*
+    };
+
+    (@impl #[doc = $doc:expr] $vis:vis $ident:ident $inner:ty, $max_bytes:literal) => {
+        #[doc = $doc]
+        #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+        #[repr(transparent)]
+        $vis struct $ident($inner);
+
+        impl $ident {
+            /// The additive identity for this integer type, i.e. `0`.
+            pub const ZERO: Self = $ident(0);
+
+            /// The multiplicative identity for this integer type, i.e. `1`.
+            pub const ONE: Self = $ident(1);
+
+            /// The smallest value that can be represented by this integer type.
+            pub const MIN: Self = $ident(0);
+
+            /// The largest value that can be represented by this integer type.
+            pub const MAX: Self = $ident(((1 as $inner) << ($max_bytes * 8)) - 1);
+
+            /// The number of data bits that the length occupies.
+            pub const LEN_BITS: u16 = 8 - ($max_bytes as u8).leading_zeros() as u16;
+
+            /// The maximum number of data bits that this struct occupies.
+            pub const MAX_BITS: u16 = Self::LEN_BITS + $max_bytes * 8;
+
+            /// Creates a new integer value from a primitive integer.
+            #[inline]
+            pub const fn new(value: $inner) -> Self {
+                Self(value)
+            }
+
+            /// Converts integer into an underlying primitive integer.
+            #[inline]
+            pub const fn into_inner(self) -> $inner {
+                self.0
+            }
+
+            /// Returns `true` if an underlying primitive integer is zero.
+            #[inline]
+            pub const fn is_zero(&self) -> bool {
+                self.0 == 0
+            }
+
+            /// Returns `true` if an underlying primitive integer fits into the repr.
+            #[inline]
+            pub const fn is_valid(&self) -> bool {
+                self.0 <= Self::MAX.0
+            }
+
+            /// Returns number of data bits that this struct occupies.
+            /// Returns `None` if an underlying primitive integer is too large.
+            pub const fn bit_len(&self) -> Option<u16> {
+                let bytes = (std::mem::size_of::<Self>() as u32 - self.0.leading_zeros() / 8) as u8;
+                if unlikely(bytes > $max_bytes) {
+                    None
+                } else {
+                    Some(Self::LEN_BITS + bytes as u16 * 8)
+                }
+            }
+
+            /// Checked integer addition. Computes `self + rhs`, returning `None` if overflow occurred.
+            #[inline]
+            pub const fn checked_add(self, rhs: Self) -> Option<Self> {
+                match self.0.checked_add(rhs.0) {
+                    Some(value) if value <= Self::MAX.0 => Some($ident(value)),
+                    _ => None,
+                }
+            }
+
+            /// Checked integer subtraction. Computes `self - rhs`, returning `None` if overflow occurred.
+            #[inline]
+            pub const fn checked_sub(self, rhs: Self) -> Option<Self> {
+                match self.0.checked_sub(rhs.0) {
+                    Some(value) if value <= Self::MAX.0 => Some($ident(value)),
+                    _ => None,
+                }
+            }
+
+            /// Checked integer multiplication. Computes `self * rhs`, returning `None` if overflow occurred.
+            #[inline]
+            pub const fn checked_mul(self, rhs: Self) -> Option<Self> {
+                match self.0.checked_mul(rhs.0) {
+                    Some(value) if value <= Self::MAX.0 => Some($ident(value)),
+                    _ => None,
+                }
+            }
+
+            /// Checked integer division. Computes `self / rhs`, returning None if `rhs == 0`
+            /// or overflow occurred.
+            #[inline]
+            pub const fn checked_div(self, rhs: Self) -> Option<Self> {
+                match self.0.checked_div(rhs.0) {
+                    Some(value) if value <= Self::MAX.0 => Some($ident(value)),
+                    _ => None,
+                }
+            }
+        }
+
+        impl From<$ident> for $inner {
+            #[inline]
+            fn from(value: $ident) -> Self {
+                value.0
+            }
+        }
+
+        impl std::fmt::Display for $ident {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                self.0.fmt(f)
+            }
+        }
+
+        impl std::fmt::Binary for $ident {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                std::fmt::Binary::fmt(&self.0, f)
+            }
+        }
+
+        impl std::fmt::LowerHex for $ident {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                std::fmt::LowerHex::fmt(&self.0, f)
+            }
+        }
+
+        impl std::fmt::UpperHex for $ident {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                std::fmt::UpperHex::fmt(&self.0, f)
+            }
+        }
+
+        impl Add for $ident {
+            type Output = Self;
+
+            #[inline]
+            fn add(mut self, rhs: Self) -> Self::Output {
+                self.0 += rhs.0;
+                self
+            }
+        }
+
+        impl Add<$inner> for $ident {
+            type Output = Self;
+
+            #[inline]
+            fn add(mut self, rhs: $inner) -> Self::Output {
+                self.0 += rhs;
+                self
+            }
+        }
+
+        impl AddAssign for $ident {
+            #[inline]
+            fn add_assign(&mut self, rhs: Self) {
+                self.0 += rhs.0;
+            }
+        }
+
+        impl AddAssign<$inner> for $ident {
+            fn add_assign(&mut self, rhs: $inner) {
+                self.0 += rhs;
+            }
+        }
+
+        impl Sub for $ident {
+            type Output = Self;
+
+            #[inline]
+            fn sub(mut self, rhs: Self) -> Self::Output {
+                self.0 -= rhs.0;
+                self
+            }
+        }
+
+        impl Sub<$inner> for $ident {
+            type Output = Self;
+
+            #[inline]
+            fn sub(mut self, rhs: $inner) -> Self::Output {
+                self.0 -= rhs;
+                self
+            }
+        }
+
+        impl SubAssign for $ident {
+            #[inline]
+            fn sub_assign(&mut self, rhs: Self) {
+                self.0 -= rhs.0;
+            }
+        }
+
+        impl SubAssign<$inner> for $ident {
+            #[inline]
+            fn sub_assign(&mut self, rhs: $inner) {
+                self.0 -= rhs;
+            }
+        }
+
+        impl Mul for $ident {
+            type Output = Self;
+
+            #[inline]
+            fn mul(mut self, rhs: Self) -> Self::Output {
+                self.0 *= rhs.0;
+                self
+            }
+        }
+
+        impl Mul<$inner> for $ident {
+            type Output = Self;
+
+            #[inline]
+            fn mul(mut self, rhs: $inner) -> Self::Output {
+                self.0 *= rhs;
+                self
+            }
+        }
+
+        impl MulAssign for $ident {
+            #[inline]
+            fn mul_assign(&mut self, rhs: Self) {
+                self.0 *= rhs.0;
+            }
+        }
+
+        impl MulAssign<$inner> for $ident {
+            #[inline]
+            fn mul_assign(&mut self, rhs: $inner) {
+                self.0 *= rhs;
+            }
+        }
+
+        impl Div for $ident {
+            type Output = Self;
+
+            #[inline]
+            fn div(mut self, rhs: Self) -> Self::Output {
+                self.0 /= rhs.0;
+                self
+            }
+        }
+
+        impl Div<$inner> for $ident {
+            type Output = Self;
+
+            #[inline]
+            fn div(mut self, rhs: $inner) -> Self::Output {
+                self.0 /= rhs;
+                self
+            }
+        }
+
+        impl DivAssign for $ident {
+            #[inline]
+            fn div_assign(&mut self, rhs: Self) {
+                self.0 /= rhs.0;
+            }
+        }
+
+        impl DivAssign<$inner> for $ident {
+            #[inline]
+            fn div_assign(&mut self, rhs: $inner) {
+                self.0 /= rhs;
+            }
+        }
+
+        impl Shr<u8> for $ident {
+            type Output = Self;
+
+            #[inline]
+            fn shr(mut self, rhs: u8) -> Self::Output {
+                self.0 >>= rhs;
+                self
+            }
+        }
+
+        impl ShrAssign<u8> for $ident {
+            #[inline]
+            fn shr_assign(&mut self, rhs: u8) {
+                self.0 >>= rhs;
+            }
+        }
+
+        impl Shl<u8> for $ident {
+            type Output = Self;
+
+            #[inline]
+            fn shl(mut self, rhs: u8) -> Self::Output {
+                self.0 <<= rhs;
+                self
+            }
+        }
+
+        impl ShlAssign<u8> for $ident {
+            #[inline]
+            fn shl_assign(&mut self, rhs: u8) {
+                self.0 <<= rhs;
+            }
+        }
+    };
+}
+
+impl_var_uints! {
+    /// Variable-length u24.
+    pub struct VarUint3(u32[..3]);
+
+    /// Variable-length u56.
+    pub struct VarUint7(u64[..7]);
+
+    /// Variable-length u120.
+    pub struct Tokens(u128[..15]);
+}
+
+impl<C: CellFamily> Store<C> for VarUint3 {
+    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+        let bytes = (4 - self.0.leading_zeros() / 8) as u8;
+        let bits = bytes as u16 * 8;
+
+        if unlikely(bytes > 3 || !builder.has_capacity(Self::LEN_BITS + bits, 0)) {
+            return false;
+        }
+
+        builder.store_small_uint(bytes, Self::LEN_BITS) && builder.store_uint(self.0 as u64, bits)
+    }
+}
+
+impl<'a, C: CellFamily> Load<'a, C> for VarUint3 {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+        let bytes = slice.load_small_uint(Self::LEN_BITS)?;
+        Some(Self(slice.load_uint(bytes as u16 * 8)? as u32))
+    }
+}
+
+impl<C: CellFamily> Store<C> for VarUint7 {
+    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+        let bytes = (8 - self.0.leading_zeros() / 8) as u8;
+        let bits = bytes as u16 * 8;
+
+        if unlikely(bytes > 7 || !builder.has_capacity(Self::LEN_BITS + bits, 0)) {
+            return false;
+        }
+
+        builder.store_small_uint(bytes, Self::LEN_BITS) && builder.store_uint(self.0, bits)
+    }
+}
+
+impl<'a, C: CellFamily> Load<'a, C> for VarUint7 {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+        let bytes = slice.load_small_uint(Self::LEN_BITS)?;
+        Some(Self(slice.load_uint(bytes as u16 * 8)?))
+    }
+}
+
+impl<C: CellFamily> Store<C> for Tokens {
+    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+        let bytes = (16 - self.0.leading_zeros() / 8) as u8;
+        let mut bits = bytes as u16 * 8;
+
+        if unlikely(bytes > 15 || !builder.has_capacity(Self::LEN_BITS + bits, 0)) {
+            return false;
+        }
+
+        builder.store_small_uint(bytes, Self::LEN_BITS);
+        if let Some(high_bits) = bits.checked_sub(64) {
+            builder.store_uint((self.0 >> 64) as u64, high_bits);
+            bits -= high_bits;
+        }
+        builder.store_uint(self.0 as u64, bits)
+    }
+}
+
+impl<'a, C: CellFamily> Load<'a, C> for Tokens {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+        let mut bytes = slice.load_small_uint(Self::LEN_BITS)?;
+
+        let mut result: u128 = 0;
+        if let Some(high_bytes) = bytes.checked_sub(8) {
+            if high_bytes > 0 {
+                result = (slice.load_uint(high_bytes as u16 * 8)? as u128) << 64;
+                bytes -= high_bytes;
+            }
+        }
+        result |= slice.load_uint(bytes as u16 * 8)? as u128;
+        Some(Self(result))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{RcCellBuilder, RcCellFamily};
+
+    use super::*;
+
+    macro_rules! impl_operation_tests {
+        ($ident:ident) => {
+            assert_eq!($ident::new(10) + $ident::new(4), $ident::new(14));
+            assert_eq!($ident::new(10) + 4, $ident::new(14));
+
+            assert_eq!($ident::new(10) - $ident::new(4), $ident::new(6));
+            assert_eq!($ident::new(10) - 4, $ident::new(6));
+
+            assert_eq!($ident::new(10) * $ident::new(4), $ident::new(40));
+            assert_eq!($ident::new(10) * 4, $ident::new(40));
+
+            assert_eq!($ident::new(10) / $ident::new(2), $ident::new(5));
+            assert_eq!($ident::new(10) / 2, $ident::new(5));
+
+            assert_eq!($ident::new(10) >> 2, $ident::new(2));
+            assert_eq!($ident::new(10) << 2, $ident::new(40));
+
+            let mut value = $ident::new(10);
+            value += 4;
+            assert_eq!(value, $ident::new(14));
+
+            let mut value = $ident::new(10);
+            value -= 4;
+            assert_eq!(value, $ident::new(6));
+
+            let mut value = $ident::new(10);
+            value *= 4;
+            assert_eq!(value, $ident::new(40));
+
+            let mut value = $ident::new(10);
+            value /= 2;
+            assert_eq!(value, $ident::new(5));
+
+            let mut value = $ident::new(10);
+            value >>= 2;
+            assert_eq!(value, $ident::new(2));
+
+            let mut value = $ident::new(10);
+            value <<= 2;
+            assert_eq!(value, $ident::new(40));
+
+            assert!(!($ident::MAX + 1).is_valid());
+
+            assert_eq!($ident::MAX.checked_add($ident::new(1)), None);
+            assert_eq!(
+                ($ident::MAX - 1).checked_add($ident::new(1)),
+                Some($ident::MAX)
+            );
+
+            assert_eq!(($ident::MAX + 10).checked_sub($ident::new(1)), None);
+            assert_eq!(
+                ($ident::MAX + 10).checked_sub($ident::MAX),
+                Some($ident::new(10)),
+            );
+            assert_eq!($ident::new(10).checked_sub($ident::MAX), None);
+
+            assert_eq!($ident::MAX.checked_mul($ident::new(2)), None);
+            assert_eq!(
+                ($ident::MAX / 2).checked_mul($ident::new(2)),
+                Some($ident::MAX - 1)
+            );
+
+            assert_eq!((($ident::MAX + 1) * 2).checked_div($ident::new(2)), None);
+            assert_eq!(
+                ($ident::MAX * 2).checked_div($ident::new(2)),
+                Some($ident::MAX)
+            );
+            assert_eq!($ident::ONE.checked_div($ident::ZERO), None);
+        };
+    }
+
+    macro_rules! impl_serialization_tests {
+        ($ident:ident, $max_bits:literal) => {
+            let finalizer = &mut RcCellFamily::default_finalizer();
+
+            for i in 0..$max_bits {
+                let value = $ident::ONE << i;
+                let mut builder = RcCellBuilder::new();
+
+                if value <= $ident::MAX {
+                    assert!(value.store_into(&mut builder, finalizer));
+                    let cell = builder.build().unwrap();
+                    assert_eq!(value.bit_len().unwrap(), cell.bit_len());
+                } else {
+                    assert!(!value.store_into(&mut builder, finalizer));
+                }
+            }
+        };
+    }
+
+    macro_rules! impl_deserialization_tests {
+        ($ident:ident, $max_bits:literal, $value:literal) => {
+            let finalizer = &mut RcCellFamily::default_finalizer();
+
+            let mut value = $ident::new($value);
+            for _ in 0..=$max_bits {
+                let mut builder = RcCellBuilder::new();
+                assert!(value.store_into(&mut builder, finalizer));
+                let cell = builder.build().unwrap();
+
+                let parsed_value = $ident::load_from(&mut cell.as_slice()).unwrap();
+                assert_eq!(parsed_value, value);
+
+                value >>= 1;
+            }
+        };
+    }
+
+    #[test]
+    fn var_uint3_operations() {
+        impl_operation_tests!(VarUint3);
+    }
+
+    #[test]
+    fn var_uint7_operations() {
+        impl_operation_tests!(VarUint7);
+    }
+
+    #[test]
+    fn tokens_operations() {
+        impl_operation_tests!(Tokens);
+    }
+
+    #[test]
+    fn var_uint3_serialization() {
+        impl_serialization_tests!(VarUint3, 32);
+    }
+
+    #[test]
+    fn var_uint7_serialization() {
+        impl_serialization_tests!(VarUint7, 64);
+    }
+
+    #[test]
+    fn tokens_serialization() {
+        impl_serialization_tests!(Tokens, 128);
+    }
+
+    #[test]
+    fn var_uint3_deserialization() {
+        impl_deserialization_tests!(VarUint3, 24, 0xabcdef);
+    }
+
+    #[test]
+    fn var_uint7_deserialization() {
+        impl_deserialization_tests!(VarUint7, 56, 0xabcdef89abcdef);
+    }
+
+    #[test]
+    fn tokens_deserialization() {
+        impl_deserialization_tests!(Tokens, 120, 0xabcdef89abcdefdeadbeeffafacafe);
+    }
+}
