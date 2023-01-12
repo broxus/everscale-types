@@ -25,9 +25,10 @@ base64 = "0.13"
 serde = { version = "1", features = ["derive"] }
 
 [features]
-default = ["base64", "serde"]
+default = ["base64", "serde", "models"]
 stats = []
 serde = ["dep:serde", "base64"]
+models = []
 
 [profile.release]
 debug = true

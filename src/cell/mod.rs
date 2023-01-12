@@ -26,9 +26,15 @@ mod builder;
 mod usage_tree;
 
 /// Cell implementation family.
-pub trait CellFamily {
+pub trait CellFamily: Sized {
     /// Owning container with cell tree node.
-    type Container: AsRef<dyn Cell<Self>> + Borrow<dyn Cell<Self>> + Clone + std::fmt::Debug;
+    type Container: AsRef<dyn Cell<Self>>
+        + Borrow<dyn Cell<Self>>
+        + Store<Self>
+        + for<'a> Load<'a, Self>
+        + Eq
+        + Clone
+        + std::fmt::Debug;
 
     /// Creates an empty cell.
     ///

@@ -83,16 +83,25 @@ impl<C: CellFamily, const N: u16> From<Option<CellContainer<C>>> for Dict<C, N> 
     }
 }
 
+impl<C: CellFamily, const N: u16> std::fmt::Debug for Dict<C, N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Dict")
+            .field("key_bit_len", &N)
+            .field("root", &self.0)
+            .finish()
+    }
+}
+
 impl<C: CellFamily, const N: u16> Dict<C, N> {
     const _ASSERT: () = assert!(N > 0, "Dict with 0-bit key is invalid");
 
     /// Creates an empty dictionary.
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self(None)
     }
 
     /// Returns `true` if the dictionary contains no elements.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.0.is_none()
     }
 }

@@ -81,6 +81,9 @@ pub mod merkle;
 pub mod num;
 pub mod util;
 
+#[cfg(feature = "models")]
+pub mod models;
+
 #[cfg(feature = "serde")]
 mod serde;
 

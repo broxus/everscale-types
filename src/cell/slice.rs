@@ -30,6 +30,17 @@ impl<'a, C: CellFamily, T: Load<'a, C>> Load<'a, C> for Rc<T> {
     }
 }
 
+impl<'a, C: CellFamily, T: Load<'a, C>> Load<'a, C> for Option<T> {
+    #[inline]
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+        if slice.load_bit()? {
+            Some(Some(T::load_from(slice)?))
+        } else {
+            Some(None)
+        }
+    }
+}
+
 macro_rules! impl_primitive_loads {
     ($($type:ty => |$s:ident| $expr:expr),*$(,)?) => {
         $(impl<C: CellFamily> Load<'_, C> for $type {

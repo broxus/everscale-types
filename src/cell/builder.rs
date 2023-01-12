@@ -47,6 +47,16 @@ impl<C: CellFamily, T: Store<C> + ?Sized> Store<C> for Rc<T> {
     }
 }
 
+impl<C: CellFamily, T: Store<C>> Store<C> for Option<T> {
+    #[inline]
+    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+        match self {
+            Some(data) => builder.store_bit_one() && data.store_into(builder, finalizer),
+            None => builder.store_bit_zero(),
+        }
+    }
+}
+
 macro_rules! impl_primitive_store {
     ($($type:ty => |$b:ident, $v:ident| $expr:expr),*$(,)?) => {
         $(impl<C: CellFamily> Store<C> for $type {

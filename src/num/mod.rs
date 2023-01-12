@@ -1,5 +1,6 @@
 //! Integer types used in blockchain models.
 
+use std::num::NonZeroU8;
 use std::ops::{
     Add, AddAssign, Div, DivAssign, Mul, MulAssign, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
 };
@@ -536,18 +537,18 @@ impl<'a, C: CellFamily> Load<'a, C> for VarUint248 {
     }
 }
 
-macro_rules! impl_uints {
-    ($($(#[doc = $doc:expr])* $vis:vis struct $ident:ident($inner:ty, $bits:literal);)*) => {
+macro_rules! impl_small_uints {
+    ($($(#[doc = $doc:expr])* $vis:vis struct $ident:ident($bits:literal);)*) => {
         $(
-            impl_uints!{@impl $(#[doc = $doc])* $vis $ident $inner, $bits}
+            impl_small_uints!{@impl $(#[doc = $doc])* $vis $ident, $bits}
         )*
     };
 
-    (@impl $(#[doc = $doc:expr])* $vis:vis $ident:ident $inner:ty, $bits:literal) => {
+    (@impl $(#[doc = $doc:expr])* $vis:vis $ident:ident, $bits:literal) => {
         $(#[doc = $doc])*
         #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
         #[repr(transparent)]
-        $vis struct $ident($inner);
+        $vis struct $ident(u16);
 
         impl $ident {
             /// The additive identity for this integer type, i.e. `0`.
@@ -560,20 +561,20 @@ macro_rules! impl_uints {
             pub const MIN: Self = $ident(0);
 
             /// The largest value that can be represented by this integer type.
-            pub const MAX: Self = $ident(((1 as $inner) << $bits) - 1);
+            pub const MAX: Self = $ident((1u16 << $bits) - 1);
 
             /// The number of data bits that this struct occupies.
             pub const BITS: u16 = $bits;
 
             /// Creates a new integer value from a primitive integer.
             #[inline]
-            pub const fn new(value: $inner) -> Self {
+            pub const fn new(value: u16) -> Self {
                 Self(value)
             }
 
             /// Converts integer into an underlying primitive integer.
             #[inline]
-            pub const fn into_inner(self) -> $inner {
+            pub const fn into_inner(self) -> u16 {
                 self.0
             }
 
@@ -627,38 +628,6 @@ macro_rules! impl_uints {
             }
         }
 
-        impl_ops! { $ident, $inner }
-    };
-}
-
-impl_uints! {
-    /// Fixed-length 5-bit integer.
-    pub struct Uint5(u8, 5);
-
-    /// Fixed-length 9-bit integer.
-    pub struct Uint9(u16, 9);
-
-    /// Fixed-length 12-bit integer.
-    pub struct Uint12(u16, 12);
-
-    /// Fixed-length 13-bit integer.
-    pub struct Uint13(u16, 13);
-}
-
-impl<C: CellFamily> Store<C> for Uint5 {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
-        self.is_valid() && builder.store_small_uint(self.0, Self::BITS)
-    }
-}
-
-impl<'a, C: CellFamily> Load<'a, C> for Uint5 {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self(slice.load_small_uint(Self::BITS)?))
-    }
-}
-
-macro_rules! impl_store_load_for_u16 {
-    ($($ident:ident),*) => {$(
         impl<C: CellFamily> Store<C> for $ident {
             fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
                 self.is_valid() && builder.store_uint(self.0 as u64, Self::BITS)
@@ -670,10 +639,80 @@ macro_rules! impl_store_load_for_u16 {
                 Some(Self(slice.load_uint(Self::BITS)? as u16))
             }
         }
-    )*};
+
+        impl_ops! { $ident, u16 }
+    };
 }
 
-impl_store_load_for_u16!(Uint9, Uint12, Uint13);
+impl_small_uints! {
+    /// Fixed-length 9-bit integer.
+    pub struct Uint9(9);
+
+    /// Fixed-length 12-bit integer.
+    pub struct Uint12(12);
+
+    /// Fixed-length 13-bit integer.
+    pub struct Uint13(13);
+}
+
+/// Account split depth. Fixed-length 5-bit integer of range `1..=30`
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+#[repr(transparent)]
+pub struct SplitDepth(NonZeroU8);
+
+impl SplitDepth {
+    /// The minimum allowed number of bits in the rewrite prefix.
+    pub const MIN: Self = match NonZeroU8::new(1) {
+        Some(value) => Self(value),
+        None => unreachable!(),
+    };
+
+    /// The maximum allowed number of bits in the rewrite prefix.
+    pub const MAX: Self = match NonZeroU8::new(30) {
+        Some(value) => Self(value),
+        None => unreachable!(),
+    };
+
+    /// The number of data bits that this struct occupies.
+    pub const BITS: u16 = 5;
+
+    /// Creates a new integer value from a primitive integer.
+    #[inline]
+    pub const fn new(value: u8) -> Option<Self> {
+        match NonZeroU8::new(value) {
+            Some(value) => Some(Self(value)),
+            None => None,
+        }
+    }
+
+    /// Creates a new integer value from bit len.
+    #[inline]
+    pub const fn from_bit_len(bit_len: u16) -> Option<Self> {
+        if bit_len < u8::MAX as u16 {
+            Self::new(bit_len as u8)
+        } else {
+            None
+        }
+    }
+
+    /// Converts split depths into the number of bits.
+    #[inline]
+    pub const fn into_bit_len(self) -> u16 {
+        self.0.get() as u16
+    }
+}
+
+impl<C: CellFamily> Store<C> for SplitDepth {
+    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+        builder.store_small_uint(self.0.get(), Self::BITS)
+    }
+}
+
+impl<'a, C: CellFamily> Load<'a, C> for SplitDepth {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+        Self::new(slice.load_small_uint(Self::BITS)?)
+    }
+}
 
 fn store_u128<C: CellFamily>(builder: &mut CellBuilder<C>, value: u128, mut bits: u16) -> bool {
     if let Some(high_bits) = bits.checked_sub(64) {
@@ -832,7 +871,6 @@ mod tests {
 
     #[test]
     fn fixed_len_operations() {
-        impl_operation_tests!(Uint5);
         impl_operation_tests!(Uint9);
         impl_operation_tests!(Uint12);
         impl_operation_tests!(Uint13);
@@ -840,7 +878,6 @@ mod tests {
 
     #[test]
     fn fixed_len_serialization() {
-        impl_fixed_len_serialization_tests!(Uint5, 8);
         impl_fixed_len_serialization_tests!(Uint9, 16);
         impl_fixed_len_serialization_tests!(Uint12, 16);
         impl_fixed_len_serialization_tests!(Uint13, 16);
@@ -848,7 +885,6 @@ mod tests {
 
     #[test]
     fn fixed_len_deserialization() {
-        impl_deserialization_tests!(Uint5, 5, 0b10101);
         impl_deserialization_tests!(Uint9, 9, 0b100110011);
         impl_deserialization_tests!(Uint12, 12, 0b111100110011);
         impl_deserialization_tests!(Uint13, 12, 0b1111100110011);
