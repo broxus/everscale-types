@@ -7,111 +7,8 @@ use std::ops::{
 use crate::cell::*;
 use crate::util::unlikely;
 
-macro_rules! impl_var_uints {
-    ($($(#[doc = $doc:expr])* $vis:vis struct $ident:ident($inner:ty[..$max_bytes:literal]);)*) => {
-        $(
-            impl_var_uints!{@impl $(#[doc = $doc])* $vis $ident $inner, $max_bytes}
-        )*
-    };
-
-    (@impl $(#[doc = $doc:expr])* $vis:vis $ident:ident $inner:ty, $max_bytes:literal) => {
-        $(#[doc = $doc])*
-        #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-        #[repr(transparent)]
-        $vis struct $ident($inner);
-
-        impl $ident {
-            /// The additive identity for this integer type, i.e. `0`.
-            pub const ZERO: Self = $ident(0);
-
-            /// The multiplicative identity for this integer type, i.e. `1`.
-            pub const ONE: Self = $ident(1);
-
-            /// The smallest value that can be represented by this integer type.
-            pub const MIN: Self = $ident(0);
-
-            /// The largest value that can be represented by this integer type.
-            pub const MAX: Self = $ident(((1 as $inner) << ($max_bytes * 8)) - 1);
-
-            /// The number of data bits that the length occupies.
-            pub const LEN_BITS: u16 = 8 - ($max_bytes as u8).leading_zeros() as u16;
-
-            /// The maximum number of data bits that this struct occupies.
-            pub const MAX_BITS: u16 = Self::LEN_BITS + $max_bytes * 8;
-
-            /// Creates a new integer value from a primitive integer.
-            #[inline]
-            pub const fn new(value: $inner) -> Self {
-                Self(value)
-            }
-
-            /// Converts integer into an underlying primitive integer.
-            #[inline]
-            pub const fn into_inner(self) -> $inner {
-                self.0
-            }
-
-            /// Returns `true` if an underlying primitive integer is zero.
-            #[inline]
-            pub const fn is_zero(&self) -> bool {
-                self.0 == 0
-            }
-
-            /// Returns `true` if an underlying primitive integer fits into the repr.
-            #[inline]
-            pub const fn is_valid(&self) -> bool {
-                self.0 <= Self::MAX.0
-            }
-
-            /// Returns number of data bits that this struct occupies.
-            /// Returns `None` if an underlying primitive integer is too large.
-            pub const fn bit_len(&self) -> Option<u16> {
-                let bytes = (std::mem::size_of::<Self>() as u32 - self.0.leading_zeros() / 8) as u8;
-                if unlikely(bytes > $max_bytes) {
-                    None
-                } else {
-                    Some(Self::LEN_BITS + bytes as u16 * 8)
-                }
-            }
-
-            /// Checked integer addition. Computes `self + rhs`, returning `None` if overflow occurred.
-            #[inline]
-            pub const fn checked_add(self, rhs: Self) -> Option<Self> {
-                match self.0.checked_add(rhs.0) {
-                    Some(value) if value <= Self::MAX.0 => Some($ident(value)),
-                    _ => None,
-                }
-            }
-
-            /// Checked integer subtraction. Computes `self - rhs`, returning `None` if overflow occurred.
-            #[inline]
-            pub const fn checked_sub(self, rhs: Self) -> Option<Self> {
-                match self.0.checked_sub(rhs.0) {
-                    Some(value) if value <= Self::MAX.0 => Some($ident(value)),
-                    _ => None,
-                }
-            }
-
-            /// Checked integer multiplication. Computes `self * rhs`, returning `None` if overflow occurred.
-            #[inline]
-            pub const fn checked_mul(self, rhs: Self) -> Option<Self> {
-                match self.0.checked_mul(rhs.0) {
-                    Some(value) if value <= Self::MAX.0 => Some($ident(value)),
-                    _ => None,
-                }
-            }
-
-            /// Checked integer division. Computes `self / rhs`, returning None if `rhs == 0`
-            /// or overflow occurred.
-            #[inline]
-            pub const fn checked_div(self, rhs: Self) -> Option<Self> {
-                match self.0.checked_div(rhs.0) {
-                    Some(value) if value <= Self::MAX.0 => Some($ident(value)),
-                    _ => None,
-                }
-            }
-        }
-
+macro_rules! impl_ops {
+    ($ident:ident, $inner:ty) => {
         impl From<$ident> for $inner {
             #[inline]
             fn from(value: $ident) -> Self {
@@ -311,6 +208,115 @@ macro_rules! impl_var_uints {
                 self.0 <<= rhs;
             }
         }
+    };
+}
+
+macro_rules! impl_var_uints {
+    ($($(#[doc = $doc:expr])* $vis:vis struct $ident:ident($inner:ty[..$max_bytes:literal]);)*) => {
+        $(
+            impl_var_uints!{@impl $(#[doc = $doc])* $vis $ident $inner, $max_bytes}
+        )*
+    };
+
+    (@impl $(#[doc = $doc:expr])* $vis:vis $ident:ident $inner:ty, $max_bytes:literal) => {
+        $(#[doc = $doc])*
+        #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+        #[repr(transparent)]
+        $vis struct $ident($inner);
+
+        impl $ident {
+            /// The additive identity for this integer type, i.e. `0`.
+            pub const ZERO: Self = $ident(0);
+
+            /// The multiplicative identity for this integer type, i.e. `1`.
+            pub const ONE: Self = $ident(1);
+
+            /// The smallest value that can be represented by this integer type.
+            pub const MIN: Self = $ident(0);
+
+            /// The largest value that can be represented by this integer type.
+            pub const MAX: Self = $ident(((1 as $inner) << ($max_bytes * 8)) - 1);
+
+            /// The number of data bits that the length occupies.
+            pub const LEN_BITS: u16 = 8 - ($max_bytes as u8).leading_zeros() as u16;
+
+            /// The maximum number of data bits that this struct occupies.
+            pub const MAX_BITS: u16 = Self::LEN_BITS + $max_bytes * 8;
+
+            /// Creates a new integer value from a primitive integer.
+            #[inline]
+            pub const fn new(value: $inner) -> Self {
+                Self(value)
+            }
+
+            /// Converts integer into an underlying primitive integer.
+            #[inline]
+            pub const fn into_inner(self) -> $inner {
+                self.0
+            }
+
+            /// Returns `true` if an underlying primitive integer is zero.
+            #[inline]
+            pub const fn is_zero(&self) -> bool {
+                self.0 == 0
+            }
+
+            /// Returns `true` if an underlying primitive integer fits into the repr.
+            #[inline]
+            pub const fn is_valid(&self) -> bool {
+                self.0 <= Self::MAX.0
+            }
+
+            /// Returns number of data bits that this struct occupies.
+            /// Returns `None` if an underlying primitive integer is too large.
+            pub const fn bit_len(&self) -> Option<u16> {
+                let bytes = (std::mem::size_of::<Self>() as u32 - self.0.leading_zeros() / 8) as u8;
+                if unlikely(bytes > $max_bytes) {
+                    None
+                } else {
+                    Some(Self::LEN_BITS + bytes as u16 * 8)
+                }
+            }
+
+            /// Checked integer addition. Computes `self + rhs`, returning `None` if overflow occurred.
+            #[inline]
+            pub const fn checked_add(self, rhs: Self) -> Option<Self> {
+                match self.0.checked_add(rhs.0) {
+                    Some(value) if value <= Self::MAX.0 => Some($ident(value)),
+                    _ => None,
+                }
+            }
+
+            /// Checked integer subtraction. Computes `self - rhs`, returning `None` if overflow occurred.
+            #[inline]
+            pub const fn checked_sub(self, rhs: Self) -> Option<Self> {
+                match self.0.checked_sub(rhs.0) {
+                    Some(value) if value <= Self::MAX.0 => Some($ident(value)),
+                    _ => None,
+                }
+            }
+
+            /// Checked integer multiplication. Computes `self * rhs`, returning `None` if overflow occurred.
+            #[inline]
+            pub const fn checked_mul(self, rhs: Self) -> Option<Self> {
+                match self.0.checked_mul(rhs.0) {
+                    Some(value) if value <= Self::MAX.0 => Some($ident(value)),
+                    _ => None,
+                }
+            }
+
+            /// Checked integer division. Computes `self / rhs`, returning None if `rhs == 0`
+            /// or overflow occurred.
+            #[inline]
+            pub const fn checked_div(self, rhs: Self) -> Option<Self> {
+                match self.0.checked_div(rhs.0) {
+                    Some(value) if value <= Self::MAX.0 => Some($ident(value)),
+                    _ => None,
+                }
+            }
+        }
+
+        impl_ops! { $ident, $inner }
     };
 }
 
@@ -530,6 +536,145 @@ impl<'a, C: CellFamily> Load<'a, C> for VarUint248 {
     }
 }
 
+macro_rules! impl_uints {
+    ($($(#[doc = $doc:expr])* $vis:vis struct $ident:ident($inner:ty, $bits:literal);)*) => {
+        $(
+            impl_uints!{@impl $(#[doc = $doc])* $vis $ident $inner, $bits}
+        )*
+    };
+
+    (@impl $(#[doc = $doc:expr])* $vis:vis $ident:ident $inner:ty, $bits:literal) => {
+        $(#[doc = $doc])*
+        #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+        #[repr(transparent)]
+        $vis struct $ident($inner);
+
+        impl $ident {
+            /// The additive identity for this integer type, i.e. `0`.
+            pub const ZERO: Self = $ident(0);
+
+            /// The multiplicative identity for this integer type, i.e. `1`.
+            pub const ONE: Self = $ident(1);
+
+            /// The smallest value that can be represented by this integer type.
+            pub const MIN: Self = $ident(0);
+
+            /// The largest value that can be represented by this integer type.
+            pub const MAX: Self = $ident(((1 as $inner) << $bits) - 1);
+
+            /// The number of data bits that this struct occupies.
+            pub const BITS: u16 = $bits;
+
+            /// Creates a new integer value from a primitive integer.
+            #[inline]
+            pub const fn new(value: $inner) -> Self {
+                Self(value)
+            }
+
+            /// Converts integer into an underlying primitive integer.
+            #[inline]
+            pub const fn into_inner(self) -> $inner {
+                self.0
+            }
+
+            /// Returns `true` if an underlying primitive integer is zero.
+            #[inline]
+            pub const fn is_zero(&self) -> bool {
+                self.0 == 0
+            }
+
+            /// Returns `true` if an underlying primitive integer fits into the repr.
+            #[inline]
+            pub const fn is_valid(&self) -> bool {
+                self.0 <= Self::MAX.0
+            }
+
+            /// Checked integer addition. Computes `self + rhs`, returning `None` if overflow occurred.
+            #[inline]
+            pub const fn checked_add(self, rhs: Self) -> Option<Self> {
+                match self.0.checked_add(rhs.0) {
+                    Some(value) if value <= Self::MAX.0 => Some($ident(value)),
+                    _ => None,
+                }
+            }
+
+            /// Checked integer subtraction. Computes `self - rhs`, returning `None` if overflow occurred.
+            #[inline]
+            pub const fn checked_sub(self, rhs: Self) -> Option<Self> {
+                match self.0.checked_sub(rhs.0) {
+                    Some(value) if value <= Self::MAX.0 => Some($ident(value)),
+                    _ => None,
+                }
+            }
+
+            /// Checked integer multiplication. Computes `self * rhs`, returning `None` if overflow occurred.
+            #[inline]
+            pub const fn checked_mul(self, rhs: Self) -> Option<Self> {
+                match self.0.checked_mul(rhs.0) {
+                    Some(value) if value <= Self::MAX.0 => Some($ident(value)),
+                    _ => None,
+                }
+            }
+
+            /// Checked integer division. Computes `self / rhs`, returning None if `rhs == 0`
+            /// or overflow occurred.
+            #[inline]
+            pub const fn checked_div(self, rhs: Self) -> Option<Self> {
+                match self.0.checked_div(rhs.0) {
+                    Some(value) if value <= Self::MAX.0 => Some($ident(value)),
+                    _ => None,
+                }
+            }
+        }
+
+        impl_ops! { $ident, $inner }
+    };
+}
+
+impl_uints! {
+    /// Fixed-length 5-bit integer.
+    pub struct Uint5(u8, 5);
+
+    /// Fixed-length 9-bit integer.
+    pub struct Uint9(u16, 9);
+
+    /// Fixed-length 12-bit integer.
+    pub struct Uint12(u16, 12);
+
+    /// Fixed-length 13-bit integer.
+    pub struct Uint13(u16, 13);
+}
+
+impl<C: CellFamily> Store<C> for Uint5 {
+    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+        self.is_valid() && builder.store_small_uint(self.0, Self::BITS)
+    }
+}
+
+impl<'a, C: CellFamily> Load<'a, C> for Uint5 {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+        Some(Self(slice.load_small_uint(Self::BITS)?))
+    }
+}
+
+macro_rules! impl_store_load_for_u16 {
+    ($($ident:ident),*) => {$(
+        impl<C: CellFamily> Store<C> for $ident {
+            fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+                self.is_valid() && builder.store_uint(self.0 as u64, Self::BITS)
+            }
+        }
+
+        impl<'a, C: CellFamily> Load<'a, C> for $ident {
+            fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+                Some(Self(slice.load_uint(Self::BITS)? as u16))
+            }
+        }
+    )*};
+}
+
+impl_store_load_for_u16!(Uint9, Uint12, Uint13);
+
 fn store_u128<C: CellFamily>(builder: &mut CellBuilder<C>, value: u128, mut bits: u16) -> bool {
     if let Some(high_bits) = bits.checked_sub(64) {
         if !builder.store_uint((value >> 64) as u64, high_bits) {
@@ -540,7 +685,7 @@ fn store_u128<C: CellFamily>(builder: &mut CellBuilder<C>, value: u128, mut bits
     builder.store_uint(value as u64, bits)
 }
 
-fn load_u128<'a, C: CellFamily>(slice: &mut CellSlice<'a, C>, mut bytes: u8) -> Option<u128> {
+fn load_u128<C: CellFamily>(slice: &mut CellSlice<'_, C>, mut bytes: u8) -> Option<u128> {
     let mut result: u128 = 0;
     if let Some(high_bytes) = bytes.checked_sub(8) {
         if high_bytes > 0 {
@@ -664,6 +809,49 @@ mod tests {
                 value >>= 1;
             }
         };
+    }
+
+    macro_rules! impl_fixed_len_serialization_tests {
+        ($ident:ident, $max_bits:literal) => {
+            let finalizer = &mut RcCellFamily::default_finalizer();
+
+            for i in 0..$max_bits {
+                let value = $ident::ONE << i;
+                let mut builder = RcCellBuilder::new();
+
+                if value <= $ident::MAX {
+                    assert!(value.store_into(&mut builder, finalizer));
+                    let cell = builder.build().unwrap();
+                    assert_eq!($ident::BITS, cell.bit_len());
+                } else {
+                    assert!(!value.store_into(&mut builder, finalizer));
+                }
+            }
+        };
+    }
+
+    #[test]
+    fn fixed_len_operations() {
+        impl_operation_tests!(Uint5);
+        impl_operation_tests!(Uint9);
+        impl_operation_tests!(Uint12);
+        impl_operation_tests!(Uint13);
+    }
+
+    #[test]
+    fn fixed_len_serialization() {
+        impl_fixed_len_serialization_tests!(Uint5, 8);
+        impl_fixed_len_serialization_tests!(Uint9, 16);
+        impl_fixed_len_serialization_tests!(Uint12, 16);
+        impl_fixed_len_serialization_tests!(Uint13, 16);
+    }
+
+    #[test]
+    fn fixed_len_deserialization() {
+        impl_deserialization_tests!(Uint5, 5, 0b10101);
+        impl_deserialization_tests!(Uint9, 9, 0b100110011);
+        impl_deserialization_tests!(Uint12, 12, 0b111100110011);
+        impl_deserialization_tests!(Uint13, 12, 0b1111100110011);
     }
 
     #[test]
