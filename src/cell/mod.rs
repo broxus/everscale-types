@@ -799,7 +799,7 @@ impl<C: CellFamily> std::fmt::Display for DisplayCellTree<'_, C> {
         let mut stack = vec![(0, self.0)];
 
         while let Some((level, cell)) = stack.pop() {
-            std::fmt::Display::fmt(&DisplayCellRoot { cell, level }, f)?;
+            ok!(std::fmt::Display::fmt(&DisplayCellRoot { cell, level }, f));
 
             let reference_count = cell.reference_count();
             for i in (0..reference_count).rev() {

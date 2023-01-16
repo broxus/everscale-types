@@ -11,3 +11,15 @@ pub enum Error {
     #[error("pruned branch access")]
     PrunedBranchAccess,
 }
+
+#[derive(Debug, Copy, Clone, thiserror::Error)]
+pub enum ParseAddrError {
+    #[error("cannot parse address from an empty string")]
+    Empty,
+    #[error("workchain id is too large to fit in target type")]
+    InvalidWorkchain,
+    #[error("cannot parse account id")]
+    InvalidAccountId,
+    #[error("unexpected address part")]
+    UnexpectedPart,
+}

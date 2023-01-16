@@ -86,7 +86,7 @@ impl<'a, C: CellFamily> Load<'a, C> for TickTock {
 }
 
 /// Amounts collection.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct CurrencyCollection<C: CellFamily> {
     /// Amount in native currency.
     pub tokens: Tokens,
@@ -95,6 +95,22 @@ pub struct CurrencyCollection<C: CellFamily> {
 }
 
 impl<C: CellFamily> CurrencyCollection<C> {
+    /// The additive identity for the currency collection
+    /// (with empty extra currencies).
+    pub const ZERO: Self = Self {
+        tokens: Tokens::ZERO,
+        other: ExtraCurrencyCollection::new(),
+    };
+
+    /// Creates a new currency collection with from the specified tokens amount
+    /// and empty extra currency collection.
+    pub const fn new(tokens: u128) -> Self {
+        Self {
+            tokens: Tokens::new(tokens),
+            other: ExtraCurrencyCollection::new(),
+        }
+    }
+
     /// Returns the number of data bits that this struct occupies.
     pub const fn bit_len(&self) -> u16 {
         self.tokens.unwrap_bit_len() + 1
@@ -122,6 +138,11 @@ impl<'a, C: CellFamily> Load<'a, C> for CurrencyCollection<C> {
 pub struct ExtraCurrencyCollection<C: CellFamily>(Dict<C, 32>);
 
 impl<C: CellFamily> ExtraCurrencyCollection<C> {
+    /// Creates an empty extra currency collection.
+    pub const fn new() -> Self {
+        Self(Dict::new())
+    }
+
     /// Returns `true` if the dictionary contains no elements.
     pub const fn is_empty(&self) -> bool {
         self.0.is_empty()
