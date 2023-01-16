@@ -4,7 +4,7 @@
 
 [Rust 1.65]: https://blog.rust-lang.org/2022/11/03/Rust-1.65.0.html
 
-[Workflow badge]: https://img.shields.io/github/workflow/status/broxus/everscale-types/master
+[Workflow badge]: https://img.shields.io/github/actions/workflow/status/broxus/everscale-types/master.yml?branch=master
 
 [Workflow]: https://github.com/broxus/everscale-types/actions?query=workflow%3Amaster
 

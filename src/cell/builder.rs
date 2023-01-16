@@ -1,18 +1,95 @@
 use std::borrow::Borrow;
 use std::mem::MaybeUninit;
+use std::rc::Rc;
+use std::sync::Arc;
 
-use crate::cell::finalizer::{CellParts, Finalizer};
-use crate::cell::{Cell, CellContainer, CellFamily, LevelMask, MAX_BIT_LEN, MAX_REF_COUNT};
+use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
+use crate::cell::{
+    Cell, CellContainer, CellFamily, CellHash, LevelMask, MAX_BIT_LEN, MAX_REF_COUNT,
+};
 use crate::util::ArrayVec;
 use crate::{CellDescriptor, CellSlice};
 
+#[cfg(feature = "stats")]
 use super::CellTreeStats;
+
+/// A data structure that can be serialized into cells.
+pub trait Store<C: CellFamily> {
+    /// Tries to store itself into the cell builder.
+    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool;
+}
+
+impl<C: CellFamily, T: Store<C> + ?Sized> Store<C> for &T {
+    #[inline]
+    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+        <T as Store<C>>::store_into(self, builder, finalizer)
+    }
+}
+
+impl<C: CellFamily, T: Store<C> + ?Sized> Store<C> for Box<T> {
+    #[inline]
+    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+        <T as Store<C>>::store_into(self.as_ref(), builder, finalizer)
+    }
+}
+
+impl<C: CellFamily, T: Store<C> + ?Sized> Store<C> for Arc<T> {
+    #[inline]
+    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+        <T as Store<C>>::store_into(self.as_ref(), builder, finalizer)
+    }
+}
+
+impl<C: CellFamily, T: Store<C> + ?Sized> Store<C> for Rc<T> {
+    #[inline]
+    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+        <T as Store<C>>::store_into(self.as_ref(), builder, finalizer)
+    }
+}
+
+impl<C: CellFamily, T: Store<C>> Store<C> for Option<T> {
+    #[inline]
+    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+        match self {
+            Some(data) => builder.store_bit_one() && data.store_into(builder, finalizer),
+            None => builder.store_bit_zero(),
+        }
+    }
+}
+
+macro_rules! impl_primitive_store {
+    ($($type:ty => |$b:ident, $v:ident| $expr:expr),*$(,)?) => {
+        $(impl<C: CellFamily> Store<C> for $type {
+            #[inline]
+            fn store_into(&self, $b: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+                let $v = self;
+                $expr
+            }
+        })*
+    };
+}
+
+impl_primitive_store! {
+    bool => |b, v| b.store_bit(*v),
+    u8 => |b, v| b.store_u8(*v),
+    i8 => |b, v| b.store_u8(*v as u8),
+    u16 => |b, v| b.store_u16(*v),
+    i16 => |b, v| b.store_u16(*v as u16),
+    u32 => |b, v| b.store_u32(*v),
+    i32 => |b, v| b.store_u32(*v as u32),
+    u64 => |b, v| b.store_u64(*v),
+    i64 => |b, v| b.store_u64(*v as u64),
+    u128 => |b, v| b.store_u128(*v),
+    i128 => |b, v| b.store_u128(*v as u128),
+    CellHash => |b, v| b.store_u256(v),
+}
 
 /// Builder for constructing cells with densely packed data.
 pub struct CellBuilder<C: CellFamily> {
     data: [u8; 128],
     level_mask: Option<LevelMask>,
     bit_len: u16,
+    is_exotic: bool,
     references: ArrayVec<CellContainer<C>, MAX_REF_COUNT>,
 }
 
@@ -32,6 +109,7 @@ where
             data: self.data,
             level_mask: self.level_mask,
             bit_len: self.bit_len,
+            is_exotic: self.is_exotic,
             references: self.references.clone(),
         }
     }
@@ -74,6 +152,7 @@ impl<C: CellFamily> CellBuilder<C> {
             data: [0; 128],
             level_mask: None,
             bit_len: 0,
+            is_exotic: false,
             references: Default::default(),
         }
     }
@@ -108,17 +187,29 @@ impl<C: CellFamily> CellBuilder<C> {
         (MAX_REF_COUNT - self.references.len()) as u8
     }
 
-    /// Explicitly sets the level mask and marks this cell as exotic.
+    /// Returns true if there is enough remaining capacity to fit `bits` and `refs`.
+    #[inline]
+    pub fn has_capacity(&self, bits: u16, refs: u8) -> bool {
+        self.bit_len + bits <= MAX_BIT_LEN && self.references.len() + refs as usize <= MAX_REF_COUNT
+    }
+
+    /// Explicitly sets the level mask.
     #[inline]
     pub fn with_level_mask(mut self, level_mask: LevelMask) -> Self {
         self.level_mask = Some(level_mask);
         self
     }
 
-    /// Explicitly sets the level mask and marks this cell as exotic.
+    /// Explicitly sets the level mask.
     #[inline]
     pub fn set_level_mask(&mut self, level_mask: LevelMask) {
         self.level_mask = Some(level_mask);
+    }
+
+    /// Marks this cell as exotic.
+    #[inline]
+    pub fn set_exotic(&mut self, is_exotic: bool) {
+        self.is_exotic = is_exotic;
     }
 
     /// Tries to store the specified number of zero bits in the cell,
@@ -142,7 +233,7 @@ impl<C: CellFamily> CellBuilder<C> {
 
     /// Tries to store one non-zero bit in the cell,
     /// returning `false` if there is not enough remaining capacity.
-    pub fn store_bit_true(&mut self) -> bool {
+    pub fn store_bit_one(&mut self) -> bool {
         if self.bit_len < MAX_BIT_LEN {
             let q = (self.bit_len / 8) as usize;
             let r = self.bit_len % 8;
@@ -151,6 +242,16 @@ impl<C: CellFamily> CellBuilder<C> {
             true
         } else {
             false
+        }
+    }
+
+    /// Tries to store one bit in the cell,
+    /// returning `false` if there is not enough remaining capacity.
+    pub fn store_bit(&mut self, value: bool) -> bool {
+        if value {
+            self.store_bit_one()
+        } else {
+            self.store_bit_zero()
         }
     }
 
@@ -361,21 +462,58 @@ impl<C: CellFamily> CellBuilder<C> {
         store_raw(&mut self.data, &mut self.bit_len, value, bits)
     }
 
+    /// Tries to store all data bits of the specified cell in the current cell,
+    /// returning `false` if there is not enough remaining capacity.
+    #[inline]
+    pub fn store_cell_data<'a, T, C1: CellFamily>(&mut self, value: T) -> bool
+    where
+        T: Borrow<dyn Cell<C1> + 'a>,
+    {
+        fn store_cell_data_impl<C1, C2>(builder: &mut CellBuilder<C1>, value: &dyn Cell<C2>) -> bool
+        where
+            C1: CellFamily,
+            C2: CellFamily,
+        {
+            store_raw(
+                &mut builder.data,
+                &mut builder.bit_len,
+                value.data(),
+                value.bit_len(),
+            )
+        }
+        store_cell_data_impl(self, value.borrow())
+    }
+
     /// Tries to store the remaining slice data in the cell,
     /// returning `false` if there is not enough remaining capacity.
-    pub fn store_slice_data<C1: CellFamily>(&mut self, value: &CellSlice<'_, C1>) -> bool {
-        let bits = value.remaining_bits();
-        if self.bit_len + bits <= MAX_BIT_LEN {
-            let mut slice_data = MaybeUninit::<[u8; 128]>::uninit();
-            let slice_data = unsafe { &mut *(slice_data.as_mut_ptr() as *mut [u8; 128]) };
-            let Some(slice_data) = value.get_raw(0, slice_data, bits) else {
-                return false;
-            };
+    #[inline]
+    pub fn store_slice_data<'a, T, C1>(&mut self, value: T) -> bool
+    where
+        T: Borrow<CellSlice<'a, C1>>,
+        C1: CellFamily + 'a,
+    {
+        fn store_slice_data_impl<'a, C1, C2>(
+            builder: &mut CellBuilder<C1>,
+            value: &CellSlice<'a, C2>,
+        ) -> bool
+        where
+            C1: CellFamily,
+            C2: CellFamily,
+        {
+            let bits = value.remaining_bits();
+            if builder.bit_len + bits <= MAX_BIT_LEN {
+                let mut slice_data = MaybeUninit::<[u8; 128]>::uninit();
+                let slice_data = unsafe { &mut *(slice_data.as_mut_ptr() as *mut [u8; 128]) };
+                let Some(slice_data) = value.get_raw(0, slice_data, bits) else {
+                    return false;
+                };
 
-            self.store_raw(slice_data, bits)
-        } else {
-            false
+                builder.store_raw(slice_data, bits)
+            } else {
+                false
+            }
         }
+        store_slice_data_impl(self, value.borrow())
     }
 
     /// Tries to prepend bytes to the cell data (but only the specified number of bits),
@@ -479,17 +617,13 @@ fn store_raw(data: &mut [u8; 128], bit_len: &mut u16, value: &[u8], mut bits: u1
     }
 }
 
-impl<C> CellBuilder<C>
-where
-    for<'a> C: CellFamily + 'a, // explicit lifetime to fix GATs
-    CellContainer<C>: AsRef<dyn Cell<C>>,
-{
+impl<C: CellFamily> CellBuilder<C> {
     /// Computes the cell level from the level mask.
     pub fn compute_level(&self) -> u8 {
         self.compute_level_mask().level()
     }
 
-    // Computes the cell level mask from children.
+    /// Computes the cell level mask from children.
     pub fn compute_level_mask(&self) -> LevelMask {
         if let Some(level_mask) = self.level_mask {
             level_mask
@@ -520,6 +654,11 @@ where
         }
     }
 
+    /// Sets children of the cell.
+    pub fn set_references(&mut self, refs: CellRefsBuilder<C>) {
+        self.references = refs.0;
+    }
+
     /// Tries to append a builder (its data and references),
     /// returning `false` if there is not enough remaining capacity.
     pub fn store_builder(&mut self, builder: &Self) -> bool {
@@ -540,33 +679,31 @@ where
 
     /// Tries to append a cell slice (its data and references),
     /// returning `false` if there is not enough remaining capacity.
+    #[inline]
     pub fn store_slice<'a, T>(&mut self, value: T) -> bool
     where
         T: Borrow<CellSlice<'a, C>>,
+        C: 'a,
     {
-        let value: &CellSlice<'a, C> = value.borrow();
-        if self.bit_len + value.remaining_bits() <= MAX_BIT_LEN
-            && self.references.len() + value.remaining_refs() as usize <= MAX_REF_COUNT
-            && self.store_slice_data(value)
-        {
-            for cell in value.references().cloned() {
-                if !self.store_reference(cell) {
-                    return false;
+        fn store_slice_impl<'a, C: CellFamily>(
+            builder: &mut CellBuilder<C>,
+            value: &CellSlice<'a, C>,
+        ) -> bool {
+            if builder.bit_len + value.remaining_bits() <= MAX_BIT_LEN
+                && builder.references.len() + value.remaining_refs() as usize <= MAX_REF_COUNT
+                && builder.store_slice_data(value)
+            {
+                for cell in value.references().cloned() {
+                    if !builder.store_reference(cell) {
+                        return false;
+                    }
                 }
+                true
+            } else {
+                false
             }
-            true
-        } else {
-            false
         }
-    }
-
-    /// Tries to build a new cell using the default finalizer.
-    ///
-    /// See [`Finalizer`]
-    ///
-    /// [`default_finalizer`]: trait@crate::cell::finalizer::Finalizer
-    pub fn build(self) -> Option<CellContainer<C>> {
-        self.build_ext(&mut C::default_finalizer())
+        store_slice_impl(self, value.borrow())
     }
 
     /// Tries to build a new cell using the specified finalizer.
@@ -574,6 +711,7 @@ where
         debug_assert!(self.bit_len <= MAX_BIT_LEN);
         debug_assert!(self.references.len() <= MAX_REF_COUNT);
 
+        #[cfg(feature = "stats")]
         let mut stats = CellTreeStats {
             bit_count: self.bit_len as u64,
             cell_count: 1,
@@ -583,10 +721,14 @@ where
         for child in self.references.as_ref() {
             let child = child.as_ref();
             children_mask |= child.descriptor().level_mask();
-            stats += child.stats();
+
+            #[cfg(feature = "stats")]
+            {
+                stats += child.stats();
+            }
         }
 
-        let is_exotic = self.level_mask.is_some();
+        let is_exotic = self.is_exotic;
         let level_mask = self.level_mask.unwrap_or(children_mask);
 
         let d1 = CellDescriptor::compute_d1(level_mask, is_exotic, self.references.len() as u8);
@@ -616,6 +758,7 @@ where
         let data = &self.data[..std::cmp::min(byte_len as usize, 128)];
 
         let cell_parts: CellParts<C> = CellParts {
+            #[cfg(feature = "stats")]
             stats,
             bit_len: self.bit_len,
             descriptor: CellDescriptor { d1, d2 },
@@ -624,6 +767,56 @@ where
             data,
         };
         finalizer.finalize_cell(cell_parts)
+    }
+}
+
+impl<C> CellBuilder<C>
+where
+    for<'a> C: DefaultFinalizer + 'a,
+{
+    /// Tries to build a new cell using the default finalizer.
+    ///
+    /// See [`default_finalizer`]
+    ///
+    /// [`default_finalizer`]: fn@crate::cell::DefaultFinalizer::default_finalizer
+    pub fn build(self) -> Option<CellContainer<C>> {
+        self.build_ext(&mut C::default_finalizer())
+    }
+}
+
+/// Builder for constructing cell references array.
+///
+/// Can be used later for [`CellBuilder::set_references`].
+#[repr(transparent)]
+pub struct CellRefsBuilder<C: CellFamily>(ArrayVec<CellContainer<C>, MAX_REF_COUNT>);
+
+impl<C: CellFamily> Default for CellRefsBuilder<C> {
+    #[inline]
+    fn default() -> Self {
+        Self(ArrayVec::default())
+    }
+}
+
+impl<C: CellFamily> CellRefsBuilder<C> {
+    /// Tries to store a child in the cell,
+    /// returning `false` if there is not enough remaining capacity.
+    pub fn store_reference(&mut self, cell: CellContainer<C>) -> bool {
+        if self.0.len() < MAX_REF_COUNT {
+            // SAFETY: reference count is in the valid range
+            unsafe { self.0.push(cell) }
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Computes children level mask as a combination of all level masks.
+    pub fn compute_level_mask(&self) -> LevelMask {
+        let mut result = LevelMask::EMPTY;
+        for child in self.0.as_ref() {
+            result |= child.as_ref().level_mask();
+        }
+        result
     }
 }
 
@@ -686,7 +879,7 @@ mod tests {
 
         let mut builder = RcCellBuilder::new();
         let mut slice = cell.as_slice();
-        assert!(slice.try_advance(3));
+        assert!(slice.try_advance(3, 0));
         assert!(builder.store_slice(slice));
         let cell = builder.build().unwrap();
         println!("{}", cell.display_tree());

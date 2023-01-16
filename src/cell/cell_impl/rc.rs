@@ -3,23 +3,48 @@ use std::rc::Rc;
 
 use super::{
     EmptyOrdinaryCell, HeaderWithData, LibraryReference, OrdinaryCell, OrdinaryCellHeader,
-    PrunedBranch, PrunedBranchHeader,
+    PrunedBranch, PrunedBranchHeader, VirtualCell, ALL_ONES_CELL, ALL_ZEROS_CELL,
 };
-use crate::cell::finalizer::{CellParts, Finalizer};
+use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 use crate::cell::{Cell, CellContainer, CellFamily, CellHash, CellType};
 
 /// Single-threaded cell family.
+#[derive(Debug)]
 pub struct RcCellFamily;
 
 impl CellFamily for RcCellFamily {
-    type Container<T: ?Sized> = Rc<T>;
-    type DefaultFinalizer = RcCellFinalizer;
+    type Container = Rc<dyn Cell<Self>>;
 
     fn empty_cell() -> CellContainer<Self> {
         Rc::new(EmptyOrdinaryCell)
     }
 
-    fn default_finalizer() -> Self::DefaultFinalizer {
+    fn empty_cell_ref() -> &'static dyn Cell<Self> {
+        &EmptyOrdinaryCell
+    }
+
+    fn all_zeros_ref() -> &'static dyn Cell<Self> {
+        &ALL_ZEROS_CELL
+    }
+
+    fn all_ones_ref() -> &'static dyn Cell<Self> {
+        &ALL_ONES_CELL
+    }
+
+    fn virtualize(cell: CellContainer<Self>) -> CellContainer<Self> {
+        let descriptor = cell.as_ref().descriptor();
+        if descriptor.level_mask().is_empty() {
+            cell
+        } else {
+            Rc::new(VirtualCell(cell))
+        }
+    }
+}
+
+impl DefaultFinalizer for RcCellFamily {
+    type Finalizer = RcCellFinalizer;
+
+    fn default_finalizer() -> Self::Finalizer {
         RcCellFinalizer
     }
 }
@@ -48,7 +73,6 @@ unsafe fn make_cell(ctx: CellParts<RcCellFamily>, hashes: Vec<(CellHash, u16)>) 
             Some(make_pruned_branch(
                 PrunedBranchHeader {
                     repr_hash: repr.0,
-                    repr_depth: repr.1,
                     level: ctx.descriptor.level_mask().level(),
                     descriptor: ctx.descriptor,
                 },
@@ -64,7 +88,6 @@ unsafe fn make_cell(ctx: CellParts<RcCellFamily>, hashes: Vec<(CellHash, u16)>) 
 
             Some(Rc::new(LibraryReference {
                 repr_hash: repr.0,
-                repr_depth: repr.1,
                 descriptor: ctx.descriptor,
                 data: *(ctx.data.as_ptr() as *const [u8; 33]),
             }))
@@ -75,6 +98,7 @@ unsafe fn make_cell(ctx: CellParts<RcCellFamily>, hashes: Vec<(CellHash, u16)>) 
         _ => Some(make_ordinary_cell(
             OrdinaryCellHeader {
                 bit_len: ctx.bit_len,
+                #[cfg(feature = "stats")]
                 stats: ctx.stats,
                 hashes,
                 descriptor: ctx.descriptor,

@@ -1,34 +1,61 @@
-use std::ops::{Add, AddAssign};
+//! Cell tree implementation.
+
+use std::borrow::Borrow;
 use std::ops::{BitOr, BitOrAssign};
 
 use crate::util::DisplayHash;
 
-pub use self::cell_impl::{rc, sync};
-use self::slice::CellSlice;
+pub use self::builder::{CellBuilder, CellRefsBuilder, Store};
+pub use self::cell_impl::{rc, sync, StaticCell};
+pub use self::finalizer::{CellParts, DefaultFinalizer, Finalizer};
+pub use self::slice::{CellSlice, Load};
+pub use self::usage_tree::{RcUsageTree, UsageTreeMode};
 
 /// Generic cell implementation.
 mod cell_impl;
 
 /// Cell finalization primitives.
-pub mod finalizer;
+mod finalizer;
 
 /// Cell view utils.
-pub mod slice;
+mod slice;
 
 /// Cell creation utils.
-pub mod builder;
+mod builder;
+
+mod usage_tree;
 
 /// Cell implementation family.
-pub trait CellFamily {
-    type Container<T: ?Sized>: Clone;
-    type DefaultFinalizer: finalizer::Finalizer<Self>;
+pub trait CellFamily: Sized {
+    /// Owning container with cell tree node.
+    type Container: AsRef<dyn Cell<Self>>
+        + Borrow<dyn Cell<Self>>
+        + Store<Self>
+        + for<'a> Load<'a, Self>
+        + Eq
+        + Clone
+        + std::fmt::Debug;
 
+    /// Creates an empty cell.
+    ///
+    /// NOTE: in most cases empty cell is ZST.
     fn empty_cell() -> CellContainer<Self>;
-    fn default_finalizer() -> Self::DefaultFinalizer;
+
+    /// Returns a static reference to the empty cell
+    fn empty_cell_ref() -> &'static dyn Cell<Self>;
+
+    /// Returns a static reference to the cell with all zeros.
+    fn all_zeros_ref() -> &'static dyn Cell<Self>;
+
+    /// Returns a static reference to the cell with all ones.
+    fn all_ones_ref() -> &'static dyn Cell<Self>;
+
+    /// Creates a virtualized cell from the specified cell.
+    fn virtualize(cell: CellContainer<Self>) -> CellContainer<Self>;
 }
 
 /// Type alias for a cell family container.
-pub type CellContainer<C> = <C as CellFamily>::Container<dyn Cell<C>>;
+pub type CellContainer<C> = <C as CellFamily>::Container;
 
 /// Represents the interface of a well-formed cell.
 ///
@@ -40,7 +67,7 @@ pub trait Cell<C: CellFamily> {
     /// # See also
     ///
     /// Cell descriptor contains some tightly packed info about the cell.
-    /// If you want convinient methods to access it use:
+    /// If you want convenient methods to access it use:
     /// [`cell_type`], [`level_mask`], [`reference_count`], [`is_exotic`]
     ///
     /// [`cell_type`]: fn@crate::cell::CellDescriptor::cell_type
@@ -61,6 +88,10 @@ pub trait Cell<C: CellFamily> {
     /// Returns the Nth child cell.
     fn reference_cloned(&self, index: u8) -> Option<CellContainer<C>>;
 
+    /// Returns this cell as a virtualized cell, so that all hashes
+    /// and depths will have an offset.
+    fn virtualize(&self) -> &dyn Cell<C>;
+
     /// Returns cell hash for the specified level.
     ///
     /// Cell representation hash is the hash at the maximum level ([`LevelMask::MAX_LEVEL`]).
@@ -72,6 +103,7 @@ pub trait Cell<C: CellFamily> {
 
     /// Returns the sum of all bits and cells of all elements in the cell tree
     /// (including this cell).
+    #[cfg(feature = "stats")]
     fn stats(&self) -> CellTreeStats;
 }
 
@@ -108,14 +140,21 @@ impl<C: CellFamily> dyn Cell<C> + '_ {
         self.descriptor().is_exotic()
     }
 
-    /// Returns representation hash of the cell.
+    /// Returns a representation hash of the cell.
     #[inline]
     pub fn repr_hash(&self) -> &CellHash {
         self.hash(LevelMask::MAX_LEVEL)
     }
 
+    /// Returns a representation depth of the cell.
+    #[inline]
+    pub fn repr_depth(&self) -> u16 {
+        self.depth(LevelMask::MAX_LEVEL)
+    }
+
+    /// Returns true if the cell is empty (no bits, no refs).
     pub fn is_empty(&self) -> bool {
-        self.hash(LevelMask::MAX_LEVEL) == &EMPTY_CELL_HASH
+        self.hash(LevelMask::MAX_LEVEL) == EMPTY_CELL_HASH
     }
 
     /// Creates an iterator through child nodes.
@@ -130,8 +169,17 @@ impl<C: CellFamily> dyn Cell<C> + '_ {
 
     /// Returns this cell as a cell slice.
     #[inline]
-    pub fn as_slice(&self) -> CellSlice<'_, C> {
+    pub fn as_slice(&'_ self) -> CellSlice<'_, C> {
         CellSlice::new(self)
+    }
+
+    /// Returns an object that implements [`Debug`] for printing only
+    /// the root cell of the cell tree.
+    ///
+    /// [`Debug`]: std::fmt::Debug
+    #[inline]
+    pub fn debug_root(&'_ self) -> DebugCell<'_, C> {
+        DebugCell(self)
     }
 
     /// Returns an object that implements [`Display`] for printing only
@@ -175,7 +223,6 @@ impl<C1: CellFamily, C2: CellFamily> PartialEq<dyn Cell<C2> + '_> for dyn Cell<C
 }
 
 /// An iterator through child nodes.
-#[derive(Clone)]
 #[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct RefsIter<'a, C> {
     cell: &'a dyn Cell<C>,
@@ -184,10 +231,67 @@ pub struct RefsIter<'a, C> {
 }
 
 impl<'a, C: CellFamily> RefsIter<'a, C> {
+    /// Returns a cell by children of which we are iterating.
+    #[inline]
+    pub fn cell(&self) -> &'a dyn Cell<C> {
+        self.cell
+    }
+
+    /// Returns a reference to the next() value without advancing the iterator.
+    #[inline]
+    pub fn peek(&self) -> Option<&'a dyn Cell<C>> {
+        if self.index >= self.len {
+            None
+        } else {
+            self.cell.reference(self.index)
+        }
+    }
+
+    /// Returns a cloned reference to the next() value without advancing the iterator.
+    #[inline]
+    pub fn peek_cloned(&self) -> Option<CellContainer<C>> {
+        if self.index >= self.len {
+            None
+        } else {
+            self.cell.reference_cloned(self.index)
+        }
+    }
+
+    /// Returns a reference to the next_back() value without advancing the iterator.
+    #[inline]
+    pub fn peek_prev(&self) -> Option<&'a dyn Cell<C>> {
+        if self.index > 0 {
+            self.cell.reference(self.index - 1)
+        } else {
+            None
+        }
+    }
+
+    /// Returns a cloned reference to the next_back() value without advancing the iterator.
+    #[inline]
+    pub fn peek_prev_cloned(&self) -> Option<CellContainer<C>> {
+        if self.index > 0 {
+            self.cell.reference_cloned(self.index - 1)
+        } else {
+            None
+        }
+    }
+
     /// Creates an iterator through child nodes which produces cloned references.
     #[inline]
     pub fn cloned(self) -> ClonedRefsIter<'a, C> {
         ClonedRefsIter { inner: self }
+    }
+}
+
+impl<C> Clone for RefsIter<'_, C> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self {
+            cell: self.cell,
+            len: self.len,
+            index: self.index,
+        }
     }
 }
 
@@ -232,14 +336,42 @@ impl<C: CellFamily> ExactSizeIterator for RefsIter<'_, C> {
 }
 
 /// An iterator through child nodes which produces cloned references.
-#[derive(Clone)]
 #[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct ClonedRefsIter<'a, C> {
     inner: RefsIter<'a, C>,
 }
 
+impl<'a, C: CellFamily> ClonedRefsIter<'a, C> {
+    /// Returns a cell by children of which we are iterating.
+    #[inline]
+    pub fn cell(&self) -> &'a dyn Cell<C> {
+        self.inner.cell
+    }
+
+    /// Returns a reference to the next() value without advancing the iterator.
+    #[inline]
+    pub fn peek(&self) -> Option<CellContainer<C>> {
+        self.inner.peek_cloned()
+    }
+
+    /// Returns a reference to the next_back() value without advancing the iterator.
+    #[inline]
+    pub fn peek_prev(&self) -> Option<CellContainer<C>> {
+        self.inner.peek_prev_cloned()
+    }
+}
+
+impl<C> Clone for ClonedRefsIter<'_, C> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
 impl<'a, C: CellFamily> Iterator for ClonedRefsIter<'a, C> {
-    type Item = C::Container<dyn Cell<C>>;
+    type Item = CellContainer<C>;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -281,7 +413,7 @@ impl<C: CellFamily> ExactSizeIterator for ClonedRefsIter<'_, C> {
 pub type CellHash = [u8; 32];
 
 /// Hash of an empty (0 bits of data, no refs) ordinary cell.
-pub const EMPTY_CELL_HASH: CellHash = [
+pub static EMPTY_CELL_HASH: &CellHash = &[
     0x96, 0xa2, 0x96, 0xd2, 0x24, 0xf2, 0x85, 0xc6, 0x7b, 0xee, 0x93, 0xc3, 0x0f, 0x8a, 0x30, 0x91,
     0x57, 0xf0, 0xda, 0xa3, 0x5d, 0xc5, 0xb8, 0x7e, 0x41, 0x0b, 0x78, 0x63, 0x0a, 0x09, 0xcf, 0xc7,
 ];
@@ -353,9 +485,13 @@ pub struct CellDescriptor {
 }
 
 impl CellDescriptor {
+    /// Bit mask to store the number of references in the descriptor.
     pub const REF_COUNT_MASK: u8 = 0b0000_0111;
+    /// Bit mask to store the `is_exotic` flag in the descriptor.
     pub const IS_EXOTIC_MASK: u8 = 0b0000_1000;
+    /// Bit mask to store the `store_hashes` flag in the descriptor.
     pub const STORE_HASHES_MASK: u8 = 0b0001_0000;
+    /// _de Brujn_ level presence mask in the descriptor.
     pub const LEVEL_MASK: u8 = 0b1110_0000;
 
     /// Computes d1 descriptor byte from parts
@@ -405,6 +541,19 @@ impl CellDescriptor {
         self.d1 & Self::REF_COUNT_MASK
     }
 
+    /// Computes hash count.
+    ///
+    /// NOTE: Guaranteed to be in range 1..=4.
+    #[inline(always)]
+    pub const fn hash_count(self) -> u8 {
+        let level = self.level_mask().level();
+        if self.is_exotic() && self.reference_count() == 0 && level > 0 {
+            1 // pruned branch always has 1 hash
+        } else {
+            level + 1
+        }
+    }
+
     /// Returns whether the cell is not [`Ordinary`].
     ///
     /// [`Ordinary`]: crate::cell::CellType::Ordinary
@@ -413,9 +562,21 @@ impl CellDescriptor {
         self.d1 & Self::IS_EXOTIC_MASK != 0
     }
 
+    /// Returns whether this cell is a pruned branch cell
+    #[inline(always)]
+    pub const fn is_pruned_branch(self) -> bool {
+        self.is_exotic() && self.reference_count() == 0 && !self.level_mask().is_empty()
+    }
+
+    /// Returns whether this cell type is Merkle proof or Merkle update.
+    #[inline(always)]
+    pub const fn is_merkle(self) -> bool {
+        self.is_exotic() && self.reference_count() != 0
+    }
+
     /// Returns whether this cell refers to some external data.
     #[inline(always)]
-    pub fn is_absent(self) -> bool {
+    pub const fn is_absent(self) -> bool {
         self.d1 == (Self::REF_COUNT_MASK | Self::IS_EXOTIC_MASK)
     }
 
@@ -445,7 +606,7 @@ impl CellDescriptor {
     }
 }
 
-/// _de Brujn_ level presense bitset.
+/// _de Brujn_ level presence bitset.
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct LevelMask(u8);
 
@@ -459,6 +620,12 @@ impl LevelMask {
     #[inline(always)]
     pub const fn new(mask: u8) -> Self {
         Self(mask & 0b111)
+    }
+
+    /// Returns true if there are no levels in mask.
+    #[inline(always)]
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
     }
 
     /// Constructs a new level mask from the provided byte as is.
@@ -499,6 +666,12 @@ impl LevelMask {
     #[inline(always)]
     pub const fn virtualize(self, offset: u8) -> Self {
         Self(self.0 >> offset)
+    }
+
+    /// Encodes level mask as byte.
+    #[inline]
+    pub const fn to_byte(self) -> u8 {
+        self.0
     }
 }
 
@@ -542,6 +715,7 @@ impl std::fmt::Debug for LevelMask {
 ///
 /// NOTE: identical cells are counted each time they occur in the tree.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(feature = "stats")]
 pub struct CellTreeStats {
     /// Total number of bits in tree.
     pub bit_count: u64,
@@ -549,23 +723,36 @@ pub struct CellTreeStats {
     pub cell_count: u64,
 }
 
-impl Add for CellTreeStats {
+#[cfg(feature = "stats")]
+impl std::ops::Add for CellTreeStats {
     type Output = Self;
 
     #[inline]
     fn add(self, rhs: Self) -> Self::Output {
         Self {
-            bit_count: self.bit_count + rhs.bit_count,
-            cell_count: self.cell_count + rhs.cell_count,
+            bit_count: self.bit_count.saturating_add(rhs.bit_count),
+            cell_count: self.cell_count.saturating_add(rhs.cell_count),
         }
     }
 }
 
-impl AddAssign for CellTreeStats {
+#[cfg(feature = "stats")]
+impl std::ops::AddAssign for CellTreeStats {
     #[inline]
     fn add_assign(&mut self, rhs: Self) {
-        self.bit_count += rhs.bit_count;
-        self.cell_count += rhs.cell_count;
+        self.bit_count = self.bit_count.saturating_add(rhs.bit_count);
+        self.cell_count = self.cell_count.saturating_add(rhs.cell_count);
+    }
+}
+
+/// Helper struct to debug print the root cell.
+#[derive(Clone, Copy)]
+pub struct DebugCell<'a, C: CellFamily>(&'a dyn Cell<C>);
+
+impl<C: CellFamily> std::fmt::Debug for DebugCell<'_, C> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
     }
 }
 
@@ -614,7 +801,7 @@ impl<C: CellFamily> std::fmt::Display for DisplayCellTree<'_, C> {
         while let Some((level, cell)) = stack.pop() {
             std::fmt::Display::fmt(&DisplayCellRoot { cell, level }, f)?;
 
-            let reference_count = cell.reference_count() as u8;
+            let reference_count = cell.reference_count();
             for i in (0..reference_count).rev() {
                 if let Some(child) = cell.reference(i) {
                     stack.push((level + 1, child));

@@ -3,12 +3,15 @@ use std::ops::Deref;
 use smallvec::SmallVec;
 
 use super::BocTag;
-use crate::cell::finalizer::{CellParts, Finalizer};
 use crate::cell::{
-    Cell, CellContainer, CellDescriptor, CellFamily, CellTreeStats, LevelMask, MAX_REF_COUNT,
+    CellContainer, CellDescriptor, CellFamily, CellParts, Finalizer, LevelMask, MAX_REF_COUNT,
 };
 use crate::util::{unlikely, ArrayVec};
 
+#[cfg(feature = "stats")]
+use crate::cell::CellTreeStats;
+
+/// BOC deserialization options.
 #[derive(Debug, Default, Clone)]
 pub struct Options {
     /// The minimum allowed root count.
@@ -263,7 +266,6 @@ impl<'a> BocHeader<'a> {
     pub fn finalize<C>(&self, finalizer: &mut dyn Finalizer<C>) -> Result<ProcessedCells<C>, Error>
     where
         C: CellFamily,
-        CellContainer<C>: AsRef<dyn Cell<C>>,
     {
         let ref_size = self.ref_size;
         let cell_count = self.cells.len() as u32;
@@ -302,6 +304,8 @@ impl<'a> BocHeader<'a> {
 
                 let mut references = ArrayVec::<CellContainer<C>, MAX_REF_COUNT>::default();
                 let mut children_mask = LevelMask::EMPTY;
+
+                #[cfg(feature = "stats")]
                 let mut stats = CellTreeStats {
                     bit_count: bit_len as u64,
                     cell_count: 1,
@@ -321,7 +325,10 @@ impl<'a> BocHeader<'a> {
                     {
                         let child = child.as_ref();
                         children_mask |= child.descriptor().level_mask();
-                        stats += child.stats();
+                        #[cfg(feature = "stats")]
+                        {
+                            stats += child.stats();
+                        }
                     }
                     references.push(child);
 
@@ -329,6 +336,7 @@ impl<'a> BocHeader<'a> {
                 }
 
                 let ctx = CellParts {
+                    #[cfg(feature = "stats")]
                     stats,
                     bit_len,
                     descriptor,
@@ -363,9 +371,11 @@ impl<'a> BocHeader<'a> {
     }
 }
 
+/// Array of processed cells.
 pub struct ProcessedCells<C: CellFamily>(SmallVec<[CellContainer<C>; CELLS_ON_STACK]>);
 
 impl<C: CellFamily> ProcessedCells<C> {
+    /// Returns a processed cell by index.
     pub fn get(&self, index: u32) -> Option<CellContainer<C>> {
         self.0.get(self.0.len() - index as usize - 1).cloned()
     }
@@ -463,9 +473,9 @@ unsafe fn read_be_uint_fast(data_ptr: *const u8, size: usize) -> u32 {
         3 => {
             let mut bytes = [0u8; 4];
             std::ptr::copy_nonoverlapping(data_ptr, bytes.as_mut_ptr().add(1), 3);
-            u32::from_be_bytes(bytes) as u32
+            u32::from_be_bytes(bytes)
         }
-        4 => u32::from_be_bytes(*(data_ptr as *const [u8; 4])) as u32,
+        4 => u32::from_be_bytes(*(data_ptr as *const [u8; 4])),
         _ => std::hint::unreachable_unchecked(),
     }
 }
@@ -475,38 +485,55 @@ const ROOTS_ON_STACK: usize = 2;
 
 const MAX_ROOTS: usize = 32;
 
+/// Error type for BOC decoding related errors.
 #[derive(Debug, Copy, Clone, thiserror::Error)]
 pub enum Error {
+    /// EOF encountered during another operation.
     #[error("unexpected EOF")]
     UnexpectedEof,
+    /// Invalid magic bytes.
     #[error("unknown BOC tag")]
     UnknownBocTag,
+    /// Invalid BOC header.
     #[error("invalid header")]
     InvalidHeader,
+    /// References size is greater than 4.
     #[error("ref index does not fit in `u32` type")]
     InvalidRefSize,
+    /// Offset size is greater than 8.
     #[error("cell offset does not fit in `usize` type")]
     InvalidOffsetSize,
+    /// Root cell not found.
     #[error("root cell not found")]
     RootCellNotFound,
+    /// Specified BOC tag doesn't support multiple roots.
     #[error("unexpected multiple roots")]
     UnexpectedMultipleRoots,
+    /// The number of roots in BOC is greater than expected.
     #[error("too many root cells")]
     TooManyRootCells,
+    /// Absent cells are legacy therefore not supported.
     #[error("absent cells are not supported")]
     AbsentCellsNotSupported,
+    /// The number of roots in BOC is less than expected.
     #[error("too few root cells")]
     TooFewRootCells,
+    /// Total cells size mismatch.
     #[error("invalid total cells size")]
     InvalidTotalSize,
+    /// Invalid root cell index.
     #[error("root index out of bounds")]
     RootOutOfBounds,
+    /// Invalid child reference.
     #[error("cell ref count not in range 0..=4")]
     InvalidRef,
+    /// Suboptimal cells are treated as error.
     #[error("unnormalized cell")]
     UnnormalizedCell,
+    /// Possible graph loop detected.
     #[error("invalid children order")]
     InvalidRefOrder,
+    /// Failed to parse cell.
     #[error("invalid cell")]
     InvalidCell,
 }

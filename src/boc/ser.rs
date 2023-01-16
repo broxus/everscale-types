@@ -1,11 +1,13 @@
-use rustc_hash::FxHashMap;
+use std::collections::HashMap;
+use std::hash::BuildHasher;
 
 use super::BocTag;
 use crate::cell::{Cell, CellDescriptor, CellFamily, CellHash};
 
-pub struct BocHeader<'a, C> {
+/// Intermediate BOC serializer state.
+pub struct BocHeader<'a, C, S = ahash::RandomState> {
     root_rev_indices: Vec<u32>,
-    rev_indices: FxHashMap<CellHash, u32>,
+    rev_indices: HashMap<CellHash, u32, S>,
     rev_cells: Vec<&'a dyn Cell<C>>,
     total_data_size: u64,
     reference_count: u64,
@@ -14,7 +16,11 @@ pub struct BocHeader<'a, C> {
     include_crc: bool,
 }
 
-impl<'a, C: CellFamily> BocHeader<'a, C> {
+impl<'a, C: CellFamily, S> BocHeader<'a, C, S>
+where
+    S: BuildHasher + Default,
+{
+    /// Creates an intermediate BOC serializer state with a single root.
     pub fn new(root: &'a dyn Cell<C>) -> Self {
         let mut res = Self {
             root_rev_indices: Default::default(),
@@ -29,24 +35,35 @@ impl<'a, C: CellFamily> BocHeader<'a, C> {
         res.add_root(root);
         res
     }
+}
 
+impl<'a, C: CellFamily, S> BocHeader<'a, C, S>
+where
+    S: BuildHasher,
+{
+    /// Adds an additional root to the state.
     pub fn add_root(&mut self, root: &'a dyn Cell<C>) {
         let root_rev_index = self.fill(root);
         self.root_rev_indices.push(root_rev_index);
     }
 
+    /// Includes CRC bytes in the encoded BOC.
     #[inline]
     pub fn with_crc(mut self, include_ctc: bool) -> Self {
         self.include_crc = include_ctc;
         self
     }
 
+    /// Prevents hashes from being stored in the encoded BOC.
+    ///
+    /// (overwrites descriptor flag `store_hashes` during serialization).
     #[inline]
     pub fn without_hashes(mut self, without_hashes: bool) -> Self {
         self.without_hashes = without_hashes;
         self
     }
 
+    /// Encodes cell trees into bytes.
     pub fn encode(self, target: &mut Vec<u8>) {
         let root_count = self.root_rev_indices.len();
 
@@ -93,7 +110,7 @@ impl<'a, C: CellFamily> BocHeader<'a, C> {
 
         for rev_index in self.root_rev_indices {
             let root_index = self.cell_count - rev_index - 1;
-            target.extend_from_slice(&root_index.to_be_bytes()[4 - ref_size as usize..]);
+            target.extend_from_slice(&root_index.to_be_bytes()[4 - ref_size..]);
         }
 
         for cell in self.rev_cells.into_iter().rev() {
@@ -113,7 +130,7 @@ impl<'a, C: CellFamily> BocHeader<'a, C> {
             for child in cell.references() {
                 if let Some(rev_index) = self.rev_indices.get(child.repr_hash()) {
                     let rev_index = self.cell_count - *rev_index - 1;
-                    target.extend_from_slice(&rev_index.to_be_bytes()[4 - ref_size as usize..]);
+                    target.extend_from_slice(&rev_index.to_be_bytes()[4 - ref_size..]);
                 } else {
                     debug_assert!(false, "child not found");
                 }

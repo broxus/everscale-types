@@ -4,23 +4,48 @@ use std::sync::Arc;
 
 use super::{
     EmptyOrdinaryCell, HeaderWithData, LibraryReference, OrdinaryCell, OrdinaryCellHeader,
-    PrunedBranch, PrunedBranchHeader,
+    PrunedBranch, PrunedBranchHeader, VirtualCell, ALL_ONES_CELL, ALL_ZEROS_CELL,
 };
-use crate::cell::finalizer::{CellParts, Finalizer};
+use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 use crate::cell::{Cell, CellContainer, CellFamily, CellHash, CellType};
 
 /// Thread-safe cell family.
+#[derive(Debug)]
 pub struct ArcCellFamily;
 
 impl CellFamily for ArcCellFamily {
-    type Container<T: ?Sized> = Arc<T>;
-    type DefaultFinalizer = ArcCellFinalizer;
+    type Container = Arc<dyn Cell<Self>>;
 
     fn empty_cell() -> CellContainer<Self> {
         Arc::new(EmptyOrdinaryCell)
     }
 
-    fn default_finalizer() -> Self::DefaultFinalizer {
+    fn empty_cell_ref() -> &'static dyn Cell<Self> {
+        &EmptyOrdinaryCell
+    }
+
+    fn all_zeros_ref() -> &'static dyn Cell<Self> {
+        &ALL_ZEROS_CELL
+    }
+
+    fn all_ones_ref() -> &'static dyn Cell<Self> {
+        &ALL_ONES_CELL
+    }
+
+    fn virtualize(cell: CellContainer<Self>) -> CellContainer<Self> {
+        let descriptor = cell.as_ref().descriptor();
+        if descriptor.level_mask().is_empty() {
+            cell
+        } else {
+            Arc::new(VirtualCell(cell))
+        }
+    }
+}
+
+impl DefaultFinalizer for ArcCellFamily {
+    type Finalizer = ArcCellFinalizer;
+
+    fn default_finalizer() -> Self::Finalizer {
         ArcCellFinalizer
     }
 }
@@ -52,7 +77,6 @@ unsafe fn make_cell(
             Some(make_pruned_branch(
                 PrunedBranchHeader {
                     repr_hash: repr.0,
-                    repr_depth: repr.1,
                     level: ctx.descriptor.level_mask().level(),
                     descriptor: ctx.descriptor,
                 },
@@ -68,7 +92,6 @@ unsafe fn make_cell(
 
             Some(Arc::new(LibraryReference {
                 repr_hash: repr.0,
-                repr_depth: repr.1,
                 descriptor: ctx.descriptor,
                 data: *(ctx.data.as_ptr() as *const [u8; 33]),
             }))
@@ -79,6 +102,7 @@ unsafe fn make_cell(
         _ => Some(make_ordinary_cell(
             OrdinaryCellHeader {
                 bit_len: ctx.bit_len,
+                #[cfg(feature = "stats")]
                 stats: ctx.stats,
                 hashes,
                 descriptor: ctx.descriptor,
