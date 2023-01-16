@@ -26,6 +26,11 @@ impl<C: CellFamily> StateInit<C> {
             + (1 + self.special.is_some() as u16 * TickTock::BITS)
             + 3
     }
+
+    /// Returns the number of references that this struct occupies.
+    pub const fn reference_count(&self) -> u8 {
+        self.code.is_some() as u8 + self.data.is_some() as u8 + !self.libraries.is_empty() as u8
+    }
 }
 
 impl<C: CellFamily> Store<C> for StateInit<C> {
@@ -89,6 +94,13 @@ pub struct CurrencyCollection<C: CellFamily> {
     pub other: ExtraCurrencyCollection<C>,
 }
 
+impl<C: CellFamily> CurrencyCollection<C> {
+    /// Returns the number of data bits that this struct occupies.
+    pub const fn bit_len(&self) -> u16 {
+        self.tokens.unwrap_bit_len() + 1
+    }
+}
+
 impl<C: CellFamily> Store<C> for CurrencyCollection<C> {
     fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
         self.tokens.store_into(builder, finalizer) && self.other.store_into(builder, finalizer)
@@ -108,6 +120,13 @@ impl<'a, C: CellFamily> Load<'a, C> for CurrencyCollection<C> {
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 #[repr(transparent)]
 pub struct ExtraCurrencyCollection<C: CellFamily>(Dict<C, 32>);
+
+impl<C: CellFamily> ExtraCurrencyCollection<C> {
+    /// Returns `true` if the dictionary contains no elements.
+    pub const fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
 
 impl<C: CellFamily> Store<C> for ExtraCurrencyCollection<C> {
     #[inline]

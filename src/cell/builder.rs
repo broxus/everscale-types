@@ -57,6 +57,13 @@ impl<C: CellFamily, T: Store<C>> Store<C> for Option<T> {
     }
 }
 
+impl<'a, C: CellFamily> Store<C> for CellSlice<'a, C> {
+    #[inline]
+    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+        builder.store_slice(self)
+    }
+}
+
 macro_rules! impl_primitive_store {
     ($($type:ty => |$b:ident, $v:ident| $expr:expr),*$(,)?) => {
         $(impl<C: CellFamily> Store<C> for $type {

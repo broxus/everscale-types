@@ -279,6 +279,19 @@ macro_rules! impl_var_uints {
                 }
             }
 
+            /// Returns number of data bits that this struct occupies.
+            /// Returns [`MAX_BITS`] if an underlying primitive integer is too large.
+            ///
+            /// [`MAX_BITS`]: Self::MAX_BITS
+            pub const fn unwrap_bit_len(&self) -> u16 {
+                let bytes = (std::mem::size_of::<Self>() as u32 - self.0.leading_zeros() / 8) as u8;
+                if unlikely(bytes > $max_bytes) {
+                    Self::MAX_BITS
+                } else {
+                    Self::LEN_BITS + bytes as u16 * 8
+                }
+            }
+
             /// Checked integer addition. Computes `self + rhs`, returning `None` if overflow occurred.
             #[inline]
             pub const fn checked_add(self, rhs: Self) -> Option<Self> {

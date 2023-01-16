@@ -41,6 +41,13 @@ impl<'a, C: CellFamily, T: Load<'a, C>> Load<'a, C> for Option<T> {
     }
 }
 
+impl<'a, C: CellFamily> Load<'a, C> for CellSlice<'a, C> {
+    #[inline]
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+        Some(slice.load_remaining())
+    }
+}
+
 macro_rules! impl_primitive_loads {
     ($($type:ty => |$s:ident| $expr:expr),*$(,)?) => {
         $(impl<C: CellFamily> Load<'_, C> for $type {
@@ -112,7 +119,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
     /// Returns a reference to the underlying cell.
     #[inline]
-    pub fn cell(&self) -> &'a dyn Cell<C> {
+    pub const fn cell(&self) -> &'a dyn Cell<C> {
         self.cell
     }
 
@@ -152,7 +159,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     /// };
     /// assert!(!not_empty_cell.as_slice().is_data_empty());
     /// ```
-    pub fn is_data_empty(&self) -> bool {
+    pub const fn is_data_empty(&self) -> bool {
         self.bits_window_start >= self.bits_window_end
     }
 
@@ -174,12 +181,12 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     /// };
     /// assert!(!not_empty_cell.as_slice().is_refs_empty());
     /// ```
-    pub fn is_refs_empty(&self) -> bool {
+    pub const fn is_refs_empty(&self) -> bool {
         self.refs_window_start >= self.refs_window_end
     }
 
     /// Returns the number of remaining references in the slice.
-    pub fn remaining_refs(&self) -> u8 {
+    pub const fn remaining_refs(&self) -> u8 {
         if self.refs_window_start > self.refs_window_end {
             0
         } else {
@@ -188,7 +195,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     }
 
     /// Returns the number of remaining bits of data in the slice.
-    pub fn remaining_bits(&self) -> u16 {
+    pub const fn remaining_bits(&self) -> u16 {
         if self.bits_window_start > self.bits_window_end {
             0
         } else {
@@ -234,7 +241,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     /// assert_eq!(slice.refs_offset(), 1);
     /// ```
     #[inline]
-    pub fn refs_offset(&self) -> u8 {
+    pub const fn refs_offset(&self) -> u8 {
         self.refs_window_start
     }
 
@@ -258,7 +265,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     /// assert!(!slice.has_remaining(0, 4)); // too many refs
     /// ```
     #[inline]
-    pub fn has_remaining(&self, bits: u16, refs: u8) -> bool {
+    pub const fn has_remaining(&self, bits: u16, refs: u8) -> bool {
         self.bits_window_start + bits <= self.bits_window_end
             && self.refs_window_start + refs <= self.refs_window_end
     }
@@ -1003,6 +1010,14 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
         let res = self.get_raw(0, target, bits)?;
         self.bits_window_start += bits;
         Some(res)
+    }
+
+    /// Reads all remaining bits and refs into the new slice.
+    pub fn load_remaining(&mut self) -> CellSlice<'a, C> {
+        let result = *self;
+        self.bits_window_start = self.bits_window_end;
+        self.refs_window_start = self.refs_window_end;
+        result
     }
 
     /// Returns a reference to the Nth child cell (relative to this slice's refs window).
