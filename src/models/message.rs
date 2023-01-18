@@ -981,7 +981,7 @@ mod tests {
 
     fn serialize_message(message: Message<RcCellFamily>) -> RcCell {
         let mut builder = RcCellBuilder::new();
-        message.store_into(&mut builder, &mut RcCellFamily::default_finalizer());
+        assert!(message.store_into(&mut builder, &mut RcCellFamily::default_finalizer()));
         builder.build().unwrap()
     }
 
@@ -1122,7 +1122,7 @@ mod tests {
 
         let init = StateInit {
             split_depth: None,
-            special: Some(TickTock {
+            special: Some(SpecialFlags {
                 tick: true,
                 tock: true,
             }),
