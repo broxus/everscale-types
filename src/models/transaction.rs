@@ -8,20 +8,34 @@ use super::account::*;
 use super::message::*;
 use super::Lazy;
 
+/// Blockchain transaction.
 #[derive(Clone, Eq, PartialEq)]
 pub struct Transaction<'a, C: CellFamily> {
+    /// Account on which this transaction was produced.
     pub account: CellHash,
+    /// Logical time when the transaction was created.
     pub lt: u64,
+    /// The hash of the previous transaction on the same account.
     pub prev_trans_hash: CellHash,
+    /// The logical time of the previous transaction on the same account.
     pub prev_trans_lt: u64,
+    /// Unix timestamp when the transaction was created.
     pub now: u32,
+    /// The number of outgoing messages.
     pub out_msg_count: Uint15,
+    /// Account status before this transaction.
     pub orig_status: AccountStatus,
+    /// Account status after this transaction.
     pub end_status: AccountStatus,
+    /// Optional incoming message.
     pub in_msg: Option<Lazy<C, Message<'a, C>>>,
+    /// Outgoing messages.
     pub out_msgs: Option<CellContainer<C>>,
+    /// Total transaction fees (including extra fwd fees).
     pub total_fees: CurrencyCollection<C>,
+    /// Account state hashes.
     pub state_update: Lazy<C, HashUpdate>,
+    /// Detailed transaction info.
     pub info: Lazy<C, TxInfo<C>>,
 }
 
@@ -46,7 +60,7 @@ impl<'a, C: CellFamily> std::fmt::Debug for Transaction<'a, C> {
 }
 
 impl<'a, C: CellFamily> Transaction<'a, C> {
-    pub const TAG: u8 = 0b0111;
+    const TAG: u8 = 0b0111;
 }
 
 impl<'a, C: CellFamily> Store<C> for Transaction<'a, C> {
@@ -112,8 +126,11 @@ impl<'a, C: CellFamily> Load<'a, C> for Transaction<'a, C> {
     }
 }
 
+/// Detailed transaction info.
 pub enum TxInfo<C: CellFamily> {
+    /// Ordinary transaction info.
     Ordinary(OrdinaryTxInfo<C>),
+    /// Tick-tock transaction info.
     TickTock(TickTockTxInfo),
 }
 
@@ -143,14 +160,33 @@ impl<'a, C: CellFamily> Load<'a, C> for TxInfo<C> {
     }
 }
 
+/// Ordinary transaction info.
 pub struct OrdinaryTxInfo<C: CellFamily> {
+    /// Whether the credit phase was executed first
+    /// (usually set when incoming message has `bounce: false`).
     pub credit_first: bool,
+    /// Storage phase info.
+    ///
+    /// Skipped if the account did not exist prior to execution.
     pub storage_phase: Option<StoragePhase>,
+    /// Credit phase info.
+    ///
+    /// Skipped if the incoming message is external.
     pub credit_phase: Option<CreditPhase<C>>,
+    /// Compute phase info.
     pub compute_phase: ComputePhase,
+    /// Action phase info.
+    ///
+    /// Skipped if the transaction was aborted at the compute phase.
     pub action_phase: Option<ActionPhase>,
+    /// Whether the transaction was reverted.
     pub aborted: bool,
+    /// Bounce phase info.
+    ///
+    /// Only present if the incoming message had `bounce: true` and
+    /// the compute phase failed.
     pub bounce_phase: Option<BouncePhase>,
+    /// Whether the account was destroyed during this transaction.
     pub destroyed: bool,
 }
 
@@ -199,13 +235,22 @@ impl<'a, C: CellFamily> Load<'a, C> for OrdinaryTxInfo<C> {
     }
 }
 
+/// Tick-tock transaction info.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TickTockTxInfo {
+    /// Tick-tock transaction execution edge.
     pub kind: TickTock,
+    /// Storage phase info.
     pub storage_phase: StoragePhase,
+    /// Compute phase info.
     pub compute_phase: ComputePhase,
+    /// Action phase info.
+    ///
+    /// Skipped if the transaction was aborted at the compute phase.
     pub action_phase: Option<ActionPhase>,
+    /// Whether the transaction was reverted.
     pub aborted: bool,
+    /// Whether the account was destroyed during this transaction.
     pub destroyed: bool,
 }
 
@@ -260,7 +305,9 @@ impl<'a, C: CellFamily> Load<'a, C> for TickTockTxInfo {
 /// Tick-tock transaction execution edge.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum TickTock {
+    /// Start of the block.
     Tick = 0,
+    /// End of the block.
     Tock = 1,
 }
 
@@ -282,10 +329,17 @@ impl<'a, C: CellFamily> Load<'a, C> for TickTock {
     }
 }
 
+/// Storage phase info.
+///
+/// At this phase account pays for storing its state.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct StoragePhase {
+    /// Amount of tokens collected for storing this contract for some time.
     pub storage_fees_collected: Tokens,
+    /// Amount of tokens which this account owes to the network
+    /// (if there was not enough balance to pay storage fee).
     pub storage_fees_due: Option<Tokens>,
+    /// Account status change during execution of this phase.
     pub status_change: AccountStatusChange,
 }
 
@@ -307,9 +361,15 @@ impl<'a, C: CellFamily> Load<'a, C> for StoragePhase {
     }
 }
 
+/// Credit phase info.
+///
+/// At this phase message balance is added to the account balance.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CreditPhase<C: CellFamily> {
+    /// Amount of tokens paid for the debt.
     pub due_fees_collected: Option<Tokens>,
+    /// Amount of tokens added to the account balance from the remaining
+    /// message balance.
     pub credit: CurrencyCollection<C>,
 }
 
@@ -329,9 +389,14 @@ impl<'a, C: CellFamily> Load<'a, C> for CreditPhase<C> {
     }
 }
 
+/// Compute phase info.
+///
+/// At this phase the VM is executed to produce a list of actions.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ComputePhase {
+    /// Compute phase was skipped.
     Skipped(SkippedComputePhase),
+    /// Compute phase was executed.
     Executed(ExecutedComputePhase),
 }
 
@@ -400,25 +465,41 @@ impl<'a, C: CellFamily> Load<'a, C> for ComputePhase {
     }
 }
 
+/// Executed compute phase info.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ExecutedComputePhase {
+    /// Whether the execution was successful.
     pub success: bool,
+    /// Whether the `init` from the incoming message was used.
     pub msg_state_used: bool,
+    /// Whether the account state changed to `Active` during this phase.
     pub account_activated: bool,
+    /// Total amount of tokens spent to execute this phase.
     pub gas_fees: Tokens,
+    /// Amount of gas used by the VM to execute this phase.
     pub gas_used: VarUint56,
+    /// Max gas amount which could be used.
     pub gas_limit: VarUint56,
+    /// Max gas amount which could be used before accepting this transaction.
     pub gas_credit: VarUint56,
+    /// Execution mode.
     pub mode: i8,
+    /// VM exit code.
     pub exit_code: i32,
+    /// Additional VM exit argument.
     pub exit_arg: Option<i32>,
+    /// The number of VM steps it took to complete this phase.
     pub vm_steps: u32,
+    /// Hash of the initial state of the VM.
     pub vm_init_state_hash: CellHash,
+    /// Hash of the VM state after executing this phase.
     pub vm_final_state_hash: CellHash,
 }
 
+/// Skipped compute phase info.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct SkippedComputePhase {
+    /// The reason this step was skipped.
     pub reason: ComputePhaseSkipReason,
 }
 
@@ -465,21 +546,39 @@ impl<'a, C: CellFamily> Load<'a, C> for ComputePhaseSkipReason {
     }
 }
 
+/// Action phase info.
+///
+/// At this phase the list of actions from the compute phase
+/// is converted into updates and outgoing messages.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ActionPhase {
+    /// Whether the execution was successful.
     pub success: bool,
+    /// Whether the action list was valid.
     pub valid: bool,
+    /// There were no funds to create an outgoing message.
     pub no_funds: bool,
+    /// Account status change during execution of this phase.
     pub status_change: AccountStatusChange,
+    /// Total forwarding fee for outgoing messages.
     pub total_fwd_fees: Option<Tokens>,
+    /// Total fees for processing all actions.
     pub total_action_fees: Option<Tokens>,
+    /// Result code of the phase.
     pub result_code: i32,
+    /// Optional result argument of the phase.
     pub result_arg: Option<i32>,
+    /// The total number of processed actions.
     pub total_actions: u16,
+    /// The number of special actions (`ReserveCurrency`, `SetCode`, `ChangeLibrary`, copyleft).
     pub special_actions: u16,
+    /// The number of skipped actions.
     pub skipped_actions: u16,
+    /// The number of outgoing messages created by the compute phase.
     pub messages_created: u16,
+    /// The hash of the actions list.
     pub action_list_hash: CellHash,
+    /// The total number of unique cells (bits / refs) of produced messages.
     pub total_message_size: StorageUsedShort,
 }
 
@@ -534,9 +633,17 @@ impl<'a, C: CellFamily> Load<'a, C> for ActionPhase {
     }
 }
 
+/// Bounce phase info.
+///
+/// At this stage some funds are returned back to the sender.
 pub enum BouncePhase {
+    /// Default phase state.
+    ///
+    /// Probably unused.
     NegativeFunds,
+    /// There were not enough funds to execute this phase.
     NoFunds(NoFundsBouncePhase),
+    /// Bounce phase was executed.
     Executed(ExecutedBouncePhase),
 }
 
@@ -566,9 +673,12 @@ impl<'a, C: CellFamily> Load<'a, C> for BouncePhase {
     }
 }
 
+/// Skipped bounce phase info.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct NoFundsBouncePhase {
+    /// The total number of unique cells (bits / refs) of the bounced message.
     pub msg_size: StorageUsedShort,
+    /// Required amount of tokens to send the bounced message.
     pub req_fwd_fees: Tokens,
 }
 
@@ -588,10 +698,14 @@ impl<'a, C: CellFamily> Load<'a, C> for NoFundsBouncePhase {
     }
 }
 
+/// Executed bounce phase info.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ExecutedBouncePhase {
+    /// The total number of unique cells (bits / refs) of the bounced message.
     pub msg_size: StorageUsedShort,
+    /// The part of fees which fo to the validators.
     pub msg_fees: Tokens,
+    /// Message forwarding fee.
     pub fwd_fees: Tokens,
 }
 
@@ -613,6 +727,7 @@ impl<'a, C: CellFamily> Load<'a, C> for ExecutedBouncePhase {
     }
 }
 
+/// Account status change during transaction execution.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum AccountStatusChange {
     /// Account status has not changed.
@@ -648,7 +763,9 @@ impl<'a, C: CellFamily> Load<'a, C> for AccountStatusChange {
 /// Account state hash update.
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct HashUpdate {
+    /// Old account state hash.
     pub old: CellHash,
+    /// New account state hash.
     pub new: CellHash,
 }
 
@@ -657,7 +774,7 @@ impl HashUpdate {
     pub const BITS: u16 = 8 + 256 + 256;
 
     /// update_hashes#72
-    pub const TAG: u8 = 0x72;
+    const TAG: u8 = 0x72;
 }
 
 impl std::fmt::Debug for HashUpdate {
@@ -713,6 +830,7 @@ mod tests {
         println!("tx: {:#?}", tx);
 
         let serialized = serialize_tx(tx);
+        assert_eq!(serialized.as_ref(), boc.as_ref());
         serialized
     }
 

@@ -4,9 +4,12 @@ use crate::cell::*;
 use crate::dict::*;
 use crate::num::*;
 
+/// Amount of unique cells and bits.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 pub struct StorageUsedShort {
+    /// Amount of unique cells.
     pub cells: VarUint56,
+    /// The total number of bits in unique cells.
     pub bits: VarUint56,
 }
 

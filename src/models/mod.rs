@@ -68,6 +68,7 @@ impl<C: CellFamily, T> Lazy<C, T> {
 }
 
 impl<C: DefaultFinalizer, T: Store<C>> Lazy<C, T> {
+    /// Serializes the provided data and returns the typed wrapper around it.
     pub fn new(data: &T) -> Option<Self> {
         let mut builder = CellBuilder::<C>::new();
         let finalizer = &mut C::default_finalizer();
