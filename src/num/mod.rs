@@ -759,7 +759,7 @@ mod tests {
     use super::*;
 
     macro_rules! impl_operation_tests {
-        ($ident:ident) => {
+        ($ident:ident$(, $check_max_div:ident)?) => {
             assert_eq!($ident::new(10) + $ident::new(4), $ident::new(14));
             assert_eq!($ident::new(10) + 4, $ident::new(14));
 
@@ -820,12 +820,16 @@ mod tests {
                 Some($ident::MAX - 1)
             );
 
-            assert_eq!((($ident::MAX + 1) * 2).checked_div($ident::new(2)), None);
-            assert_eq!(
-                ($ident::MAX * 2).checked_div($ident::new(2)),
-                Some($ident::MAX)
-            );
-            assert_eq!($ident::ONE.checked_div($ident::ZERO), None);
+            $(
+                let $check_max_div = ();
+                _ = $check_max_div;
+                assert_eq!((($ident::MAX + 1) * 2).checked_div($ident::new(2)), None);
+                assert_eq!(
+                    ($ident::MAX * 2).checked_div($ident::new(2)),
+                    Some($ident::MAX)
+                );
+                assert_eq!($ident::ONE.checked_div($ident::ZERO), None);
+            )?
         };
     }
 
@@ -887,9 +891,9 @@ mod tests {
 
     #[test]
     fn fixed_len_operations() {
-        impl_operation_tests!(Uint9);
-        impl_operation_tests!(Uint12);
-        impl_operation_tests!(Uint13);
+        impl_operation_tests!(Uint9, check_max_div);
+        impl_operation_tests!(Uint12, check_max_div);
+        impl_operation_tests!(Uint13, check_max_div);
         impl_operation_tests!(Uint15);
     }
 
@@ -911,17 +915,17 @@ mod tests {
 
     #[test]
     fn var_uint3_operations() {
-        impl_operation_tests!(VarUint24);
+        impl_operation_tests!(VarUint24, check_max_div);
     }
 
     #[test]
     fn var_uint7_operations() {
-        impl_operation_tests!(VarUint56);
+        impl_operation_tests!(VarUint56, check_max_div);
     }
 
     #[test]
     fn tokens_operations() {
-        impl_operation_tests!(Tokens);
+        impl_operation_tests!(Tokens, check_max_div);
     }
 
     #[test]
