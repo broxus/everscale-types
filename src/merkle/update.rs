@@ -572,6 +572,13 @@ mod tests {
         .build()
         .unwrap();
 
+        {
+            // Test serialization
+            let mut builder = RcCellBuilder::new();
+            assert!(merkle_update.store_into(&mut builder, &mut RcCellFamily::default_finalizer()));
+            builder.build().unwrap();
+        }
+
         let after_apply = merkle_update.apply(&old_dict_cell).unwrap();
         assert_eq!(after_apply.as_ref(), new_dict_cell.as_ref());
     }
