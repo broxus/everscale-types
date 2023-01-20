@@ -37,6 +37,24 @@ impl<'a, C: CellFamily> Load<'a, C> for () {
     }
 }
 
+macro_rules! impl_load_for_tuples {
+    ($( ($($t:ident),+) ),*$(,)?) => {$(
+        impl<'a, C: CellFamily, $($t: Load<'a, C>),+> Load<'a, C> for ($($t),*) {
+            fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+                Some(($(<$t>::load_from(slice)?),+))
+            }
+        }
+    )*};
+}
+
+impl_load_for_tuples! {
+    (T1, T2),
+    (T1, T2, T3),
+    (T1, T2, T3, T4),
+    (T1, T2, T3, T4, T5),
+    (T1, T2, T3, T4, T5, T6),
+}
+
 impl<'a, C: CellFamily, T: Load<'a, C>> Load<'a, C> for Option<T> {
     #[inline]
     fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {

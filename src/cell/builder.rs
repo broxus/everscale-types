@@ -54,6 +54,25 @@ impl<C: CellFamily> Store<C> for () {
     }
 }
 
+macro_rules! impl_store_for_tuples {
+    ($( ($($field:ident: $t:ident),+) ),*$(,)?) => {$(
+        impl<C: CellFamily, $($t: Store<C>),+> Store<C> for ($($t),*) {
+            fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+                let ($($field),+) = self;
+                $($field.store_into(builder, finalizer))&&*
+            }
+        }
+    )*};
+}
+
+impl_store_for_tuples! {
+    (t1: T1, t2: T2),
+    (t1: T1, t2: T2, t3: T3),
+    (t1: T1, t2: T2, t3: T3, t4: T4),
+    (t1: T1, t2: T2, t3: T3, t4: T4, t5: T5),
+    (t1: T1, t2: T2, t3: T3, t4: T4, t5: T5, t6: T6),
+}
+
 impl<C: CellFamily, T: Store<C>> Store<C> for Option<T> {
     #[inline]
     fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
