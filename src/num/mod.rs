@@ -17,6 +17,20 @@ macro_rules! impl_ops {
             }
         }
 
+        impl PartialEq<$inner> for $ident {
+            #[inline]
+            fn eq(&self, other: &$inner) -> bool {
+                self.0 == *other
+            }
+        }
+
+        impl PartialEq<$ident> for $inner {
+            #[inline]
+            fn eq(&self, other: &$ident) -> bool {
+                *self == other.0
+            }
+        }
+
         impl std::fmt::Display for $ident {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 self.0.fmt(f)

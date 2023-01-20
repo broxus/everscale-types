@@ -727,7 +727,7 @@ impl<'a, C, K, V> Iterator for Iter<'a, C, K, V>
 where
     for<'c> C: DefaultFinalizer + 'c,
     for<'c> K: Load<'c, C> + DictKey,
-    for<'c> V: Load<'c, C>,
+    V: Load<'a, C>,
 {
     type Item = Result<(K, V), Error>;
 

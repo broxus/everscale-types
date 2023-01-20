@@ -1,6 +1,7 @@
 //! Message models.
 
 use crate::cell::*;
+use crate::dict::Dict;
 use crate::num::*;
 use crate::util::{unlikely, DisplayHash};
 
@@ -30,7 +31,7 @@ pub struct Transaction<'a, C: CellFamily> {
     /// Optional incoming message.
     pub in_msg: Option<Lazy<C, Message<'a, C>>>,
     /// Outgoing messages.
-    pub out_msgs: Option<CellContainer<C>>,
+    pub out_msgs: Dict<C, Uint15, Lazy<C, Message<'a, C>>>,
     /// Total transaction fees (including extra fwd fees).
     pub total_fees: CurrencyCollection<C>,
     /// Account state hashes.
@@ -111,7 +112,7 @@ impl<'a, C: CellFamily> Load<'a, C> for Transaction<'a, C> {
         let (in_msg, out_msgs) = {
             let slice = &mut slice.load_reference()?.as_slice();
             let in_msg = Option::<Lazy<C, Message<'a, C>>>::load_from(slice)?;
-            let out_msgs = Option::<CellContainer<C>>::load_from(slice)?;
+            let out_msgs = Dict::load_from(slice)?;
             (in_msg, out_msgs)
         };
 
@@ -884,6 +885,17 @@ mod tests {
         let boc = RcBoc::decode_base64(boc).unwrap();
         let tx = Transaction::load_from(&mut boc.as_slice()).unwrap();
         println!("tx: {:#?}", tx);
+
+        for (i, entry) in tx.out_msgs.iter().enumerate() {
+            let (number, lazy) = entry.unwrap();
+            let message = lazy.load().unwrap();
+            assert_eq!(number, i as u16);
+            println!("Message: {i}, message: {message:?}");
+        }
+        assert_eq!(
+            tx.out_msg_count.into_inner() as usize,
+            tx.out_msgs.raw_values().count()
+        );
 
         let info = tx.load_info().unwrap();
         println!("info: {info:#?}");
