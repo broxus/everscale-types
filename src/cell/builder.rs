@@ -47,6 +47,13 @@ impl<C: CellFamily, T: Store<C> + ?Sized> Store<C> for Rc<T> {
     }
 }
 
+impl<C: CellFamily> Store<C> for () {
+    #[inline]
+    fn store_into(&self, _: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+        true
+    }
+}
+
 impl<C: CellFamily, T: Store<C>> Store<C> for Option<T> {
     #[inline]
     fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {

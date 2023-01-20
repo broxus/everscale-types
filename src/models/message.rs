@@ -723,6 +723,10 @@ impl<'a, C: CellFamily> Load<'a, C> for StdAddr {
     }
 }
 
+impl crate::dict::DictKey for StdAddr {
+    const BITS: u16 = StdAddr::BITS_WITHOUT_ANYCAST;
+}
+
 /// Variable-length internal address.
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct VarAddr {

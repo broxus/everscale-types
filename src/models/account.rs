@@ -82,7 +82,7 @@ pub struct StateInit<C: CellFamily> {
     /// Optional contract data.
     pub data: Option<CellContainer<C>>,
     /// Libraries used in smart-contract.
-    pub libraries: Dict<C, 256>,
+    pub libraries: RawDict<C, 256>,
 }
 
 impl<C: CellFamily> StateInit<C> {
@@ -116,7 +116,7 @@ impl<'a, C: CellFamily> Load<'a, C> for StateInit<C> {
             special: Option::<SpecialFlags>::load_from(slice)?,
             code: Option::<CellContainer<C>>::load_from(slice)?,
             data: Option::<CellContainer<C>>::load_from(slice)?,
-            libraries: Dict::<C, 256>::load_from(slice)?,
+            libraries: RawDict::<C, 256>::load_from(slice)?,
         })
     }
 }
@@ -210,7 +210,7 @@ impl<'a, C: CellFamily> Load<'a, C> for CurrencyCollection<C> {
 /// Dictionary with amounts for multiple currencies.
 #[derive(Default, Clone, Eq, PartialEq)]
 #[repr(transparent)]
-pub struct ExtraCurrencyCollection<C: CellFamily>(Dict<C, 32>);
+pub struct ExtraCurrencyCollection<C: CellFamily>(RawDict<C, 32>);
 
 impl<C: CellFamily> std::fmt::Debug for ExtraCurrencyCollection<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -223,7 +223,7 @@ impl<C: CellFamily> std::fmt::Debug for ExtraCurrencyCollection<C> {
 impl<C: CellFamily> ExtraCurrencyCollection<C> {
     /// Creates an empty extra currency collection.
     pub const fn new() -> Self {
-        Self(Dict::new())
+        Self(RawDict::new())
     }
 
     /// Returns `true` if the dictionary contains no elements.
@@ -241,6 +241,6 @@ impl<C: CellFamily> Store<C> for ExtraCurrencyCollection<C> {
 
 impl<'a, C: CellFamily> Load<'a, C> for ExtraCurrencyCollection<C> {
     fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self(Dict::load_from(slice)?))
+        Some(Self(RawDict::load_from(slice)?))
     }
 }

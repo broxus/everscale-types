@@ -180,7 +180,7 @@ mod tests {
     #[derive(::serde::Serialize, ::serde::Deserialize)]
     struct SerdeWithRepr<C: DefaultFinalizer> {
         #[serde(with = "BocRepr::<C>")]
-        dict: crate::dict::Dict<C, 32>,
+        dict: crate::dict::RawDict<C, 32>,
         #[serde(with = "BocRepr::<C>")]
         merkle_proof: crate::merkle::MerkleProof<C>,
         #[serde(with = "BocRepr::<C>")]
@@ -218,7 +218,7 @@ mod tests {
             merkle_update,
         } = serde_json::from_str(&test).unwrap();
 
-        let orig_dict = crate::dict::Dict::<RcCellFamily, 32>::load_from(
+        let orig_dict = crate::dict::RawDict::<RcCellFamily, 32>::load_from(
             &mut RcBoc::decode_base64(boc_dict).unwrap().as_slice(),
         )
         .unwrap();

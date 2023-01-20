@@ -653,6 +653,10 @@ macro_rules! impl_small_uints {
             }
         }
 
+        impl crate::dict::DictKey for $ident {
+            const BITS: u16 = $bits;
+        }
+
         impl_ops! { $ident, u16 }
     };
 }

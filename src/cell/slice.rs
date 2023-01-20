@@ -30,6 +30,13 @@ impl<'a, C: CellFamily, T: Load<'a, C>> Load<'a, C> for Rc<T> {
     }
 }
 
+impl<'a, C: CellFamily> Load<'a, C> for () {
+    #[inline]
+    fn load_from(_: &mut CellSlice<'a, C>) -> Option<Self> {
+        Some(())
+    }
+}
+
 impl<'a, C: CellFamily, T: Load<'a, C>> Load<'a, C> for Option<T> {
     #[inline]
     fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
