@@ -4,6 +4,44 @@ use crate::cell::*;
 use crate::dict::*;
 use crate::num::*;
 
+/// Amount of unique cells and bits for shard states.
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+pub struct StorageUsed {
+    /// Amount of unique cells.
+    pub cells: VarUint56,
+    /// The total number of bits in unique cells.
+    pub bits: VarUint56,
+    /// The number of public libraries in the state.
+    pub public_cells: VarUint56,
+}
+
+impl StorageUsed {
+    /// The additive identity for this type, i.e. `0`.
+    pub const ZERO: Self = Self {
+        cells: VarUint56::ZERO,
+        bits: VarUint56::ZERO,
+        public_cells: VarUint56::ZERO,
+    };
+}
+
+impl<C: CellFamily> Store<C> for StorageUsed {
+    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+        self.cells.store_into(builder, finalizer)
+            && self.bits.store_into(builder, finalizer)
+            && self.public_cells.store_into(builder, finalizer)
+    }
+}
+
+impl<'a, C: CellFamily> Load<'a, C> for StorageUsed {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+        Some(Self {
+            cells: VarUint56::load_from(slice)?,
+            bits: VarUint56::load_from(slice)?,
+            public_cells: VarUint56::load_from(slice)?,
+        })
+    }
+}
+
 /// Amount of unique cells and bits.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 pub struct StorageUsedShort {
@@ -14,7 +52,7 @@ pub struct StorageUsedShort {
 }
 
 impl StorageUsedShort {
-    /// The additive identity for this integer type, i.e. `0`.
+    /// The additive identity for this type, i.e. `0`.
     pub const ZERO: Self = Self {
         cells: VarUint56::ZERO,
         bits: VarUint56::ZERO,
@@ -210,7 +248,7 @@ impl<'a, C: CellFamily> Load<'a, C> for CurrencyCollection<C> {
 /// Dictionary with amounts for multiple currencies.
 #[derive(Default, Clone, Eq, PartialEq)]
 #[repr(transparent)]
-pub struct ExtraCurrencyCollection<C: CellFamily>(RawDict<C, 32>);
+pub struct ExtraCurrencyCollection<C: CellFamily>(Dict<C, CellHash, VarUint248>);
 
 impl<C: CellFamily> std::fmt::Debug for ExtraCurrencyCollection<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -223,12 +261,17 @@ impl<C: CellFamily> std::fmt::Debug for ExtraCurrencyCollection<C> {
 impl<C: CellFamily> ExtraCurrencyCollection<C> {
     /// Creates an empty extra currency collection.
     pub const fn new() -> Self {
-        Self(RawDict::new())
+        Self(Dict::new())
     }
 
     /// Returns `true` if the dictionary contains no elements.
     pub const fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    /// Returns the underlying dictionary.
+    pub const fn as_dict(&self) -> &Dict<C, CellHash, VarUint248> {
+        &self.0
     }
 }
 
@@ -241,6 +284,6 @@ impl<C: CellFamily> Store<C> for ExtraCurrencyCollection<C> {
 
 impl<'a, C: CellFamily> Load<'a, C> for ExtraCurrencyCollection<C> {
     fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self(RawDict::load_from(slice)?))
+        Some(Self(Dict::load_from(slice)?))
     }
 }
