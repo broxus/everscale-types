@@ -3,6 +3,7 @@ use std::hash::BuildHasher;
 
 use super::{make_pruned_branch, FilterAction, MerkleFilter};
 use crate::cell::*;
+use crate::util::DisplayHash;
 
 /// Parsed Merkle proof representation.
 ///
@@ -19,7 +20,7 @@ pub struct MerkleProof<C: CellFamily> {
 impl<C: CellFamily> std::fmt::Debug for MerkleProof<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MerkleProof")
-            .field("hash", &hex::encode(self.hash.as_slice()))
+            .field("hash", &DisplayHash(&self.hash))
             .field("depth", &self.depth)
             .field("cell", &self.cell.as_ref().debug_root())
             .finish()

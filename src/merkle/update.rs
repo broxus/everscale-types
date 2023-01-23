@@ -3,6 +3,7 @@ use std::hash::BuildHasher;
 
 use super::{make_pruned_branch, FilterAction, MerkleFilter, MerkleProofBuilder};
 use crate::cell::*;
+use crate::util::DisplayHash;
 
 /// Parsed Merkle update representation.
 ///
@@ -25,8 +26,8 @@ pub struct MerkleUpdate<C: CellFamily> {
 impl<C: CellFamily> std::fmt::Debug for MerkleUpdate<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MerkleUpdate")
-            .field("old_hash", &self.old_hash)
-            .field("new_hash", &self.new_hash)
+            .field("old_hash", &DisplayHash(&self.old_hash))
+            .field("new_hash", &DisplayHash(&self.new_hash))
             .field("old_depth", &self.old_depth)
             .field("new_depth", &self.new_depth)
             .field("old", &self.old.as_ref().debug_root())
