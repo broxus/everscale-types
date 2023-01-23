@@ -695,7 +695,11 @@ impl FromStr for StdAddr {
             None => return Err(ParseAddrError::InvalidAccountId),
         }
 
-        Ok(result)
+        if parts.next().is_none() {
+            Ok(result)
+        } else {
+            Err(ParseAddrError::UnexpectedPart)
+        }
     }
 }
 

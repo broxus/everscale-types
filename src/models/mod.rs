@@ -7,10 +7,12 @@ use crate::cell::{
 };
 
 pub use account::*;
+pub use block::*;
 pub use message::*;
 pub use transaction::*;
 
 pub mod account;
+pub mod block;
 pub mod message;
 pub mod transaction;
 

@@ -87,7 +87,7 @@ pub mod models;
 #[cfg(feature = "serde")]
 mod serde;
 
-mod error;
+pub mod error;
 
 #[cfg(test)]
 mod tests {
