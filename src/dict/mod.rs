@@ -136,7 +136,7 @@ impl<C: CellFamily, K, V> Dict<C, K, V> {
 
 impl<C, K, V> Dict<C, K, V>
 where
-    for<'a> C: DefaultFinalizer + 'a,
+    for<'c> C: DefaultFinalizer + 'c,
     K: Store<C> + DictKey,
 {
     /// Returns `true` if the dictionary contains a value for the specified key.
@@ -146,7 +146,7 @@ where
     {
         fn contains_key_impl<C, K>(root: &Option<CellContainer<C>>, key: &K) -> Result<bool, Error>
         where
-            for<'a> C: DefaultFinalizer + 'a,
+            for<'c> C: DefaultFinalizer + 'c,
             K: Store<C> + DictKey,
         {
             let key = ok!(serialize_entry(key, &mut C::default_finalizer()));
@@ -158,7 +158,7 @@ where
 
 impl<C, K, V> Dict<C, K, V>
 where
-    for<'a> C: DefaultFinalizer + 'a,
+    for<'c> C: DefaultFinalizer + 'c,
     K: Store<C> + DictKey,
     for<'a> V: Load<'a, C>,
 {
@@ -175,7 +175,7 @@ where
 
 impl<C, K, V> Dict<C, K, V>
 where
-    for<'a> C: DefaultFinalizer + 'a,
+    for<'c> C: DefaultFinalizer + 'c,
     K: Store<C> + DictKey,
     V: Store<C>,
 {
@@ -265,7 +265,7 @@ where
 
 impl<C, K, V> Dict<C, K, V>
 where
-    for<'a> C: CellFamily + 'a,
+    for<'c> C: CellFamily + 'c,
     K: Store<C> + DictKey,
     for<'a> V: Load<'a, C>,
 {
@@ -350,7 +350,7 @@ where
 
 impl<C, K, V> Dict<C, K, V>
 where
-    for<'a> C: CellFamily + 'a,
+    for<'c> C: CellFamily + 'c,
     K: Store<C> + DictKey,
     V: Store<C>,
 {
@@ -406,7 +406,7 @@ where
         finalizer: &mut dyn Finalizer<C>,
     ) -> Result<(), Error>
     where
-        for<'a> C: CellFamily + 'a,
+        for<'c> C: CellFamily + 'c,
         K: Store<C> + DictKey,
         V: Store<C>,
     {
@@ -1109,7 +1109,7 @@ impl<'a, C: CellFamily> RawValues<'a, C> {
     }
 
     #[inline]
-    fn finish(&mut self, err: Error) -> Error {
+    pub(crate) fn finish(&mut self, err: Error) -> Error {
         self.status = IterStatus::Broken;
         err
     }

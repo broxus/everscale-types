@@ -538,7 +538,7 @@ mod tests {
     fn static_cells() {
         fn check_static_cells<C>()
         where
-            for<'a> C: DefaultFinalizer + 'a,
+            for<'c> C: DefaultFinalizer + 'c,
         {
             let mut builder = CellBuilder::<C>::new();
             assert!(builder.store_zeros(1023));

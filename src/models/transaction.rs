@@ -1,7 +1,8 @@
 //! Message models.
 
 use crate::cell::*;
-use crate::dict::Dict;
+use crate::dict::{self, Dict};
+use crate::error::*;
 use crate::num::*;
 use crate::util::{unlikely, DisplayHash};
 
@@ -11,7 +12,7 @@ use super::Lazy;
 
 /// Blockchain transaction.
 #[derive(Clone, Eq, PartialEq)]
-pub struct Transaction<'a, C: CellFamily> {
+pub struct Transaction<C: CellFamily> {
     /// Account on which this transaction was produced.
     pub account: CellHash,
     /// Logical time when the transaction was created.
@@ -29,9 +30,9 @@ pub struct Transaction<'a, C: CellFamily> {
     /// Account status after this transaction.
     pub end_status: AccountStatus,
     /// Optional incoming message.
-    pub in_msg: Option<Lazy<C, Message<'a, C>>>,
+    pub in_msg: Option<CellContainer<C>>,
     /// Outgoing messages.
-    pub out_msgs: Dict<C, Uint15, Lazy<C, Message<'a, C>>>,
+    pub out_msgs: Dict<C, Uint15, CellContainer<C>>,
     /// Total transaction fees (including extra fwd fees).
     pub total_fees: CurrencyCollection<C>,
     /// Account state hashes.
@@ -40,14 +41,41 @@ pub struct Transaction<'a, C: CellFamily> {
     pub info: Lazy<C, TxInfo<C>>,
 }
 
-impl<'a, C: CellFamily> Transaction<'a, C> {
+impl<C: CellFamily> Transaction<C> {
+    /// Tries to load the incoming message, if present.
+    pub fn load_in_msg(&self) -> Result<Option<Message<'_, C>>, Error> {
+        match &self.in_msg {
+            Some(in_msg) => match Message::<C>::load_from(&mut in_msg.as_ref().as_slice()) {
+                Some(message) => Ok(Some(message)),
+                None => Err(Error::CellUnderflow),
+            },
+            None => Ok(None),
+        }
+    }
+
     /// Tries to load the detailed transaction info from the lazy cell.
     pub fn load_info(&self) -> Option<TxInfo<C>> {
         self.info.load()
     }
 }
 
-impl<'a, C: CellFamily> std::fmt::Debug for Transaction<'a, C> {
+impl<C> Transaction<C>
+where
+    for<'c> C: CellFamily + 'c,
+{
+    /// Gets an iterator over the output messages of this transaction, in order by lt.
+    /// The iterator element type is `Result<Message<'a, C>>`.
+    ///
+    /// If the dictionary or message is invalid, finishes after the first invalid element,
+    /// returning an error.
+    pub fn iter_out_msgs(&'_ self) -> TxOutMsgIter<'_, C> {
+        TxOutMsgIter {
+            inner: self.out_msgs.raw_values(),
+        }
+    }
+}
+
+impl<C: CellFamily> std::fmt::Debug for Transaction<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Transaction")
             .field("account", &DisplayHash(&self.account))
@@ -67,11 +95,50 @@ impl<'a, C: CellFamily> std::fmt::Debug for Transaction<'a, C> {
     }
 }
 
-impl<'a, C: CellFamily> Transaction<'a, C> {
+/// An iterator over the transaction output messages.
+///
+/// This struct is created by the [`iter_out_msgs`] method on [`Transaction`].
+/// See its documentation for more.
+///
+/// [`iter_out_msgs`]: Transaction::iter_out_msgs
+pub struct TxOutMsgIter<'a, C: CellFamily> {
+    inner: dict::RawValues<'a, C>,
+}
+
+impl<'a, C: CellFamily> Clone for TxOutMsgIter<'a, C> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<'a, C: CellFamily + 'a> Iterator for TxOutMsgIter<'a, C>
+where
+    for<'c> C: CellFamily + 'c,
+{
+    type Item = Result<Message<'a, C>, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.inner.next()? {
+            Ok(mut value) => {
+                if let Some(value) = value.load_reference() {
+                    if let Some(message) = Message::<'a, C>::load_from(&mut value.as_slice()) {
+                        return Some(Ok(message));
+                    }
+                }
+                Some(Err(self.inner.finish(Error::CellUnderflow)))
+            }
+            Err(e) => Some(Err(e)),
+        }
+    }
+}
+
+impl<C: CellFamily> Transaction<C> {
     const TAG: u8 = 0b0111;
 }
 
-impl<'a, C: CellFamily> Store<C> for Transaction<'a, C> {
+impl<C: CellFamily> Store<C> for Transaction<C> {
     fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
         let messages = {
             let mut builder = CellBuilder::<C>::new();
@@ -103,7 +170,7 @@ impl<'a, C: CellFamily> Store<C> for Transaction<'a, C> {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for Transaction<'a, C> {
+impl<'a, C: CellFamily> Load<'a, C> for Transaction<C> {
     fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
         if slice.load_small_uint(4)? != Self::TAG {
             return None;
@@ -111,7 +178,7 @@ impl<'a, C: CellFamily> Load<'a, C> for Transaction<'a, C> {
 
         let (in_msg, out_msgs) = {
             let slice = &mut slice.load_reference()?.as_slice();
-            let in_msg = Option::<Lazy<C, Message<'a, C>>>::load_from(slice)?;
+            let in_msg = Option::<CellContainer<C>>::load_from(slice)?;
             let out_msgs = Dict::load_from(slice)?;
             (in_msg, out_msgs)
         };
@@ -886,16 +953,26 @@ mod tests {
         let tx = Transaction::load_from(&mut boc.as_slice()).unwrap();
         println!("tx: {:#?}", tx);
 
+        let in_msg = tx.load_in_msg().unwrap();
+        println!("In message: {in_msg:?}");
+
         for (i, entry) in tx.out_msgs.iter().enumerate() {
-            let (number, lazy) = entry.unwrap();
-            let message = lazy.load().unwrap();
+            let (number, cell) = entry.unwrap();
+            let message = Message::load_from(&mut cell.as_slice()).unwrap();
             assert_eq!(number, i as u16);
-            println!("Message: {i}, message: {message:?}");
+            println!("Out message: {i}, message: {message:?}");
         }
         assert_eq!(
             tx.out_msg_count.into_inner() as usize,
             tx.out_msgs.raw_values().count()
         );
+
+        let mut out_msg_count = 0;
+        for msg in tx.iter_out_msgs() {
+            msg.unwrap();
+            out_msg_count += 1;
+        }
+        assert_eq!(out_msg_count, tx.out_msg_count);
 
         let info = tx.load_info().unwrap();
         println!("info: {info:#?}");

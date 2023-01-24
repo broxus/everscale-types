@@ -805,7 +805,7 @@ impl<C: CellFamily> CellBuilder<C> {
 
 impl<C> CellBuilder<C>
 where
-    for<'a> C: DefaultFinalizer + 'a,
+    for<'c> C: DefaultFinalizer + 'c,
 {
     /// Tries to build a new cell using the default finalizer.
     ///

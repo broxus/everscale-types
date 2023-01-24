@@ -11,6 +11,7 @@ use crate::util::{unlikely, DisplayHash};
 use crate::CellHash;
 
 use super::account::*;
+use super::transaction::*;
 use super::Lazy;
 
 /// Shard block.
@@ -26,8 +27,8 @@ pub struct Block<C: CellFamily> {
     pub state_update: Lazy<C, MerkleUpdate<C>>,
     /// Merkle updates for the outgoing messages queue.
     pub out_msg_queue_updates: Option<Dict<C, u32, Lazy<C, MerkleUpdate<C>>>>,
-    /// Extra block info.
-    pub extra: CellContainer<C>,
+    /// Block content.
+    pub extra: Lazy<C, BlockExtra<C>>,
 }
 
 impl<C: CellFamily> Block<C> {
@@ -47,6 +48,11 @@ impl<C: CellFamily> Block<C> {
     /// Tries to load state update.
     pub fn load_state_update(&self) -> Option<MerkleUpdate<C>> {
         self.state_update.load()
+    }
+
+    /// Tries to load block content.
+    pub fn load_extra(&self) -> Option<BlockExtra<C>> {
+        self.extra.load()
     }
 }
 
@@ -538,6 +544,134 @@ impl<'a, C: CellFamily> Load<'a, C> for ValueFlow<C> {
     }
 }
 
+/// Block content.
+#[derive(Clone, Eq, PartialEq)]
+pub struct BlockExtra<C: CellFamily> {
+    /// Incoming message description.
+    pub in_msg_description: CellContainer<C>,
+    /// Outgoing message description.
+    pub out_msg_description: CellContainer<C>,
+    /// Block transactions info.
+    pub account_blocks: Lazy<C, AccountBlocks<C>>,
+    /// Random generator seed.
+    pub rand_seed: CellHash,
+    /// Public key of the collator who produced this block.
+    pub created_by: CellHash,
+    /// Additional block content.
+    pub custom: Option<CellContainer<C>>,
+}
+
+impl<C: CellFamily> BlockExtra<C> {
+    const TAG: u32 = 0x4a33f6fd;
+}
+
+impl<C: CellFamily> std::fmt::Debug for BlockExtra<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BlockExtra")
+            .field("in_msg_description", &self.in_msg_description)
+            .field("out_msg_description", &self.out_msg_description)
+            .field("account_blocks", &self.account_blocks)
+            .field("rand_seed", &DisplayHash(&self.rand_seed))
+            .field("created_by", &DisplayHash(&self.created_by))
+            .field("custom", &self.custom)
+            .finish()
+    }
+}
+
+impl<C: CellFamily> Store<C> for BlockExtra<C> {
+    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+        builder.store_u32(Self::TAG)
+            && builder.store_reference(self.in_msg_description.clone())
+            && builder.store_reference(self.out_msg_description.clone())
+            && self.account_blocks.store_into(builder, finalizer)
+            && builder.store_u256(&self.rand_seed)
+            && builder.store_u256(&self.created_by)
+            && self.custom.store_into(builder, finalizer)
+    }
+}
+
+impl<'a, C: CellFamily> Load<'a, C> for BlockExtra<C> {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+        if slice.load_u32()? != Self::TAG {
+            return None;
+        }
+
+        Some(Self {
+            in_msg_description: slice.load_reference_cloned()?,
+            out_msg_description: slice.load_reference_cloned()?,
+            account_blocks: Lazy::load_from(slice)?,
+            rand_seed: slice.load_u256()?,
+            created_by: slice.load_u256()?,
+            custom: Option::<CellContainer<C>>::load_from(slice)?,
+        })
+    }
+}
+
+/// Block transactions info.
+pub struct AccountBlocks<C: CellFamily> {
+    /// Transactions grouped by account.
+    pub blocks: Dict<C, CellHash, (CurrencyCollection<C>, AccountBlock<C>)>,
+    /// Total transaction fees.
+    pub total_fees: CurrencyCollection<C>,
+}
+
+impl<C: CellFamily> Store<C> for AccountBlocks<C> {
+    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+        self.blocks.store_into(builder, finalizer) && self.total_fees.store_into(builder, finalizer)
+    }
+}
+
+impl<'a, C: CellFamily> Load<'a, C> for AccountBlocks<C> {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+        Some(Self {
+            blocks: Dict::load_from(slice)?,
+            total_fees: CurrencyCollection::load_from(slice)?,
+        })
+    }
+}
+
+/// A group of account transactions.
+#[derive(Clone)]
+pub struct AccountBlock<C: CellFamily> {
+    /// Account id.
+    pub account: CellHash,
+    /// Dictionary with fees and account transactions.
+    pub transactions: Dict<C, u64, (CurrencyCollection<C>, Transaction<C>)>,
+    /// Sum of all account transactions fees.
+    pub total_fees: CurrencyCollection<C>,
+    /// Account state hashes before and after this block.
+    pub state_update: Lazy<C, HashUpdate>,
+}
+
+impl<C: CellFamily> AccountBlock<C> {
+    const TAG: u8 = 5;
+}
+
+impl<C: CellFamily> Store<C> for AccountBlock<C> {
+    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+        builder.store_small_uint(Self::TAG, 4)
+            && builder.store_u256(&self.account)
+            && self.transactions.store_into(builder, finalizer)
+            && self.total_fees.store_into(builder, finalizer)
+            && self.state_update.store_into(builder, finalizer)
+    }
+}
+
+impl<'a, C: CellFamily> Load<'a, C> for AccountBlock<C> {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+        if slice.load_small_uint(4)? != Self::TAG {
+            return None;
+        }
+
+        Some(Self {
+            account: slice.load_u256()?,
+            transactions: Dict::load_from(slice)?,
+            total_fees: CurrencyCollection::load_from(slice)?,
+            state_update: Lazy::load_from(slice)?,
+        })
+    }
+}
+
 /// Full block id.
 #[derive(Default, Clone, Copy, Eq, Hash, PartialEq, Ord, PartialOrd)]
 pub struct BlockId {
@@ -999,6 +1133,9 @@ mod tests {
             serialize_any(state_update).as_ref(),
             block.state_update.cell.as_ref()
         );
+
+        let extra = block.load_extra().unwrap();
+        println!("extra: {:#?}", extra);
 
         let serialized = serialize_any(block);
         assert_eq!(serialized.as_ref(), boc.as_ref());
