@@ -5,11 +5,11 @@ use crate::cell::*;
 use crate::Error;
 
 use super::raw::*;
-use super::{dict_get, dict_insert, DictKey, SetMode};
+use super::{dict_get, dict_insert, serialize_entry, DictKey, SetMode};
 
 /// Typed dictionary with fixed length keys.
 pub struct Dict<C: CellFamily, K, V> {
-    root: Option<CellContainer<C>>,
+    pub(crate) root: Option<CellContainer<C>>,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }
@@ -35,11 +35,7 @@ impl<C: CellFamily, K, V> Store<C> for Dict<C, K, V> {
 impl<C: CellFamily, K, V> Default for Dict<C, K, V> {
     #[inline]
     fn default() -> Self {
-        Self {
-            root: None,
-            _key: PhantomData,
-            _value: PhantomData,
-        }
+        Self::new()
     }
 }
 
@@ -129,7 +125,6 @@ impl<C, K, V> Dict<C, K, V>
 where
     for<'c> C: DefaultFinalizer + 'c,
     K: Store<C> + DictKey,
-    for<'a> V: Load<'a, C>,
 {
     /// Returns the value corresponding to the key.
     ///
@@ -137,6 +132,7 @@ where
     pub fn get<'a: 'b, 'b, Q>(&'a self, key: Q) -> Result<Option<V>, Error>
     where
         Q: Borrow<K> + 'b,
+        V: Load<'a, C>,
     {
         self.get_ext(key, &mut C::default_finalizer())
     }
@@ -188,7 +184,13 @@ where
     {
         self.add_ext(key, value, &mut C::default_finalizer())
     }
+}
 
+impl<C, K, V> Dict<C, K, V>
+where
+    for<'c> C: DefaultFinalizer + 'c,
+    K: Store<C> + DictKey,
+{
     /// Gets an iterator over the entries of the dictionary, sorted by key.
     /// The iterator element type is `Result<(K, V)>`.
     ///
@@ -202,7 +204,10 @@ where
     ///
     /// [`values`]: Dict::values
     /// [`raw_values`]: Dict::raw_values
-    pub fn iter(&'_ self) -> Iter<'_, C, K, V> {
+    pub fn iter<'a>(&'a self) -> Iter<'_, C, K, V>
+    where
+        V: Load<'a, C>,
+    {
         Iter::new(&self.root)
     }
 
@@ -221,13 +226,22 @@ where
     pub fn keys(&'_ self) -> Keys<'_, C, K> {
         Keys::new(&self.root)
     }
+}
 
+impl<C, K, V> Dict<C, K, V>
+where
+    for<'c> C: DefaultFinalizer + 'c,
+    K: DictKey,
+{
     /// Gets an iterator over the values of the dictionary, in order by key.
     /// The iterator element type is `Result<V>`.
     ///
     /// If the dictionary is invalid, finishes after the first invalid element,
     /// returning an error.
-    pub fn values(&'_ self) -> Values<'_, C, V> {
+    pub fn values<'a>(&'a self) -> Values<'a, C, V>
+    where
+        V: Load<'a, C>,
+    {
         Values::new(&self.root, K::BITS)
     }
 }
@@ -236,7 +250,6 @@ impl<C, K, V> Dict<C, K, V>
 where
     for<'c> C: CellFamily + 'c,
     K: Store<C> + DictKey,
-    for<'a> V: Load<'a, C>,
 {
     /// Returns the value corresponding to the key.
     ///
@@ -248,6 +261,7 @@ where
     ) -> Result<Option<V>, Error>
     where
         Q: Borrow<K> + 'b,
+        V: Load<'a, C>,
     {
         pub fn get_ext_impl<'a: 'b, 'b, C, K, V>(
             root: &'a Option<CellContainer<C>>,
@@ -306,7 +320,13 @@ where
     pub fn raw_keys(&'_ self) -> RawKeys<'_, C> {
         RawKeys::new(&self.root, K::BITS)
     }
+}
 
+impl<C, K, V> Dict<C, K, V>
+where
+    for<'c> C: CellFamily + 'c,
+    K: DictKey,
+{
     /// Gets an iterator over the raw values of the dictionary, in order by key.
     /// The iterator element type is `Result<CellSlice<C>>`.
     ///
@@ -553,19 +573,6 @@ where
             Err(e) => Some(Err(e)),
         }
     }
-}
-
-fn serialize_entry<C: CellFamily, T: Store<C>>(
-    entry: &T,
-    finalizer: &mut dyn Finalizer<C>,
-) -> Result<CellContainer<C>, Error> {
-    let mut builder = CellBuilder::<C>::new();
-    if entry.store_into(&mut builder, finalizer) {
-        if let Some(key) = builder.build_ext(finalizer) {
-            return Ok(key);
-        }
-    }
-    Err(Error::CellOverflow)
 }
 
 #[cfg(test)]

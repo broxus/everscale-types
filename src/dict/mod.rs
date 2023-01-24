@@ -4,9 +4,11 @@ use crate::cell::*;
 use crate::util::unlikely;
 use crate::Error;
 
+pub use aug::*;
 pub use raw::*;
 pub use typed::*;
 
+mod aug;
 mod raw;
 mod typed;
 
@@ -471,6 +473,19 @@ where
     };
     let len = label.load_uint(bits_for_len)? as u16;
     Some(cell.as_slice().get_prefix(len, 0))
+}
+
+fn serialize_entry<C: CellFamily, T: Store<C>>(
+    entry: &T,
+    finalizer: &mut dyn Finalizer<C>,
+) -> Result<CellContainer<C>, Error> {
+    let mut builder = CellBuilder::<C>::new();
+    if entry.store_into(&mut builder, finalizer) {
+        if let Some(key) = builder.build_ext(finalizer) {
+            return Ok(key);
+        }
+    }
+    Err(Error::CellOverflow)
 }
 
 #[cfg(test)]

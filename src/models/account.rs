@@ -87,6 +87,11 @@ pub enum AccountStatus {
     NotExists = 0b11,
 }
 
+impl AccountStatus {
+    /// The number of data bits that this struct occupies.
+    pub const BITS: u16 = 2;
+}
+
 impl<C: CellFamily> Store<C> for AccountStatus {
     #[inline]
     fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {

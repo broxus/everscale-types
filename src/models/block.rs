@@ -3,7 +3,7 @@
 use std::str::FromStr;
 
 use crate::cell::*;
-use crate::dict::Dict;
+use crate::dict::{AugDict, AugDictSkipValue, Dict};
 use crate::error::ParseBlockIdError;
 use crate::merkle::MerkleUpdate;
 use crate::num::*;
@@ -552,7 +552,7 @@ pub struct BlockExtra<C: CellFamily> {
     /// Outgoing message description.
     pub out_msg_description: CellContainer<C>,
     /// Block transactions info.
-    pub account_blocks: Lazy<C, AccountBlocks<C>>,
+    pub account_blocks: Lazy<C, AugDict<C, CellHash, CurrencyCollection<C>, AccountBlock<C>>>,
     /// Random generator seed.
     pub rand_seed: CellHash,
     /// Public key of the collator who produced this block.
@@ -607,38 +607,13 @@ impl<'a, C: CellFamily> Load<'a, C> for BlockExtra<C> {
     }
 }
 
-/// Block transactions info.
-pub struct AccountBlocks<C: CellFamily> {
-    /// Transactions grouped by account.
-    pub blocks: Dict<C, CellHash, (CurrencyCollection<C>, AccountBlock<C>)>,
-    /// Total transaction fees.
-    pub total_fees: CurrencyCollection<C>,
-}
-
-impl<C: CellFamily> Store<C> for AccountBlocks<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        self.blocks.store_into(builder, finalizer) && self.total_fees.store_into(builder, finalizer)
-    }
-}
-
-impl<'a, C: CellFamily> Load<'a, C> for AccountBlocks<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self {
-            blocks: Dict::load_from(slice)?,
-            total_fees: CurrencyCollection::load_from(slice)?,
-        })
-    }
-}
-
 /// A group of account transactions.
 #[derive(Clone)]
 pub struct AccountBlock<C: CellFamily> {
     /// Account id.
     pub account: CellHash,
     /// Dictionary with fees and account transactions.
-    pub transactions: Dict<C, u64, (CurrencyCollection<C>, Transaction<C>)>,
-    /// Sum of all account transactions fees.
-    pub total_fees: CurrencyCollection<C>,
+    pub transactions: AugDict<C, u64, CurrencyCollection<C>, Lazy<C, Transaction<C>>>,
     /// Account state hashes before and after this block.
     pub state_update: Lazy<C, HashUpdate>,
 }
@@ -649,15 +624,22 @@ impl<C: CellFamily> AccountBlock<C> {
 
 impl<C: CellFamily> Store<C> for AccountBlock<C> {
     fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+        let transactions_root = match self.transactions.dict().root() {
+            Some(root) => root.as_ref().as_slice(),
+            None => return false,
+        };
+
         builder.store_small_uint(Self::TAG, 4)
             && builder.store_u256(&self.account)
-            && self.transactions.store_into(builder, finalizer)
-            && self.total_fees.store_into(builder, finalizer)
+            && builder.store_slice(transactions_root)
             && self.state_update.store_into(builder, finalizer)
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for AccountBlock<C> {
+impl<'a, C> Load<'a, C> for AccountBlock<C>
+where
+    for<'c> C: DefaultFinalizer + 'c,
+{
     fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
         if slice.load_small_uint(4)? != Self::TAG {
             return None;
@@ -665,10 +647,15 @@ impl<'a, C: CellFamily> Load<'a, C> for AccountBlock<C> {
 
         Some(Self {
             account: slice.load_u256()?,
-            transactions: Dict::load_from(slice)?,
-            total_fees: CurrencyCollection::load_from(slice)?,
+            transactions: AugDict::load_from_root(slice, &mut C::default_finalizer())?,
             state_update: Lazy::load_from(slice)?,
         })
+    }
+}
+
+impl<'a, C: CellFamily> AugDictSkipValue<'a, C> for Lazy<C, Transaction<C>> {
+    fn skip_value(slice: &mut CellSlice<'a, C>) -> bool {
+        slice.try_advance(0, 1)
     }
 }
 
@@ -1136,6 +1123,25 @@ mod tests {
 
         let extra = block.load_extra().unwrap();
         println!("extra: {:#?}", extra);
+        let account_blocks = extra.account_blocks.load().unwrap();
+        println!("account_blocks: {account_blocks:#?}");
+
+        for entry in account_blocks.iter() {
+            let (account, _, account_block) = entry.unwrap();
+            assert_eq!(account, account_block.account);
+
+            for entry in account_block.transactions.iter() {
+                let (_lt, _, cell) = entry.unwrap();
+                let tx = cell.load().unwrap();
+                assert_eq!(account, tx.account);
+            }
+        }
+        assert_eq!(
+            serialize_any(account_blocks).as_ref(),
+            extra.account_blocks.cell.as_ref()
+        );
+
+        assert_eq!(serialize_any(extra).as_ref(), block.extra.cell.as_ref());
 
         let serialized = serialize_any(block);
         assert_eq!(serialized.as_ref(), boc.as_ref());
