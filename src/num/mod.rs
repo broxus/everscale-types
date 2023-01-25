@@ -1,9 +1,6 @@
 //! Integer types used in blockchain models.
 
 use std::num::NonZeroU8;
-use std::ops::{
-    Add, AddAssign, Div, DivAssign, Mul, MulAssign, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
-};
 
 use crate::cell::*;
 use crate::util::unlikely;
@@ -55,7 +52,7 @@ macro_rules! impl_ops {
             }
         }
 
-        impl Add for $ident {
+        impl std::ops::Add for $ident {
             type Output = Self;
 
             #[inline]
@@ -65,7 +62,7 @@ macro_rules! impl_ops {
             }
         }
 
-        impl Add<$inner> for $ident {
+        impl std::ops::Add<$inner> for $ident {
             type Output = Self;
 
             #[inline]
@@ -75,20 +72,20 @@ macro_rules! impl_ops {
             }
         }
 
-        impl AddAssign for $ident {
+        impl std::ops::AddAssign for $ident {
             #[inline]
             fn add_assign(&mut self, rhs: Self) {
                 self.0 += rhs.0;
             }
         }
 
-        impl AddAssign<$inner> for $ident {
+        impl std::ops::AddAssign<$inner> for $ident {
             fn add_assign(&mut self, rhs: $inner) {
                 self.0 += rhs;
             }
         }
 
-        impl Sub for $ident {
+        impl std::ops::Sub for $ident {
             type Output = Self;
 
             #[inline]
@@ -98,7 +95,7 @@ macro_rules! impl_ops {
             }
         }
 
-        impl Sub<$inner> for $ident {
+        impl std::ops::Sub<$inner> for $ident {
             type Output = Self;
 
             #[inline]
@@ -108,21 +105,21 @@ macro_rules! impl_ops {
             }
         }
 
-        impl SubAssign for $ident {
+        impl std::ops::SubAssign for $ident {
             #[inline]
             fn sub_assign(&mut self, rhs: Self) {
                 self.0 -= rhs.0;
             }
         }
 
-        impl SubAssign<$inner> for $ident {
+        impl std::ops::SubAssign<$inner> for $ident {
             #[inline]
             fn sub_assign(&mut self, rhs: $inner) {
                 self.0 -= rhs;
             }
         }
 
-        impl Mul for $ident {
+        impl std::ops::Mul for $ident {
             type Output = Self;
 
             #[inline]
@@ -132,7 +129,7 @@ macro_rules! impl_ops {
             }
         }
 
-        impl Mul<$inner> for $ident {
+        impl std::ops::Mul<$inner> for $ident {
             type Output = Self;
 
             #[inline]
@@ -142,21 +139,21 @@ macro_rules! impl_ops {
             }
         }
 
-        impl MulAssign for $ident {
+        impl std::ops::MulAssign for $ident {
             #[inline]
             fn mul_assign(&mut self, rhs: Self) {
                 self.0 *= rhs.0;
             }
         }
 
-        impl MulAssign<$inner> for $ident {
+        impl std::ops::MulAssign<$inner> for $ident {
             #[inline]
             fn mul_assign(&mut self, rhs: $inner) {
                 self.0 *= rhs;
             }
         }
 
-        impl Div for $ident {
+        impl std::ops::Div for $ident {
             type Output = Self;
 
             #[inline]
@@ -166,7 +163,7 @@ macro_rules! impl_ops {
             }
         }
 
-        impl Div<$inner> for $ident {
+        impl std::ops::Div<$inner> for $ident {
             type Output = Self;
 
             #[inline]
@@ -176,21 +173,21 @@ macro_rules! impl_ops {
             }
         }
 
-        impl DivAssign for $ident {
+        impl std::ops::DivAssign for $ident {
             #[inline]
             fn div_assign(&mut self, rhs: Self) {
                 self.0 /= rhs.0;
             }
         }
 
-        impl DivAssign<$inner> for $ident {
+        impl std::ops::DivAssign<$inner> for $ident {
             #[inline]
             fn div_assign(&mut self, rhs: $inner) {
                 self.0 /= rhs;
             }
         }
 
-        impl Shr<u8> for $ident {
+        impl std::ops::Shr<u8> for $ident {
             type Output = Self;
 
             #[inline]
@@ -200,14 +197,14 @@ macro_rules! impl_ops {
             }
         }
 
-        impl ShrAssign<u8> for $ident {
+        impl std::ops::ShrAssign<u8> for $ident {
             #[inline]
             fn shr_assign(&mut self, rhs: u8) {
                 self.0 >>= rhs;
             }
         }
 
-        impl Shl<u8> for $ident {
+        impl std::ops::Shl<u8> for $ident {
             type Output = Self;
 
             #[inline]
@@ -217,7 +214,7 @@ macro_rules! impl_ops {
             }
         }
 
-        impl ShlAssign<u8> for $ident {
+        impl std::ops::ShlAssign<u8> for $ident {
             #[inline]
             fn shl_assign(&mut self, rhs: u8) {
                 self.0 <<= rhs;

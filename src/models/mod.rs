@@ -10,9 +10,12 @@ pub use account::*;
 pub use block::*;
 pub use message::*;
 pub use transaction::*;
+pub use config::*;
 
 pub mod account;
 pub mod block;
+pub mod config;
+pub mod currency;
 pub mod message;
 pub mod transaction;
 

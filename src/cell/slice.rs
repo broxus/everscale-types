@@ -1046,7 +1046,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     }
 
     /// Returns a reference to the Nth child cell (relative to this slice's refs window).
-    pub fn get_reference(&self, index: u8) -> Option<&dyn Cell<C>> {
+    pub fn get_reference(&self, index: u8) -> Option<&'a dyn Cell<C>> {
         if self.refs_window_start + index < self.refs_window_end {
             self.cell.reference(self.refs_window_start + index)
         } else {
