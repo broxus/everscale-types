@@ -8,9 +8,9 @@ use crate::cell::{
 
 pub use account::*;
 pub use block::*;
+pub use config::*;
 pub use message::*;
 pub use transaction::*;
-pub use config::*;
 
 pub mod account;
 pub mod block;

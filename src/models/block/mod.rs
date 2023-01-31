@@ -562,30 +562,30 @@ mod tests {
     fn check_block(boc: &str) -> RcCell {
         let boc = RcBoc::decode_base64(boc).unwrap();
         let block = Block::load_from(&mut boc.as_slice()).unwrap();
-        println!("block: {:#?}", block);
+        println!("block: {block:#?}");
 
         let info = block.load_info().unwrap();
-        println!("info: {:#?}", info);
+        println!("info: {info:#?}");
         let prev_ref = info.load_prev_ref().unwrap();
-        println!("prev_ref: {:#?}", prev_ref);
+        println!("prev_ref: {prev_ref:#?}");
         assert_eq!(serialize_any(info).as_ref(), block.info.cell.as_ref());
 
         let value_flow = block.load_value_flow().unwrap();
-        println!("value_flow: {:#?}", value_flow);
+        println!("value_flow: {value_flow:#?}");
         assert_eq!(
             serialize_any(value_flow).as_ref(),
             block.value_flow.cell.as_ref()
         );
 
         let state_update = block.load_state_update().unwrap();
-        println!("state_update: {:#?}", state_update);
+        println!("state_update: {state_update:#?}");
         assert_eq!(
             serialize_any(state_update).as_ref(),
             block.state_update.cell.as_ref()
         );
 
         let extra = block.load_extra().unwrap();
-        println!("extra: {:#?}", extra);
+        println!("extra: {extra:#?}");
         let account_blocks = extra.account_blocks.load().unwrap();
         println!("account_blocks: {account_blocks:#?}");
 

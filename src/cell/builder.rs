@@ -525,9 +525,9 @@ impl<C: CellFamily> CellBuilder<C> {
         T: Borrow<CellSlice<'a, C1>>,
         C1: CellFamily + 'a,
     {
-        fn store_slice_data_impl<'a, C1, C2>(
+        fn store_slice_data_impl<C1, C2>(
             builder: &mut CellBuilder<C1>,
-            value: &CellSlice<'a, C2>,
+            value: &CellSlice<'_, C2>,
         ) -> bool
         where
             C1: CellFamily,
@@ -718,9 +718,9 @@ impl<C: CellFamily> CellBuilder<C> {
         T: Borrow<CellSlice<'a, C>>,
         C: 'a,
     {
-        fn store_slice_impl<'a, C: CellFamily>(
+        fn store_slice_impl<C: CellFamily>(
             builder: &mut CellBuilder<C>,
-            value: &CellSlice<'a, C>,
+            value: &CellSlice<'_, C>,
         ) -> bool {
             if builder.bit_len + value.remaining_bits() <= MAX_BIT_LEN
                 && builder.references.len() + value.remaining_refs() as usize <= MAX_REF_COUNT

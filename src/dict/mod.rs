@@ -72,8 +72,8 @@ impl SetMode {
 
 /// Inserts the value associated with key in dictionary
 /// in accordance with the logic of the specified [`SetMode`].
-pub fn dict_insert<'a, C>(
-    root: &'a Option<CellContainer<C>>,
+pub fn dict_insert<C>(
+    root: &Option<CellContainer<C>>,
     key: &mut CellSlice<C>,
     key_bit_len: u16,
     value: &CellSlice<C>,

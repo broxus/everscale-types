@@ -438,7 +438,7 @@ impl<'a, C: CellFamily, K, V> Iter<'a, C, K, V>
 where
     K: DictKey,
 {
-    /// Creates an iterator over the entires of a dictionary.
+    /// Creates an iterator over the entries of a dictionary.
     pub fn new(root: &'a Option<CellContainer<C>>) -> Self {
         Self {
             inner: RawIter::new(root, K::BITS),

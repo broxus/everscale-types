@@ -478,7 +478,7 @@ mod tests {
     fn check_tx(boc: &str) -> RcCell {
         let boc = RcBoc::decode_base64(boc).unwrap();
         let tx = Transaction::load_from(&mut boc.as_slice()).unwrap();
-        println!("tx: {:#?}", tx);
+        println!("tx: {tx:#?}");
 
         let in_msg = tx.load_in_msg().unwrap();
         println!("In message: {in_msg:?}");

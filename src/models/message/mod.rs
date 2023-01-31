@@ -172,11 +172,11 @@ impl MessageLayout {
     }
 
     /// Computes the number of bits and refs for this layout for the root cell.
-    pub const fn compute_full_len<'a, C: CellFamily>(
+    pub const fn compute_full_len<C: CellFamily>(
         &self,
         info: &MsgInfo<C>,
         init: &Option<StateInit<C>>,
-        body: &Option<CellSlice<'a, C>>,
+        body: &Option<CellSlice<'_, C>>,
     ) -> (u16, u8) {
         let l = DetailedMessageLayout::compute(info, init, body);
 
@@ -204,10 +204,10 @@ impl MessageLayout {
 
     /// Computes the most optimal layout of the message parts.
     /// Also returns the number of bits and refs for the root cell.
-    pub const fn compute<'a, C: CellFamily>(
+    pub const fn compute<C: CellFamily>(
         info: &MsgInfo<C>,
         init: &Option<StateInit<C>>,
-        body: &Option<CellSlice<'a, C>>,
+        body: &Option<CellSlice<'_, C>>,
     ) -> (Self, u16, u8) {
         let l = DetailedMessageLayout::compute(info, init, body);
 
@@ -263,10 +263,10 @@ struct DetailedMessageLayout {
 }
 
 impl DetailedMessageLayout {
-    const fn compute<'a, C: CellFamily>(
+    const fn compute<C: CellFamily>(
         info: &MsgInfo<C>,
         init: &Option<StateInit<C>>,
-        body: &Option<CellSlice<'a, C>>,
+        body: &Option<CellSlice<'_, C>>,
     ) -> Self {
         let mut info_bits = info.bit_len() + 2; // (Maybe X) (1bit) + (Either X) (1bit)
         let info_refs = info.has_references() as u8;
@@ -569,7 +569,7 @@ mod tests {
     fn check_message(boc: &str) -> RcCell {
         let boc = RcBoc::decode_base64(boc).unwrap();
         let message = Message::load_from(&mut boc.as_slice()).unwrap();
-        println!("message: {:#?}", message);
+        println!("message: {message:#?}");
 
         if let Some(init) = &message.init {
             let mut builder = RcCellBuilder::new();

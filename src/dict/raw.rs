@@ -1,5 +1,5 @@
 use crate::cell::*;
-use crate::util::unlikely;
+use crate::util::{unlikely, IterStatus};
 use crate::Error;
 
 use super::{dict_get, dict_insert, read_label, SetMode};
@@ -260,8 +260,9 @@ where
 /// This struct is created by the [`iter`] method on [`RawDict`] or the [`raw_iter`] method on [`Dict`].
 /// See their documentation for more.
 ///
-/// [`iter`]: fn@crate::dict::RawDict::iter
-/// [`raw_iter`]: fn@crate::dict::Dict::raw_iter
+/// [`Dict`]: crate::dict::Dict
+/// [`iter`]: RawDict::iter
+/// [`raw_iter`]: crate::dict::Dict::raw_iter
 pub struct RawIter<'a, C: CellFamily> {
     // TODO: replace `Vec` with on-stack stuff
     segments: Vec<IterSegment<'a, C>>,
@@ -278,7 +279,7 @@ impl<C: CellFamily> Clone for RawIter<'_, C> {
 }
 
 impl<'a, C: CellFamily> RawIter<'a, C> {
-    /// Creates an iterator over the entires of a dictionary.
+    /// Creates an iterator over the entries of a dictionary.
     pub fn new(root: &'a Option<CellContainer<C>>, bit_len: u16) -> Self {
         let mut segments = Vec::new();
 
@@ -430,8 +431,9 @@ impl<C: CellFamily> Clone for IterSegment<'_, C> {
 /// This struct is created by the [`keys`] method on [`RawDict`] or the [`raw_keys`] method on [`Dict`].
 /// See their documentation for more.
 ///
+/// [`Dict`]: crate::dict::Dict
 /// [`keys`]: RawDict::keys
-/// [`raw_keys`]: Dict::raw_keys
+/// [`raw_keys`]: crate::dict::Dict::raw_keys
 pub struct RawKeys<'a, C: CellFamily> {
     inner: RawIter<'a, C>,
 }
@@ -472,8 +474,9 @@ where
 /// This struct is created by the [`values`] method on [`RawDict`] or the [`raw_values`] method on [`Dict`].
 /// See their documentation for more.
 ///
+/// [`Dict`]: crate::dict::Dict
 /// [`values`]: RawDict::values
-/// [`raw_values`]: Dict::values
+/// [`raw_values`]: crate::Dict::values
 pub struct RawValues<'a, C: CellFamily> {
     // TODO: replace `Vec` with on-stack stuff
     segments: Vec<ValuesSegment<'a, C>>,
@@ -611,28 +614,6 @@ impl<C: CellFamily> Clone for ValuesSegment<'_, C> {
             data: self.data,
             remaining_bit_len: self.remaining_bit_len,
         }
-    }
-}
-
-#[derive(Clone, Copy)]
-enum IterStatus {
-    /// Iterator is still valid.
-    Valid,
-    /// Iterator started with a pruned branch cell.
-    Pruned,
-    /// `Dict` has invalid structure.
-    Broken,
-}
-
-impl IterStatus {
-    #[inline]
-    pub const fn is_valid(self) -> bool {
-        matches!(self, Self::Valid)
-    }
-
-    #[inline]
-    pub const fn is_pruned(self) -> bool {
-        matches!(self, Self::Pruned)
     }
 }
 

@@ -125,3 +125,25 @@ impl<T, const N: usize> Drop for ArrayVec<T, N> {
         }
     }
 }
+
+#[derive(Clone, Copy)]
+pub(crate) enum IterStatus {
+    /// Iterator is still valid.
+    Valid,
+    /// Iterator started with a pruned branch cell.
+    Pruned,
+    /// [`RawDict`] has invalid structure.
+    Broken,
+}
+
+impl IterStatus {
+    #[inline]
+    pub(crate) const fn is_valid(self) -> bool {
+        matches!(self, Self::Valid)
+    }
+
+    #[inline]
+    pub(crate) const fn is_pruned(self) -> bool {
+        matches!(self, Self::Pruned)
+    }
+}
