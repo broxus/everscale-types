@@ -3,6 +3,7 @@
 use std::num::NonZeroU8;
 
 use crate::cell::*;
+use crate::error::ParseIntError;
 use crate::util::unlikely;
 
 macro_rules! impl_ops {
@@ -11,6 +12,24 @@ macro_rules! impl_ops {
             #[inline]
             fn from(value: $ident) -> Self {
                 value.0
+            }
+        }
+
+        impl std::str::FromStr for $ident {
+            type Err = ParseIntError;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                match std::str::FromStr::from_str(s) {
+                    Ok(inner) => {
+                        let result = Self::new(inner);
+                        if result.is_valid() {
+                            Ok(result)
+                        } else {
+                            Err(ParseIntError::Overflow)
+                        }
+                    }
+                    Err(e) => Err(ParseIntError::InvalidString(e)),
+                }
             }
         }
 

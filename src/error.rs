@@ -1,7 +1,7 @@
 //! Common error types.
 
 /// Error type for cell related errors.
-#[derive(Debug, Copy, Clone, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum Error {
     /// There were not enough bits or refs in the cell slice.
     #[error("cell underflow")]
@@ -14,8 +14,19 @@ pub enum Error {
     PrunedBranchAccess,
 }
 
+/// Error type for integer parsing related errors.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum ParseIntError {
+    /// Error while parsing underlying type.
+    #[error("cannot parse underlying integer")]
+    InvalidString(#[source] std::num::ParseIntError),
+    /// Underlying integer type does not fit into the target type.
+    #[error("underlying integer is too large to fin in target type")]
+    Overflow,
+}
+
 /// Error type for address parsing related errors.
-#[derive(Debug, Copy, Clone, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum ParseAddrError {
     /// Tried to parse an empty string.
     #[error("cannot parse address from an empty string")]
@@ -32,7 +43,7 @@ pub enum ParseAddrError {
 }
 
 /// Error type for block id parsing related errors.
-#[derive(Debug, Clone, Copy, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum ParseBlockIdError {
     /// Tried to parse an empty string.
     #[error("cannot parse block id from an empty string")]
