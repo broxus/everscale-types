@@ -549,7 +549,7 @@ fn load_ext_addr<C: CellFamily>(slice: &mut CellSlice<'_, C>) -> Option<Option<E
         return None;
     }
 
-    let mut data = Vec::with_capacity((data_bit_len.into_inner() as usize + 7) / 8);
+    let mut data = vec![0; (data_bit_len.into_inner() as usize + 7) / 8];
     slice.load_raw(&mut data, data_bit_len.into_inner())?;
     Some(Some(ExtAddr { data_bit_len, data }))
 }

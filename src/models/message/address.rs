@@ -72,7 +72,7 @@ impl<'a, C: CellFamily> Load<'a, C> for IntAddr {
                 return None;
             }
 
-            let mut address = Vec::with_capacity((address_len.into_inner() as usize + 7) / 8);
+            let mut address = vec![0; (address_len.into_inner() as usize + 7) / 8];
             slice.load_raw(&mut address, address_len.into_inner())?;
 
             Self::Var(VarAddr {
@@ -423,7 +423,7 @@ impl<'a, C: CellFamily> Load<'a, C> for Anycast {
             return None;
         }
 
-        let mut rewrite_prefix = Vec::with_capacity((depth.into_bit_len() as usize + 7) / 8);
+        let mut rewrite_prefix = vec![0; (depth.into_bit_len() as usize + 7) / 8];
         slice.load_raw(&mut rewrite_prefix, depth.into_bit_len())?;
 
         Some(Self {
