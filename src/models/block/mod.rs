@@ -619,6 +619,11 @@ mod tests {
                 println!("shard {shard:?}: {value:#?}");
             }
 
+            for item in custom.shards.latest_blocks() {
+                let block_id = item.unwrap();
+                println!("block_id: {block_id}");
+            }
+
             assert_eq!(
                 serialize_any(custom).as_ref(),
                 extra.custom.as_ref().unwrap().cell.as_ref()

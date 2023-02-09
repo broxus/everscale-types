@@ -4,7 +4,7 @@ use crate::error::Error;
 use crate::num::Tokens;
 use crate::util::{unlikely, DisplayHash, IterStatus};
 
-use crate::models::block::block_id::ShardIdent;
+use crate::models::block::block_id::{BlockId, ShardIdent};
 use crate::models::currency::CurrencyCollection;
 
 /// A tree of the most recent descriptions for all currently existing shards
@@ -28,7 +28,7 @@ where
     /// If the dict or tree is invalid, finishes after the first invalid element.
     /// returning an error.
     pub fn iter(&self) -> Iter<'_, C> {
-        Iter::new(&self.0)
+        Iter::new(self.0.root())
     }
 
     /// Gets an iterator over the raw entries of the shard description trees, sorted by
@@ -37,7 +37,16 @@ where
     /// If the dict or tree is invalid, finishes after the first invalid element,
     /// returning an error.
     pub fn raw_iter(&self) -> RawIter<'_, C> {
-        RawIter::new(&self.0)
+        RawIter::new(self.0.root())
+    }
+
+    /// Gets an iterator over the latest blocks in all shards, sorted by
+    /// shard ident. The iterator element is `Result<BlockId>`.
+    ///
+    /// If the dict or tree is invalid, finishes after the first invalid element,
+    /// returning an error.
+    pub fn latest_blocks(&self) -> LatestBlocksIter<'_, C> {
+        LatestBlocksIter::new(self.0.root())
     }
 
     /// Returns a shards description tree root for the specified workchain.
@@ -101,6 +110,15 @@ impl<C: CellFamily> WorkchainShardHashes<C> {
         WorkchainShardHashesIter::new(self.workchain, self.root.as_ref())
     }
 
+    /// Gets an iterator over the latest block in the current workchain, sorted by key.
+    /// The iterator element type is `Result<BlockId>`.
+    ///
+    /// If the tree is invalid, finishes after the first invalid element,
+    /// returning an error.
+    pub fn latest_blocks(&self) -> WorkchainLatestBlocksIter<'_, C> {
+        WorkchainLatestBlocksIter::new(self.workchain, self.root.as_ref())
+    }
+
     /// Gets an iterator over the raw entries of the shard descriptions tree, sorted by key.
     /// The iterator element type is `Result<(ShardIdent, CellSlice<C>)>`.
     ///
@@ -134,7 +152,7 @@ impl<'a, C> Iter<'a, C>
 where
     for<'c> C: DefaultFinalizer + 'c,
 {
-    fn new(dict: &'a Dict<C, i32, CellContainer<C>>) -> Self {
+    fn new(dict: &'a Option<CellContainer<C>>) -> Self {
         Self {
             inner: RawIter::new(dict),
         }
@@ -173,13 +191,23 @@ pub struct RawIter<'a, C: CellFamily> {
     status: IterStatus,
 }
 
+impl<C: CellFamily> Clone for RawIter<'_, C> {
+    fn clone(&self) -> Self {
+        Self {
+            dict_iter: self.dict_iter.clone(),
+            shard_hashes_iter: self.shard_hashes_iter.clone(),
+            status: self.status,
+        }
+    }
+}
+
 impl<'a, C> RawIter<'a, C>
 where
     for<'c> C: DefaultFinalizer + 'c,
 {
-    fn new(dict: &'a Dict<C, i32, CellContainer<C>>) -> Self {
+    fn new(dict: &'a Option<CellContainer<C>>) -> Self {
         Self {
-            dict_iter: dict.raw_iter(),
+            dict_iter: dict::RawIter::new(dict, 32),
             shard_hashes_iter: None,
             status: IterStatus::Valid,
         }
@@ -246,6 +274,53 @@ where
                 Err(e) => break Some(Err(self.finish(e))),
             });
         }
+    }
+}
+
+/// An iterator over the latest blocks of a [`ShardHashes`].
+///
+/// This struct is created by the [`latest_blocks`] method on [`ShardHashes`].
+/// See its documentation for more.
+///
+/// [`latest_blocks`]: ShardHashes::latest_blocks
+pub struct LatestBlocksIter<'a, C: CellFamily> {
+    inner: RawIter<'a, C>,
+}
+
+impl<C: CellFamily> Clone for LatestBlocksIter<'_, C> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<'a, C> LatestBlocksIter<'a, C>
+where
+    for<'c> C: DefaultFinalizer + 'c,
+{
+    /// Creates an iterator over the latest blocks of a [`ShardHashes`].
+    pub fn new(dict: &'a Option<CellContainer<C>>) -> Self {
+        Self {
+            inner: RawIter::new(dict),
+        }
+    }
+}
+
+impl<C> Iterator for LatestBlocksIter<'_, C>
+where
+    for<'c> C: DefaultFinalizer + 'c,
+{
+    type Item = Result<BlockId, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(match self.inner.next()? {
+            Ok((shard_ident, value)) => match parse_block_id(shard_ident, value) {
+                Some(value) => Ok(value),
+                None => Err(self.inner.finish(Error::CellUnderflow)),
+            },
+            Err(e) => Err(e),
+        })
     }
 }
 
@@ -437,6 +512,47 @@ impl<'a, C: CellFamily> Iterator for WorkchainShardHashesRawIter<'a, C> {
     }
 }
 
+/// An iterator over the latest blocks of a [`WorkchainShardHashes`].
+///
+/// This struct is created by the [`latest_blocks`] method on [`WorkchainShardHashes`].
+/// See its documentation for more.
+///
+/// [`latest_blocks`]: WorkchainShardHashes::latest_blocks
+pub struct WorkchainLatestBlocksIter<'a, C: CellFamily> {
+    inner: WorkchainShardHashesRawIter<'a, C>,
+}
+
+impl<C: CellFamily> Clone for WorkchainLatestBlocksIter<'_, C> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<'a, C: CellFamily> WorkchainLatestBlocksIter<'a, C> {
+    /// Creates an iterator over the latest blocks of a [`WorkchainShardHashes`].
+    pub fn new(workchain: i32, root: &'a dyn Cell<C>) -> Self {
+        Self {
+            inner: WorkchainShardHashesRawIter::new(workchain, root),
+        }
+    }
+}
+
+impl<C: CellFamily> Iterator for WorkchainLatestBlocksIter<'_, C> {
+    type Item = Result<BlockId, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(match self.inner.next()? {
+            Ok((shard_ident, value)) => match parse_block_id(shard_ident, value) {
+                Some(block_id) => Ok(block_id),
+                None => Err(self.inner.finish(Error::CellUnderflow)),
+            },
+            Err(e) => Err(e),
+        })
+    }
+}
+
 /// An iterator over the keys of a [`WorkchainShardHashes`].
 ///
 /// This struct is created by the [`raw_keys`] method on [`WorkchainShardHashes`].
@@ -603,6 +719,8 @@ impl<C: CellFamily> std::fmt::Debug for ShardDescription<C> {
 }
 
 impl<C: CellFamily> ShardDescription<C> {
+    const TAG_LEN: u16 = 4;
+
     const TAG_V1: u8 = 0xa;
     const TAG_V2: u8 = 0xb;
     const TAG_V3: u8 = 0xc;
@@ -625,7 +743,7 @@ impl<C: CellFamily> Store<C> for ShardDescription<C> {
             | ((self.want_merge as u8) << 4)
             | ((self.nx_cc_updated as u8) << 3);
 
-        if !(builder.store_small_uint(tag, 4)
+        if !(builder.store_small_uint(tag, Self::TAG_LEN)
             && builder.store_u32(self.seqno)
             && builder.store_u32(self.reg_mc_seqno)
             && builder.store_u64(self.start_lt)
@@ -678,13 +796,14 @@ impl<C: CellFamily> Store<C> for ShardDescription<C> {
 
 impl<'a, C: CellFamily> Load<'a, C> for ShardDescription<C> {
     fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let (cont_in_cell, with_copyleft, with_proof_chain) = match slice.load_small_uint(4)? {
-            Self::TAG_V1 => (true, false, false),
-            Self::TAG_V2 => (false, false, false),
-            Self::TAG_V3 => (true, true, false),
-            Self::TAG_V4 => (true, true, true),
-            _ => return None,
-        };
+        let (cont_in_cell, with_copyleft, with_proof_chain) =
+            match slice.load_small_uint(Self::TAG_LEN)? {
+                Self::TAG_V1 => (true, false, false),
+                Self::TAG_V2 => (false, false, false),
+                Self::TAG_V3 => (true, true, false),
+                Self::TAG_V4 => (true, true, true),
+                _ => return None,
+            };
 
         let seqno = slice.load_u32()?;
         let reg_mc_seqno = slice.load_u32()?;
@@ -751,6 +870,25 @@ impl<'a, C: CellFamily> Load<'a, C> for ShardDescription<C> {
             proof_chain,
         })
     }
+}
+
+fn parse_block_id<C: CellFamily>(shard: ShardIdent, mut value: CellSlice<C>) -> Option<BlockId> {
+    if !value.try_advance(ShardDescription::<C>::TAG_LEN, 0) {
+        return None;
+    }
+
+    Some(BlockId {
+        shard,
+        seqno: value.load_u32()?,
+        root_hash: {
+            // Skip some fields (reg_mc_seqno: u32, start_lt: u64, end_lt: u64)
+            if !value.try_advance(32 + 64 + 64, 0) {
+                return None;
+            }
+            value.load_u256()?
+        },
+        file_hash: value.load_u256()?,
+    })
 }
 
 /// Time window for shard split/merge.
