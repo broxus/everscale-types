@@ -608,6 +608,17 @@ mod tests {
         if let Some(custom) = &custom {
             println!("custom: {custom:#?}");
 
+            let shards = custom.shards.get_workchain_shards(0).unwrap().unwrap();
+            for entry in shards.raw_iter() {
+                let (shard, _value) = entry.unwrap();
+                println!("shard: {shard:?}");
+            }
+
+            for entry in custom.shards.iter() {
+                let (shard, value) = entry.unwrap();
+                println!("shard {shard:?}: {value:#?}");
+            }
+
             assert_eq!(
                 serialize_any(custom).as_ref(),
                 extra.custom.as_ref().unwrap().cell.as_ref()

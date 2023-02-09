@@ -1,8 +1,8 @@
 use crate::cell::*;
-use crate::dict::Dict;
+use crate::dict::{self, Dict};
 use crate::error::Error;
 use crate::num::Tokens;
-use crate::util::{unlikely, IterStatus};
+use crate::util::{unlikely, DisplayHash, IterStatus};
 
 use crate::models::block::block_id::ShardIdent;
 use crate::models::currency::CurrencyCollection;
@@ -22,6 +22,24 @@ impl<C> ShardHashes<C>
 where
     for<'c> C: DefaultFinalizer + 'c,
 {
+    /// Gets an iterator over the entries of the shard description trees, sorted by
+    /// shard ident. The iterator element is `Result<(ShardIdent, ShardDescription<C>)>`.
+    ///
+    /// If the dict or tree is invalid, finishes after the first invalid element.
+    /// returning an error.
+    pub fn iter(&self) -> Iter<'_, C> {
+        Iter::new(&self.0)
+    }
+
+    /// Gets an iterator over the raw entries of the shard description trees, sorted by
+    /// shard ident. The iterator element is `Result<(ShardIdent, CellSlice<C>)>`.
+    ///
+    /// If the dict or tree is invalid, finishes after the first invalid element,
+    /// returning an error.
+    pub fn raw_iter(&self) -> RawIter<'_, C> {
+        RawIter::new(&self.0)
+    }
+
     /// Returns a shards description tree root for the specified workchain.
     pub fn get_workchain_shards(
         &self,
@@ -74,6 +92,15 @@ impl<C: CellFamily> WorkchainShardHashes<C> {
         WorkchainShardHashesKeysIter::new(self.workchain, self.root.as_ref())
     }
 
+    /// Gets an iterator over the entries of the shard descriptions tree, sorted by key.
+    /// The iterator element type is `Result<(ShardIdent, ShardDescription<C>)>`.
+    ///
+    /// If the tree is invalid, finishes after the first invalid element,
+    /// returning an error.
+    pub fn iter(&self) -> WorkchainShardHashesIter<'_, C> {
+        WorkchainShardHashesIter::new(self.workchain, self.root.as_ref())
+    }
+
     /// Gets an iterator over the raw entries of the shard descriptions tree, sorted by key.
     /// The iterator element type is `Result<(ShardIdent, CellSlice<C>)>`.
     ///
@@ -93,7 +120,180 @@ impl<C: CellFamily> WorkchainShardHashes<C> {
     }
 }
 
+/// An iterator over the entries of a [`ShardHashes`].
+///
+/// This struct is created by the [`iter`] method on [`ShardHashes`].
+/// See its documentation for more.
+///
+/// [`iter`]: ShardHashes::iter
+pub struct Iter<'a, C: CellFamily> {
+    inner: RawIter<'a, C>,
+}
+
+impl<'a, C> Iter<'a, C>
+where
+    for<'c> C: DefaultFinalizer + 'c,
+{
+    fn new(dict: &'a Dict<C, i32, CellContainer<C>>) -> Self {
+        Self {
+            inner: RawIter::new(dict),
+        }
+    }
+}
+
+impl<C> Iterator for Iter<'_, C>
+where
+    for<'c> C: DefaultFinalizer + 'c,
+{
+    type Item = Result<(ShardIdent, ShardDescription<C>), Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(match self.inner.next()? {
+            Ok((shard_ident, mut value)) => {
+                if let Some(value) = ShardDescription::<C>::load_from(&mut value) {
+                    Ok((shard_ident, value))
+                } else {
+                    Err(self.inner.finish(Error::CellUnderflow))
+                }
+            }
+            Err(e) => Err(e),
+        })
+    }
+}
+
+/// An iterator over the raw entries of a [`ShardHashes`].
+///
+/// This struct is created by the [`raw_iter`] method on [`ShardHashes`].
+/// See its documentation for more.
+///
+/// [`raw_iter`]: ShardHashes::raw_iter
+pub struct RawIter<'a, C: CellFamily> {
+    dict_iter: dict::RawIter<'a, C>,
+    shard_hashes_iter: Option<WorkchainShardHashesRawIter<'a, C>>,
+    status: IterStatus,
+}
+
+impl<'a, C> RawIter<'a, C>
+where
+    for<'c> C: DefaultFinalizer + 'c,
+{
+    fn new(dict: &'a Dict<C, i32, CellContainer<C>>) -> Self {
+        Self {
+            dict_iter: dict.raw_iter(),
+            shard_hashes_iter: None,
+            status: IterStatus::Valid,
+        }
+    }
+
+    #[inline(always)]
+    fn finish(&mut self, error: Error) -> Error {
+        self.status = IterStatus::Broken;
+        error
+    }
+}
+
+impl<'a, C> Iterator for RawIter<'a, C>
+where
+    for<'c> C: DefaultFinalizer + 'c,
+{
+    type Item = Result<(ShardIdent, CellSlice<'a, C>), Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        fn parse_workchain_id<C>(key: CellBuilder<C>) -> Option<i32>
+        where
+            for<'c> C: DefaultFinalizer + 'c,
+        {
+            let key = key.build()?;
+            Some(key.as_ref().as_slice().load_u32()? as i32)
+        }
+
+        if unlikely(!self.status.is_valid()) {
+            return if self.status.is_pruned() {
+                self.status = IterStatus::Broken;
+                Some(Err(Error::PrunedBranchAccess))
+            } else {
+                None
+            };
+        }
+
+        loop {
+            // Try to read next item from the current shards tree
+            if let Some(iter) = &mut self.shard_hashes_iter {
+                match iter.next() {
+                    Some(next_item) => break Some(next_item),
+                    None => self.shard_hashes_iter = None,
+                }
+            }
+
+            // Try to get a shards tree for the next workchain
+            self.shard_hashes_iter = Some(match self.dict_iter.next()? {
+                Ok((key, value)) => {
+                    // Parse workchain id from the raw iterator
+                    let workchain = match parse_workchain_id(key) {
+                        Some(workchain) => workchain,
+                        None => return Some(Err(self.finish(Error::CellUnderflow))),
+                    };
+
+                    // Shards tree is in the first reference in each value
+                    let tree_root = match value.get_reference(0) {
+                        Some(cell) => cell,
+                        None => break Some(Err(self.finish(Error::CellUnderflow))),
+                    };
+
+                    // Create shards tree iterator
+                    WorkchainShardHashesRawIter::new(workchain, tree_root)
+                }
+                Err(e) => break Some(Err(self.finish(e))),
+            });
+        }
+    }
+}
+
 /// An iterator over the entries of a [`WorkchainShardHashes`].
+///
+/// This struct is created by the [`iter`] method on [`WorkchainShardHashes`].
+/// See its documentation for more.
+///
+/// [`iter`]: WorkchainShardHashes::iter
+pub struct WorkchainShardHashesIter<'a, C: CellFamily> {
+    inner: WorkchainShardHashesRawIter<'a, C>,
+}
+
+impl<C: CellFamily> Clone for WorkchainShardHashesIter<'_, C> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<'a, C: CellFamily> WorkchainShardHashesIter<'a, C> {
+    /// Creates an iterator over the entries of a [`WorkchainShardHashes`].
+    pub fn new(workchain: i32, root: &'a dyn Cell<C>) -> Self {
+        Self {
+            inner: WorkchainShardHashesRawIter::new(workchain, root),
+        }
+    }
+}
+
+impl<C: CellFamily> Iterator for WorkchainShardHashesIter<'_, C> {
+    type Item = Result<(ShardIdent, ShardDescription<C>), Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(match self.inner.next()? {
+            Ok((shard_ident, mut value)) => {
+                if let Some(value) = ShardDescription::<C>::load_from(&mut value) {
+                    Ok((shard_ident, value))
+                } else {
+                    Err(self.inner.finish(Error::CellUnderflow))
+                }
+            }
+            Err(e) => Err(e),
+        })
+    }
+}
+
+/// An iterator over the raw entries of a [`WorkchainShardHashes`].
 ///
 /// This struct is created by the [`raw_iter`] method on [`WorkchainShardHashes`].
 /// See its documentation for more.
@@ -118,7 +318,7 @@ impl<C: CellFamily> Clone for WorkchainShardHashesRawIter<'_, C> {
 }
 
 impl<'a, C: CellFamily> WorkchainShardHashesRawIter<'a, C> {
-    /// Creates an iterator over the entries of a [`WorkchainShardHashes`].
+    /// Creates an iterator over the raw entries of a [`WorkchainShardHashes`].
     pub fn new(workchain: i32, root: &'a dyn Cell<C>) -> Self {
         let status = 'error: {
             if root.descriptor().is_pruned_branch() {
@@ -375,6 +575,33 @@ pub struct ShardDescription<C: CellFamily> {
     pub proof_chain: Option<ProofChain<C>>,
 }
 
+impl<C: CellFamily> std::fmt::Debug for ShardDescription<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ShardDescription")
+            .field("seqno", &self.seqno)
+            .field("reg_mc_seqno", &self.reg_mc_seqno)
+            .field("start_lt", &self.start_lt)
+            .field("end_lt", &self.end_lt)
+            .field("root_hash", &DisplayHash(&self.root_hash))
+            .field("file_hash", &DisplayHash(&self.file_hash))
+            .field("before_split", &self.before_split)
+            .field("before_merge", &self.before_merge)
+            .field("want_split", &self.want_split)
+            .field("want_merge", &self.want_merge)
+            .field("nx_cc_updated", &self.nx_cc_updated)
+            .field("next_catchain_seqno", &self.next_catchain_seqno)
+            .field("next_validator_shard", &self.next_validator_shard)
+            .field("min_ref_mc_seqno", &self.min_ref_mc_seqno)
+            .field("gen_utime", &self.gen_utime)
+            .field("split_merge_at", &self.split_merge_at)
+            .field("fees_collected", &self.fees_collected)
+            .field("funds_created", &self.funds_created)
+            .field("copyleft_rewards", &self.copyleft_rewards)
+            .field("proof_chain", &self.proof_chain)
+            .finish()
+    }
+}
+
 impl<C: CellFamily> ShardDescription<C> {
     const TAG_V1: u8 = 0xa;
     const TAG_V2: u8 = 0xb;
@@ -596,6 +823,15 @@ pub struct ProofChain<C: CellFamily> {
     child: CellContainer<C>,
 }
 
+impl<C: CellFamily> std::fmt::Debug for ProofChain<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProofChain")
+            .field("len", &self.len)
+            .field("child", &self.child)
+            .finish()
+    }
+}
+
 impl<C: CellFamily> Store<C> for ProofChain<C> {
     fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
         builder.store_u8(self.len) && builder.store_reference(self.child.clone())
@@ -614,72 +850,3 @@ impl<'a, C: CellFamily> Load<'a, C> for ProofChain<C> {
         })
     }
 }
-
-// ///
-// /// # TLB-scheme
-// ///
-// /// ```text
-// /// bt_leaf$0 {X:Type} leaf:X = BinTree X;
-// /// bt_fork$1 {X:Type} left:^(BinTree X) right:^(BinTree X) = BinTree X;
-// /// ```
-// pub struct BinTree<'a, C: CellFamily, T> {
-//     data: CellSlice<'a, C>,
-//     _value: PhantomData<T>,
-// }
-
-// impl<'a, C: CellFamily> Load<'a, C> for BinTree<'a, C> {
-//     fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-//         let data = *slice;
-//         let (data_bits, data_refs) = if slice.load_bit()? {
-//             (0, 2)
-//         } else {
-//             if !T::skip_value(slice) {
-//                 return None;
-//             }
-//             let bits = data.remaining_bits() - slice.remaining_bits();
-//             let refs = data.remaining_refs() - slice.remaining_refs();
-//             (bits, refs)
-//         };
-
-//         Some(Self {
-//             data: data.get_prefix(data_bits, data_refs),
-//             _value: PhantomData,
-//         })
-//     }
-// }
-
-// fn bin_tree_get<'a, C: CellFamily>(
-//     mut data: CellSlice<'a, C>,
-//     mut key: CellSlice<'a, C>,
-// ) -> Result<Option<CellSlice<'a, C>>, Error> {
-//     loop {
-//         match data.load_bit() {
-//             Some(true) => {}
-//             Some(false) => break,
-//             None => return Err(Error::CellUnderflow),
-//         }
-//         if data.remaining_refs() < 2 {
-//             return Err(Error::CellUnderflow);
-//         }
-
-//         match key.load_bit() {
-//             Some(bit) => match data.get_reference(bit as u8) {
-//                 Some(child) => {
-//                     // Handle pruned branch access
-//                     if unlikely(child.descriptor().is_pruned_branch()) {
-//                         return Err(Error::PrunedBranchAccess);
-//                     }
-//                     data = child.as_slice()
-//                 }
-//                 None => return Err(Error::CellUnderflow),
-//             },
-//             None => return Ok(None),
-//         }
-//     }
-
-//     Ok(if key.is_data_empty() {
-//         Some(data)
-//     } else {
-//         None
-//     })
-// }
