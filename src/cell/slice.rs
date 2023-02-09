@@ -1,3 +1,4 @@
+use std::num::{NonZeroU16, NonZeroU32, NonZeroU8};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -96,6 +97,9 @@ impl_primitive_loads! {
     i64 => |s| Some(s.load_u64()? as i64),
     u128 => |s| s.load_u128(),
     i128 => |s| Some(s.load_u128()? as i128),
+    NonZeroU8 => |s| NonZeroU8::new(s.load_u8()?),
+    NonZeroU16 => |s| NonZeroU16::new(s.load_u16()?),
+    NonZeroU32 => |s| NonZeroU32::new(s.load_u32()?),
     CellHash => |s| s.load_u256(),
 }
 

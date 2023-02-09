@@ -440,7 +440,7 @@ pub struct ValueFlow<C: CellFamily> {
     /// Total fees collected in this block.
     pub fees_collected: CurrencyCollection<C>,
     /// Shard fees imported to this block.
-    pub fess_imported: CurrencyCollection<C>,
+    pub fees_imported: CurrencyCollection<C>,
     /// Fee recovery (?)
     pub recovered: CurrencyCollection<C>,
     /// Block creation fees.
@@ -489,7 +489,7 @@ impl<C: CellFamily> Store<C> for ValueFlow<C> {
 
         let cell2 = 'cell2: {
             let mut builder = CellBuilder::<C>::new();
-            if self.fess_imported.store_into(&mut builder, finalizer)
+            if self.fees_imported.store_into(&mut builder, finalizer)
                 && self.recovered.store_into(&mut builder, finalizer)
                 && self.created.store_into(&mut builder, finalizer)
                 && self.minted.store_into(&mut builder, finalizer)
@@ -538,7 +538,7 @@ impl<'a, C: CellFamily> Load<'a, C> for ValueFlow<C> {
             imported: CurrencyCollection::load_from(slice1)?,
             exported: CurrencyCollection::load_from(slice1)?,
             fees_collected,
-            fess_imported: CurrencyCollection::load_from(slice2)?,
+            fees_imported: CurrencyCollection::load_from(slice2)?,
             recovered: CurrencyCollection::load_from(slice2)?,
             created: CurrencyCollection::load_from(slice2)?,
             minted: CurrencyCollection::load_from(slice2)?,

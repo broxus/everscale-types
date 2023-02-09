@@ -5,7 +5,7 @@ use crate::cell::*;
 use crate::Error;
 
 use super::raw::*;
-use super::{dict_get, dict_insert, serialize_entry, DictKey, SetMode};
+use super::{dict_get, dict_insert, dict_load_from_root, serialize_entry, DictKey, SetMode};
 
 /// Typed dictionary with fixed length keys.
 pub struct Dict<C: CellFamily, K, V> {
@@ -101,6 +101,24 @@ impl<C: CellFamily, K, V> Dict<C, K, V> {
 
 impl<C, K, V> Dict<C, K, V>
 where
+    for<'c> C: CellFamily + 'c,
+    K: DictKey,
+{
+    /// Loads a non-empty dictionary from a root cell.
+    pub fn load_from_root_ext(
+        slice: &mut CellSlice<'_, C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Option<Self> {
+        Some(Self {
+            root: Some(dict_load_from_root(slice, K::BITS, finalizer)?),
+            _key: PhantomData,
+            _value: PhantomData,
+        })
+    }
+}
+
+impl<C, K, V> Dict<C, K, V>
+where
     for<'c> C: DefaultFinalizer + 'c,
     K: Store<C> + DictKey,
 {
@@ -135,6 +153,16 @@ where
         V: Load<'a, C>,
     {
         self.get_ext(key, &mut C::default_finalizer())
+    }
+
+    /// Returns the raw value corresponding to the key.
+    ///
+    /// Key is serialized using the default finalizer.
+    pub fn get_raw<'a: 'b, 'b, Q>(&'a self, key: Q) -> Result<Option<CellSlice<'a, C>>, Error>
+    where
+        Q: Borrow<K> + 'b,
+    {
+        self.get_raw_ext(key, &mut C::default_finalizer())
     }
 }
 
@@ -285,6 +313,33 @@ where
         }
 
         get_ext_impl(&self.root, key.borrow(), finalizer)
+    }
+
+    /// Returns the value corresponding to the key.
+    ///
+    /// Key is serialized using the provided finalizer.
+    pub fn get_raw_ext<'a: 'b, 'b, Q>(
+        &'a self,
+        key: Q,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<Option<CellSlice<'a, C>>, Error>
+    where
+        Q: Borrow<K> + 'b,
+    {
+        pub fn get_raw_ext_impl<'a: 'b, 'b, C, K>(
+            root: &'a Option<CellContainer<C>>,
+            key: &'b K,
+            finalizer: &mut dyn Finalizer<C>,
+        ) -> Result<Option<CellSlice<'a, C>>, Error>
+        where
+            for<'c> C: CellFamily + 'c,
+            K: Store<C> + DictKey,
+        {
+            let key = ok!(serialize_entry(key, finalizer));
+            dict_get(root, K::BITS, key.as_ref().as_slice())
+        }
+
+        get_raw_ext_impl(&self.root, key.borrow(), finalizer)
     }
 
     /// Gets an iterator over the raw entries of the dictionary, sorted by key.

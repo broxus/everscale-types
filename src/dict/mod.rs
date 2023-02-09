@@ -345,6 +345,33 @@ where
     Ok(if is_key_empty { Some(data) } else { None })
 }
 
+/// Loads a non-empty dictionary from the root cell.
+pub fn dict_load_from_root<C>(
+    slice: &mut CellSlice<'_, C>,
+    key_bit_len: u16,
+    finalizer: &mut dyn Finalizer<C>,
+) -> Option<CellContainer<C>>
+where
+    for<'c> C: CellFamily + 'c,
+{
+    let root = *slice;
+
+    let label = read_label(slice, key_bit_len)?;
+    if label.remaining_bits() != key_bit_len && !slice.try_advance(0, 2) {
+        return None;
+    };
+
+    let root_bits = root.remaining_bits() - slice.remaining_bits();
+    let root_refs = root.remaining_refs() - slice.remaining_refs();
+
+    let mut builder = CellBuilder::<C>::new();
+    if builder.store_slice(root.get_prefix(root_bits, root_refs)) {
+        Some(builder.build_ext(finalizer)?)
+    } else {
+        None
+    }
+}
+
 fn write_label<C: CellFamily>(
     key: &CellSlice<C>,
     key_bit_len: u16,

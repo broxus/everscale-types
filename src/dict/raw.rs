@@ -2,7 +2,7 @@ use crate::cell::*;
 use crate::util::{unlikely, IterStatus};
 use crate::Error;
 
-use super::{dict_get, dict_insert, read_label, SetMode};
+use super::{dict_get, dict_insert, dict_load_from_root, read_label, SetMode};
 
 /// Dictionary with fixed length keys (where `N` is a number of bits in each key).
 ///
@@ -30,7 +30,7 @@ use super::{dict_get, dict_insert, read_label, SetMode};
 ///
 /// bit$_ (## 1) = Bit;
 /// ```
-pub struct RawDict<C: CellFamily, const N: u16>(Option<CellContainer<C>>);
+pub struct RawDict<C: CellFamily, const N: u16>(pub(crate) Option<CellContainer<C>>);
 
 impl<'a, C: CellFamily, const N: u16> Load<'a, C> for RawDict<C, N> {
     #[inline]
@@ -103,6 +103,20 @@ impl<C: CellFamily, const N: u16> RawDict<C, N> {
     #[inline]
     pub const fn root(&self) -> &Option<CellContainer<C>> {
         &self.0
+    }
+}
+
+impl<C, const N: u16> RawDict<C, N>
+where
+    for<'c> C: CellFamily + 'c,
+{
+    /// Loads a non-empty dictionary from a root cell.
+    #[inline]
+    pub fn load_from_root_ext(
+        slice: &mut CellSlice<'_, C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Option<Self> {
+        Some(Self(Some(dict_load_from_root(slice, N, finalizer)?)))
     }
 }
 
