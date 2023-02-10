@@ -703,9 +703,6 @@ impl_small_uints! {
     /// Fixed-length 12-bit integer.
     pub struct Uint12(12);
 
-    /// Fixed-length 13-bit integer.
-    pub struct Uint13(13);
-
     /// Fixed-length 15-bit integer.
     pub struct Uint15(15);
 }
@@ -932,7 +929,6 @@ mod tests {
     fn fixed_len_operations() {
         impl_operation_tests!(Uint9, check_max_div);
         impl_operation_tests!(Uint12, check_max_div);
-        impl_operation_tests!(Uint13, check_max_div);
         impl_operation_tests!(Uint15);
     }
 
@@ -940,7 +936,6 @@ mod tests {
     fn fixed_len_serialization() {
         impl_fixed_len_serialization_tests!(Uint9, 16);
         impl_fixed_len_serialization_tests!(Uint12, 16);
-        impl_fixed_len_serialization_tests!(Uint13, 16);
         impl_fixed_len_serialization_tests!(Uint15, 16);
     }
 
@@ -948,7 +943,6 @@ mod tests {
     fn fixed_len_deserialization() {
         impl_deserialization_tests!(Uint9, 9, 0b100110011);
         impl_deserialization_tests!(Uint12, 12, 0b111100110011);
-        impl_deserialization_tests!(Uint13, 13, 0b1111100110011);
         impl_deserialization_tests!(Uint15, 15, 0b11111100110011);
     }
 
