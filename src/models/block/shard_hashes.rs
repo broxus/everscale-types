@@ -555,7 +555,7 @@ impl<C: CellFamily> Iterator for WorkchainLatestBlocksIter<'_, C> {
 
 /// An iterator over the keys of a [`WorkchainShardHashes`].
 ///
-/// This struct is created by the [`raw_keys`] method on [`WorkchainShardHashes`].
+/// This struct is created by the [`keys`] method on [`WorkchainShardHashes`].
 /// See its documentation for more.
 ///
 /// [`keys`]: WorkchainShardHashes::keys

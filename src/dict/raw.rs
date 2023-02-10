@@ -490,7 +490,7 @@ where
 ///
 /// [`Dict`]: crate::dict::Dict
 /// [`values`]: RawDict::values
-/// [`raw_values`]: crate::Dict::values
+/// [`raw_values`]: crate::dict::Dict::raw_values
 pub struct RawValues<'a, C: CellFamily> {
     // TODO: replace `Vec` with on-stack stuff
     segments: Vec<ValuesSegment<'a, C>>,
