@@ -331,18 +331,18 @@ impl<'a, C: CellFamily> Load<'a, C> for WorkchainFormatExtended {
 
 /// Block creation reward.
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct BlockCreationReward {
+pub struct BlockCreationRewards {
     /// Reward for each created masterchain block.
     pub masterchain_block_fee: Tokens,
     /// Base reward for basechain blocks.
     pub basechain_block_fee: Tokens,
 }
 
-impl BlockCreationReward {
+impl BlockCreationRewards {
     const TAG: u8 = 0x6b;
 }
 
-impl<C: CellFamily> Store<C> for BlockCreationReward {
+impl<C: CellFamily> Store<C> for BlockCreationRewards {
     fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
         builder.store_u8(Self::TAG)
             && self.masterchain_block_fee.store_into(builder, finalizer)
@@ -350,7 +350,7 @@ impl<C: CellFamily> Store<C> for BlockCreationReward {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for BlockCreationReward {
+impl<'a, C: CellFamily> Load<'a, C> for BlockCreationRewards {
     fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
         if slice.load_u8()? != Self::TAG {
             return None;
