@@ -50,6 +50,7 @@ impl<C: CellFamily, K, V> Clone for Dict<C, K, V> {
 }
 
 impl<C: CellFamily, K, V> Eq for Dict<C, K, V> {}
+
 impl<C: CellFamily, K, V> PartialEq for Dict<C, K, V> {
     fn eq(&self, other: &Self) -> bool {
         match (&self.root, &other.root) {
@@ -214,9 +215,8 @@ where
     }
 }
 
-impl<C, K, V> Dict<C, K, V>
+impl<C: CellFamily, K, V> Dict<C, K, V>
 where
-    for<'c> C: DefaultFinalizer + 'c,
     K: Store<C> + DictKey,
 {
     /// Gets an iterator over the entries of the dictionary, sorted by key.
@@ -472,7 +472,7 @@ where
 ///
 /// This struct is created by the [`iter`] method on [`Dict`]. See its documentation for more.
 ///
-/// [`iter`]: fn@crate::dict::Dict::iter
+/// [`iter`]: Dict::iter
 pub struct Iter<'a, C: CellFamily, K, V> {
     inner: RawIter<'a, C>,
     _key: PhantomData<K>,
@@ -506,25 +506,23 @@ where
 impl<'a, C, K, V> Iterator for Iter<'a, C, K, V>
 where
     for<'c> C: DefaultFinalizer + 'c,
-    for<'c> K: Load<'c, C> + DictKey,
+    K: DictKey,
     V: Load<'a, C>,
 {
     type Item = Result<(K, V), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.inner.next()? {
+        Some(match self.inner.next()? {
             Ok((key, mut value)) => {
-                if let Some(key) = key.build() {
-                    if let Some(key) = K::load_from(&mut key.as_ref().as_slice()) {
-                        if let Some(value) = V::load_from(&mut value) {
-                            return Some(Ok((key, value)));
-                        }
+                if let Some(key) = K::from_raw_data(key.raw_data()) {
+                    if let Some(value) = V::load_from(&mut value) {
+                        return Some(Ok((key, value)));
                     }
                 }
-                Some(Err(self.inner.finish(Error::CellUnderflow)))
+                Err(self.inner.finish(Error::CellUnderflow))
             }
-            Err(e) => Some(Err(e)),
-        }
+            Err(e) => Err(e),
+        })
     }
 }
 
@@ -533,7 +531,7 @@ where
 /// This struct is created by the [`keys`] method on [`Dict`]. See its
 /// documentation for more.
 ///
-/// [`keys`]: RawDict::keys
+/// [`keys`]: Dict::keys
 pub struct Keys<'a, C: CellFamily, K> {
     inner: RawIter<'a, C>,
     _key: PhantomData<K>,
@@ -564,22 +562,18 @@ where
 impl<'a, C, K> Iterator for Keys<'a, C, K>
 where
     for<'c> C: DefaultFinalizer + 'c,
-    for<'c> K: Load<'c, C> + DictKey,
+    K: DictKey,
 {
     type Item = Result<K, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.inner.next()? {
-            Ok((key, _)) => {
-                if let Some(key) = key.build() {
-                    if let Some(key) = K::load_from(&mut key.as_ref().as_slice()) {
-                        return Some(Ok(key));
-                    }
-                }
-                Some(Err(self.inner.finish(Error::CellUnderflow)))
-            }
-            Err(e) => Some(Err(e)),
-        }
+        Some(match self.inner.next()? {
+            Ok((key, _)) => match K::from_raw_data(key.raw_data()) {
+                Some(key) => Ok(key),
+                None => Err(self.inner.finish(Error::CellUnderflow)),
+            },
+            Err(e) => Err(e),
+        })
     }
 }
 

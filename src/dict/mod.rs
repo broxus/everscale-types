@@ -13,34 +13,42 @@ mod raw;
 mod typed;
 
 /// Type which can be used as a dictionary key.
-pub trait DictKey {
+pub trait DictKey: Sized {
     /// Length in bits for a dictionary key.
     const BITS: u16;
+
+    /// Creates a key from a raw builder data.
+    fn from_raw_data(raw_data: &[u8; 128]) -> Option<Self>;
 }
 
 macro_rules! impl_dict_key {
-    ($($ty:ty => $bits:literal),*,) => {
+    ($($ty:ty => $bits:literal => |$raw_data:ident| $expr:expr),*,) => {
         $(impl DictKey for $ty {
             const BITS: u16 = $bits;
+
+            #[inline]
+            fn from_raw_data($raw_data: &[u8; 128]) -> Option<Self> {
+                Some($expr)
+            }
         })*
     };
 }
 
 impl_dict_key! {
-    bool => 1,
-    u8 => 8,
-    i8 => 8,
-    u16 => 16,
-    i16 => 16,
-    u32 => 32,
-    i32 => 32,
-    u64 => 64,
-    i64 => 64,
-    u128 => 128,
-    i128 => 128,
-    [u8; 16] => 128,
-    [u8; 20] => 160,
-    [u8; 32] => 256,
+    bool => 1 => |d| d[0] & 0x80 != 0,
+    u8 => 8 => |d| d[0],
+    i8 => 8 => |d| d[0] as i8,
+    u16 => 16 => |d| u16::from_be_bytes([d[0], d[1]]),
+    i16 => 16 => |d| i16::from_be_bytes([d[0], d[1]]),
+    u32 => 32 => |d| u32::from_be_bytes(d[..4].try_into().unwrap()),
+    i32 => 32 => |d| i32::from_be_bytes(d[..4].try_into().unwrap()),
+    u64 => 64 => |d| u64::from_be_bytes(d[..8].try_into().unwrap()),
+    i64 => 64 => |d| i64::from_be_bytes(d[..8].try_into().unwrap()),
+    u128 => 128 => |d| u128::from_be_bytes(d[..16].try_into().unwrap()),
+    i128 => 128 => |d| i128::from_be_bytes(d[..16].try_into().unwrap()),
+    [u8; 16] => 128 => |d| d[..16].try_into().unwrap(),
+    [u8; 20] => 160 => |d| d[..20].try_into().unwrap(),
+    [u8; 32] => 256 => |d| d[..32].try_into().unwrap(),
 }
 
 /// Dictionary insertion mode.

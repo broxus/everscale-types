@@ -202,6 +202,12 @@ impl<C: CellFamily> CellBuilder<C> {
         }
     }
 
+    /// Returns an underlying cell data.
+    #[inline]
+    pub fn raw_data(&self) -> &[u8; 128] {
+        &self.data
+    }
+
     /// Returns the data size of this cell in bits.
     #[inline]
     pub fn bit_len(&self) -> u16 {

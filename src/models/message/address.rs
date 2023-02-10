@@ -226,6 +226,49 @@ impl<'a, C: CellFamily> Load<'a, C> for StdAddr {
 
 impl crate::dict::DictKey for StdAddr {
     const BITS: u16 = StdAddr::BITS_WITHOUT_ANYCAST;
+
+    fn from_raw_data([first_byte, second_byte, data @ ..]: &[u8; 128]) -> Option<Self> {
+        // 2 bits id, 1 bit maybe (None), 8 bits workchain, 256 bits address
+
+        const PREFIX_BITS: u8 = 0b1000_0000;
+        const PREFIX_MASK: u8 = 0b1110_0000;
+
+        const R: u8 = 3;
+        const SHIFT: u8 = 8 - R;
+        const REV_SHIFT: u8 = 120 + R;
+
+        if unlikely((first_byte ^ PREFIX_BITS) & PREFIX_MASK != 0) {
+            return None;
+        }
+
+        let mut result = Self {
+            anycast: None,
+            // 100xxxxx | xxxaaaaa -> xxxxxxxx
+            workchain: ((first_byte << R) | (second_byte >> SHIFT)) as i8,
+            address: [0; 32],
+        };
+
+        // SAFETY: transmuting [u8; 32] to [u128; 2] is safe
+        let [mut hi, mut lo]: [u128; 2] =
+            unsafe { std::mem::transmute::<[u8; 32], _>(data[..32].try_into().unwrap()) };
+
+        // Numbers are in big endian order, swap bytes on little endian arch
+        #[cfg(target_endian = "little")]
+        {
+            hi = hi.swap_bytes();
+            lo = lo.swap_bytes();
+        }
+
+        // SAFETY: transmuting [[u8; 16]; 2] to [u8; 32] is safe
+        result.address = unsafe {
+            std::mem::transmute([
+                (hi >> SHIFT | ((*second_byte as u128) << REV_SHIFT)).to_be_bytes(),
+                (lo >> SHIFT | (hi << REV_SHIFT)).to_be_bytes(),
+            ])
+        };
+
+        Some(result)
+    }
 }
 
 /// Variable-length internal address.

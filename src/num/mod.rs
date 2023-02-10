@@ -685,6 +685,11 @@ macro_rules! impl_small_uints {
 
         impl crate::dict::DictKey for $ident {
             const BITS: u16 = $bits;
+
+            #[inline]
+            fn from_raw_data(d: &[u8; 128]) -> Option<Self> {
+                Some($ident(u16::from_be_bytes([d[0], d[1]]) >> (16 - $bits)))
+            }
         }
 
         impl_ops! { $ident, u16 }

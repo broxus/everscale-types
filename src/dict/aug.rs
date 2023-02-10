@@ -268,7 +268,7 @@ where
 impl<C, K, A, V> AugDict<C, K, A, V>
 where
     for<'c> C: DefaultFinalizer + 'c,
-    K: Store<C> + DictKey,
+    K: DictKey,
 {
     /// Gets an iterator over the entries of the dictionary, sorted by key.
     /// The iterator element type is `Result<(K, A, V)>`.
@@ -531,7 +531,7 @@ where
 impl<'a, C, K, A, V> Iterator for AugIter<'a, C, K, A, V>
 where
     for<'c> C: DefaultFinalizer + 'c,
-    for<'c> K: Load<'c, C> + DictKey,
+    K: DictKey,
     (A, V): Load<'a, C>,
 {
     type Item = Result<(K, A, V), Error>;
