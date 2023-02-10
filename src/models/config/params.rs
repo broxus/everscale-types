@@ -1,172 +1,12 @@
-//! Blockchain config and params.
-
 use std::num::{NonZeroU16, NonZeroU32, NonZeroU8};
 
 use crate::cell::*;
 use crate::dict::Dict;
-use crate::error::Error;
 use crate::num::{Tokens, Uint12};
 use crate::util::DisplayHash;
 
-use crate::models::block::{GlobalVersion, ShardIdent};
-use crate::models::currency::ExtraCurrencyCollection;
+use crate::models::block::ShardIdent;
 use crate::models::Lazy;
-
-/// Blockchain config.
-#[derive(Clone, Eq, PartialEq)]
-pub struct BlockchainConfig<C: CellFamily> {
-    /// Configuration contract address.
-    pub address: CellHash,
-    /// Configuration parameters.
-    pub params: Dict<C, u32, CellContainer<C>>,
-}
-
-impl<C: CellFamily> std::fmt::Debug for BlockchainConfig<C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BlockchainConfig")
-            .field("address", &DisplayHash(&self.address))
-            .field("params", &self.params)
-            .finish()
-    }
-}
-
-impl<C: CellFamily> Store<C> for BlockchainConfig<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
-        let params_root = match self.params.root() {
-            Some(root) => root.clone(),
-            None => return false,
-        };
-        builder.store_u256(&self.address) && builder.store_reference(params_root)
-    }
-}
-
-impl<'a, C: CellFamily> Load<'a, C> for BlockchainConfig<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self {
-            address: slice.load_u256()?,
-            params: Dict::from(Some(slice.load_reference_cloned()?)),
-        })
-    }
-}
-
-impl<C> BlockchainConfig<C>
-where
-    for<'c> C: DefaultFinalizer + 'c,
-{
-    /// Tries to get a parameter from the blockchain config.
-    pub fn get<'a, T: KnownConfigParam<'a, C>>(&'a self) -> Result<Option<T::Value>, Error> {
-        let mut slice = match self.params.get_raw(T::ID)? {
-            Some(slice) => match slice.get_reference(0) {
-                Some(cell) => cell.as_slice(),
-                None => return Err(Error::CellUnderflow),
-            },
-            None => return Ok(None),
-        };
-        match <T::Value as Load<'a, C>>::load_from(&mut slice) {
-            Some(value) => Ok(Some(value)),
-            None => Err(Error::CellUnderflow),
-        }
-    }
-}
-
-/// Marker trait which is implemented for known config params.
-pub trait KnownConfigParam<'a, C: CellFamily> {
-    /// Parameter index in a configuration dictionary.
-    const ID: u32;
-
-    /// Associated value type.
-    type Value: Load<'a, C>;
-}
-
-macro_rules! define_config_params {
-    ($($(#[doc = $doc:expr])* $id:literal => $ident:ident($($ty:tt)*)),*$(,)?) => {$(
-        $(#[doc = $doc])*
-        pub struct $ident;
-
-        impl<'a, C> KnownConfigParam<'a, C> for $ident
-        where
-            for<'c> C: DefaultFinalizer + 'c
-        {
-            const ID: u32 = $id;
-
-            type Value = $($ty)*;
-        }
-    )*}
-}
-
-define_config_params! {
-    /// Configuration account address.
-    0 => ConfigParam0(CellHash),
-    /// Elector account address.
-    1 => ConfigParam1(CellHash),
-    /// Minter account address.
-    2 => ConfigParam2(CellHash),
-    /// Fee collector account address.
-    3 => ConfigParam3(CellHash),
-    /// DNS root account address.
-    4 => ConfigParam4(CellHash),
-
-    /// Mint new price and mint add price (unused).
-    6 => ConfigParam6(CellSlice<'a, C>),
-    /// Target amount of minted extra currencies.
-    7 => ConfigParam7(ExtraCurrencyCollection<C>),
-    /// The lowest supported block version and required capabilities.
-    8 => ConfigParam8(GlobalVersion),
-    /// Params that must be present in config.
-    9 => ConfigParam9(Dict<C, u32, ()>),
-    /// Params that have a different set of update requirements.
-    10 => ConfigParam10(Dict<C, u32, ()>),
-    /// Config voting setup params.
-    11 => ConfigParam11(ConfigVotingSetup<C>),
-    /// Known workchain descriptions.
-    12 => ConfigParam12(Dict<C, i32, WorkchainDescription>),
-    /// Complaint pricing.
-    13 => ConfigParam13(CellSlice<'a, C>),
-    /// Block creation reward for masterchain and basechain.
-    14 => ConfigParam14(BlockCreationReward),
-    /// Validators election timings.
-    15 => ConfigParam15(ElectionTimings),
-    /// Range of number of validators.
-    16 => ConfigParam16(ValidatorCount),
-    /// Validator stake range and factor.
-    17 => ConfigParam17(ValidatorStakeParams),
-    /// Storage prices for different intervals of time.
-    18 => ConfigParam18(Dict<C, u32, StoragePrices>),
-    /// Masterchain gas limits and prices.
-    20 => ConfigParam20(GasLimitsPrices),
-    /// Base workchain gas limits and prices.
-    21 => ConfigParam21(GasLimitsPrices),
-    /// Masterchain block limits.
-    22 => ConfigParam22(BlockLimits),
-    /// Base workchain block limits.
-    23 => ConfigParam23(BlockLimits),
-    /// Message forwarding prices for masterchain.
-    24 => ConfigParam24(MsgForwardPrices),
-    /// Message forwarding prices for base workchain.
-    25 => ConfigParam25(MsgForwardPrices),
-
-    /// Catchain configuration params.
-    28 => ConfigParam28(CatchainConfig),
-    /// Consensus configuration params.
-    29 => ConfigParam29(ConsensusConfig),
-    /// Delector configuration params.
-    30 => ConfigParam30(CellSlice<'a, C>),
-    /// Fundamental smartcontract addresses.
-    31 => ConfigParam31(Dict<C, CellHash, ()>),
-
-    /// Previous validator set.
-    32 => ConfigParam32(ValidatorSet),
-    /// Previous temporary validator set.
-    33 => ConfigParam33(ValidatorSet),
-    /// Current validator set.
-    34 => ConfigParam34(ValidatorSet),
-    /// Current temporary validator set.
-    35 => ConfigParam35(ValidatorSet),
-    /// Next validator set.
-    36 => ConfigParam36(ValidatorSet),
-    /// Next temporary validator set.
-    37 => ConfigParam37(ValidatorSet),
-}
 
 /// Config voting setup params.
 pub struct ConfigVotingSetup<C: CellFamily> {
@@ -345,7 +185,7 @@ impl<'a, C: CellFamily> Load<'a, C> for WorkchainDescription {
         let min_split = slice.load_u8()?;
         let max_split = slice.load_u8()?;
         let flags = slice.load_u16()?;
-        if flags >> 3 != 0 {
+        if flags << 3 != 0 {
             return None;
         }
 
@@ -786,6 +626,7 @@ impl<'a, C: CellFamily> Load<'a, C> for BlockParamLimits {
 }
 
 /// Block limits.
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct BlockLimits {
     /// Block size limits in bytes.
     pub bytes: BlockParamLimits,
@@ -998,6 +839,7 @@ impl<'a, C: CellFamily> Load<'a, C> for ConsensusConfig {
 }
 
 /// Validator set.
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ValidatorSet {
     /// Unix timestamp from which this set will be active.
     pub utime_since: u32,

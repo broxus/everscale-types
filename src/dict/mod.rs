@@ -334,7 +334,7 @@ where
         };
         data = match data.cell().reference(child_index) {
             Some(child) if unlikely(child.descriptor().is_pruned_branch()) => {
-                return Err(Error::PrunedBranchAccess)
+                return Err(Error::PrunedBranchAccess);
             }
             Some(child) => child.as_slice(),
             None => return Err(Error::CellUnderflow),
@@ -354,18 +354,22 @@ pub fn dict_load_from_root<C>(
 where
     for<'c> C: CellFamily + 'c,
 {
-    let root = *slice;
+    let mut root = *slice;
 
     let label = read_label(slice, key_bit_len)?;
-    if label.remaining_bits() != key_bit_len && !slice.try_advance(0, 2) {
-        return None;
-    };
-
-    let root_bits = root.remaining_bits() - slice.remaining_bits();
-    let root_refs = root.remaining_refs() - slice.remaining_refs();
+    if label.remaining_bits() != key_bit_len {
+        if !slice.try_advance(0, 2) {
+            return None;
+        }
+        let root_bits = root.remaining_bits() - slice.remaining_bits();
+        let root_refs = root.remaining_refs() - slice.remaining_refs();
+        root = root.get_prefix(root_bits, root_refs)
+    } else {
+        slice.load_remaining();
+    }
 
     let mut builder = CellBuilder::<C>::new();
-    if builder.store_slice(root.get_prefix(root_bits, root_refs)) {
+    if builder.store_slice(root) {
         Some(builder.build_ext(finalizer)?)
     } else {
         None
