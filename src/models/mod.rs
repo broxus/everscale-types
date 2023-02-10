@@ -9,6 +9,7 @@ use crate::cell::{
 pub use account::*;
 pub use block::*;
 pub use config::*;
+pub use global_version::*;
 pub use message::*;
 pub use transaction::*;
 
@@ -16,6 +17,7 @@ pub mod account;
 pub mod block;
 pub mod config;
 pub mod currency;
+pub mod global_version;
 pub mod message;
 pub mod transaction;
 

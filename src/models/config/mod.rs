@@ -6,8 +6,8 @@ use crate::error::Error;
 use crate::num::Tokens;
 use crate::util::DisplayHash;
 
-use crate::models::block::GlobalVersion;
 use crate::models::currency::ExtraCurrencyCollection;
+use crate::models::global_version::GlobalVersion;
 
 pub use self::params::*;
 
@@ -518,7 +518,7 @@ mod tests {
             blockchain_config.get::<ConfigParam8>().unwrap(),
             Some(GlobalVersion {
                 version: 35,
-                capabilities: 0x717ae,
+                capabilities: 0x717ae.into(),
             })
         );
 
