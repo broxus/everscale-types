@@ -475,3 +475,24 @@ impl<'a, C: CellFamily> Load<'a, C> for Anycast {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cell::rc::RcCellFamily;
+    use crate::dict::Dict;
+
+    #[test]
+    fn dict_with_std_addr_keys() {
+        let mut dict = Dict::<RcCellFamily, StdAddr, u32>::new();
+        dict.set(StdAddr::new(-1, [0x33; 32]), 123).unwrap();
+        dict.set(StdAddr::new(0, [0x10; 32]), 321).unwrap();
+        dict.set(StdAddr::new(-1, [0x55; 32]), 234).unwrap();
+        dict.set(StdAddr::new(0, [0x20; 32]), 432).unwrap();
+
+        for entry in dict.iter() {
+            let (addr, value) = entry.unwrap();
+            println!("{addr}: {value}");
+        }
+    }
+}
