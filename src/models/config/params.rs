@@ -397,7 +397,7 @@ impl<'a, C: CellFamily> Load<'a, C> for ElectionTimings {
 
 /// Range of number of validators.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct ValidatorCount {
+pub struct ValidatorCountParams {
     /// The maximum number of validators.
     pub max_validators: u16,
     /// The maximum number of masterchain validators.
@@ -406,7 +406,7 @@ pub struct ValidatorCount {
     pub min_validators: u16,
 }
 
-impl<C: CellFamily> Store<C> for ValidatorCount {
+impl<C: CellFamily> Store<C> for ValidatorCountParams {
     fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
         builder.store_u16(self.max_validators)
             && builder.store_u16(self.max_main_validators)
@@ -414,7 +414,7 @@ impl<C: CellFamily> Store<C> for ValidatorCount {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for ValidatorCount {
+impl<'a, C: CellFamily> Load<'a, C> for ValidatorCountParams {
     fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
         Some(Self {
             max_validators: slice.load_u16()?,
