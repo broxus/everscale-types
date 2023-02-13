@@ -5,8 +5,11 @@ use everscale_types_proc::*;
 use crate::cell::*;
 use crate::dict::*;
 use crate::num::*;
+use crate::util::*;
 
 use crate::models::currency::CurrencyCollection;
+use crate::models::message::IntAddr;
+use crate::models::Lazy;
 
 /// Amount of unique cells and bits for shard states.
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
@@ -146,18 +149,136 @@ impl<'a, C: CellFamily> Load<'a, C> for AccountStatus {
     }
 }
 
+/// Shard accounts entry.
 #[derive(CustomDebug, CustomClone, CustomEq)]
-pub struct AccountStorage<C: CellFamily> {
+pub struct ShardAccount<C: CellFamily> {
+    /// Optional reference to account state.
+    pub account: Lazy<C, OptionalAccount<C>>,
+    /// The exact hash of the last transaction.
+    #[debug(with = "DisplayHash")]
+    pub last_trans_hash: CellHash,
+    /// The exact logical time of the last transaction.
+    pub last_trans_lt: u64,
+}
+
+impl<C: CellFamily> Store<C> for ShardAccount<C> {
+    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+        builder.store_reference(self.account.cell.clone())
+            && builder.store_u256(&self.last_trans_hash)
+            && builder.store_u64(self.last_trans_lt)
+    }
+}
+
+impl<'a, C: CellFamily> Load<'a, C> for ShardAccount<C> {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+        Some(Self {
+            account: Lazy::load_from(slice)?,
+            last_trans_hash: slice.load_u256()?,
+            last_trans_lt: slice.load_u64()?,
+        })
+    }
+}
+
+/// A wrapper for `Option<Account>` with customized representation.
+#[derive(CustomDebug, CustomClone, CustomEq)]
+pub struct OptionalAccount<C: CellFamily>(pub Option<Account<C>>);
+
+impl<C: CellFamily> Default for OptionalAccount<C> {
+    #[inline]
+    fn default() -> Self {
+        Self(None)
+    }
+}
+
+impl<C: CellFamily> OptionalAccount<C> {
+    /// Non-existing account.
+    pub const EMPTY: Self = Self(None);
+}
+
+impl<C: CellFamily> Store<C> for OptionalAccount<C> {
+    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+        match &self.0 {
+            None => builder.store_bit_zero(),
+            Some(account) => {
+                let with_init_code_hash = account.init_code_hash.is_some();
+                let prefix_stored = if with_init_code_hash {
+                    builder.store_small_uint(0b0001, 4)
+                } else {
+                    builder.store_bit_one()
+                };
+
+                prefix_stored
+                    && account.address.store_into(builder, finalizer)
+                    && account.storage_stat.store_into(builder, finalizer)
+                    && builder.store_u64(account.last_trans_lt)
+                    && account.balance.store_into(builder, finalizer)
+                    && account.state.store_into(builder, finalizer)
+                    && if let Some(init_code_hash) = &account.init_code_hash {
+                        builder.store_bit_one() && builder.store_u256(init_code_hash)
+                    } else {
+                        true
+                    }
+            }
+        }
+    }
+}
+
+impl<'a, C: CellFamily> Load<'a, C> for OptionalAccount<C> {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+        let with_init_code_hash = if slice.load_bit()? {
+            false // old version
+        } else if slice.is_data_empty() {
+            return Some(Self::EMPTY);
+        } else {
+            let tag = slice.load_small_uint(3)?;
+            match tag {
+                0 => false, // old version
+                1 => true,  // new version
+                _ => return None,
+            }
+        };
+
+        Some(Self(Some(Account {
+            address: IntAddr::load_from(slice)?,
+            storage_stat: StorageInfo::load_from(slice)?,
+            last_trans_lt: slice.load_u64()?,
+            balance: CurrencyCollection::load_from(slice)?,
+            state: AccountState::load_from(slice)?,
+            init_code_hash: if with_init_code_hash {
+                Option::<CellHash>::load_from(slice)?
+            } else {
+                None
+            },
+        })))
+    }
+}
+
+/// Existing account data.
+#[derive(CustomDebug, CustomClone, CustomEq)]
+pub struct Account<C: CellFamily> {
+    /// Account address.
+    pub address: IntAddr,
+    /// Storage statistics.
+    pub storage_stat: StorageInfo,
     /// Logical time after the last transaction execution.
     pub last_trans_lt: u64,
     /// Account balance for all currencies.
     pub balance: CurrencyCollection<C>,
+    /// Account state.
+    pub state: AccountState<C>,
+    /// Optional initial code hash.
+    #[debug(with = "DisplayOptionalHash")]
+    pub init_code_hash: Option<CellHash>,
 }
 
+/// State of an existing account.
 #[derive(CustomDebug, CustomClone, CustomEq)]
 pub enum AccountState<C: CellFamily> {
+    /// Account exists but has not yet been deployed.
     Uninit,
+    /// Account exists and has been deployed.
     Active(StateInit<C>),
+    /// Account exists but has been frozen. Contains a hash of the last known [`StateInit`].
     Frozen(CellHash),
 }
 
