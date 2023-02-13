@@ -20,6 +20,7 @@ pub mod config;
 pub mod currency;
 pub mod global_version;
 pub mod message;
+pub mod shard;
 pub mod transaction;
 
 /// Lazy-loaded model.
