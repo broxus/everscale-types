@@ -1,13 +1,13 @@
 use std::str::FromStr;
 
-use everscale_types_proc::CustomDebug;
+use everscale_types_proc::*;
 
 use crate::cell::*;
 use crate::error::ParseBlockIdError;
 use crate::util::*;
 
 /// Full block id.
-#[derive(CustomDebug, Default, Clone, Copy, Eq, Hash, PartialEq, Ord, PartialOrd)]
+#[derive(CustomDebug, Default, Clone, Copy, Eq, Hash, PartialEq, Ord, PartialOrd, Load)]
 pub struct BlockId {
     /// Block shard ident.
     pub shard: ShardIdent,
@@ -121,17 +121,6 @@ impl<C: CellFamily> Store<C> for BlockId {
             && builder.store_u32(self.seqno)
             && builder.store_u256(&self.root_hash)
             && builder.store_u256(&self.file_hash)
-    }
-}
-
-impl<'a, C: CellFamily> Load<'a, C> for BlockId {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self {
-            shard: ShardIdent::load_from(slice)?,
-            seqno: slice.load_u32()?,
-            root_hash: slice.load_u256()?,
-            file_hash: slice.load_u256()?,
-        })
     }
 }
 

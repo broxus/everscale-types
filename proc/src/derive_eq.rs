@@ -4,7 +4,7 @@ use quote::{quote, ToTokens};
 use crate::internals::{ast, ctxt};
 use crate::{bound, Derive};
 
-pub fn impl_derive_eq(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Error>> {
+pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Error>> {
     let cx = ctxt::Ctxt::new();
     let container = match ast::Container::from_ast(&cx, &input, Derive::Debug) {
         Some(container) => container,

@@ -243,7 +243,7 @@ impl<'a, C: CellFamily> Load<'a, C> for WorkchainFormat {
 }
 
 /// Basic workchain format description.
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Load)]
 pub struct WorkchainFormatBasic {
     /// VM version.
     pub vm_version: i32,
@@ -254,15 +254,6 @@ pub struct WorkchainFormatBasic {
 impl<C: CellFamily> Store<C> for WorkchainFormatBasic {
     fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
         builder.store_u32(self.vm_version as u32) && builder.store_u64(self.vm_mode)
-    }
-}
-
-impl<'a, C: CellFamily> Load<'a, C> for WorkchainFormatBasic {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self {
-            vm_version: slice.load_u32()? as i32,
-            vm_mode: slice.load_u64()?,
-        })
     }
 }
 
@@ -345,7 +336,7 @@ impl<'a, C: CellFamily> Load<'a, C> for BlockCreationRewards {
 }
 
 /// Validators election timings.
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Load)]
 pub struct ElectionTimings {
     /// Validation round length in seconds.
     pub validators_elected_for: u32,
@@ -366,19 +357,8 @@ impl<C: CellFamily> Store<C> for ElectionTimings {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for ElectionTimings {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self {
-            validators_elected_for: slice.load_u32()?,
-            elections_start_before: slice.load_u32()?,
-            elections_end_before: slice.load_u32()?,
-            stake_held_for: slice.load_u32()?,
-        })
-    }
-}
-
 /// Range of number of validators.
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Load)]
 pub struct ValidatorCountParams {
     /// The maximum number of validators.
     pub max_validators: u16,
@@ -396,18 +376,8 @@ impl<C: CellFamily> Store<C> for ValidatorCountParams {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for ValidatorCountParams {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self {
-            max_validators: slice.load_u16()?,
-            max_main_validators: slice.load_u16()?,
-            min_validators: slice.load_u16()?,
-        })
-    }
-}
-
 /// Validator stake range and factor.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Load)]
 pub struct ValidatorStakeParams {
     /// The minimum validator stake.
     pub min_stake: Tokens,
@@ -425,17 +395,6 @@ impl<C: CellFamily> Store<C> for ValidatorStakeParams {
             && self.max_stake.store_into(builder, finalizer)
             && self.min_total_stake.store_into(builder, finalizer)
             && builder.store_u32(self.max_stake_factor)
-    }
-}
-
-impl<'a, C: CellFamily> Load<'a, C> for ValidatorStakeParams {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self {
-            min_stake: Tokens::load_from(slice)?,
-            max_stake: Tokens::load_from(slice)?,
-            min_total_stake: Tokens::load_from(slice)?,
-            max_stake_factor: slice.load_u32()?,
-        })
     }
 }
 

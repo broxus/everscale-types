@@ -351,7 +351,7 @@ pub enum PrevBlockRef {
 }
 
 /// Reference to the external block.
-#[derive(CustomDebug, Clone, Copy, Eq, PartialEq)]
+#[derive(CustomDebug, Clone, Copy, Eq, PartialEq, Load)]
 pub struct BlockRef {
     /// The end of the logical time of the referenced block.
     pub end_lt: u64,
@@ -371,17 +371,6 @@ impl<C: CellFamily> Store<C> for BlockRef {
             && builder.store_u32(self.seqno)
             && builder.store_u256(&self.root_hash)
             && builder.store_u256(&self.file_hash)
-    }
-}
-
-impl<'a, C: CellFamily> Load<'a, C> for BlockRef {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self {
-            end_lt: slice.load_u64()?,
-            seqno: slice.load_u32()?,
-            root_hash: slice.load_u256()?,
-            file_hash: slice.load_u256()?,
-        })
     }
 }
 

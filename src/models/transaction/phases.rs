@@ -10,7 +10,7 @@ use crate::models::currency::CurrencyCollection;
 /// Storage phase info.
 ///
 /// At this phase account pays for storing its state.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Load)]
 pub struct StoragePhase {
     /// Amount of tokens collected for storing this contract for some time.
     pub storage_fees_collected: Tokens,
@@ -29,20 +29,10 @@ impl<C: CellFamily> Store<C> for StoragePhase {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for StoragePhase {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self {
-            storage_fees_collected: Tokens::load_from(slice)?,
-            storage_fees_due: Option::<Tokens>::load_from(slice)?,
-            status_change: AccountStatusChange::load_from(slice)?,
-        })
-    }
-}
-
 /// Credit phase info.
 ///
 /// At this phase message balance is added to the account balance.
-#[derive(CustomDebug, CustomClone, CustomEq)]
+#[derive(CustomDebug, CustomClone, CustomEq, Load)]
 pub struct CreditPhase<C: CellFamily> {
     /// Amount of tokens paid for the debt.
     pub due_fees_collected: Option<Tokens>,
@@ -55,15 +45,6 @@ impl<C: CellFamily> Store<C> for CreditPhase<C> {
     fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
         self.due_fees_collected.store_into(builder, finalizer)
             && self.credit.store_into(builder, finalizer)
-    }
-}
-
-impl<'a, C: CellFamily> Load<'a, C> for CreditPhase<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self {
-            due_fees_collected: Option::<Tokens>::load_from(slice)?,
-            credit: CurrencyCollection::<C>::load_from(slice)?,
-        })
     }
 }
 
@@ -179,7 +160,7 @@ pub struct ExecutedComputePhase {
 }
 
 /// Skipped compute phase info.
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Load)]
 pub struct SkippedComputePhase {
     /// The reason this step was skipped.
     pub reason: ComputePhaseSkipReason,
@@ -188,14 +169,6 @@ pub struct SkippedComputePhase {
 impl<C: CellFamily> Store<C> for SkippedComputePhase {
     fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
         self.reason.store_into(builder, finalizer)
-    }
-}
-
-impl<'a, C: CellFamily> Load<'a, C> for SkippedComputePhase {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self {
-            reason: ComputePhaseSkipReason::load_from(slice)?,
-        })
     }
 }
 
@@ -358,7 +331,7 @@ impl<'a, C: CellFamily> Load<'a, C> for BouncePhase {
 }
 
 /// Skipped bounce phase info.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Load)]
 pub struct NoFundsBouncePhase {
     /// The total number of unique cells (bits / refs) of the bounced message.
     pub msg_size: StorageUsedShort,
@@ -373,17 +346,8 @@ impl<C: CellFamily> Store<C> for NoFundsBouncePhase {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for NoFundsBouncePhase {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self {
-            msg_size: StorageUsedShort::load_from(slice)?,
-            req_fwd_fees: Tokens::load_from(slice)?,
-        })
-    }
-}
-
 /// Executed bounce phase info.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Load)]
 pub struct ExecutedBouncePhase {
     /// The total number of unique cells (bits / refs) of the bounced message.
     pub msg_size: StorageUsedShort,
@@ -398,16 +362,6 @@ impl<C: CellFamily> Store<C> for ExecutedBouncePhase {
         self.msg_size.store_into(builder, finalizer)
             && self.msg_fees.store_into(builder, finalizer)
             && self.fwd_fees.store_into(builder, finalizer)
-    }
-}
-
-impl<'a, C: CellFamily> Load<'a, C> for ExecutedBouncePhase {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self {
-            msg_size: StorageUsedShort::load_from(slice)?,
-            msg_fees: Tokens::load_from(slice)?,
-            fwd_fees: Tokens::load_from(slice)?,
-        })
     }
 }
 

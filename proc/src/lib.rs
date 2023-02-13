@@ -5,6 +5,7 @@ mod bound;
 mod derive_clone;
 mod derive_debug;
 mod derive_eq;
+mod derive_load;
 mod internals;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -18,7 +19,7 @@ enum Derive {
 #[proc_macro_derive(CustomClone, attributes(bounds))]
 pub fn derive_clone(input: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(input as syn::DeriveInput);
-    derive_clone::impl_derive_clone(input)
+    derive_clone::impl_derive(input)
         .unwrap_or_else(to_compile_errors)
         .into()
 }
@@ -29,7 +30,7 @@ pub fn derive_clone(input: TokenStream) -> TokenStream {
 #[proc_macro_derive(CustomDebug, attributes(debug, bounds))]
 pub fn derive_debug(input: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(input as syn::DeriveInput);
-    derive_debug::impl_derive_debug(input)
+    derive_debug::impl_derive(input)
         .unwrap_or_else(to_compile_errors)
         .into()
 }
@@ -38,7 +39,16 @@ pub fn derive_debug(input: TokenStream) -> TokenStream {
 #[proc_macro_derive(CustomEq, attributes(bounds))]
 pub fn derive_eq(input: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(input as syn::DeriveInput);
-    derive_eq::impl_derive_eq(input)
+    derive_eq::impl_derive(input)
+        .unwrap_or_else(to_compile_errors)
+        .into()
+}
+
+/// Implements `Load` for the type.
+#[proc_macro_derive(Load, attributes(bounds))]
+pub fn derive_load(input: TokenStream) -> TokenStream {
+    let input = syn::parse_macro_input!(input as syn::DeriveInput);
+    derive_load::impl_derive(input)
         .unwrap_or_else(to_compile_errors)
         .into()
 }

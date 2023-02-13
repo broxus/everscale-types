@@ -11,7 +11,7 @@ use crate::models::currency::CurrencyCollection;
 
 /// A tree of the most recent descriptions for all currently existing shards
 /// for all workchains except the masterchain.
-#[derive(CustomDebug, CustomClone, CustomEq)]
+#[derive(CustomDebug, CustomClone, CustomEq, Load)]
 pub struct ShardHashes<C: CellFamily>(Dict<C, i32, CellContainer<C>>);
 
 impl<C> ShardHashes<C>
@@ -23,8 +23,8 @@ where
     ///
     /// If the dict or tree is invalid, finishes after the first invalid element.
     /// returning an error.
-    pub fn iter(&self) -> Iter<'_, C> {
-        Iter::new(self.0.root())
+    pub fn iter(&self) -> ShardHashesIter<'_, C> {
+        ShardHashesIter::new(self.0.root())
     }
 
     /// Gets an iterator over the raw entries of the shard description trees, sorted by
@@ -32,8 +32,8 @@ where
     ///
     /// If the dict or tree is invalid, finishes after the first invalid element,
     /// returning an error.
-    pub fn raw_iter(&self) -> RawIter<'_, C> {
-        RawIter::new(self.0.root())
+    pub fn raw_iter(&self) -> ShardHashesRawIter<'_, C> {
+        ShardHashesRawIter::new(self.0.root())
     }
 
     /// Gets an iterator over the latest blocks in all shards, sorted by
@@ -61,12 +61,6 @@ where
 impl<C: CellFamily> Store<C> for ShardHashes<C> {
     fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
         self.0.store_into(builder, finalizer)
-    }
-}
-
-impl<'a, C: CellFamily> Load<'a, C> for ShardHashes<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self(Dict::load_from(slice)?))
     }
 }
 
@@ -132,22 +126,22 @@ impl<C: CellFamily> WorkchainShardHashes<C> {
 ///
 /// [`iter`]: ShardHashes::iter
 #[derive(CustomClone)]
-pub struct Iter<'a, C: CellFamily> {
-    inner: RawIter<'a, C>,
+pub struct ShardHashesIter<'a, C: CellFamily> {
+    inner: ShardHashesRawIter<'a, C>,
 }
 
-impl<'a, C> Iter<'a, C>
+impl<'a, C> ShardHashesIter<'a, C>
 where
     for<'c> C: DefaultFinalizer + 'c,
 {
     fn new(dict: &'a Option<CellContainer<C>>) -> Self {
         Self {
-            inner: RawIter::new(dict),
+            inner: ShardHashesRawIter::new(dict),
         }
     }
 }
 
-impl<C> Iterator for Iter<'_, C>
+impl<C> Iterator for ShardHashesIter<'_, C>
 where
     for<'c> C: DefaultFinalizer + 'c,
 {
@@ -174,13 +168,13 @@ where
 ///
 /// [`raw_iter`]: ShardHashes::raw_iter
 #[derive(CustomClone)]
-pub struct RawIter<'a, C: CellFamily> {
+pub struct ShardHashesRawIter<'a, C: CellFamily> {
     dict_iter: dict::RawIter<'a, C>,
     shard_hashes_iter: Option<WorkchainShardHashesRawIter<'a, C>>,
     status: IterStatus,
 }
 
-impl<'a, C> RawIter<'a, C>
+impl<'a, C> ShardHashesRawIter<'a, C>
 where
     for<'c> C: DefaultFinalizer + 'c,
 {
@@ -199,7 +193,7 @@ where
     }
 }
 
-impl<'a, C> Iterator for RawIter<'a, C>
+impl<'a, C> Iterator for ShardHashesRawIter<'a, C>
 where
     for<'c> C: DefaultFinalizer + 'c,
 {
@@ -264,7 +258,7 @@ where
 /// [`latest_blocks`]: ShardHashes::latest_blocks
 #[derive(CustomClone)]
 pub struct LatestBlocksIter<'a, C: CellFamily> {
-    inner: RawIter<'a, C>,
+    inner: ShardHashesRawIter<'a, C>,
 }
 
 impl<'a, C> LatestBlocksIter<'a, C>
@@ -274,7 +268,7 @@ where
     /// Creates an iterator over the latest blocks of a [`ShardHashes`].
     pub fn new(dict: &'a Option<CellContainer<C>>) -> Self {
         Self {
-            inner: RawIter::new(dict),
+            inner: ShardHashesRawIter::new(dict),
         }
     }
 }

@@ -9,6 +9,10 @@ use crate::models::block::{BlockRef, ShardIdent};
 use crate::models::currency::CurrencyCollection;
 use crate::models::Lazy;
 
+pub use self::shard_accounts::*;
+
+mod shard_accounts;
+
 /// Applied shard state.
 #[derive(CustomDebug, CustomClone, CustomEq)]
 pub enum ShardState<C: CellFamily> {
@@ -59,7 +63,7 @@ pub struct ShardStateUnsplit<C: CellFamily> {
     /// Whether this state was produced before the shards split.
     pub before_split: bool,
     /// Reference to the dictionary with shard accounts.
-    pub accounts: CellContainer<C>,
+    pub accounts: Lazy<C, ShardAccounts<C>>,
     /// Mask for the overloaded blocks.
     pub overload_history: u64,
     /// Mask for the underloaded blocks.
@@ -110,7 +114,7 @@ impl<C: CellFamily> Store<C> for ShardStateUnsplit<C> {
             && builder.store_u32(self.min_ref_mc_seqno)
             && builder.store_reference(self.out_msg_queue_info.clone())
             && builder.store_bit(self.before_split)
-            && builder.store_reference(self.accounts.clone())
+            && builder.store_reference(self.accounts.cell.clone())
             && builder.store_reference(child_cell)
             && self.custom.store_into(builder, finalizer)
     }
@@ -123,7 +127,7 @@ impl<'a, C: CellFamily> Load<'a, C> for ShardStateUnsplit<C> {
         }
 
         let out_msg_queue_info = slice.load_reference_cloned()?;
-        let accounts = slice.load_reference_cloned()?;
+        let accounts = Lazy::load_from(slice)?;
 
         let child_cell = slice.load_reference_cloned()?;
         let child_slice = &mut child_cell.as_ref().as_slice();

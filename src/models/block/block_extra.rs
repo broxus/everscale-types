@@ -243,7 +243,7 @@ impl<'a, C: CellFamily> Load<'a, C> for McBlockExtra<C> {
 }
 
 /// TEMP shard fees mapping sub.
-#[derive(CustomDebug, CustomClone)]
+#[derive(CustomDebug, CustomClone, Load)]
 pub struct ShardFees<C: CellFamily> {
     /// Dictionary root.
     pub root: Option<CellContainer<C>>,
@@ -261,18 +261,8 @@ impl<C: CellFamily> Store<C> for ShardFees<C> {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for ShardFees<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self {
-            root: Option::<CellContainer<C>>::load_from(slice)?,
-            fees: CurrencyCollection::load_from(slice)?,
-            create: CurrencyCollection::load_from(slice)?,
-        })
-    }
-}
-
 /// Block signature pair.
-#[derive(CustomDebug, Clone)]
+#[derive(CustomDebug, Clone, Load)]
 pub struct BlockSignature {
     /// Signer node short id.
     #[debug(with = "DisplayHash")]
@@ -284,15 +274,6 @@ pub struct BlockSignature {
 impl<C: CellFamily> Store<C> for BlockSignature {
     fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
         builder.store_u256(&self.node_id_short) && self.signature.store_into(builder, finalizer)
-    }
-}
-
-impl<'a, C: CellFamily> Load<'a, C> for BlockSignature {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self {
-            node_id_short: slice.load_u256()?,
-            signature: Signature::load_from(slice)?,
-        })
     }
 }
 
