@@ -243,7 +243,7 @@ impl<'a, C: CellFamily> Load<'a, C> for McBlockExtra<C> {
 }
 
 /// TEMP shard fees mapping sub.
-#[derive(CustomDebug, CustomClone, Load)]
+#[derive(CustomDebug, CustomClone, Store, Load)]
 pub struct ShardFees<C: CellFamily> {
     /// Dictionary root.
     pub root: Option<CellContainer<C>>,
@@ -253,28 +253,14 @@ pub struct ShardFees<C: CellFamily> {
     pub create: CurrencyCollection<C>,
 }
 
-impl<C: CellFamily> Store<C> for ShardFees<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        self.root.store_into(builder, finalizer)
-            && self.fees.store_into(builder, finalizer)
-            && self.create.store_into(builder, finalizer)
-    }
-}
-
 /// Block signature pair.
-#[derive(CustomDebug, Clone, Load)]
+#[derive(CustomDebug, Clone, Store, Load)]
 pub struct BlockSignature {
     /// Signer node short id.
     #[debug(with = "DisplayHash")]
     pub node_id_short: CellHash,
     /// Signature data.
     pub signature: Signature,
-}
-
-impl<C: CellFamily> Store<C> for BlockSignature {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        builder.store_u256(&self.node_id_short) && self.signature.store_into(builder, finalizer)
-    }
 }
 
 /// Ed25519 signature.

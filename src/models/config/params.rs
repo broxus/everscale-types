@@ -243,18 +243,12 @@ impl<'a, C: CellFamily> Load<'a, C> for WorkchainFormat {
 }
 
 /// Basic workchain format description.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Load)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Store, Load)]
 pub struct WorkchainFormatBasic {
     /// VM version.
     pub vm_version: i32,
     /// VM mode.
     pub vm_mode: u64,
-}
-
-impl<C: CellFamily> Store<C> for WorkchainFormatBasic {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
-        builder.store_u32(self.vm_version as u32) && builder.store_u64(self.vm_mode)
-    }
 }
 
 /// Extended workchain format description.
@@ -336,7 +330,7 @@ impl<'a, C: CellFamily> Load<'a, C> for BlockCreationRewards {
 }
 
 /// Validators election timings.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Load)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Store, Load)]
 pub struct ElectionTimings {
     /// Validation round length in seconds.
     pub validators_elected_for: u32,
@@ -348,17 +342,8 @@ pub struct ElectionTimings {
     pub stake_held_for: u32,
 }
 
-impl<C: CellFamily> Store<C> for ElectionTimings {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
-        builder.store_u32(self.validators_elected_for)
-            && builder.store_u32(self.elections_start_before)
-            && builder.store_u32(self.elections_end_before)
-            && builder.store_u32(self.stake_held_for)
-    }
-}
-
 /// Range of number of validators.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Load)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Store, Load)]
 pub struct ValidatorCountParams {
     /// The maximum number of validators.
     pub max_validators: u16,
@@ -368,16 +353,8 @@ pub struct ValidatorCountParams {
     pub min_validators: u16,
 }
 
-impl<C: CellFamily> Store<C> for ValidatorCountParams {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
-        builder.store_u16(self.max_validators)
-            && builder.store_u16(self.max_main_validators)
-            && builder.store_u16(self.min_validators)
-    }
-}
-
 /// Validator stake range and factor.
-#[derive(Debug, Clone, Eq, PartialEq, Load)]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
 pub struct ValidatorStakeParams {
     /// The minimum validator stake.
     pub min_stake: Tokens,
@@ -387,15 +364,6 @@ pub struct ValidatorStakeParams {
     pub min_total_stake: Tokens,
     /// Stake constraint (shifted by 16 bits).
     pub max_stake_factor: u32,
-}
-
-impl<C: CellFamily> Store<C> for ValidatorStakeParams {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        self.min_stake.store_into(builder, finalizer)
-            && self.max_stake.store_into(builder, finalizer)
-            && self.min_total_stake.store_into(builder, finalizer)
-            && builder.store_u32(self.max_stake_factor)
-    }
 }
 
 /// Storage prices for some interval.

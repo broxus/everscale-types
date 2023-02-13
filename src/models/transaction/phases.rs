@@ -10,7 +10,7 @@ use crate::models::currency::CurrencyCollection;
 /// Storage phase info.
 ///
 /// At this phase account pays for storing its state.
-#[derive(Debug, Clone, Eq, PartialEq, Load)]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
 pub struct StoragePhase {
     /// Amount of tokens collected for storing this contract for some time.
     pub storage_fees_collected: Tokens,
@@ -21,31 +21,16 @@ pub struct StoragePhase {
     pub status_change: AccountStatusChange,
 }
 
-impl<C: CellFamily> Store<C> for StoragePhase {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        self.storage_fees_collected.store_into(builder, finalizer)
-            && self.storage_fees_due.store_into(builder, finalizer)
-            && self.status_change.store_into(builder, finalizer)
-    }
-}
-
 /// Credit phase info.
 ///
 /// At this phase message balance is added to the account balance.
-#[derive(CustomDebug, CustomClone, CustomEq, Load)]
+#[derive(CustomDebug, CustomClone, CustomEq, Store, Load)]
 pub struct CreditPhase<C: CellFamily> {
     /// Amount of tokens paid for the debt.
     pub due_fees_collected: Option<Tokens>,
     /// Amount of tokens added to the account balance from the remaining
     /// message balance.
     pub credit: CurrencyCollection<C>,
-}
-
-impl<C: CellFamily> Store<C> for CreditPhase<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        self.due_fees_collected.store_into(builder, finalizer)
-            && self.credit.store_into(builder, finalizer)
-    }
 }
 
 /// Compute phase info.
@@ -160,16 +145,10 @@ pub struct ExecutedComputePhase {
 }
 
 /// Skipped compute phase info.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Load)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Store, Load)]
 pub struct SkippedComputePhase {
     /// The reason this step was skipped.
     pub reason: ComputePhaseSkipReason,
-}
-
-impl<C: CellFamily> Store<C> for SkippedComputePhase {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        self.reason.store_into(builder, finalizer)
-    }
 }
 
 /// Enum with reasons for skipping compute phase.
@@ -331,7 +310,7 @@ impl<'a, C: CellFamily> Load<'a, C> for BouncePhase {
 }
 
 /// Skipped bounce phase info.
-#[derive(Debug, Clone, Eq, PartialEq, Load)]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
 pub struct NoFundsBouncePhase {
     /// The total number of unique cells (bits / refs) of the bounced message.
     pub msg_size: StorageUsedShort,
@@ -339,15 +318,8 @@ pub struct NoFundsBouncePhase {
     pub req_fwd_fees: Tokens,
 }
 
-impl<C: CellFamily> Store<C> for NoFundsBouncePhase {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        self.msg_size.store_into(builder, finalizer)
-            && self.req_fwd_fees.store_into(builder, finalizer)
-    }
-}
-
 /// Executed bounce phase info.
-#[derive(Debug, Clone, Eq, PartialEq, Load)]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
 pub struct ExecutedBouncePhase {
     /// The total number of unique cells (bits / refs) of the bounced message.
     pub msg_size: StorageUsedShort,
@@ -355,14 +327,6 @@ pub struct ExecutedBouncePhase {
     pub msg_fees: Tokens,
     /// Message forwarding fee.
     pub fwd_fees: Tokens,
-}
-
-impl<C: CellFamily> Store<C> for ExecutedBouncePhase {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        self.msg_size.store_into(builder, finalizer)
-            && self.msg_fees.store_into(builder, finalizer)
-            && self.fwd_fees.store_into(builder, finalizer)
-    }
 }
 
 /// Account status change during transaction execution.

@@ -351,7 +351,7 @@ pub enum PrevBlockRef {
 }
 
 /// Reference to the external block.
-#[derive(CustomDebug, Clone, Copy, Eq, PartialEq, Load)]
+#[derive(CustomDebug, Clone, Copy, Eq, PartialEq, Store, Load)]
 pub struct BlockRef {
     /// The end of the logical time of the referenced block.
     pub end_lt: u64,
@@ -363,15 +363,6 @@ pub struct BlockRef {
     /// Hash of the BOC encoded root cell of the referenced block.
     #[debug(with = "DisplayHash")]
     pub file_hash: CellHash,
-}
-
-impl<C: CellFamily> Store<C> for BlockRef {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
-        builder.store_u64(self.end_lt)
-            && builder.store_u32(self.seqno)
-            && builder.store_u256(&self.root_hash)
-            && builder.store_u256(&self.file_hash)
-    }
 }
 
 /// Tokens flow info.

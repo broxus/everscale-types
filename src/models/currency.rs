@@ -7,7 +7,7 @@ use crate::dict::Dict;
 use crate::num::{Tokens, VarUint248};
 
 /// Amounts collection.
-#[derive(CustomDebug, CustomClone, CustomEq, Load)]
+#[derive(CustomDebug, CustomClone, CustomEq, Store, Load)]
 pub struct CurrencyCollection<C: CellFamily> {
     /// Amount in native currency.
     pub tokens: Tokens,
@@ -45,14 +45,8 @@ impl<C: CellFamily> CurrencyCollection<C> {
     }
 }
 
-impl<C: CellFamily> Store<C> for CurrencyCollection<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        self.tokens.store_into(builder, finalizer) && self.other.store_into(builder, finalizer)
-    }
-}
-
 /// Dictionary with amounts for multiple currencies.
-#[derive(CustomDebug, CustomClone, CustomEq, Load)]
+#[derive(CustomDebug, CustomClone, CustomEq, Store, Load)]
 #[repr(transparent)]
 pub struct ExtraCurrencyCollection<C: CellFamily>(Dict<C, CellHash, VarUint248>);
 
@@ -77,12 +71,5 @@ impl<C: CellFamily> ExtraCurrencyCollection<C> {
     /// Returns the underlying dictionary.
     pub const fn as_dict(&self) -> &Dict<C, CellHash, VarUint248> {
         &self.0
-    }
-}
-
-impl<C: CellFamily> Store<C> for ExtraCurrencyCollection<C> {
-    #[inline]
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        self.0.store_into(builder, finalizer)
     }
 }

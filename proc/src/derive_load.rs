@@ -48,16 +48,21 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Erro
     }
     let (impl_generics, _, _) = alt_generics.split_for_impl();
 
-    let body = match &container.data {
-        ast::Data::Enum(variants) => build_enum(variants),
+    let (inline, body) = match &container.data {
+        ast::Data::Enum(variants) => (variants.len() < 2, build_enum(variants)),
         ast::Data::Struct(style, fields) => {
-            build_struct(&tlb_lifetime, &cell_family, *style, fields)
+            let inline = fields.len() < 2;
+            let body = build_struct(&tlb_lifetime, &cell_family, *style, fields);
+            (inline, body)
         }
     };
+
+    let inline = if inline { quote!(#[inline]) } else { quote!() };
 
     let result = quote! {
         #[automatically_derived]
         impl #impl_generics crate::cell::Load<#tlb_lifetime, #cell_family> for #ident #ty_generics #where_clause {
+            #inline
             fn load_from(__slice: &mut crate::cell::CellSlice<#tlb_lifetime, #cell_family>) -> Option<Self> {
                 #body
             }

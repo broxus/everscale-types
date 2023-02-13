@@ -11,7 +11,7 @@ use crate::models::currency::CurrencyCollection;
 
 /// A tree of the most recent descriptions for all currently existing shards
 /// for all workchains except the masterchain.
-#[derive(CustomDebug, CustomClone, CustomEq, Load)]
+#[derive(CustomDebug, CustomClone, CustomEq, Store, Load)]
 pub struct ShardHashes<C: CellFamily>(Dict<C, i32, CellContainer<C>>);
 
 impl<C> ShardHashes<C>
@@ -55,12 +55,6 @@ where
             Ok(None) => Ok(None),
             Err(e) => Err(e),
         }
-    }
-}
-
-impl<C: CellFamily> Store<C> for ShardHashes<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        self.0.store_into(builder, finalizer)
     }
 }
 

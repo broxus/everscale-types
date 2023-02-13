@@ -8,20 +8,8 @@ use crate::models::currency::CurrencyCollection;
 use crate::models::ShardAccount;
 
 /// A dictionary of account states.
-#[derive(CustomDebug, CustomClone, CustomEq)]
+#[derive(CustomDebug, CustomClone, CustomEq, Store, Load)]
 pub struct ShardAccounts<C: CellFamily>(AugDict<C, CellHash, DepthBalanceInfo<C>, ShardAccount<C>>);
-
-impl<C: CellFamily> Store<C> for ShardAccounts<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        self.0.store_into(builder, finalizer)
-    }
-}
-
-impl<'a, C: CellFamily> Load<'a, C> for ShardAccounts<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self(AugDict::load_from(slice)?))
-    }
-}
 
 /// Intermediate balance info.
 #[derive(CustomDebug, CustomClone, CustomEq)]

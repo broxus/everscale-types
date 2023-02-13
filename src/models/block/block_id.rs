@@ -7,7 +7,7 @@ use crate::error::ParseBlockIdError;
 use crate::util::*;
 
 /// Full block id.
-#[derive(CustomDebug, Default, Clone, Copy, Eq, Hash, PartialEq, Ord, PartialOrd, Load)]
+#[derive(CustomDebug, Default, Clone, Copy, Eq, Hash, PartialEq, Ord, PartialOrd, Store, Load)]
 pub struct BlockId {
     /// Block shard ident.
     pub shard: ShardIdent,
@@ -112,15 +112,6 @@ impl std::fmt::Display for BlockId {
             DisplayHash(&self.root_hash),
             DisplayHash(&self.file_hash)
         ))
-    }
-}
-
-impl<C: CellFamily> Store<C> for BlockId {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        self.shard.store_into(builder, finalizer)
-            && builder.store_u32(self.seqno)
-            && builder.store_u256(&self.root_hash)
-            && builder.store_u256(&self.file_hash)
     }
 }
 

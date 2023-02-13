@@ -6,6 +6,7 @@ mod derive_clone;
 mod derive_debug;
 mod derive_eq;
 mod derive_load;
+mod derive_store;
 mod internals;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -49,6 +50,15 @@ pub fn derive_eq(input: TokenStream) -> TokenStream {
 pub fn derive_load(input: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(input as syn::DeriveInput);
     derive_load::impl_derive(input)
+        .unwrap_or_else(to_compile_errors)
+        .into()
+}
+
+/// Implements `Store` for the type.
+#[proc_macro_derive(Store, attributes(bounds))]
+pub fn derive_store(input: TokenStream) -> TokenStream {
+    let input = syn::parse_macro_input!(input as syn::DeriveInput);
+    derive_store::impl_derive(input)
         .unwrap_or_else(to_compile_errors)
         .into()
 }

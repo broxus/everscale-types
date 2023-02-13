@@ -1,5 +1,7 @@
 //! Global version and capabilities.
 
+use everscale_types_proc::*;
+
 use crate::cell::*;
 
 macro_rules! decl_global_capability {
@@ -202,7 +204,7 @@ impl<'a, C: CellFamily> Load<'a, C> for GlobalVersion {
 /// A set of enabled capabilities.
 ///
 /// See [`GlobalCapability`].
-#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Store, Load)]
 #[repr(transparent)]
 pub struct GlobalCapabilities(u64);
 
@@ -264,20 +266,6 @@ impl IntoIterator for GlobalCapabilities {
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
         GlobalCapabilitiesIter(self.0)
-    }
-}
-
-impl<C: CellFamily> Store<C> for GlobalCapabilities {
-    #[inline]
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
-        builder.store_u64(self.0)
-    }
-}
-
-impl<'a, C: CellFamily> Load<'a, C> for GlobalCapabilities {
-    #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self(slice.load_u64()?))
     }
 }
 

@@ -12,7 +12,7 @@ use crate::models::message::IntAddr;
 use crate::models::Lazy;
 
 /// Amount of unique cells and bits for shard states.
-#[derive(Debug, Default, Clone, Eq, PartialEq, Load)]
+#[derive(Debug, Default, Clone, Eq, PartialEq, Store, Load)]
 pub struct StorageUsed {
     /// Amount of unique cells.
     pub cells: VarUint56,
@@ -31,16 +31,8 @@ impl StorageUsed {
     };
 }
 
-impl<C: CellFamily> Store<C> for StorageUsed {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        self.cells.store_into(builder, finalizer)
-            && self.bits.store_into(builder, finalizer)
-            && self.public_cells.store_into(builder, finalizer)
-    }
-}
-
 /// Amount of unique cells and bits.
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Load)]
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Store, Load)]
 pub struct StorageUsedShort {
     /// Amount of unique cells.
     pub cells: VarUint56,
@@ -56,14 +48,8 @@ impl StorageUsedShort {
     };
 }
 
-impl<C: CellFamily> Store<C> for StorageUsedShort {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        self.cells.store_into(builder, finalizer) && self.bits.store_into(builder, finalizer)
-    }
-}
-
 /// Storage profile of an account.
-#[derive(Debug, Default, Clone, Eq, PartialEq, Load)]
+#[derive(Debug, Default, Clone, Eq, PartialEq, Store, Load)]
 pub struct StorageInfo {
     /// Amount of unique cells and bits which account state occupies.
     pub used: StorageUsed,
@@ -71,14 +57,6 @@ pub struct StorageInfo {
     pub last_paid: u32,
     /// Account debt for storing its state.
     pub due_payment: Option<Tokens>,
-}
-
-impl<C: CellFamily> Store<C> for StorageInfo {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        self.used.store_into(builder, finalizer)
-            && builder.store_u32(self.last_paid)
-            && self.due_payment.store_into(builder, finalizer)
-    }
 }
 
 /// Brief account status.
@@ -121,7 +99,7 @@ impl<'a, C: CellFamily> Load<'a, C> for AccountStatus {
 }
 
 /// Shard accounts entry.
-#[derive(CustomDebug, CustomClone, CustomEq, Load)]
+#[derive(CustomDebug, CustomClone, CustomEq, Store, Load)]
 pub struct ShardAccount<C: CellFamily> {
     /// Optional reference to account state.
     pub account: Lazy<C, OptionalAccount<C>>,
@@ -130,14 +108,6 @@ pub struct ShardAccount<C: CellFamily> {
     pub last_trans_hash: CellHash,
     /// The exact logical time of the last transaction.
     pub last_trans_lt: u64,
-}
-
-impl<C: CellFamily> Store<C> for ShardAccount<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
-        builder.store_reference(self.account.cell.clone())
-            && builder.store_u256(&self.last_trans_hash)
-            && builder.store_u64(self.last_trans_lt)
-    }
 }
 
 /// A wrapper for `Option<Account>` with customized representation.
@@ -266,7 +236,7 @@ impl<'a, C: CellFamily> Load<'a, C> for AccountState<C> {
 }
 
 /// Deployed account state.
-#[derive(CustomDebug, CustomClone, CustomEq, Load)]
+#[derive(CustomDebug, CustomClone, CustomEq, Store, Load)]
 pub struct StateInit<C: CellFamily> {
     /// Optional split depth for large smart contracts.
     pub split_depth: Option<SplitDepth>,
@@ -306,16 +276,6 @@ impl<C: CellFamily> StateInit<C> {
     }
 }
 
-impl<C: CellFamily> Store<C> for StateInit<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        self.split_depth.store_into(builder, finalizer)
-            && self.special.store_into(builder, finalizer)
-            && self.code.store_into(builder, finalizer)
-            && self.data.store_into(builder, finalizer)
-            && self.libraries.store_into(builder, finalizer)
-    }
-}
-
 /// Special transactions execution flags.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 pub struct SpecialFlags {
@@ -347,16 +307,10 @@ impl<'a, C: CellFamily> Load<'a, C> for SpecialFlags {
 }
 
 /// Simple TVM library.
-#[derive(CustomDebug, CustomClone, CustomEq, Load)]
+#[derive(CustomDebug, CustomClone, CustomEq, Store, Load)]
 pub struct SimpleLib<C: CellFamily> {
     /// Whether this library is accessible from other accounts.
     pub public: bool,
     /// Reference to the library cell.
     pub root: CellContainer<C>,
-}
-
-impl<C: CellFamily> Store<C> for SimpleLib<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
-        builder.store_bit(self.public) && builder.store_reference(self.root.clone())
-    }
 }
