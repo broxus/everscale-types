@@ -1,4 +1,4 @@
-use everscale_types_proc::{CustomClone, CustomDebug};
+use everscale_types_proc::*;
 
 use crate::cell::*;
 use crate::dict::{self, Dict};
@@ -11,16 +11,8 @@ use crate::models::currency::CurrencyCollection;
 
 /// A tree of the most recent descriptions for all currently existing shards
 /// for all workchains except the masterchain.
-#[derive(CustomDebug, CustomClone)]
+#[derive(CustomDebug, CustomClone, CustomEq)]
 pub struct ShardHashes<C: CellFamily>(Dict<C, i32, CellContainer<C>>);
-
-impl<C: CellFamily> Eq for ShardHashes<C> {}
-impl<C: CellFamily> PartialEq for ShardHashes<C> {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
-}
 
 impl<C> ShardHashes<C>
 where
@@ -80,18 +72,10 @@ impl<'a, C: CellFamily> Load<'a, C> for ShardHashes<C> {
 
 /// A tree of the most recent descriptions for all currently existing shards
 /// for a single workchain.
-#[derive(CustomDebug, CustomClone)]
+#[derive(CustomDebug, CustomClone, CustomEq)]
 pub struct WorkchainShardHashes<C: CellFamily> {
     workchain: i32,
     root: CellContainer<C>,
-}
-
-impl<C: CellFamily> Eq for WorkchainShardHashes<C> {}
-impl<C: CellFamily> PartialEq for WorkchainShardHashes<C> {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.workchain == other.workchain && self.root == other.root
-    }
 }
 
 impl<C: CellFamily> WorkchainShardHashes<C> {
@@ -588,7 +572,7 @@ struct IterSegment<'a, C: CellFamily> {
 impl<C: CellFamily> Copy for IterSegment<'_, C> {}
 
 /// Description of the most recent state of the shard.
-#[derive(CustomDebug, CustomClone, Eq, PartialEq)]
+#[derive(CustomDebug, CustomClone, CustomEq)]
 pub struct ShardDescription<C: CellFamily> {
     /// Sequence number of the latest block in the shard.
     pub seqno: u32,
@@ -870,20 +854,12 @@ impl<'a, C: CellFamily> Load<'a, C> for FutureSplitMerge {
 }
 
 /// Proofs from other workchains.
-#[derive(CustomDebug, CustomClone)]
+#[derive(CustomDebug, CustomClone, CustomEq)]
 pub struct ProofChain<C: CellFamily> {
     /// Amount of proofs (`1..=8`)
     len: u8,
     /// Start cell for proofs.
     child: CellContainer<C>,
-}
-
-impl<C: CellFamily> Eq for ProofChain<C> {}
-impl<C: CellFamily> PartialEq for ProofChain<C> {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.len == other.len && self.child == other.child
-    }
 }
 
 impl<C: CellFamily> Store<C> for ProofChain<C> {

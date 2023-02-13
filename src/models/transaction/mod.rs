@@ -1,6 +1,6 @@
 //! Message models.
 
-use everscale_types_proc::{CustomClone, CustomDebug};
+use everscale_types_proc::*;
 
 use crate::cell::*;
 use crate::dict::{self, Dict};
@@ -18,7 +18,7 @@ pub use self::phases::*;
 mod phases;
 
 /// Blockchain transaction.
-#[derive(CustomDebug, CustomClone, Eq, PartialEq)]
+#[derive(CustomDebug, CustomClone, CustomEq)]
 pub struct Transaction<C: CellFamily> {
     /// Account on which this transaction was produced.
     #[debug(with = "DisplayHash")]
@@ -184,7 +184,7 @@ impl<'a, C: CellFamily> Load<'a, C> for Transaction<C> {
 }
 
 /// Detailed transaction info.
-#[derive(CustomDebug, CustomClone, Eq, PartialEq)]
+#[derive(CustomDebug, CustomClone, CustomEq)]
 pub enum TxInfo<C: CellFamily> {
     /// Ordinary transaction info.
     Ordinary(OrdinaryTxInfo<C>),
@@ -219,7 +219,7 @@ impl<'a, C: CellFamily> Load<'a, C> for TxInfo<C> {
 }
 
 /// Ordinary transaction info.
-#[derive(CustomDebug, CustomClone, Eq, PartialEq)]
+#[derive(CustomDebug, CustomClone, CustomEq)]
 pub struct OrdinaryTxInfo<C: CellFamily> {
     /// Whether the credit phase was executed first
     /// (usually set when incoming message has `bounce: false`).

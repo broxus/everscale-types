@@ -1,6 +1,6 @@
 use std::num::{NonZeroU16, NonZeroU32, NonZeroU8};
 
-use everscale_types_proc::{CustomClone, CustomDebug};
+use everscale_types_proc::*;
 
 use crate::cell::*;
 use crate::dict::Dict;
@@ -11,7 +11,7 @@ use crate::models::block::ShardIdent;
 use crate::models::Lazy;
 
 /// Config voting setup params.
-#[derive(CustomDebug, CustomClone)]
+#[derive(CustomDebug, CustomClone, CustomEq)]
 pub struct ConfigVotingSetup<C: CellFamily> {
     /// Proposal configuration for non-critical params.
     pub normal_params: Lazy<C, ConfigProposalSetup>,

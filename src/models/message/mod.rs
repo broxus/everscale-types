@@ -1,6 +1,6 @@
 //! Message models.
 
-use everscale_types_proc::{CustomClone, CustomDebug};
+use everscale_types_proc::*;
 
 use crate::cell::*;
 use crate::num::*;
@@ -298,7 +298,7 @@ impl DetailedMessageLayout {
 }
 
 /// Message info.
-#[derive(CustomDebug, CustomClone)]
+#[derive(CustomDebug, CustomClone, CustomEq)]
 pub enum MsgInfo<C: CellFamily> {
     /// Internal message info,
     Int(IntMsgInfo<C>),
@@ -306,20 +306,6 @@ pub enum MsgInfo<C: CellFamily> {
     ExtIn(ExtInMsgInfo),
     /// External outgoing message info,
     ExtOut(ExtOutMsgInfo),
-}
-
-impl<C: CellFamily> Eq for MsgInfo<C> {}
-
-impl<C: CellFamily> PartialEq for MsgInfo<C> {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Int(info), Self::Int(other)) => info == other,
-            (Self::ExtIn(info), Self::ExtIn(other)) => info == other,
-            (Self::ExtOut(info), Self::ExtOut(other)) => info == other,
-            _ => false,
-        }
-    }
 }
 
 impl<C: CellFamily> MsgInfo<C> {
@@ -367,7 +353,7 @@ impl<'a, C: CellFamily> Load<'a, C> for MsgInfo<C> {
 }
 
 /// Internal message info.
-#[derive(CustomDebug, CustomClone)]
+#[derive(CustomDebug, CustomClone, CustomEq)]
 pub struct IntMsgInfo<C: CellFamily> {
     /// Whether IHR is disabled for the message.
     pub ihr_disabled: bool,
@@ -407,23 +393,6 @@ impl<C: CellFamily> Default for IntMsgInfo<C> {
             created_lt: 0,
             created_at: 0,
         }
-    }
-}
-
-impl<C: CellFamily> Eq for IntMsgInfo<C> {}
-impl<C: CellFamily> PartialEq for IntMsgInfo<C> {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.ihr_disabled == other.ihr_disabled
-            && self.bounce == other.bounce
-            && self.bounced == other.bounced
-            && self.src == other.src
-            && self.dst == other.dst
-            && self.value == other.value
-            && self.ihr_fee == other.ihr_fee
-            && self.fwd_fee == other.fwd_fee
-            && self.created_lt == other.created_lt
-            && self.created_at == other.created_at
     }
 }
 

@@ -1,4 +1,4 @@
-use everscale_types_proc::{CustomClone, CustomDebug};
+use everscale_types_proc::*;
 
 use crate::cell::*;
 use crate::dict::{AugDict, AugDictSkipValue, Dict};

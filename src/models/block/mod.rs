@@ -1,6 +1,6 @@
 //! Block models.
 
-use everscale_types_proc::{CustomClone, CustomDebug};
+use everscale_types_proc::*;
 
 use crate::cell::*;
 use crate::dict::Dict;
@@ -21,7 +21,7 @@ mod block_id;
 mod shard_hashes;
 
 /// Shard block.
-#[derive(CustomDebug, CustomClone, Eq, PartialEq)]
+#[derive(CustomDebug, CustomClone, CustomEq)]
 pub struct Block<C: CellFamily> {
     /// Global network id.
     pub global_id: i32,
@@ -129,7 +129,7 @@ impl<'a, C: CellFamily> Load<'a, C> for Block<C> {
 }
 
 /// Block info.
-#[derive(CustomDebug, CustomClone, Eq, PartialEq)]
+#[derive(CustomDebug, CustomClone, CustomEq)]
 pub struct BlockInfo<C: CellFamily> {
     /// Block model version.
     pub version: u32,
@@ -386,7 +386,7 @@ impl<'a, C: CellFamily> Load<'a, C> for BlockRef {
 }
 
 /// Tokens flow info.
-#[derive(CustomDebug, CustomClone, Eq, PartialEq)]
+#[derive(CustomDebug, CustomClone, CustomEq)]
 pub struct ValueFlow<C: CellFamily> {
     /// Total amount transferred from the previous block.
     pub from_prev_block: CurrencyCollection<C>,

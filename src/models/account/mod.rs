@@ -1,6 +1,6 @@
 //! Account state models.
 
-use everscale_types_proc::{CustomClone, CustomDebug};
+use everscale_types_proc::*;
 
 use crate::cell::*;
 use crate::dict::*;
@@ -146,7 +146,7 @@ impl<'a, C: CellFamily> Load<'a, C> for AccountStatus {
     }
 }
 
-#[derive(CustomDebug, CustomClone)]
+#[derive(CustomDebug, CustomClone, CustomEq)]
 pub struct AccountStorage<C: CellFamily> {
     /// Logical time after the last transaction execution.
     pub last_trans_lt: u64,
@@ -154,7 +154,7 @@ pub struct AccountStorage<C: CellFamily> {
     pub balance: CurrencyCollection<C>,
 }
 
-#[derive(CustomDebug, CustomClone)]
+#[derive(CustomDebug, CustomClone, CustomEq)]
 pub enum AccountState<C: CellFamily> {
     Uninit,
     Active(StateInit<C>),
@@ -184,7 +184,7 @@ impl<'a, C: CellFamily> Load<'a, C> for AccountState<C> {
 }
 
 /// Deployed account state.
-#[derive(CustomDebug, CustomClone)]
+#[derive(CustomDebug, CustomClone, CustomEq)]
 pub struct StateInit<C: CellFamily> {
     /// Optional split depth for large smart contracts.
     pub split_depth: Option<SplitDepth>,
@@ -207,18 +207,6 @@ impl<C: CellFamily> Default for StateInit<C> {
             data: None,
             libraries: Dict::new(),
         }
-    }
-}
-
-impl<C: CellFamily> Eq for StateInit<C> {}
-impl<C: CellFamily> PartialEq for StateInit<C> {
-    #[inline]
-    fn eq(&self, other: &StateInit<C>) -> bool {
-        self.split_depth == other.split_depth
-            && self.special == other.special
-            && self.code == other.code
-            && self.data == other.data
-            && self.libraries == other.libraries
     }
 }
 
@@ -289,7 +277,7 @@ impl<'a, C: CellFamily> Load<'a, C> for SpecialFlags {
 }
 
 /// Simple TVM library.
-#[derive(CustomDebug, CustomClone)]
+#[derive(CustomDebug, CustomClone, CustomEq)]
 pub struct SimpleLib<C: CellFamily> {
     /// Whether this library is accessible from other accounts.
     pub public: bool,

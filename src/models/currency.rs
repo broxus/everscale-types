@@ -1,13 +1,13 @@
 //! Currency collection stuff.
 
-use everscale_types_proc::{CustomClone, CustomDebug};
+use everscale_types_proc::*;
 
 use crate::cell::*;
 use crate::dict::Dict;
 use crate::num::{Tokens, VarUint248};
 
 /// Amounts collection.
-#[derive(CustomDebug, CustomClone)]
+#[derive(CustomDebug, CustomClone, CustomEq)]
 pub struct CurrencyCollection<C: CellFamily> {
     /// Amount in native currency.
     pub tokens: Tokens,
@@ -19,14 +19,6 @@ impl<C: CellFamily> Default for CurrencyCollection<C> {
     #[inline]
     fn default() -> Self {
         Self::ZERO
-    }
-}
-
-impl<C: CellFamily> Eq for CurrencyCollection<C> {}
-impl<C: CellFamily> PartialEq for CurrencyCollection<C> {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.tokens == other.tokens && self.other == other.other
     }
 }
 
@@ -69,7 +61,7 @@ impl<'a, C: CellFamily> Load<'a, C> for CurrencyCollection<C> {
 }
 
 /// Dictionary with amounts for multiple currencies.
-#[derive(CustomDebug, CustomClone)]
+#[derive(CustomDebug, CustomClone, CustomEq)]
 #[repr(transparent)]
 pub struct ExtraCurrencyCollection<C: CellFamily>(Dict<C, CellHash, VarUint248>);
 
@@ -77,14 +69,6 @@ impl<C: CellFamily> Default for ExtraCurrencyCollection<C> {
     #[inline]
     fn default() -> Self {
         Self(Dict::new())
-    }
-}
-
-impl<C: CellFamily> Eq for ExtraCurrencyCollection<C> {}
-impl<C: CellFamily> PartialEq for ExtraCurrencyCollection<C> {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.0.eq(&other.0)
     }
 }
 

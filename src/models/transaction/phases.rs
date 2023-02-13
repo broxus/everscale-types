@@ -1,4 +1,4 @@
-use everscale_types_proc::{CustomClone, CustomDebug};
+use everscale_types_proc::*;
 
 use crate::cell::*;
 use crate::num::*;
@@ -42,7 +42,7 @@ impl<'a, C: CellFamily> Load<'a, C> for StoragePhase {
 /// Credit phase info.
 ///
 /// At this phase message balance is added to the account balance.
-#[derive(CustomDebug, CustomClone, Eq, PartialEq)]
+#[derive(CustomDebug, CustomClone, CustomEq)]
 pub struct CreditPhase<C: CellFamily> {
     /// Amount of tokens paid for the debt.
     pub due_fees_collected: Option<Tokens>,
