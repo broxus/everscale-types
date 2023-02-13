@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::hash::BuildHasher;
 
-use everscale_types_proc::CustomDebug;
+use everscale_types_proc::{CustomClone, CustomDebug};
 
 use super::{make_pruned_branch, FilterAction, MerkleFilter};
 use crate::cell::*;
@@ -10,7 +10,7 @@ use crate::util::*;
 /// Parsed Merkle proof representation.
 ///
 /// NOTE: Serialized into `MerkleProof` cell.
-#[derive(CustomDebug)]
+#[derive(CustomDebug, CustomClone)]
 pub struct MerkleProof<C: CellFamily> {
     /// Representation hash of the original cell.
     #[debug(with = "DisplayHash")]

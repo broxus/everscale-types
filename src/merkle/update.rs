@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasher;
 
-use everscale_types_proc::CustomDebug;
+use everscale_types_proc::{CustomClone, CustomDebug};
 
 use super::{make_pruned_branch, FilterAction, MerkleFilter, MerkleProofBuilder};
 use crate::cell::*;
@@ -10,7 +10,7 @@ use crate::util::*;
 /// Parsed Merkle update representation.
 ///
 /// NOTE: Serialized into `MerkleUpdate` cell.
-#[derive(CustomDebug)]
+#[derive(CustomDebug, CustomClone)]
 pub struct MerkleUpdate<C: CellFamily> {
     /// Representation hash of the original cell.
     #[debug(with = "DisplayHash")]

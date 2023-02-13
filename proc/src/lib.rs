@@ -2,6 +2,7 @@ use proc_macro::TokenStream;
 use quote::quote;
 
 mod bound;
+mod derive_clone;
 mod derive_debug;
 mod internals;
 
@@ -10,11 +11,22 @@ enum Derive {
     Debug,
 }
 
+/// Implements [`Clone`] for the type.
+///
+/// [`Clone`]: std::fmt::Clone
+#[proc_macro_derive(CustomClone, attributes(bounds))]
+pub fn derive_clone(input: TokenStream) -> TokenStream {
+    let input = syn::parse_macro_input!(input as syn::DeriveInput);
+    derive_clone::impl_derive_clone(input)
+        .unwrap_or_else(to_compile_errors)
+        .into()
+}
+
 /// Implements [`Debug`] for the type.
 ///
 /// [`Debug`]: std::fmt::Debug
-#[proc_macro_derive(CustomDebug, attributes(debug))]
-pub fn derive_tl_write(input: TokenStream) -> TokenStream {
+#[proc_macro_derive(CustomDebug, attributes(debug, bounds))]
+pub fn derive_debug(input: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(input as syn::DeriveInput);
     derive_debug::impl_derive_debug(input)
         .unwrap_or_else(to_compile_errors)

@@ -1,6 +1,6 @@
 //! Message models.
 
-use everscale_types_proc::CustomDebug;
+use everscale_types_proc::{CustomClone, CustomDebug};
 
 use crate::cell::*;
 use crate::num::*;
@@ -13,7 +13,7 @@ pub use self::address::*;
 mod address;
 
 /// Blockchain message.
-#[derive(CustomDebug)]
+#[derive(CustomDebug, CustomClone)]
 pub struct Message<'a, C: CellFamily> {
     /// Message info.
     pub info: MsgInfo<C>,
@@ -23,17 +23,6 @@ pub struct Message<'a, C: CellFamily> {
     pub body: Option<CellSlice<'a, C>>,
     /// Optional message layout.
     pub layout: Option<MessageLayout>,
-}
-
-impl<C: CellFamily> Clone for Message<'_, C> {
-    fn clone(&self) -> Self {
-        Self {
-            info: self.info.clone(),
-            init: self.init.clone(),
-            body: self.body,
-            layout: self.layout,
-        }
-    }
 }
 
 impl<'a, C: CellFamily> Store<C> for Message<'a, C> {
@@ -309,7 +298,7 @@ impl DetailedMessageLayout {
 }
 
 /// Message info.
-#[derive(CustomDebug)]
+#[derive(CustomDebug, CustomClone)]
 pub enum MsgInfo<C: CellFamily> {
     /// Internal message info,
     Int(IntMsgInfo<C>),
@@ -317,17 +306,6 @@ pub enum MsgInfo<C: CellFamily> {
     ExtIn(ExtInMsgInfo),
     /// External outgoing message info,
     ExtOut(ExtOutMsgInfo),
-}
-
-impl<C: CellFamily> Clone for MsgInfo<C> {
-    #[inline]
-    fn clone(&self) -> Self {
-        match self {
-            Self::Int(info) => Self::Int(info.clone()),
-            Self::ExtIn(info) => Self::ExtIn(info.clone()),
-            Self::ExtOut(info) => Self::ExtOut(info.clone()),
-        }
-    }
 }
 
 impl<C: CellFamily> Eq for MsgInfo<C> {}
@@ -389,7 +367,7 @@ impl<'a, C: CellFamily> Load<'a, C> for MsgInfo<C> {
 }
 
 /// Internal message info.
-#[derive(CustomDebug)]
+#[derive(CustomDebug, CustomClone)]
 pub struct IntMsgInfo<C: CellFamily> {
     /// Whether IHR is disabled for the message.
     pub ihr_disabled: bool,
@@ -428,23 +406,6 @@ impl<C: CellFamily> Default for IntMsgInfo<C> {
             fwd_fee: Default::default(),
             created_lt: 0,
             created_at: 0,
-        }
-    }
-}
-
-impl<C: CellFamily> Clone for IntMsgInfo<C> {
-    fn clone(&self) -> Self {
-        Self {
-            ihr_disabled: self.ihr_disabled,
-            bounce: self.bounce,
-            bounced: self.bounced,
-            src: self.src.clone(),
-            dst: self.dst.clone(),
-            value: self.value.clone(),
-            ihr_fee: self.ihr_fee,
-            fwd_fee: self.fwd_fee,
-            created_lt: self.created_lt,
-            created_at: self.created_at,
         }
     }
 }

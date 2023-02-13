@@ -1,6 +1,6 @@
 //! Account state models.
 
-use everscale_types_proc::CustomDebug;
+use everscale_types_proc::{CustomClone, CustomDebug};
 
 use crate::cell::*;
 use crate::dict::*;
@@ -146,7 +146,7 @@ impl<'a, C: CellFamily> Load<'a, C> for AccountStatus {
     }
 }
 
-#[derive(CustomDebug)]
+#[derive(CustomDebug, CustomClone)]
 pub struct AccountStorage<C: CellFamily> {
     /// Logical time after the last transaction execution.
     pub last_trans_lt: u64,
@@ -154,21 +154,11 @@ pub struct AccountStorage<C: CellFamily> {
     pub balance: CurrencyCollection<C>,
 }
 
-#[derive(CustomDebug)]
+#[derive(CustomDebug, CustomClone)]
 pub enum AccountState<C: CellFamily> {
     Uninit,
     Active(StateInit<C>),
     Frozen(CellHash),
-}
-
-impl<C: CellFamily> Clone for AccountState<C> {
-    fn clone(&self) -> Self {
-        match self {
-            Self::Uninit => Self::Uninit,
-            Self::Active(state) => Self::Active(state.clone()),
-            Self::Frozen(hash) => Self::Frozen(*hash),
-        }
-    }
 }
 
 impl<C: CellFamily> Store<C> for AccountState<C> {
@@ -194,7 +184,7 @@ impl<'a, C: CellFamily> Load<'a, C> for AccountState<C> {
 }
 
 /// Deployed account state.
-#[derive(CustomDebug)]
+#[derive(CustomDebug, CustomClone)]
 pub struct StateInit<C: CellFamily> {
     /// Optional split depth for large smart contracts.
     pub split_depth: Option<SplitDepth>,
@@ -216,18 +206,6 @@ impl<C: CellFamily> Default for StateInit<C> {
             code: None,
             data: None,
             libraries: Dict::new(),
-        }
-    }
-}
-
-impl<C: CellFamily> Clone for StateInit<C> {
-    fn clone(&self) -> Self {
-        Self {
-            split_depth: self.split_depth,
-            special: self.special,
-            code: self.code.clone(),
-            data: self.data.clone(),
-            libraries: self.libraries.clone(),
         }
     }
 }
@@ -311,7 +289,7 @@ impl<'a, C: CellFamily> Load<'a, C> for SpecialFlags {
 }
 
 /// Simple TVM library.
-#[derive(CustomDebug)]
+#[derive(CustomDebug, CustomClone)]
 pub struct SimpleLib<C: CellFamily> {
     /// Whether this library is accessible from other accounts.
     pub public: bool,

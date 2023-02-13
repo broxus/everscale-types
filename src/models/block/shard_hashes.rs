@@ -1,4 +1,4 @@
-use everscale_types_proc::CustomDebug;
+use everscale_types_proc::{CustomClone, CustomDebug};
 
 use crate::cell::*;
 use crate::dict::{self, Dict};
@@ -11,15 +11,8 @@ use crate::models::currency::CurrencyCollection;
 
 /// A tree of the most recent descriptions for all currently existing shards
 /// for all workchains except the masterchain.
-#[derive(CustomDebug)]
+#[derive(CustomDebug, CustomClone)]
 pub struct ShardHashes<C: CellFamily>(Dict<C, i32, CellContainer<C>>);
-
-impl<C: CellFamily> Clone for ShardHashes<C> {
-    #[inline]
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
-}
 
 impl<C: CellFamily> Eq for ShardHashes<C> {}
 impl<C: CellFamily> PartialEq for ShardHashes<C> {
@@ -65,11 +58,11 @@ where
         &self,
         workchain: i32,
     ) -> Result<Option<WorkchainShardHashes<C>>, Error> {
-        let Some(root) = ok!(self.0.get(workchain)) else {
-            return Ok(None);
-        };
-
-        Ok(Some(WorkchainShardHashes { workchain, root }))
+        match self.0.get(workchain) {
+            Ok(Some(root)) => Ok(Some(WorkchainShardHashes { workchain, root })),
+            Ok(None) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -87,24 +80,13 @@ impl<'a, C: CellFamily> Load<'a, C> for ShardHashes<C> {
 
 /// A tree of the most recent descriptions for all currently existing shards
 /// for a single workchain.
-#[derive(CustomDebug)]
+#[derive(CustomDebug, CustomClone)]
 pub struct WorkchainShardHashes<C: CellFamily> {
     workchain: i32,
     root: CellContainer<C>,
 }
 
-impl<C: CellFamily> Clone for WorkchainShardHashes<C> {
-    #[inline]
-    fn clone(&self) -> Self {
-        Self {
-            workchain: self.workchain,
-            root: self.root.clone(),
-        }
-    }
-}
-
 impl<C: CellFamily> Eq for WorkchainShardHashes<C> {}
-
 impl<C: CellFamily> PartialEq for WorkchainShardHashes<C> {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
@@ -165,6 +147,7 @@ impl<C: CellFamily> WorkchainShardHashes<C> {
 /// See its documentation for more.
 ///
 /// [`iter`]: ShardHashes::iter
+#[derive(CustomClone)]
 pub struct Iter<'a, C: CellFamily> {
     inner: RawIter<'a, C>,
 }
@@ -206,20 +189,11 @@ where
 /// See its documentation for more.
 ///
 /// [`raw_iter`]: ShardHashes::raw_iter
+#[derive(CustomClone)]
 pub struct RawIter<'a, C: CellFamily> {
     dict_iter: dict::RawIter<'a, C>,
     shard_hashes_iter: Option<WorkchainShardHashesRawIter<'a, C>>,
     status: IterStatus,
-}
-
-impl<C: CellFamily> Clone for RawIter<'_, C> {
-    fn clone(&self) -> Self {
-        Self {
-            dict_iter: self.dict_iter.clone(),
-            shard_hashes_iter: self.shard_hashes_iter.clone(),
-            status: self.status,
-        }
-    }
 }
 
 impl<'a, C> RawIter<'a, C>
@@ -304,16 +278,9 @@ where
 /// See its documentation for more.
 ///
 /// [`latest_blocks`]: ShardHashes::latest_blocks
+#[derive(CustomClone)]
 pub struct LatestBlocksIter<'a, C: CellFamily> {
     inner: RawIter<'a, C>,
-}
-
-impl<C: CellFamily> Clone for LatestBlocksIter<'_, C> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
-    }
 }
 
 impl<'a, C> LatestBlocksIter<'a, C>
@@ -351,16 +318,9 @@ where
 /// See its documentation for more.
 ///
 /// [`iter`]: WorkchainShardHashes::iter
+#[derive(CustomClone)]
 pub struct WorkchainShardHashesIter<'a, C: CellFamily> {
     inner: WorkchainShardHashesRawIter<'a, C>,
-}
-
-impl<C: CellFamily> Clone for WorkchainShardHashesIter<'_, C> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
-    }
 }
 
 impl<'a, C: CellFamily> WorkchainShardHashesIter<'a, C> {
@@ -395,22 +355,12 @@ impl<C: CellFamily> Iterator for WorkchainShardHashesIter<'_, C> {
 /// See its documentation for more.
 ///
 /// [`raw_iter`]: WorkchainShardHashes::raw_iter
+#[derive(CustomClone)]
 pub struct WorkchainShardHashesRawIter<'a, C: CellFamily> {
     workchain: i32,
     leaf: Option<CellSlice<'a, C>>,
     segments: Vec<IterSegment<'a, C>>,
     status: IterStatus,
-}
-
-impl<C: CellFamily> Clone for WorkchainShardHashesRawIter<'_, C> {
-    fn clone(&self) -> Self {
-        Self {
-            workchain: self.workchain,
-            leaf: self.leaf,
-            segments: self.segments.clone(),
-            status: self.status,
-        }
-    }
 }
 
 impl<'a, C: CellFamily> WorkchainShardHashesRawIter<'a, C> {
@@ -539,16 +489,9 @@ impl<'a, C: CellFamily> Iterator for WorkchainShardHashesRawIter<'a, C> {
 /// See its documentation for more.
 ///
 /// [`latest_blocks`]: WorkchainShardHashes::latest_blocks
+#[derive(CustomClone)]
 pub struct WorkchainLatestBlocksIter<'a, C: CellFamily> {
     inner: WorkchainShardHashesRawIter<'a, C>,
-}
-
-impl<C: CellFamily> Clone for WorkchainLatestBlocksIter<'_, C> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
-    }
 }
 
 impl<'a, C: CellFamily> WorkchainLatestBlocksIter<'a, C> {
@@ -580,16 +523,9 @@ impl<C: CellFamily> Iterator for WorkchainLatestBlocksIter<'_, C> {
 /// See its documentation for more.
 ///
 /// [`keys`]: WorkchainShardHashes::keys
+#[derive(CustomClone)]
 pub struct WorkchainShardHashesKeysIter<'a, C: CellFamily> {
     inner: WorkchainShardHashesRawIter<'a, C>,
-}
-
-impl<C: CellFamily> Clone for WorkchainShardHashesKeysIter<'_, C> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
-    }
 }
 
 impl<'a, C: CellFamily> WorkchainShardHashesKeysIter<'a, C> {
@@ -618,16 +554,9 @@ impl<'a, C: CellFamily> Iterator for WorkchainShardHashesKeysIter<'a, C> {
 /// See its documentation for more.
 ///
 /// [`raw_values`]: WorkchainShardHashes::raw_values
+#[derive(CustomClone)]
 pub struct WorkchainShardHashesRawValuesIter<'a, C: CellFamily> {
     inner: WorkchainShardHashesRawIter<'a, C>,
-}
-
-impl<C: CellFamily> Clone for WorkchainShardHashesRawValuesIter<'_, C> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
-    }
 }
 
 impl<'a, C: CellFamily> WorkchainShardHashesRawValuesIter<'a, C> {
@@ -650,6 +579,7 @@ impl<'a, C: CellFamily> Iterator for WorkchainShardHashesRawValuesIter<'a, C> {
     }
 }
 
+#[derive(CustomClone)]
 struct IterSegment<'a, C: CellFamily> {
     data: &'a dyn Cell<C>,
     is_right: bool,
@@ -657,17 +587,8 @@ struct IterSegment<'a, C: CellFamily> {
 
 impl<C: CellFamily> Copy for IterSegment<'_, C> {}
 
-impl<C: CellFamily> Clone for IterSegment<'_, C> {
-    fn clone(&self) -> Self {
-        Self {
-            data: self.data,
-            is_right: self.is_right,
-        }
-    }
-}
-
 /// Description of the most recent state of the shard.
-#[derive(CustomDebug, Clone, Eq, PartialEq)]
+#[derive(CustomDebug, CustomClone, Eq, PartialEq)]
 pub struct ShardDescription<C: CellFamily> {
     /// Sequence number of the latest block in the shard.
     pub seqno: u32,
@@ -949,22 +870,12 @@ impl<'a, C: CellFamily> Load<'a, C> for FutureSplitMerge {
 }
 
 /// Proofs from other workchains.
-#[derive(CustomDebug)]
+#[derive(CustomDebug, CustomClone)]
 pub struct ProofChain<C: CellFamily> {
     /// Amount of proofs (`1..=8`)
     len: u8,
     /// Start cell for proofs.
     child: CellContainer<C>,
-}
-
-impl<C: CellFamily> Clone for ProofChain<C> {
-    #[inline]
-    fn clone(&self) -> Self {
-        Self {
-            len: self.len,
-            child: self.child.clone(),
-        }
-    }
 }
 
 impl<C: CellFamily> Eq for ProofChain<C> {}

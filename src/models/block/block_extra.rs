@@ -1,4 +1,4 @@
-use everscale_types_proc::CustomDebug;
+use everscale_types_proc::{CustomClone, CustomDebug};
 
 use crate::cell::*;
 use crate::dict::{AugDict, AugDictSkipValue, Dict};
@@ -14,7 +14,7 @@ use crate::models::Lazy;
 use super::ShardHashes;
 
 /// Block content.
-#[derive(CustomDebug, Clone)]
+#[derive(CustomDebug, CustomClone)]
 pub struct BlockExtra<C: CellFamily> {
     /// Incoming message description.
     pub in_msg_description: CellContainer<C>,
@@ -77,7 +77,7 @@ impl<'a, C: CellFamily> Load<'a, C> for BlockExtra<C> {
 }
 
 /// A group of account transactions.
-#[derive(CustomDebug, Clone)]
+#[derive(CustomDebug, CustomClone)]
 pub struct AccountBlock<C: CellFamily> {
     /// Account id.
     #[debug(with = "DisplayHash")]
@@ -130,7 +130,7 @@ impl<'a, C: CellFamily> AugDictSkipValue<'a, C> for Lazy<C, Transaction<C>> {
 }
 
 /// Additional content for masterchain blocks.
-#[derive(CustomDebug, Clone)]
+#[derive(CustomDebug, CustomClone)]
 pub struct McBlockExtra<C: CellFamily> {
     /// A tree of the most recent descriptions for all currently existing shards
     /// for all workchains except the masterchain.
@@ -243,7 +243,7 @@ impl<'a, C: CellFamily> Load<'a, C> for McBlockExtra<C> {
 }
 
 /// TEMP shard fees mapping sub.
-#[derive(CustomDebug, Clone)]
+#[derive(CustomDebug, CustomClone)]
 pub struct ShardFees<C: CellFamily> {
     /// Dictionary root.
     pub root: Option<CellContainer<C>>,
@@ -272,7 +272,7 @@ impl<'a, C: CellFamily> Load<'a, C> for ShardFees<C> {
 }
 
 /// Block signature pair.
-#[derive(CustomDebug)]
+#[derive(CustomDebug, Clone)]
 pub struct BlockSignature {
     /// Signer node short id.
     #[debug(with = "DisplayHash")]

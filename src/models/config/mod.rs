@@ -1,6 +1,6 @@
 //! Blockchain config and params.
 
-use everscale_types_proc::CustomDebug;
+use everscale_types_proc::{CustomClone, CustomDebug};
 
 use crate::cell::*;
 use crate::dict::{Dict, DictKey};
@@ -16,22 +16,13 @@ pub use self::params::*;
 mod params;
 
 /// Blockchain config.
-#[derive(CustomDebug)]
+#[derive(CustomDebug, CustomClone)]
 pub struct BlockchainConfig<C: CellFamily> {
     /// Configuration contract address.
     #[debug(with = "DisplayHash")]
     pub address: CellHash,
     /// Configuration parameters.
     pub params: Dict<C, u32, CellContainer<C>>,
-}
-
-impl<C: CellFamily> Clone for BlockchainConfig<C> {
-    fn clone(&self) -> Self {
-        Self {
-            address: self.address,
-            params: self.params.clone(),
-        }
-    }
 }
 
 impl<C: CellFamily> Eq for BlockchainConfig<C> {}

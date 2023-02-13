@@ -1,6 +1,6 @@
 //! Message models.
 
-use everscale_types_proc::CustomDebug;
+use everscale_types_proc::{CustomClone, CustomDebug};
 
 use crate::cell::*;
 use crate::dict::{self, Dict};
@@ -18,7 +18,7 @@ pub use self::phases::*;
 mod phases;
 
 /// Blockchain transaction.
-#[derive(CustomDebug, Clone, Eq, PartialEq)]
+#[derive(CustomDebug, CustomClone, Eq, PartialEq)]
 pub struct Transaction<C: CellFamily> {
     /// Account on which this transaction was produced.
     #[debug(with = "DisplayHash")]
@@ -90,16 +90,9 @@ where
 /// See its documentation for more.
 ///
 /// [`iter_out_msgs`]: Transaction::iter_out_msgs
+#[derive(CustomClone)]
 pub struct TxOutMsgIter<'a, C: CellFamily> {
     inner: dict::RawValues<'a, C>,
-}
-
-impl<'a, C: CellFamily> Clone for TxOutMsgIter<'a, C> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
-    }
 }
 
 impl<'a, C: CellFamily + 'a> Iterator for TxOutMsgIter<'a, C>
@@ -191,7 +184,7 @@ impl<'a, C: CellFamily> Load<'a, C> for Transaction<C> {
 }
 
 /// Detailed transaction info.
-#[derive(CustomDebug, Clone, Eq, PartialEq)]
+#[derive(CustomDebug, CustomClone, Eq, PartialEq)]
 pub enum TxInfo<C: CellFamily> {
     /// Ordinary transaction info.
     Ordinary(OrdinaryTxInfo<C>),
@@ -226,7 +219,7 @@ impl<'a, C: CellFamily> Load<'a, C> for TxInfo<C> {
 }
 
 /// Ordinary transaction info.
-#[derive(CustomDebug, Clone, Eq, PartialEq)]
+#[derive(CustomDebug, CustomClone, Eq, PartialEq)]
 pub struct OrdinaryTxInfo<C: CellFamily> {
     /// Whether the credit phase was executed first
     /// (usually set when incoming message has `bounce: false`).
