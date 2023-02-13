@@ -1,10 +1,12 @@
 //! Block models.
 
+use everscale_types_proc::CustomDebug;
+
 use crate::cell::*;
 use crate::dict::Dict;
 use crate::merkle::MerkleUpdate;
 use crate::num::*;
-use crate::util::{unlikely, DisplayHash};
+use crate::util::*;
 
 use crate::models::currency::CurrencyCollection;
 use crate::models::global_version::GlobalVersion;
@@ -19,7 +21,7 @@ mod block_id;
 mod shard_hashes;
 
 /// Shard block.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(CustomDebug, Clone, Eq, PartialEq)]
 pub struct Block<C: CellFamily> {
     /// Global network id.
     pub global_id: i32,
@@ -127,7 +129,7 @@ impl<'a, C: CellFamily> Load<'a, C> for Block<C> {
 }
 
 /// Block info.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(CustomDebug, Clone, Eq, PartialEq)]
 pub struct BlockInfo<C: CellFamily> {
     /// Block model version.
     pub version: u32,
@@ -349,27 +351,18 @@ pub enum PrevBlockRef {
 }
 
 /// Reference to the external block.
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(CustomDebug, Clone, Copy, Eq, PartialEq)]
 pub struct BlockRef {
     /// The end of the logical time of the referenced block.
     pub end_lt: u64,
     /// Sequence number of the referenced block.
     pub seqno: u32,
     /// Representation hash of the root cell of the referenced block.
+    #[debug(with = "DisplayHash")]
     pub root_hash: CellHash,
     /// Hash of the BOC encoded root cell of the referenced block.
+    #[debug(with = "DisplayHash")]
     pub file_hash: CellHash,
-}
-
-impl std::fmt::Debug for BlockRef {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BlockRef")
-            .field("end_lt", &self.end_lt)
-            .field("seqno", &self.seqno)
-            .field("root_hash", &DisplayHash(&self.root_hash))
-            .field("file_hash", &DisplayHash(&self.file_hash))
-            .finish()
-    }
 }
 
 impl<C: CellFamily> Store<C> for BlockRef {
@@ -393,7 +386,7 @@ impl<'a, C: CellFamily> Load<'a, C> for BlockRef {
 }
 
 /// Tokens flow info.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(CustomDebug, Clone, Eq, PartialEq)]
 pub struct ValueFlow<C: CellFamily> {
     /// Total amount transferred from the previous block.
     pub from_prev_block: CurrencyCollection<C>,

@@ -1,9 +1,11 @@
 use std::str::FromStr;
 
+use everscale_types_proc::CustomDebug;
+
 use crate::cell::*;
 use crate::error::ParseAddrError;
 use crate::num::*;
-use crate::util::{debug_struct_field3_finish, unlikely, DisplayHash};
+use crate::util::*;
 
 /// Internal message address.
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -92,29 +94,15 @@ impl<'a, C: CellFamily> Load<'a, C> for IntAddr {
 }
 
 /// Standard internal address.
-#[derive(Default, Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(CustomDebug, Default, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct StdAddr {
     /// Optional anycast info.
     pub anycast: Option<Box<Anycast>>,
     /// Workchain id (one-byte range).
     pub workchain: i8,
     /// Account id.
+    #[debug(with = "DisplayHash")]
     pub address: [u8; 32],
-}
-
-impl std::fmt::Debug for StdAddr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        debug_struct_field3_finish(
-            f,
-            "StdAddr",
-            "anycast",
-            &self.anycast,
-            "workchain",
-            &self.workchain,
-            "address",
-            &DisplayHash(&self.address),
-        )
-    }
 }
 
 impl StdAddr {

@@ -1,9 +1,10 @@
 //! Account state models.
 
+use everscale_types_proc::CustomDebug;
+
 use crate::cell::*;
 use crate::dict::*;
 use crate::num::*;
-use crate::util::*;
 
 use crate::models::currency::CurrencyCollection;
 
@@ -145,6 +146,7 @@ impl<'a, C: CellFamily> Load<'a, C> for AccountStatus {
     }
 }
 
+#[derive(CustomDebug)]
 pub struct AccountStorage<C: CellFamily> {
     /// Logical time after the last transaction execution.
     pub last_trans_lt: u64,
@@ -152,20 +154,11 @@ pub struct AccountStorage<C: CellFamily> {
     pub balance: CurrencyCollection<C>,
 }
 
+#[derive(CustomDebug)]
 pub enum AccountState<C: CellFamily> {
     Uninit,
     Active(StateInit<C>),
     Frozen(CellHash),
-}
-
-impl<C: CellFamily> std::fmt::Debug for AccountState<C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Uninit => f.write_str("Uninit"),
-            Self::Active(state) => debug_tuple_field1_finish(f, "Active", state),
-            Self::Frozen(hash) => debug_tuple_field1_finish(f, "Frozen", &DisplayHash(hash)),
-        }
-    }
 }
 
 impl<C: CellFamily> Clone for AccountState<C> {
@@ -201,6 +194,7 @@ impl<'a, C: CellFamily> Load<'a, C> for AccountState<C> {
 }
 
 /// Deployed account state.
+#[derive(CustomDebug)]
 pub struct StateInit<C: CellFamily> {
     /// Optional split depth for large smart contracts.
     pub split_depth: Option<SplitDepth>,
@@ -212,19 +206,6 @@ pub struct StateInit<C: CellFamily> {
     pub data: Option<CellContainer<C>>,
     /// Libraries used in smart-contract.
     pub libraries: Dict<C, CellHash, SimpleLib<C>>,
-}
-
-impl<C: CellFamily> Eq for StateInit<C> {}
-
-impl<C: CellFamily> PartialEq for StateInit<C> {
-    #[inline]
-    fn eq(&self, other: &StateInit<C>) -> bool {
-        self.split_depth == other.split_depth
-            && self.special == other.special
-            && self.code == other.code
-            && self.data == other.data
-            && self.libraries == other.libraries
-    }
 }
 
 impl<C: CellFamily> Default for StateInit<C> {
@@ -251,22 +232,15 @@ impl<C: CellFamily> Clone for StateInit<C> {
     }
 }
 
-impl<C: CellFamily> std::fmt::Debug for StateInit<C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        debug_struct_field5_finish(
-            f,
-            "StateInit",
-            "split_depth",
-            &self.split_depth,
-            "special",
-            &self.special,
-            "code",
-            &self.code,
-            "data",
-            &self.data,
-            "libraries",
-            &self.libraries,
-        )
+impl<C: CellFamily> Eq for StateInit<C> {}
+impl<C: CellFamily> PartialEq for StateInit<C> {
+    #[inline]
+    fn eq(&self, other: &StateInit<C>) -> bool {
+        self.split_depth == other.split_depth
+            && self.special == other.special
+            && self.code == other.code
+            && self.data == other.data
+            && self.libraries == other.libraries
     }
 }
 
@@ -337,17 +311,12 @@ impl<'a, C: CellFamily> Load<'a, C> for SpecialFlags {
 }
 
 /// Simple TVM library.
+#[derive(CustomDebug)]
 pub struct SimpleLib<C: CellFamily> {
     /// Whether this library is accessible from other accounts.
     pub public: bool,
     /// Reference to the library cell.
     pub root: CellContainer<C>,
-}
-
-impl<C: CellFamily> std::fmt::Debug for SimpleLib<C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        debug_struct_field2_finish(f, "SimpleLib", "public", &self.public, "root", &self.root)
-    }
 }
 
 impl<C: CellFamily> Store<C> for SimpleLib<C> {

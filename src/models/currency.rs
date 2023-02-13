@@ -1,29 +1,18 @@
 //! Currency collection stuff.
 
+use everscale_types_proc::CustomDebug;
+
 use crate::cell::*;
 use crate::dict::Dict;
 use crate::num::{Tokens, VarUint248};
-use crate::util::*;
 
 /// Amounts collection.
+#[derive(CustomDebug)]
 pub struct CurrencyCollection<C: CellFamily> {
     /// Amount in native currency.
     pub tokens: Tokens,
     /// Amounts in other currencies.
     pub other: ExtraCurrencyCollection<C>,
-}
-
-impl<C: CellFamily> std::fmt::Debug for CurrencyCollection<C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        debug_struct_field2_finish(
-            f,
-            "CurrencyCollection",
-            "tokens",
-            &self.tokens,
-            "other",
-            &self.other,
-        )
-    }
 }
 
 impl<C: CellFamily> Default for CurrencyCollection<C> {
@@ -89,14 +78,9 @@ impl<'a, C: CellFamily> Load<'a, C> for CurrencyCollection<C> {
 }
 
 /// Dictionary with amounts for multiple currencies.
+#[derive(CustomDebug)]
 #[repr(transparent)]
 pub struct ExtraCurrencyCollection<C: CellFamily>(Dict<C, CellHash, VarUint248>);
-
-impl<C: CellFamily> std::fmt::Debug for ExtraCurrencyCollection<C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        debug_tuple_field1_finish(f, "ExtraCurrencyCollection", &self.0)
-    }
-}
 
 impl<C: CellFamily> Default for ExtraCurrencyCollection<C> {
     #[inline]

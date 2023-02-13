@@ -1,17 +1,22 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasher;
 
+use everscale_types_proc::CustomDebug;
+
 use super::{make_pruned_branch, FilterAction, MerkleFilter, MerkleProofBuilder};
 use crate::cell::*;
-use crate::util::DisplayHash;
+use crate::util::*;
 
 /// Parsed Merkle update representation.
 ///
 /// NOTE: Serialized into `MerkleUpdate` cell.
+#[derive(CustomDebug)]
 pub struct MerkleUpdate<C: CellFamily> {
     /// Representation hash of the original cell.
+    #[debug(with = "DisplayHash")]
     pub old_hash: CellHash,
     /// Representation hash of the updated cell.
+    #[debug(with = "DisplayHash")]
     pub new_hash: CellHash,
     /// Representation depth of the original cell.
     pub old_depth: u16,
@@ -21,19 +26,6 @@ pub struct MerkleUpdate<C: CellFamily> {
     pub old: CellContainer<C>,
     /// Partially pruned tree with all cells that are not in the original cell.
     pub new: CellContainer<C>,
-}
-
-impl<C: CellFamily> std::fmt::Debug for MerkleUpdate<C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MerkleUpdate")
-            .field("old_hash", &DisplayHash(&self.old_hash))
-            .field("new_hash", &DisplayHash(&self.new_hash))
-            .field("old_depth", &self.old_depth)
-            .field("new_depth", &self.new_depth)
-            .field("old", &self.old.as_ref().debug_root())
-            .field("new", &self.new.as_ref().debug_root())
-            .finish()
-    }
 }
 
 impl<C: CellFamily> Eq for MerkleUpdate<C> {}

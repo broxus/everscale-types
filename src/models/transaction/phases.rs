@@ -1,6 +1,8 @@
+use everscale_types_proc::CustomDebug;
+
 use crate::cell::*;
 use crate::num::*;
-use crate::util::{debug_struct_fields_finish, DisplayHash};
+use crate::util::DisplayHash;
 
 use crate::models::account::StorageUsedShort;
 use crate::models::currency::CurrencyCollection;
@@ -40,7 +42,7 @@ impl<'a, C: CellFamily> Load<'a, C> for StoragePhase {
 /// Credit phase info.
 ///
 /// At this phase message balance is added to the account balance.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(CustomDebug, Clone, Eq, PartialEq)]
 pub struct CreditPhase<C: CellFamily> {
     /// Amount of tokens paid for the debt.
     pub due_fees_collected: Option<Tokens>,
@@ -144,7 +146,7 @@ impl<'a, C: CellFamily> Load<'a, C> for ComputePhase {
 }
 
 /// Executed compute phase info.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(CustomDebug, Clone, Eq, PartialEq)]
 pub struct ExecutedComputePhase {
     /// Whether the execution was successful.
     pub success: bool,
@@ -169,46 +171,11 @@ pub struct ExecutedComputePhase {
     /// The number of VM steps it took to complete this phase.
     pub vm_steps: u32,
     /// Hash of the initial state of the VM.
+    #[debug(with = "DisplayHash")]
     pub vm_init_state_hash: CellHash,
     /// Hash of the VM state after executing this phase.
+    #[debug(with = "DisplayHash")]
     pub vm_final_state_hash: CellHash,
-}
-
-impl std::fmt::Debug for ExecutedComputePhase {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let names: &[&'static _] = &[
-            "success",
-            "msg_state_used",
-            "account_activated",
-            "gas_fees",
-            "gas_used",
-            "gas_limit",
-            "gas_credit",
-            "mode",
-            "exit_code",
-            "exit_arg",
-            "vm_steps",
-            "vm_init_state_hash",
-            "vm_final_state_hash",
-        ];
-        let values: &[&dyn std::fmt::Debug] = &[
-            &self.success,
-            &self.msg_state_used,
-            &self.account_activated,
-            &self.gas_fees,
-            &self.gas_used,
-            &self.gas_limit,
-            &self.gas_credit,
-            &self.mode,
-            &self.exit_code,
-            &self.exit_arg,
-            &self.vm_steps,
-            &DisplayHash(&self.vm_init_state_hash),
-            &DisplayHash(&self.vm_final_state_hash),
-        ];
-
-        debug_struct_fields_finish(f, "ExecutedComputePhase", names, values)
-    }
 }
 
 /// Skipped compute phase info.
@@ -265,7 +232,7 @@ impl<'a, C: CellFamily> Load<'a, C> for ComputePhaseSkipReason {
 ///
 /// At this phase the list of actions from the compute phase
 /// is converted into updates and outgoing messages.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(CustomDebug, Clone, Eq, PartialEq)]
 pub struct ActionPhase {
     /// Whether the execution was successful.
     pub success: bool,
@@ -292,48 +259,10 @@ pub struct ActionPhase {
     /// The number of outgoing messages created by the compute phase.
     pub messages_created: u16,
     /// The hash of the actions list.
+    #[debug(with = "DisplayHash")]
     pub action_list_hash: CellHash,
     /// The total number of unique cells (bits / refs) of produced messages.
     pub total_message_size: StorageUsedShort,
-}
-
-impl std::fmt::Debug for ActionPhase {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let names: &'static _ = &[
-            "success",
-            "valid",
-            "no_funds",
-            "status_change",
-            "total_fwd_fees",
-            "total_action_fees",
-            "result_code",
-            "result_arg",
-            "total_actions",
-            "special_actions",
-            "skipped_actions",
-            "messages_created",
-            "action_list_hash",
-            "total_message_size",
-        ];
-        let values: &[&dyn std::fmt::Debug] = &[
-            &self.success,
-            &self.valid,
-            &self.no_funds,
-            &self.status_change,
-            &self.total_fwd_fees,
-            &self.total_action_fees,
-            &self.result_code,
-            &self.result_arg,
-            &self.total_actions,
-            &self.special_actions,
-            &self.skipped_actions,
-            &self.messages_created,
-            &DisplayHash(&self.action_list_hash),
-            &self.total_message_size,
-        ];
-
-        debug_struct_fields_finish(f, "ActionPhase", names, values)
-    }
 }
 
 impl<C: CellFamily> Store<C> for ActionPhase {

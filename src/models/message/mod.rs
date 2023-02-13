@@ -1,8 +1,9 @@
 //! Message models.
 
+use everscale_types_proc::CustomDebug;
+
 use crate::cell::*;
 use crate::num::*;
-use crate::util::*;
 
 use crate::models::account::StateInit;
 use crate::models::currency::CurrencyCollection;
@@ -12,6 +13,7 @@ pub use self::address::*;
 mod address;
 
 /// Blockchain message.
+#[derive(CustomDebug)]
 pub struct Message<'a, C: CellFamily> {
     /// Message info.
     pub info: MsgInfo<C>,
@@ -21,23 +23,6 @@ pub struct Message<'a, C: CellFamily> {
     pub body: Option<CellSlice<'a, C>>,
     /// Optional message layout.
     pub layout: Option<MessageLayout>,
-}
-
-impl<C: CellFamily> std::fmt::Debug for Message<'_, C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        debug_struct_field4_finish(
-            f,
-            "Message",
-            "info",
-            &self.info,
-            "init",
-            &self.init,
-            "body",
-            &self.body,
-            "layout",
-            &self.layout,
-        )
-    }
 }
 
 impl<C: CellFamily> Clone for Message<'_, C> {
@@ -324,6 +309,7 @@ impl DetailedMessageLayout {
 }
 
 /// Message info.
+#[derive(CustomDebug)]
 pub enum MsgInfo<C: CellFamily> {
     /// Internal message info,
     Int(IntMsgInfo<C>),
@@ -331,17 +317,6 @@ pub enum MsgInfo<C: CellFamily> {
     ExtIn(ExtInMsgInfo),
     /// External outgoing message info,
     ExtOut(ExtOutMsgInfo),
-}
-
-impl<C: CellFamily> std::fmt::Debug for MsgInfo<C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let (name, value): (&'static _, &dyn std::fmt::Debug) = match self {
-            Self::Int(info) => ("Int", info),
-            Self::ExtIn(info) => ("ExtIn", info),
-            Self::ExtOut(info) => ("ExtOut", info),
-        };
-        debug_tuple_field1_finish(f, name, value)
-    }
 }
 
 impl<C: CellFamily> Clone for MsgInfo<C> {
@@ -414,6 +389,7 @@ impl<'a, C: CellFamily> Load<'a, C> for MsgInfo<C> {
 }
 
 /// Internal message info.
+#[derive(CustomDebug)]
 pub struct IntMsgInfo<C: CellFamily> {
     /// Whether IHR is disabled for the message.
     pub ihr_disabled: bool,
@@ -437,36 +413,6 @@ pub struct IntMsgInfo<C: CellFamily> {
     pub created_lt: u64,
     /// Unix timestamp when the message was created.
     pub created_at: u32,
-}
-
-impl<C: CellFamily> std::fmt::Debug for IntMsgInfo<C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let names: &[&'static _] = &[
-            "ihr_disabled",
-            "bounce",
-            "bounced",
-            "src",
-            "dst",
-            "value",
-            "ihr_fee",
-            "fwd_fee",
-            "created_lt",
-            "created_at",
-        ];
-        let values: &[&dyn std::fmt::Debug] = &[
-            &self.ihr_disabled,
-            &self.bounce,
-            &self.bounced,
-            &self.src,
-            &self.dst,
-            &self.value,
-            &self.ihr_fee,
-            &self.fwd_fee,
-            &self.created_lt,
-            &self.created_at,
-        ];
-        debug_struct_fields_finish(f, "IntMsgInfo", names, values)
-    }
 }
 
 impl<C: CellFamily> Default for IntMsgInfo<C> {

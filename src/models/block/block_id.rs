@@ -1,19 +1,23 @@
 use std::str::FromStr;
 
+use everscale_types_proc::CustomDebug;
+
 use crate::cell::*;
 use crate::error::ParseBlockIdError;
 use crate::util::*;
 
 /// Full block id.
-#[derive(Default, Clone, Copy, Eq, Hash, PartialEq, Ord, PartialOrd)]
+#[derive(CustomDebug, Default, Clone, Copy, Eq, Hash, PartialEq, Ord, PartialOrd)]
 pub struct BlockId {
     /// Block shard ident.
     pub shard: ShardIdent,
     /// Block number in shard.
     pub seqno: u32,
     /// Representation hash of the root cell of the block.
+    #[debug(with = "DisplayHash")]
     pub root_hash: CellHash,
     /// Hash of the BOC encoded root cell of the block.
+    #[debug(with = "DisplayHash")]
     pub file_hash: CellHash,
 }
 
@@ -108,23 +112,6 @@ impl std::fmt::Display for BlockId {
             DisplayHash(&self.root_hash),
             DisplayHash(&self.file_hash)
         ))
-    }
-}
-
-impl std::fmt::Debug for BlockId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        debug_struct_field4_finish(
-            f,
-            "BlockId",
-            "shard",
-            &self.shard,
-            "seqno",
-            &self.seqno,
-            "root_hash",
-            &DisplayHash(&self.root_hash),
-            "file_hash",
-            &DisplayHash(&self.file_hash),
-        )
     }
 }
 

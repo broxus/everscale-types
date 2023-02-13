@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 
 use crate::cell::*;
 use crate::error::*;
+use crate::util::*;
 use crate::CellFamily;
 
 use super::raw::*;
@@ -82,10 +83,7 @@ impl<C: CellFamily, K, A: PartialEq, V> PartialEq for AugDict<C, K, A, V> {
 
 impl<C: CellFamily, K, A: std::fmt::Debug, V> std::fmt::Debug for AugDict<C, K, A, V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AugDict")
-            .field("dict", &self.dict)
-            .field("extra", &self.extra)
-            .finish()
+        debug_struct_field2_finish(f, "AugDict", "dict", &self.dict, "extra", &self.extra)
     }
 }
 

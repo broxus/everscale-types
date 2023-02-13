@@ -1,5 +1,7 @@
 //! Message models.
 
+use everscale_types_proc::CustomDebug;
+
 use crate::cell::*;
 use crate::dict::{self, Dict};
 use crate::error::*;
@@ -16,13 +18,15 @@ pub use self::phases::*;
 mod phases;
 
 /// Blockchain transaction.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(CustomDebug, Clone, Eq, PartialEq)]
 pub struct Transaction<C: CellFamily> {
     /// Account on which this transaction was produced.
+    #[debug(with = "DisplayHash")]
     pub account: CellHash,
     /// Logical time when the transaction was created.
     pub lt: u64,
     /// The hash of the previous transaction on the same account.
+    #[debug(with = "DisplayHash")]
     pub prev_trans_hash: CellHash,
     /// The logical time of the previous transaction on the same account.
     pub prev_trans_lt: u64,
@@ -77,43 +81,6 @@ where
         TxOutMsgIter {
             inner: self.out_msgs.raw_values(),
         }
-    }
-}
-
-impl<C: CellFamily> std::fmt::Debug for Transaction<C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let names: &[&'static _] = &[
-            "account",
-            "lt",
-            "prev_trans_hash",
-            "prev_trans_lt",
-            "now",
-            "out_msg_count",
-            "orig_status",
-            "end_status",
-            "in_msg",
-            "out_msgs",
-            "total_fees",
-            "state_update",
-            "info",
-        ];
-        let values: &[&dyn std::fmt::Debug] = &[
-            &DisplayHash(&self.account),
-            &self.lt,
-            &DisplayHash(&self.prev_trans_hash),
-            &self.prev_trans_lt,
-            &self.now,
-            &self.out_msg_count,
-            &self.orig_status,
-            &self.end_status,
-            &self.in_msg,
-            &self.out_msgs,
-            &self.total_fees,
-            &self.state_update,
-            &self.info,
-        ];
-
-        debug_struct_fields_finish(f, "Transaction", names, values)
     }
 }
 
@@ -224,7 +191,7 @@ impl<'a, C: CellFamily> Load<'a, C> for Transaction<C> {
 }
 
 /// Detailed transaction info.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(CustomDebug, Clone, Eq, PartialEq)]
 pub enum TxInfo<C: CellFamily> {
     /// Ordinary transaction info.
     Ordinary(OrdinaryTxInfo<C>),
@@ -259,7 +226,7 @@ impl<'a, C: CellFamily> Load<'a, C> for TxInfo<C> {
 }
 
 /// Ordinary transaction info.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(CustomDebug, Clone, Eq, PartialEq)]
 pub struct OrdinaryTxInfo<C: CellFamily> {
     /// Whether the credit phase was executed first
     /// (usually set when incoming message has `bounce: false`).
@@ -429,11 +396,13 @@ impl<'a, C: CellFamily> Load<'a, C> for TickTock {
 }
 
 /// Account state hash update.
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(CustomDebug, Clone, Copy, Eq, PartialEq)]
 pub struct HashUpdate {
     /// Old account state hash.
+    #[debug(with = "DisplayHash")]
     pub old: CellHash,
     /// New account state hash.
+    #[debug(with = "DisplayHash")]
     pub new: CellHash,
 }
 
@@ -443,19 +412,6 @@ impl HashUpdate {
 
     /// update_hashes#72
     const TAG: u8 = 0x72;
-}
-
-impl std::fmt::Debug for HashUpdate {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        debug_struct_field2_finish(
-            f,
-            "HashUpdate",
-            "old",
-            &DisplayHash(&self.old),
-            "new",
-            &DisplayHash(&self.new),
-        )
-    }
 }
 
 impl<C: CellFamily> Store<C> for HashUpdate {

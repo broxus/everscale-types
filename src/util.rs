@@ -35,6 +35,16 @@ impl std::fmt::Debug for DisplayHash<'_> {
     }
 }
 
+/// Helper struct to pretty-print optinal hash.
+#[derive(Clone, Copy)]
+pub struct DisplayOptionalHash<'a>(pub &'a Option<[u8; 32]>);
+
+impl std::fmt::Debug for DisplayOptionalHash<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.0.as_ref().map(DisplayHash), f)
+    }
+}
+
 /// Small on-stack vector of max length N.
 pub struct ArrayVec<T, const N: usize> {
     inner: [MaybeUninit<T>; N],
@@ -148,6 +158,7 @@ impl IterStatus {
     }
 }
 
+#[allow(unused)]
 pub(crate) fn debug_tuple_field1_finish(
     f: &mut std::fmt::Formatter<'_>,
     name: &str,
@@ -158,6 +169,7 @@ pub(crate) fn debug_tuple_field1_finish(
     builder.finish()
 }
 
+#[allow(unused)]
 pub(crate) fn debug_tuple_field2_finish(
     f: &mut std::fmt::Formatter<'_>,
     name: &str,
@@ -170,6 +182,20 @@ pub(crate) fn debug_tuple_field2_finish(
     builder.finish()
 }
 
+#[allow(unused)]
+pub(crate) fn debug_tuple_fields_finish(
+    f: &mut std::fmt::Formatter<'_>,
+    name: &str,
+    values: &[&dyn std::fmt::Debug],
+) -> std::fmt::Result {
+    let mut builder = std::fmt::Formatter::debug_tuple(f, name);
+    for value in values {
+        builder.field(value);
+    }
+    builder.finish()
+}
+
+#[allow(unused)]
 pub(crate) fn debug_struct_field1_finish(
     f: &mut std::fmt::Formatter<'_>,
     name: &str,
@@ -181,6 +207,7 @@ pub(crate) fn debug_struct_field1_finish(
     builder.finish()
 }
 
+#[allow(unused)]
 pub(crate) fn debug_struct_field2_finish(
     f: &mut std::fmt::Formatter<'_>,
     name: &str,
@@ -195,6 +222,7 @@ pub(crate) fn debug_struct_field2_finish(
     builder.finish()
 }
 
+#[allow(unused)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn debug_struct_field3_finish(
     f: &mut std::fmt::Formatter<'_>,
@@ -213,6 +241,7 @@ pub(crate) fn debug_struct_field3_finish(
     builder.finish()
 }
 
+#[allow(unused)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn debug_struct_field4_finish(
     f: &mut std::fmt::Formatter<'_>,
@@ -234,6 +263,7 @@ pub(crate) fn debug_struct_field4_finish(
     builder.finish()
 }
 
+#[allow(unused)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn debug_struct_field5_finish(
     f: &mut std::fmt::Formatter<'_>,
@@ -258,6 +288,7 @@ pub(crate) fn debug_struct_field5_finish(
     builder.finish()
 }
 
+#[allow(unused)]
 pub(crate) fn debug_struct_fields_finish(
     f: &mut std::fmt::Formatter<'_>,
     name: &str,

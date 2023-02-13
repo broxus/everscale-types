@@ -2,8 +2,9 @@ use std::num::{NonZeroU16, NonZeroU32, NonZeroU8};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use everscale_types_proc::CustomDebug;
+
 use crate::cell::{Cell, CellContainer, CellFamily, CellHash, CellType, LevelMask, RefsIter};
-use crate::util::debug_struct_field5_finish;
 
 /// A data structure that can be deserialized from cells.
 pub trait Load<'a, C: CellFamily>: Sized {
@@ -111,31 +112,13 @@ impl<'a, C: CellFamily> Load<'a, C> for &'a dyn Cell<C> {
 }
 
 /// A read-only view for a subcell of a cell
+#[derive(CustomDebug)]
 pub struct CellSlice<'a, C: CellFamily> {
     cell: &'a dyn Cell<C>,
     bits_window_start: u16,
     bits_window_end: u16,
     refs_window_start: u8,
     refs_window_end: u8,
-}
-
-impl<C: CellFamily> std::fmt::Debug for CellSlice<'_, C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        debug_struct_field5_finish(
-            f,
-            "CellSlice",
-            "cell",
-            &self.cell,
-            "bits_window_start",
-            &self.bits_window_start,
-            "bits_window_end",
-            &self.bits_window_end,
-            "refs_window_start",
-            &self.refs_window_start,
-            "refs_window_end",
-            &self.refs_window_end,
-        )
-    }
 }
 
 impl<'a, C: CellFamily> Clone for CellSlice<'a, C> {

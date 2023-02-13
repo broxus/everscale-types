@@ -1,15 +1,19 @@
 use std::collections::HashMap;
 use std::hash::BuildHasher;
 
+use everscale_types_proc::CustomDebug;
+
 use super::{make_pruned_branch, FilterAction, MerkleFilter};
 use crate::cell::*;
-use crate::util::DisplayHash;
+use crate::util::*;
 
 /// Parsed Merkle proof representation.
 ///
 /// NOTE: Serialized into `MerkleProof` cell.
+#[derive(CustomDebug)]
 pub struct MerkleProof<C: CellFamily> {
     /// Representation hash of the original cell.
+    #[debug(with = "DisplayHash")]
     pub hash: CellHash,
     /// Representation depth of the origin cell.
     pub depth: u16,
@@ -17,18 +21,7 @@ pub struct MerkleProof<C: CellFamily> {
     pub cell: CellContainer<C>,
 }
 
-impl<C: CellFamily> std::fmt::Debug for MerkleProof<C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MerkleProof")
-            .field("hash", &DisplayHash(&self.hash))
-            .field("depth", &self.depth)
-            .field("cell", &self.cell.as_ref().debug_root())
-            .finish()
-    }
-}
-
 impl<C: CellFamily> Eq for MerkleProof<C> {}
-
 impl<C: CellFamily> PartialEq for MerkleProof<C> {
     fn eq(&self, other: &Self) -> bool {
         self.hash == other.hash

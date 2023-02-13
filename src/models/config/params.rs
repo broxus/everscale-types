@@ -1,5 +1,7 @@
 use std::num::{NonZeroU16, NonZeroU32, NonZeroU8};
 
+use everscale_types_proc::CustomDebug;
+
 use crate::cell::*;
 use crate::dict::Dict;
 use crate::num::{Tokens, Uint12};
@@ -9,6 +11,7 @@ use crate::models::block::ShardIdent;
 use crate::models::Lazy;
 
 /// Config voting setup params.
+#[derive(CustomDebug)]
 pub struct ConfigVotingSetup<C: CellFamily> {
     /// Proposal configuration for non-critical params.
     pub normal_params: Lazy<C, ConfigProposalSetup>,
@@ -98,7 +101,7 @@ impl<'a, C: CellFamily> Load<'a, C> for ConfigProposalSetup {
 }
 
 /// Workchain description.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(CustomDebug, Clone, Eq, PartialEq)]
 pub struct WorkchainDescription {
     /// Unix timestamp from which blocks can be produced.
     pub enabled_since: u32,
@@ -113,44 +116,15 @@ pub struct WorkchainDescription {
     /// Whether the workchain accepts messages.
     pub accept_msgs: bool,
     /// A hash of the zerostate root cell.
+    #[debug(with = "DisplayHash")]
     pub zerostate_root_hash: CellHash,
     /// A hash of the zerostate file.
+    #[debug(with = "DisplayHash")]
     pub zerostate_file_hash: CellHash,
     /// Workchain version.
     pub version: u32,
     /// Workchain format description.
     pub format: WorkchainFormat,
-}
-
-impl std::fmt::Debug for WorkchainDescription {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let names: &[&'static _] = &[
-            "enabled_since",
-            "actual_min_split",
-            "min_split",
-            "max_split",
-            "active",
-            "accept_msgs",
-            "zerostate_root_hash",
-            "zerostate_file_hash",
-            "version",
-            "format",
-        ];
-        let values: &[&dyn std::fmt::Debug] = &[
-            &self.enabled_since,
-            &self.actual_min_split,
-            &self.min_split,
-            &self.max_split,
-            &self.active,
-            &self.accept_msgs,
-            &DisplayHash(&self.zerostate_root_hash),
-            &DisplayHash(&self.zerostate_file_hash),
-            &self.version,
-            &self.format,
-        ];
-
-        debug_struct_fields_finish(f, "WorkchainDescription", names, values)
-    }
 }
 
 impl WorkchainDescription {
@@ -955,33 +929,18 @@ where
 }
 
 /// Validator description.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(CustomDebug, Clone, Eq, PartialEq)]
 pub struct ValidatorDescription {
     /// Validator public key.
+    #[debug(with = "DisplayHash")]
     pub public_key: CellHash, // TODO: replace with everscale_crypto::ed25519::PublicKey ?
     /// Validator weight in some units.
     pub weight: u64,
     /// Optional validator ADNL address.
+    #[debug(with = "DisplayOptionalHash")]
     pub adnl_addr: Option<CellHash>,
     /// Since which seqno this validator will be active.
     pub mc_seqno_since: u32,
-}
-
-impl std::fmt::Debug for ValidatorDescription {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        debug_struct_field4_finish(
-            f,
-            "ValidatorDescription",
-            "public_key",
-            &DisplayHash(&self.public_key),
-            "weight",
-            &self.weight,
-            "adnl_addr",
-            &self.adnl_addr.as_ref().map(DisplayHash),
-            "mc_seqno_since",
-            &self.mc_seqno_since,
-        )
-    }
 }
 
 impl ValidatorDescription {

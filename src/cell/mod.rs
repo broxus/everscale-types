@@ -206,10 +206,14 @@ impl<C: CellFamily> dyn Cell<C> + '_ {
 
 impl<C: CellFamily> std::fmt::Debug for dyn Cell<C> + '_ {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Cell")
-            .field("ty", &self.cell_type())
-            .field("hash", &DisplayHash(self.repr_hash()))
-            .finish()
+        crate::util::debug_struct_field2_finish(
+            f,
+            "Cell",
+            "ty",
+            &self.cell_type(),
+            "hash",
+            &DisplayHash(self.repr_hash()),
+        )
     }
 }
 

@@ -1,3 +1,5 @@
+use everscale_types_proc::CustomDebug;
+
 use crate::cell::*;
 use crate::dict::{AugDict, AugDictSkipValue, Dict};
 use crate::error::Error;
@@ -12,7 +14,7 @@ use crate::models::Lazy;
 use super::ShardHashes;
 
 /// Block content.
-#[derive(Clone)]
+#[derive(CustomDebug, Clone)]
 pub struct BlockExtra<C: CellFamily> {
     /// Incoming message description.
     pub in_msg_description: CellContainer<C>,
@@ -21,8 +23,10 @@ pub struct BlockExtra<C: CellFamily> {
     /// Block transactions info.
     pub account_blocks: Lazy<C, AugDict<C, CellHash, CurrencyCollection<C>, AccountBlock<C>>>,
     /// Random generator seed.
+    #[debug(with = "DisplayHash")]
     pub rand_seed: CellHash,
     /// Public key of the collator who produced this block.
+    #[debug(with = "DisplayHash")]
     pub created_by: CellHash,
     /// Additional block content.
     pub custom: Option<Lazy<C, McBlockExtra<C>>>,
@@ -40,19 +44,6 @@ impl<C: CellFamily> BlockExtra<C> {
             },
             None => Ok(None),
         }
-    }
-}
-
-impl<C: CellFamily> std::fmt::Debug for BlockExtra<C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BlockExtra")
-            .field("in_msg_description", &self.in_msg_description)
-            .field("out_msg_description", &self.out_msg_description)
-            .field("account_blocks", &self.account_blocks)
-            .field("rand_seed", &DisplayHash(&self.rand_seed))
-            .field("created_by", &DisplayHash(&self.created_by))
-            .field("custom", &self.custom)
-            .finish()
     }
 }
 
@@ -86,9 +77,10 @@ impl<'a, C: CellFamily> Load<'a, C> for BlockExtra<C> {
 }
 
 /// A group of account transactions.
-#[derive(Clone)]
+#[derive(CustomDebug, Clone)]
 pub struct AccountBlock<C: CellFamily> {
     /// Account id.
+    #[debug(with = "DisplayHash")]
     pub account: CellHash,
     /// Dictionary with fees and account transactions.
     pub transactions: AugDict<C, u64, CurrencyCollection<C>, Lazy<C, Transaction<C>>>,
@@ -138,7 +130,7 @@ impl<'a, C: CellFamily> AugDictSkipValue<'a, C> for Lazy<C, Transaction<C>> {
 }
 
 /// Additional content for masterchain blocks.
-#[derive(Clone)]
+#[derive(CustomDebug, Clone)]
 pub struct McBlockExtra<C: CellFamily> {
     /// A tree of the most recent descriptions for all currently existing shards
     /// for all workchains except the masterchain.
@@ -155,20 +147,6 @@ pub struct McBlockExtra<C: CellFamily> {
     pub copyleft_msgs: Dict<C, Uint15, CellContainer<C>>,
     /// Blockchain config (if the block is a key block).
     pub config: Option<BlockchainConfig<C>>,
-}
-
-impl<C: CellFamily> std::fmt::Debug for McBlockExtra<C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("McBlockExtra")
-            .field("shards", &self.shards)
-            .field("fees", &self.fees)
-            .field("prev_block_signatures", &self.prev_block_signatures)
-            .field("recover_create_msg", &self.recover_create_msg)
-            .field("mint_msg", &self.mint_msg)
-            .field("copyleft_msgs", &self.copyleft_msgs)
-            .field("config", &self.config)
-            .finish()
-    }
 }
 
 impl<C: CellFamily> McBlockExtra<C> {
@@ -265,7 +243,7 @@ impl<'a, C: CellFamily> Load<'a, C> for McBlockExtra<C> {
 }
 
 /// TEMP shard fees mapping sub.
-#[derive(Clone)]
+#[derive(CustomDebug, Clone)]
 pub struct ShardFees<C: CellFamily> {
     /// Dictionary root.
     pub root: Option<CellContainer<C>>,
@@ -273,16 +251,6 @@ pub struct ShardFees<C: CellFamily> {
     pub fees: CurrencyCollection<C>,
     /// `AugDict` root extra part.
     pub create: CurrencyCollection<C>,
-}
-
-impl<C: CellFamily> std::fmt::Debug for ShardFees<C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ShardFees")
-            .field("root", &self.root)
-            .field("fees", &self.fees)
-            .field("create", &self.create)
-            .finish()
-    }
 }
 
 impl<C: CellFamily> Store<C> for ShardFees<C> {
@@ -304,8 +272,10 @@ impl<'a, C: CellFamily> Load<'a, C> for ShardFees<C> {
 }
 
 /// Block signature pair.
+#[derive(CustomDebug)]
 pub struct BlockSignature {
     /// Signer node short id.
+    #[debug(with = "DisplayHash")]
     pub node_id_short: CellHash,
     /// Signature data.
     pub signature: Signature,

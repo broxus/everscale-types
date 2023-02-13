@@ -2,6 +2,7 @@ use std::borrow::Borrow;
 use std::marker::PhantomData;
 
 use crate::cell::*;
+use crate::util::*;
 use crate::Error;
 
 use super::raw::*;
@@ -74,7 +75,7 @@ impl<C: CellFamily, K, V> From<Option<CellContainer<C>>> for Dict<C, K, V> {
 
 impl<C: CellFamily, K, V> std::fmt::Debug for Dict<C, K, V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Dict").field("root", &self.root).finish()
+        debug_struct_field1_finish(f, "Dict", "root", &self.root)
     }
 }
 
