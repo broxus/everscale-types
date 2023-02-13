@@ -10,7 +10,7 @@ use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 use crate::cell::{Cell, CellContainer, CellFamily, CellHash, CellType};
 
 /// Thread-safe cell family.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 pub struct ArcCellFamily;
 
 impl CellFamily for ArcCellFamily {
@@ -54,7 +54,7 @@ impl DefaultFinalizer for ArcCellFamily {
 pub type ArcCell = CellContainer<ArcCellFamily>;
 
 /// Thread-safe cell finalizer.
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 pub struct ArcCellFinalizer;
 
 impl Finalizer<ArcCellFamily> for ArcCellFinalizer {

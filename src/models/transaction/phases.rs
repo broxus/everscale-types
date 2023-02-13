@@ -1,6 +1,6 @@
 use crate::cell::*;
 use crate::num::*;
-use crate::util::DisplayHash;
+use crate::util::{debug_struct_fields_finish, DisplayHash};
 
 use crate::models::account::StorageUsedShort;
 use crate::models::currency::CurrencyCollection;
@@ -176,24 +176,38 @@ pub struct ExecutedComputePhase {
 
 impl std::fmt::Debug for ExecutedComputePhase {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ExecutedComputePhase")
-            .field("success", &self.success)
-            .field("msg_state_used", &self.msg_state_used)
-            .field("account_activated", &self.account_activated)
-            .field("gas_fees", &self.gas_fees)
-            .field("gas_used", &self.gas_used)
-            .field("gas_limit", &self.gas_limit)
-            .field("gas_credit", &self.gas_credit)
-            .field("mode", &self.mode)
-            .field("exit_code", &self.exit_code)
-            .field("exit_arg", &self.exit_arg)
-            .field("vm_steps", &self.vm_steps)
-            .field("vm_init_state_hash", &DisplayHash(&self.vm_init_state_hash))
-            .field(
-                "vm_final_state_hash",
-                &DisplayHash(&self.vm_final_state_hash),
-            )
-            .finish()
+        let names: &[&'static _] = &[
+            "success",
+            "msg_state_used",
+            "account_activated",
+            "gas_fees",
+            "gas_used",
+            "gas_limit",
+            "gas_credit",
+            "mode",
+            "exit_code",
+            "exit_arg",
+            "vm_steps",
+            "vm_init_state_hash",
+            "vm_final_state_hash",
+        ];
+        let values: &[&dyn std::fmt::Debug] = &[
+            &self.success,
+            &self.msg_state_used,
+            &self.account_activated,
+            &self.gas_fees,
+            &self.gas_used,
+            &self.gas_limit,
+            &self.gas_credit,
+            &self.mode,
+            &self.exit_code,
+            &self.exit_arg,
+            &self.vm_steps,
+            &DisplayHash(&self.vm_init_state_hash),
+            &DisplayHash(&self.vm_final_state_hash),
+        ];
+
+        debug_struct_fields_finish(f, "ExecutedComputePhase", names, values)
     }
 }
 
@@ -285,22 +299,40 @@ pub struct ActionPhase {
 
 impl std::fmt::Debug for ActionPhase {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ActionPhase")
-            .field("success", &self.success)
-            .field("valid", &self.valid)
-            .field("no_funds", &self.no_funds)
-            .field("status_change", &self.status_change)
-            .field("total_fwd_fees", &self.total_fwd_fees)
-            .field("total_action_fees", &self.total_action_fees)
-            .field("result_code", &self.result_code)
-            .field("result_arg", &self.result_arg)
-            .field("total_actions", &self.total_actions)
-            .field("special_actions", &self.special_actions)
-            .field("skipped_actions", &self.skipped_actions)
-            .field("messages_created", &self.messages_created)
-            .field("action_list_hash", &DisplayHash(&self.action_list_hash))
-            .field("total_message_size", &self.total_message_size)
-            .finish()
+        let names: &'static _ = &[
+            "success",
+            "valid",
+            "no_funds",
+            "status_change",
+            "total_fwd_fees",
+            "total_action_fees",
+            "result_code",
+            "result_arg",
+            "total_actions",
+            "special_actions",
+            "skipped_actions",
+            "messages_created",
+            "action_list_hash",
+            "total_message_size",
+        ];
+        let values: &[&dyn std::fmt::Debug] = &[
+            &self.success,
+            &self.valid,
+            &self.no_funds,
+            &self.status_change,
+            &self.total_fwd_fees,
+            &self.total_action_fees,
+            &self.result_code,
+            &self.result_arg,
+            &self.total_actions,
+            &self.special_actions,
+            &self.skipped_actions,
+            &self.messages_created,
+            &DisplayHash(&self.action_list_hash),
+            &self.total_message_size,
+        ];
+
+        debug_struct_fields_finish(f, "ActionPhase", names, values)
     }
 }
 

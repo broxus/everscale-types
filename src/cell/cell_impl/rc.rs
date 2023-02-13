@@ -9,7 +9,7 @@ use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 use crate::cell::{Cell, CellContainer, CellFamily, CellHash, CellType};
 
 /// Single-threaded cell family.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 pub struct RcCellFamily;
 
 impl CellFamily for RcCellFamily {
@@ -53,7 +53,7 @@ impl DefaultFinalizer for RcCellFamily {
 pub type RcCell = CellContainer<RcCellFamily>;
 
 /// Single-threaded cell finalizer.
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 pub struct RcCellFinalizer;
 
 impl Finalizer<RcCellFamily> for RcCellFinalizer {

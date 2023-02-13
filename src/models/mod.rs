@@ -5,6 +5,7 @@ use std::marker::PhantomData;
 use crate::cell::{
     CellBuilder, CellContainer, CellFamily, CellSlice, DefaultFinalizer, Finalizer, Load, Store,
 };
+use crate::util::*;
 
 pub use account::*;
 pub use block::*;
@@ -29,7 +30,7 @@ pub struct Lazy<C: CellFamily, T> {
 
 impl<C: CellFamily, T> std::fmt::Debug for Lazy<C, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Lazy").field(&self.cell).finish()
+        debug_tuple_field1_finish(f, "Lazy", &self.cell)
     }
 }
 

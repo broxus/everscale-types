@@ -4,7 +4,7 @@ use crate::cell::*;
 use crate::dict::{self, Dict};
 use crate::error::*;
 use crate::num::*;
-use crate::util::{unlikely, DisplayHash};
+use crate::util::*;
 
 use crate::models::account::AccountStatus;
 use crate::models::currency::CurrencyCollection;
@@ -82,21 +82,38 @@ where
 
 impl<C: CellFamily> std::fmt::Debug for Transaction<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Transaction")
-            .field("account", &DisplayHash(&self.account))
-            .field("lt", &self.lt)
-            .field("prev_trans_hash", &DisplayHash(&self.prev_trans_hash))
-            .field("prev_trans_lt", &self.prev_trans_lt)
-            .field("now", &self.now)
-            .field("out_msg_count", &self.out_msg_count)
-            .field("orig_status", &self.orig_status)
-            .field("end_status", &self.end_status)
-            .field("in_msg", &self.in_msg)
-            .field("out_msgs", &self.out_msgs)
-            .field("total_fees", &self.total_fees)
-            .field("state_update", &self.state_update)
-            .field("info", &self.info)
-            .finish()
+        let names: &[&'static _] = &[
+            "account",
+            "lt",
+            "prev_trans_hash",
+            "prev_trans_lt",
+            "now",
+            "out_msg_count",
+            "orig_status",
+            "end_status",
+            "in_msg",
+            "out_msgs",
+            "total_fees",
+            "state_update",
+            "info",
+        ];
+        let values: &[&dyn std::fmt::Debug] = &[
+            &DisplayHash(&self.account),
+            &self.lt,
+            &DisplayHash(&self.prev_trans_hash),
+            &self.prev_trans_lt,
+            &self.now,
+            &self.out_msg_count,
+            &self.orig_status,
+            &self.end_status,
+            &self.in_msg,
+            &self.out_msgs,
+            &self.total_fees,
+            &self.state_update,
+            &self.info,
+        ];
+
+        debug_struct_fields_finish(f, "Transaction", names, values)
     }
 }
 
@@ -430,10 +447,14 @@ impl HashUpdate {
 
 impl std::fmt::Debug for HashUpdate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HashUpdate")
-            .field("old", &DisplayHash(&self.old))
-            .field("new", &DisplayHash(&self.new))
-            .finish()
+        debug_struct_field2_finish(
+            f,
+            "HashUpdate",
+            "old",
+            &DisplayHash(&self.old),
+            "new",
+            &DisplayHash(&self.new),
+        )
     }
 }
 

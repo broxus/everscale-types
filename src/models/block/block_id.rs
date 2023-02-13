@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use crate::cell::*;
 use crate::error::ParseBlockIdError;
-use crate::util::DisplayHash;
+use crate::util::*;
 
 /// Full block id.
 #[derive(Default, Clone, Copy, Eq, Hash, PartialEq, Ord, PartialOrd)]
@@ -113,12 +113,18 @@ impl std::fmt::Display for BlockId {
 
 impl std::fmt::Debug for BlockId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BlockId")
-            .field("shard", &self.shard)
-            .field("seqno", &self.seqno)
-            .field("root_hash", &DisplayHash(&self.root_hash))
-            .field("file_hash", &DisplayHash(&self.file_hash))
-            .finish()
+        debug_struct_field4_finish(
+            f,
+            "BlockId",
+            "shard",
+            &self.shard,
+            "seqno",
+            &self.seqno,
+            "root_hash",
+            &DisplayHash(&self.root_hash),
+            "file_hash",
+            &DisplayHash(&self.file_hash),
+        )
     }
 }
 

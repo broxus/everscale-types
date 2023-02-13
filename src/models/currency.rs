@@ -3,9 +3,9 @@
 use crate::cell::*;
 use crate::dict::Dict;
 use crate::num::{Tokens, VarUint248};
+use crate::util::*;
 
 /// Amounts collection.
-#[derive(Default, Clone, Eq, PartialEq)]
 pub struct CurrencyCollection<C: CellFamily> {
     /// Amount in native currency.
     pub tokens: Tokens,
@@ -15,10 +15,38 @@ pub struct CurrencyCollection<C: CellFamily> {
 
 impl<C: CellFamily> std::fmt::Debug for CurrencyCollection<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CurrencyCollection")
-            .field("tokens", &self.tokens)
-            .field("other", &self.other)
-            .finish()
+        debug_struct_field2_finish(
+            f,
+            "CurrencyCollection",
+            "tokens",
+            &self.tokens,
+            "other",
+            &self.other,
+        )
+    }
+}
+
+impl<C: CellFamily> Default for CurrencyCollection<C> {
+    #[inline]
+    fn default() -> Self {
+        Self::ZERO
+    }
+}
+
+impl<C: CellFamily> Clone for CurrencyCollection<C> {
+    fn clone(&self) -> Self {
+        Self {
+            tokens: self.tokens,
+            other: self.other.clone(),
+        }
+    }
+}
+
+impl<C: CellFamily> Eq for CurrencyCollection<C> {}
+impl<C: CellFamily> PartialEq for CurrencyCollection<C> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.tokens == other.tokens && self.other == other.other
     }
 }
 
@@ -61,15 +89,34 @@ impl<'a, C: CellFamily> Load<'a, C> for CurrencyCollection<C> {
 }
 
 /// Dictionary with amounts for multiple currencies.
-#[derive(Default, Clone, Eq, PartialEq)]
 #[repr(transparent)]
 pub struct ExtraCurrencyCollection<C: CellFamily>(Dict<C, CellHash, VarUint248>);
 
 impl<C: CellFamily> std::fmt::Debug for ExtraCurrencyCollection<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("ExtraCurrencyCollection")
-            .field(&self.0)
-            .finish()
+        debug_tuple_field1_finish(f, "ExtraCurrencyCollection", &self.0)
+    }
+}
+
+impl<C: CellFamily> Default for ExtraCurrencyCollection<C> {
+    #[inline]
+    fn default() -> Self {
+        Self(Dict::new())
+    }
+}
+
+impl<C: CellFamily> Clone for ExtraCurrencyCollection<C> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<C: CellFamily> Eq for ExtraCurrencyCollection<C> {}
+impl<C: CellFamily> PartialEq for ExtraCurrencyCollection<C> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.0.eq(&other.0)
     }
 }
 

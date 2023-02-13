@@ -70,10 +70,10 @@ pub trait Cell<C: CellFamily> {
     /// If you want convenient methods to access it use:
     /// [`cell_type`], [`level_mask`], [`reference_count`], [`is_exotic`]
     ///
-    /// [`cell_type`]: fn@crate::cell::CellDescriptor::cell_type
-    /// [`level_mask`]: fn@crate::cell::CellDescriptor::level_mask
-    /// [`reference_count`]: fn@crate::cell::CellDescriptor::reference_count
-    /// [`is_exotic`]: fn@crate::cell::CellDescriptor::is_exotic
+    /// [`cell_type`]: CellDescriptor::cell_type
+    /// [`level_mask`]: CellDescriptor::level_mask
+    /// [`reference_count`]: CellDescriptor::reference_count
+    /// [`is_exotic`]: CellDescriptor::is_exotic
     fn descriptor(&self) -> CellDescriptor;
 
     /// Returns the raw data of this cell.

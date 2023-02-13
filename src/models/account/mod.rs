@@ -3,9 +3,12 @@
 use crate::cell::*;
 use crate::dict::*;
 use crate::num::*;
+use crate::util::*;
+
+use crate::models::currency::CurrencyCollection;
 
 /// Amount of unique cells and bits for shard states.
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct StorageUsed {
     /// Amount of unique cells.
     pub cells: VarUint56,
@@ -74,6 +77,35 @@ impl<'a, C: CellFamily> Load<'a, C> for StorageUsedShort {
     }
 }
 
+/// Storage profile of an account.
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
+pub struct StorageInfo {
+    /// Amount of unique cells and bits which account state occupies.
+    pub used: StorageUsed,
+    /// Unix timestamp of the last storage phase.
+    pub last_paid: u32,
+    /// Account debt for storing its state.
+    pub due_payment: Option<Tokens>,
+}
+
+impl<C: CellFamily> Store<C> for StorageInfo {
+    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+        self.used.store_into(builder, finalizer)
+            && builder.store_u32(self.last_paid)
+            && self.due_payment.store_into(builder, finalizer)
+    }
+}
+
+impl<'a, C: CellFamily> Load<'a, C> for StorageInfo {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+        Some(Self {
+            used: StorageUsed::load_from(slice)?,
+            last_paid: slice.load_u32()?,
+            due_payment: Option::<Tokens>::load_from(slice)?,
+        })
+    }
+}
+
 /// Brief account status.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum AccountStatus {
@@ -113,8 +145,62 @@ impl<'a, C: CellFamily> Load<'a, C> for AccountStatus {
     }
 }
 
+pub struct AccountStorage<C: CellFamily> {
+    /// Logical time after the last transaction execution.
+    pub last_trans_lt: u64,
+    /// Account balance for all currencies.
+    pub balance: CurrencyCollection<C>,
+}
+
+pub enum AccountState<C: CellFamily> {
+    Uninit,
+    Active(StateInit<C>),
+    Frozen(CellHash),
+}
+
+impl<C: CellFamily> std::fmt::Debug for AccountState<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Uninit => f.write_str("Uninit"),
+            Self::Active(state) => debug_tuple_field1_finish(f, "Active", state),
+            Self::Frozen(hash) => debug_tuple_field1_finish(f, "Frozen", &DisplayHash(hash)),
+        }
+    }
+}
+
+impl<C: CellFamily> Clone for AccountState<C> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Uninit => Self::Uninit,
+            Self::Active(state) => Self::Active(state.clone()),
+            Self::Frozen(hash) => Self::Frozen(*hash),
+        }
+    }
+}
+
+impl<C: CellFamily> Store<C> for AccountState<C> {
+    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+        match self {
+            Self::Uninit => builder.store_small_uint(0b00, 2),
+            Self::Active(state) => builder.store_bit_one() && state.store_into(builder, finalizer),
+            Self::Frozen(hash) => builder.store_small_uint(0b01, 2) && builder.store_u256(hash),
+        }
+    }
+}
+
+impl<'a, C: CellFamily> Load<'a, C> for AccountState<C> {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+        Some(if slice.load_bit()? {
+            Self::Active(StateInit::<C>::load_from(slice)?)
+        } else if slice.load_bit()? {
+            Self::Frozen(slice.load_u256()?)
+        } else {
+            Self::Uninit
+        })
+    }
+}
+
 /// Deployed account state.
-#[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct StateInit<C: CellFamily> {
     /// Optional split depth for large smart contracts.
     pub split_depth: Option<SplitDepth>,
@@ -125,7 +211,63 @@ pub struct StateInit<C: CellFamily> {
     /// Optional contract data.
     pub data: Option<CellContainer<C>>,
     /// Libraries used in smart-contract.
-    pub libraries: RawDict<C, 256>,
+    pub libraries: Dict<C, CellHash, SimpleLib<C>>,
+}
+
+impl<C: CellFamily> Eq for StateInit<C> {}
+
+impl<C: CellFamily> PartialEq for StateInit<C> {
+    #[inline]
+    fn eq(&self, other: &StateInit<C>) -> bool {
+        self.split_depth == other.split_depth
+            && self.special == other.special
+            && self.code == other.code
+            && self.data == other.data
+            && self.libraries == other.libraries
+    }
+}
+
+impl<C: CellFamily> Default for StateInit<C> {
+    fn default() -> Self {
+        Self {
+            split_depth: None,
+            special: None,
+            code: None,
+            data: None,
+            libraries: Dict::new(),
+        }
+    }
+}
+
+impl<C: CellFamily> Clone for StateInit<C> {
+    fn clone(&self) -> Self {
+        Self {
+            split_depth: self.split_depth,
+            special: self.special,
+            code: self.code.clone(),
+            data: self.data.clone(),
+            libraries: self.libraries.clone(),
+        }
+    }
+}
+
+impl<C: CellFamily> std::fmt::Debug for StateInit<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        debug_struct_field5_finish(
+            f,
+            "StateInit",
+            "split_depth",
+            &self.split_depth,
+            "special",
+            &self.special,
+            "code",
+            &self.code,
+            "data",
+            &self.data,
+            "libraries",
+            &self.libraries,
+        )
+    }
 }
 
 impl<C: CellFamily> StateInit<C> {
@@ -159,7 +301,7 @@ impl<'a, C: CellFamily> Load<'a, C> for StateInit<C> {
             special: Option::<SpecialFlags>::load_from(slice)?,
             code: Option::<CellContainer<C>>::load_from(slice)?,
             data: Option::<CellContainer<C>>::load_from(slice)?,
-            libraries: RawDict::<C, 256>::load_from(slice)?,
+            libraries: Dict::load_from(slice)?,
         })
     }
 }
@@ -190,6 +332,35 @@ impl<'a, C: CellFamily> Load<'a, C> for SpecialFlags {
         Some(Self {
             tick: data & 0b10 != 0,
             tock: data & 0b01 != 0,
+        })
+    }
+}
+
+/// Simple TVM library.
+pub struct SimpleLib<C: CellFamily> {
+    /// Whether this library is accessible from other accounts.
+    pub public: bool,
+    /// Reference to the library cell.
+    pub root: CellContainer<C>,
+}
+
+impl<C: CellFamily> std::fmt::Debug for SimpleLib<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        debug_struct_field2_finish(f, "SimpleLib", "public", &self.public, "root", &self.root)
+    }
+}
+
+impl<C: CellFamily> Store<C> for SimpleLib<C> {
+    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+        builder.store_bit(self.public) && builder.store_reference(self.root.clone())
+    }
+}
+
+impl<'a, C: CellFamily> Load<'a, C> for SimpleLib<C> {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+        Some(Self {
+            public: slice.load_bit()?,
+            root: slice.load_reference_cloned()?,
         })
     }
 }

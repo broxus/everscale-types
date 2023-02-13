@@ -2,19 +2,34 @@ use crate::cell::*;
 use crate::dict::{self, Dict};
 use crate::error::Error;
 use crate::num::Tokens;
-use crate::util::{unlikely, DisplayHash, IterStatus};
+use crate::util::*;
 
 use crate::models::block::block_id::{BlockId, ShardIdent};
 use crate::models::currency::CurrencyCollection;
 
 /// A tree of the most recent descriptions for all currently existing shards
 /// for all workchains except the masterchain.
-#[derive(Clone, Eq, PartialEq)]
 pub struct ShardHashes<C: CellFamily>(Dict<C, i32, CellContainer<C>>);
 
 impl<C: CellFamily> std::fmt::Debug for ShardHashes<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("ShardHashes").field(&self.0).finish()
+        debug_tuple_field1_finish(f, "ShardHashes", &self.0)
+    }
+}
+
+impl<C: CellFamily> Clone for ShardHashes<C> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<C: CellFamily> Eq for ShardHashes<C> {}
+
+impl<C: CellFamily> PartialEq for ShardHashes<C> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
     }
 }
 
@@ -84,10 +99,33 @@ pub struct WorkchainShardHashes<C: CellFamily> {
 
 impl<C: CellFamily> std::fmt::Debug for WorkchainShardHashes<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WorkchainShardHashes")
-            .field("workchain", &self.workchain)
-            .field("root", &self.root)
-            .finish()
+        debug_struct_field2_finish(
+            f,
+            "WorkchainShardHashes",
+            "workchain",
+            &self.workchain,
+            "root",
+            self.root.as_ref(),
+        )
+    }
+}
+
+impl<C: CellFamily> Clone for WorkchainShardHashes<C> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self {
+            workchain: self.workchain,
+            root: self.root.clone(),
+        }
+    }
+}
+
+impl<C: CellFamily> Eq for WorkchainShardHashes<C> {}
+
+impl<C: CellFamily> PartialEq for WorkchainShardHashes<C> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.workchain == other.workchain && self.root == other.root
     }
 }
 
@@ -693,28 +731,52 @@ pub struct ShardDescription<C: CellFamily> {
 
 impl<C: CellFamily> std::fmt::Debug for ShardDescription<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ShardDescription")
-            .field("seqno", &self.seqno)
-            .field("reg_mc_seqno", &self.reg_mc_seqno)
-            .field("start_lt", &self.start_lt)
-            .field("end_lt", &self.end_lt)
-            .field("root_hash", &DisplayHash(&self.root_hash))
-            .field("file_hash", &DisplayHash(&self.file_hash))
-            .field("before_split", &self.before_split)
-            .field("before_merge", &self.before_merge)
-            .field("want_split", &self.want_split)
-            .field("want_merge", &self.want_merge)
-            .field("nx_cc_updated", &self.nx_cc_updated)
-            .field("next_catchain_seqno", &self.next_catchain_seqno)
-            .field("next_validator_shard", &self.next_validator_shard)
-            .field("min_ref_mc_seqno", &self.min_ref_mc_seqno)
-            .field("gen_utime", &self.gen_utime)
-            .field("split_merge_at", &self.split_merge_at)
-            .field("fees_collected", &self.fees_collected)
-            .field("funds_created", &self.funds_created)
-            .field("copyleft_rewards", &self.copyleft_rewards)
-            .field("proof_chain", &self.proof_chain)
-            .finish()
+        let names: &[&'static _] = &[
+            "seqno",
+            "reg_mc_seqno",
+            "start_lt",
+            "end_lt",
+            "root_hash",
+            "file_hash",
+            "before_split",
+            "before_merge",
+            "want_split",
+            "want_merge",
+            "nx_cc_updated",
+            "next_catchain_seqno",
+            "next_validator_shard",
+            "min_ref_mc_seqno",
+            "gen_utime",
+            "split_merge_at",
+            "fees_collected",
+            "funds_created",
+            "copyleft_rewards",
+            "proof_chain",
+        ];
+        let values: &[&dyn std::fmt::Debug] = &[
+            &self.seqno,
+            &self.reg_mc_seqno,
+            &self.start_lt,
+            &self.end_lt,
+            &DisplayHash(&self.root_hash),
+            &DisplayHash(&self.file_hash),
+            &self.before_split,
+            &self.before_merge,
+            &self.want_split,
+            &self.want_merge,
+            &self.nx_cc_updated,
+            &self.next_catchain_seqno,
+            &self.next_validator_shard,
+            &self.min_ref_mc_seqno,
+            &self.gen_utime,
+            &self.split_merge_at,
+            &self.fees_collected,
+            &self.funds_created,
+            &self.copyleft_rewards,
+            &self.proof_chain,
+        ];
+
+        debug_struct_fields_finish(f, "ShardDescription", names, values)
     }
 }
 
@@ -953,7 +1015,6 @@ impl<'a, C: CellFamily> Load<'a, C> for FutureSplitMerge {
 }
 
 /// Proofs from other workchains.
-#[derive(Clone, Eq, PartialEq)]
 pub struct ProofChain<C: CellFamily> {
     /// Amount of proofs (`1..=8`)
     len: u8,
@@ -963,10 +1024,26 @@ pub struct ProofChain<C: CellFamily> {
 
 impl<C: CellFamily> std::fmt::Debug for ProofChain<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ProofChain")
-            .field("len", &self.len)
-            .field("child", &self.child)
-            .finish()
+        debug_struct_field2_finish(f, "ProofChain", "len", &self.len, "child", &self.child)
+    }
+}
+
+impl<C: CellFamily> Clone for ProofChain<C> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self {
+            len: self.len,
+            child: self.child.clone(),
+        }
+    }
+}
+
+impl<C: CellFamily> Eq for ProofChain<C> {}
+
+impl<C: CellFamily> PartialEq for ProofChain<C> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.len == other.len && self.child == other.child
     }
 }
 

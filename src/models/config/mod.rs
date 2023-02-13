@@ -4,7 +4,7 @@ use crate::cell::*;
 use crate::dict::{Dict, DictKey};
 use crate::error::Error;
 use crate::num::Tokens;
-use crate::util::DisplayHash;
+use crate::util::*;
 
 use crate::models::currency::ExtraCurrencyCollection;
 use crate::models::global_version::GlobalVersion;
@@ -14,7 +14,6 @@ pub use self::params::*;
 mod params;
 
 /// Blockchain config.
-#[derive(Clone, Eq, PartialEq)]
 pub struct BlockchainConfig<C: CellFamily> {
     /// Configuration contract address.
     pub address: CellHash,
@@ -24,10 +23,31 @@ pub struct BlockchainConfig<C: CellFamily> {
 
 impl<C: CellFamily> std::fmt::Debug for BlockchainConfig<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BlockchainConfig")
-            .field("address", &DisplayHash(&self.address))
-            .field("params", &self.params)
-            .finish()
+        debug_struct_field2_finish(
+            f,
+            "BlockchainConfig",
+            "address",
+            &DisplayHash(&self.address),
+            "params",
+            &self.params,
+        )
+    }
+}
+
+impl<C: CellFamily> Clone for BlockchainConfig<C> {
+    fn clone(&self) -> Self {
+        Self {
+            address: self.address,
+            params: self.params.clone(),
+        }
+    }
+}
+
+impl<C: CellFamily> Eq for BlockchainConfig<C> {}
+impl<C: CellFamily> PartialEq for BlockchainConfig<C> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.address == other.address && self.params == other.params
     }
 }
 

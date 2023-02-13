@@ -2,6 +2,7 @@
 
 use crate::cell::*;
 use crate::num::*;
+use crate::util::*;
 
 use crate::models::account::StateInit;
 use crate::models::currency::CurrencyCollection;
@@ -11,7 +12,6 @@ pub use self::address::*;
 mod address;
 
 /// Blockchain message.
-#[derive(Debug, Clone)]
 pub struct Message<'a, C: CellFamily> {
     /// Message info.
     pub info: MsgInfo<C>,
@@ -21,6 +21,34 @@ pub struct Message<'a, C: CellFamily> {
     pub body: Option<CellSlice<'a, C>>,
     /// Optional message layout.
     pub layout: Option<MessageLayout>,
+}
+
+impl<C: CellFamily> std::fmt::Debug for Message<'_, C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        debug_struct_field4_finish(
+            f,
+            "Message",
+            "info",
+            &self.info,
+            "init",
+            &self.init,
+            "body",
+            &self.body,
+            "layout",
+            &self.layout,
+        )
+    }
+}
+
+impl<C: CellFamily> Clone for Message<'_, C> {
+    fn clone(&self) -> Self {
+        Self {
+            info: self.info.clone(),
+            init: self.init.clone(),
+            body: self.body,
+            layout: self.layout,
+        }
+    }
 }
 
 impl<'a, C: CellFamily> Store<C> for Message<'a, C> {
@@ -48,9 +76,9 @@ impl<'a, C: CellFamily> Store<C> for Message<'a, C> {
             Some(value) => {
                 builder.store_bit_one() // just$1
                     && SliceOrCell {
-                        to_cell: layout.init_to_cell,
-                        value,
-                    }
+                    to_cell: layout.init_to_cell,
+                    value,
+                }
                     .store_into(builder, finalizer)
             }
             None => builder.store_bit_zero(), // nothing$0
@@ -296,7 +324,6 @@ impl DetailedMessageLayout {
 }
 
 /// Message info.
-#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum MsgInfo<C: CellFamily> {
     /// Internal message info,
     Int(IntMsgInfo<C>),
@@ -304,6 +331,42 @@ pub enum MsgInfo<C: CellFamily> {
     ExtIn(ExtInMsgInfo),
     /// External outgoing message info,
     ExtOut(ExtOutMsgInfo),
+}
+
+impl<C: CellFamily> std::fmt::Debug for MsgInfo<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (name, value): (&'static _, &dyn std::fmt::Debug) = match self {
+            Self::Int(info) => ("Int", info),
+            Self::ExtIn(info) => ("ExtIn", info),
+            Self::ExtOut(info) => ("ExtOut", info),
+        };
+        debug_tuple_field1_finish(f, name, value)
+    }
+}
+
+impl<C: CellFamily> Clone for MsgInfo<C> {
+    #[inline]
+    fn clone(&self) -> Self {
+        match self {
+            Self::Int(info) => Self::Int(info.clone()),
+            Self::ExtIn(info) => Self::ExtIn(info.clone()),
+            Self::ExtOut(info) => Self::ExtOut(info.clone()),
+        }
+    }
+}
+
+impl<C: CellFamily> Eq for MsgInfo<C> {}
+
+impl<C: CellFamily> PartialEq for MsgInfo<C> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Int(info), Self::Int(other)) => info == other,
+            (Self::ExtIn(info), Self::ExtIn(other)) => info == other,
+            (Self::ExtOut(info), Self::ExtOut(other)) => info == other,
+            _ => false,
+        }
+    }
 }
 
 impl<C: CellFamily> MsgInfo<C> {
@@ -351,7 +414,6 @@ impl<'a, C: CellFamily> Load<'a, C> for MsgInfo<C> {
 }
 
 /// Internal message info.
-#[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct IntMsgInfo<C: CellFamily> {
     /// Whether IHR is disabled for the message.
     pub ihr_disabled: bool,
@@ -375,6 +437,87 @@ pub struct IntMsgInfo<C: CellFamily> {
     pub created_lt: u64,
     /// Unix timestamp when the message was created.
     pub created_at: u32,
+}
+
+impl<C: CellFamily> std::fmt::Debug for IntMsgInfo<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let names: &[&'static _] = &[
+            "ihr_disabled",
+            "bounce",
+            "bounced",
+            "src",
+            "dst",
+            "value",
+            "ihr_fee",
+            "fwd_fee",
+            "created_lt",
+            "created_at",
+        ];
+        let values: &[&dyn std::fmt::Debug] = &[
+            &self.ihr_disabled,
+            &self.bounce,
+            &self.bounced,
+            &self.src,
+            &self.dst,
+            &self.value,
+            &self.ihr_fee,
+            &self.fwd_fee,
+            &self.created_lt,
+            &self.created_at,
+        ];
+        debug_struct_fields_finish(f, "IntMsgInfo", names, values)
+    }
+}
+
+impl<C: CellFamily> Default for IntMsgInfo<C> {
+    fn default() -> Self {
+        Self {
+            ihr_disabled: true,
+            bounce: false,
+            bounced: false,
+            src: Default::default(),
+            dst: Default::default(),
+            value: CurrencyCollection::ZERO,
+            ihr_fee: Default::default(),
+            fwd_fee: Default::default(),
+            created_lt: 0,
+            created_at: 0,
+        }
+    }
+}
+
+impl<C: CellFamily> Clone for IntMsgInfo<C> {
+    fn clone(&self) -> Self {
+        Self {
+            ihr_disabled: self.ihr_disabled,
+            bounce: self.bounce,
+            bounced: self.bounced,
+            src: self.src.clone(),
+            dst: self.dst.clone(),
+            value: self.value.clone(),
+            ihr_fee: self.ihr_fee,
+            fwd_fee: self.fwd_fee,
+            created_lt: self.created_lt,
+            created_at: self.created_at,
+        }
+    }
+}
+
+impl<C: CellFamily> Eq for IntMsgInfo<C> {}
+impl<C: CellFamily> PartialEq for IntMsgInfo<C> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.ihr_disabled == other.ihr_disabled
+            && self.bounce == other.bounce
+            && self.bounced == other.bounced
+            && self.src == other.src
+            && self.dst == other.dst
+            && self.value == other.value
+            && self.ihr_fee == other.ihr_fee
+            && self.fwd_fee == other.fwd_fee
+            && self.created_lt == other.created_lt
+            && self.created_at == other.created_at
+    }
 }
 
 impl<C: CellFamily> IntMsgInfo<C> {

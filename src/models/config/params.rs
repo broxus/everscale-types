@@ -3,7 +3,7 @@ use std::num::{NonZeroU16, NonZeroU32, NonZeroU8};
 use crate::cell::*;
 use crate::dict::Dict;
 use crate::num::{Tokens, Uint12};
-use crate::util::DisplayHash;
+use crate::util::*;
 
 use crate::models::block::ShardIdent;
 use crate::models::Lazy;
@@ -124,24 +124,32 @@ pub struct WorkchainDescription {
 
 impl std::fmt::Debug for WorkchainDescription {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WorkchainDescription")
-            .field("enabled_since", &self.enabled_since)
-            .field("actual_min_split", &self.actual_min_split)
-            .field("min_split", &self.min_split)
-            .field("max_split", &self.max_split)
-            .field("active", &self.active)
-            .field("accept_msgs", &self.accept_msgs)
-            .field(
-                "zerostate_root_hash",
-                &DisplayHash(&self.zerostate_root_hash),
-            )
-            .field(
-                "zerostate_file_hash",
-                &DisplayHash(&self.zerostate_file_hash),
-            )
-            .field("version", &self.version)
-            .field("format", &self.format)
-            .finish()
+        let names: &[&'static _] = &[
+            "enabled_since",
+            "actual_min_split",
+            "min_split",
+            "max_split",
+            "active",
+            "accept_msgs",
+            "zerostate_root_hash",
+            "zerostate_file_hash",
+            "version",
+            "format",
+        ];
+        let values: &[&dyn std::fmt::Debug] = &[
+            &self.enabled_since,
+            &self.actual_min_split,
+            &self.min_split,
+            &self.max_split,
+            &self.active,
+            &self.accept_msgs,
+            &DisplayHash(&self.zerostate_root_hash),
+            &DisplayHash(&self.zerostate_file_hash),
+            &self.version,
+            &self.format,
+        ];
+
+        debug_struct_fields_finish(f, "WorkchainDescription", names, values)
     }
 }
 
@@ -961,11 +969,18 @@ pub struct ValidatorDescription {
 
 impl std::fmt::Debug for ValidatorDescription {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ValidatorDescription")
-            .field("public_key", &DisplayHash(&self.public_key))
-            .field("weight", &self.weight)
-            .field("adnl_addr", &self.adnl_addr.as_ref().map(DisplayHash))
-            .finish()
+        debug_struct_field4_finish(
+            f,
+            "ValidatorDescription",
+            "public_key",
+            &DisplayHash(&self.public_key),
+            "weight",
+            &self.weight,
+            "adnl_addr",
+            &self.adnl_addr.as_ref().map(DisplayHash),
+            "mc_seqno_since",
+            &self.mc_seqno_since,
+        )
     }
 }
 

@@ -3,7 +3,7 @@ use std::str::FromStr;
 use crate::cell::*;
 use crate::error::ParseAddrError;
 use crate::num::*;
-use crate::util::{unlikely, DisplayHash};
+use crate::util::{debug_struct_field3_finish, unlikely, DisplayHash};
 
 /// Internal message address.
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -104,11 +104,16 @@ pub struct StdAddr {
 
 impl std::fmt::Debug for StdAddr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StdAddr")
-            .field("anycast", &self.anycast)
-            .field("workchain", &self.workchain)
-            .field("address", &DisplayHash(&self.address))
-            .finish()
+        debug_struct_field3_finish(
+            f,
+            "StdAddr",
+            "anycast",
+            &self.anycast,
+            "workchain",
+            &self.workchain,
+            "address",
+            &DisplayHash(&self.address),
+        )
     }
 }
 
