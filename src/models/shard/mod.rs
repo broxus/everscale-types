@@ -11,8 +11,10 @@ use crate::models::currency::CurrencyCollection;
 use crate::models::Lazy;
 
 pub use self::shard_accounts::*;
+pub use self::shard_extra::*;
 
 mod shard_accounts;
+mod shard_extra;
 
 /// Applied shard state.
 #[derive(CustomDebug, CustomClone, CustomEq)]
@@ -78,7 +80,7 @@ pub struct ShardStateUnsplit<C: CellFamily> {
     /// Optional reference to the masterchain block.
     pub master_ref: Option<BlockRef>,
     /// Shard state additional info.
-    pub custom: Option<CellContainer<C>>,
+    pub custom: Option<Lazy<C, McStateExtra<C>>>,
 }
 
 impl<C: CellFamily> ShardStateUnsplit<C> {
@@ -87,6 +89,17 @@ impl<C: CellFamily> ShardStateUnsplit<C> {
     /// Tries to load shard accounts dictionary.
     pub fn load_accounts(&self) -> Result<ShardAccounts<C>, Error> {
         self.accounts.load().ok_or(Error::CellUnderflow)
+    }
+
+    /// Tries to load additional masterchain data.
+    pub fn load_custom(&self) -> Result<Option<McStateExtra<C>>, Error> {
+        match &self.custom {
+            Some(custom) => match custom.load() {
+                Some(custom) => Ok(Some(custom)),
+                None => Err(Error::CellUnderflow),
+            },
+            None => Ok(None),
+        }
     }
 }
 
@@ -135,8 +148,7 @@ impl<'a, C: CellFamily> Load<'a, C> for ShardStateUnsplit<C> {
         let out_msg_queue_info = slice.load_reference_cloned()?;
         let accounts = Lazy::load_from(slice)?;
 
-        let child_cell = slice.load_reference_cloned()?;
-        let child_slice = &mut child_cell.as_ref().as_slice();
+        let child_slice = &mut slice.load_reference()?.as_slice();
 
         Some(Self {
             global_id: slice.load_u32()? as i32,
@@ -155,7 +167,7 @@ impl<'a, C: CellFamily> Load<'a, C> for ShardStateUnsplit<C> {
             total_validator_fees: CurrencyCollection::load_from(child_slice)?,
             libraries: RawDict::load_from(child_slice)?,
             master_ref: Option::<BlockRef>::load_from(child_slice)?,
-            custom: Option::<CellContainer<C>>::load_from(slice)?,
+            custom: Option::<Lazy<C, McStateExtra<C>>>::load_from(slice)?,
         })
     }
 }
@@ -191,6 +203,9 @@ mod tests {
 
         let _elector = shard_accounts.get([0x33; 32]).unwrap().unwrap();
         assert!(shard_accounts.contains_account([0x55; 32]).unwrap());
+
+        let custom = data.load_custom().unwrap().unwrap();
+        println!("custom: {custom:#?}");
     }
 
     #[test]

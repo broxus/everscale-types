@@ -97,7 +97,7 @@ fn build_struct(
 }
 
 fn store_tag_op(tag: attr::TlbTag) -> Option<TokenStream> {
-    let bits = tag.bits;
+    let bits = tag.bits as u16;
 
     let op = match bits {
         0 => return None,

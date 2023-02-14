@@ -351,7 +351,7 @@ pub enum PrevBlockRef {
 }
 
 /// Reference to the external block.
-#[derive(CustomDebug, Clone, Copy, Eq, PartialEq, Store, Load)]
+#[derive(CustomDebug, Clone, Eq, PartialEq, Store, Load)]
 pub struct BlockRef {
     /// The end of the logical time of the referenced block.
     pub end_lt: u64,
