@@ -4,6 +4,7 @@ use everscale_types_proc::*;
 
 use crate::cell::*;
 use crate::dict::RawDict;
+use crate::error::*;
 
 use crate::models::block::{BlockRef, ShardIdent};
 use crate::models::currency::CurrencyCollection;
@@ -82,6 +83,11 @@ pub struct ShardStateUnsplit<C: CellFamily> {
 
 impl<C: CellFamily> ShardStateUnsplit<C> {
     const TAG: u32 = 0x9023afe2;
+
+    /// Tries to load shard accounts dictionary.
+    pub fn load_accounts(&self) -> Result<ShardAccounts<C>, Error> {
+        self.accounts.load().ok_or(Error::CellUnderflow)
+    }
 }
 
 impl<C: CellFamily> Store<C> for ShardStateUnsplit<C> {
@@ -167,6 +173,7 @@ pub struct ShardStateSplit<C: CellFamily> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::DisplayHash;
     use crate::RcBoc;
 
     fn check_state(data: &str) {
@@ -174,6 +181,16 @@ mod tests {
         let data = ShardStateUnsplit::load_from(&mut data.as_slice()).unwrap();
 
         println!("data: {data:#?}");
+
+        let shard_accounts = data.load_accounts().unwrap();
+        for entry in shard_accounts.iter() {
+            let (id, shard_state) = entry.unwrap();
+            let account = shard_state.load_account().unwrap();
+            println!("{}: {account:#?}", DisplayHash(&id));
+        }
+
+        let _elector = shard_accounts.get([0x33; 32]).unwrap().unwrap();
+        assert!(shard_accounts.contains_account([0x55; 32]).unwrap());
     }
 
     #[test]

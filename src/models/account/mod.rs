@@ -4,6 +4,7 @@ use everscale_types_proc::*;
 
 use crate::cell::*;
 use crate::dict::*;
+use crate::error::*;
 use crate::num::*;
 use crate::util::*;
 
@@ -108,6 +109,16 @@ pub struct ShardAccount<C: CellFamily> {
     pub last_trans_hash: CellHash,
     /// The exact logical time of the last transaction.
     pub last_trans_lt: u64,
+}
+
+impl<C: CellFamily> ShardAccount<C> {
+    /// Tries to load account data.
+    pub fn load_account(&self) -> Result<Option<Account<C>>, Error> {
+        match self.account.load() {
+            Some(OptionalAccount(account)) => Ok(account),
+            None => Err(Error::CellUnderflow),
+        }
+    }
 }
 
 /// A wrapper for `Option<Account>` with customized representation.

@@ -1,7 +1,7 @@
 use everscale_types_proc::*;
 
 use crate::cell::*;
-use crate::dict::{self, Dict};
+use crate::dict::{self, Dict, DictKey};
 use crate::error::Error;
 use crate::num::Tokens;
 use crate::util::*;
@@ -16,7 +16,7 @@ pub struct ShardHashes<C: CellFamily>(Dict<C, i32, CellContainer<C>>);
 
 impl<C> ShardHashes<C>
 where
-    for<'c> C: DefaultFinalizer + 'c,
+    for<'c> C: CellFamily + 'c,
 {
     /// Gets an iterator over the entries of the shard description trees, sorted by
     /// shard ident. The iterator element is `Result<(ShardIdent, ShardDescription<C>)>`.
@@ -49,12 +49,23 @@ where
     pub fn get_workchain_shards(
         &self,
         workchain: i32,
-    ) -> Result<Option<WorkchainShardHashes<C>>, Error> {
+    ) -> Result<Option<WorkchainShardHashes<C>>, Error>
+    where
+        C: DefaultFinalizer,
+    {
         match self.0.get(workchain) {
             Ok(Some(root)) => Ok(Some(WorkchainShardHashes { workchain, root })),
             Ok(None) => Ok(None),
             Err(e) => Err(e),
         }
+    }
+
+    /// Returns `true` if the dictionary contains a workchain for the specified id.
+    pub fn contains_workchain<Q>(&self, workchain: i32) -> Result<bool, Error>
+    where
+        C: DefaultFinalizer,
+    {
+        self.0.contains_key(workchain)
     }
 }
 
@@ -126,7 +137,7 @@ pub struct ShardHashesIter<'a, C: CellFamily> {
 
 impl<'a, C> ShardHashesIter<'a, C>
 where
-    for<'c> C: DefaultFinalizer + 'c,
+    for<'c> C: CellFamily + 'c,
 {
     fn new(dict: &'a Option<CellContainer<C>>) -> Self {
         Self {
@@ -137,7 +148,7 @@ where
 
 impl<C> Iterator for ShardHashesIter<'_, C>
 where
-    for<'c> C: DefaultFinalizer + 'c,
+    for<'c> C: CellFamily + 'c,
 {
     type Item = Result<(ShardIdent, ShardDescription<C>), Error>;
 
@@ -170,7 +181,7 @@ pub struct ShardHashesRawIter<'a, C: CellFamily> {
 
 impl<'a, C> ShardHashesRawIter<'a, C>
 where
-    for<'c> C: DefaultFinalizer + 'c,
+    for<'c> C: CellFamily + 'c,
 {
     fn new(dict: &'a Option<CellContainer<C>>) -> Self {
         Self {
@@ -189,19 +200,11 @@ where
 
 impl<'a, C> Iterator for ShardHashesRawIter<'a, C>
 where
-    for<'c> C: DefaultFinalizer + 'c,
+    for<'c> C: CellFamily + 'c,
 {
     type Item = Result<(ShardIdent, CellSlice<'a, C>), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        fn parse_workchain_id<C>(key: CellBuilder<C>) -> Option<i32>
-        where
-            for<'c> C: DefaultFinalizer + 'c,
-        {
-            let key = key.build()?;
-            Some(key.as_ref().as_slice().load_u32()? as i32)
-        }
-
         if unlikely(!self.status.is_valid()) {
             return if self.status.is_pruned() {
                 self.status = IterStatus::Broken;
@@ -224,7 +227,7 @@ where
             self.shard_hashes_iter = Some(match self.dict_iter.next()? {
                 Ok((key, value)) => {
                     // Parse workchain id from the raw iterator
-                    let workchain = match parse_workchain_id(key) {
+                    let workchain = match i32::from_raw_data(key.raw_data()) {
                         Some(workchain) => workchain,
                         None => return Some(Err(self.finish(Error::CellUnderflow))),
                     };
@@ -257,7 +260,7 @@ pub struct LatestBlocksIter<'a, C: CellFamily> {
 
 impl<'a, C> LatestBlocksIter<'a, C>
 where
-    for<'c> C: DefaultFinalizer + 'c,
+    for<'c> C: CellFamily + 'c,
 {
     /// Creates an iterator over the latest blocks of a [`ShardHashes`].
     pub fn new(dict: &'a Option<CellContainer<C>>) -> Self {
@@ -269,7 +272,7 @@ where
 
 impl<C> Iterator for LatestBlocksIter<'_, C>
 where
-    for<'c> C: DefaultFinalizer + 'c,
+    for<'c> C: CellFamily + 'c,
 {
     type Item = Result<BlockId, Error>;
 

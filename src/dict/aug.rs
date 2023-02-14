@@ -14,6 +14,17 @@ pub(crate) trait AugDictSkipValue<'a, C: CellFamily> {
     fn skip_value(slice: &mut CellSlice<'a, C>) -> bool;
 }
 
+impl<'a, C: CellFamily> AugDictSkipValue<'a, C> for crate::num::Tokens {
+    #[inline]
+    fn skip_value(slice: &mut CellSlice<'a, C>) -> bool {
+        if let Some(token_bytes) = slice.load_small_uint(4) {
+            slice.try_advance(8 * token_bytes as u16, 0)
+        } else {
+            false
+        }
+    }
+}
+
 /// Typed augmented dictionary with fixed length keys.
 ///
 /// # TLB scheme
@@ -75,6 +86,7 @@ impl<C: CellFamily, K, A: Clone, V> Clone for AugDict<C, K, A, V> {
 }
 
 impl<C: CellFamily, K, A: Eq, V> Eq for AugDict<C, K, A, V> {}
+
 impl<C: CellFamily, K, A: PartialEq, V> PartialEq for AugDict<C, K, A, V> {
     fn eq(&self, other: &Self) -> bool {
         self.dict.eq(&other.dict) && self.extra.eq(&other.extra)

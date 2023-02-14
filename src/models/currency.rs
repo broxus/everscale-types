@@ -3,7 +3,7 @@
 use everscale_types_proc::*;
 
 use crate::cell::*;
-use crate::dict::Dict;
+use crate::dict::{AugDictSkipValue, Dict};
 use crate::num::{Tokens, VarUint248};
 
 /// Amounts collection.
@@ -45,6 +45,13 @@ impl<C: CellFamily> CurrencyCollection<C> {
     }
 }
 
+impl<'a, C: CellFamily> AugDictSkipValue<'a, C> for CurrencyCollection<C> {
+    #[inline]
+    fn skip_value(slice: &mut CellSlice<'a, C>) -> bool {
+        Tokens::skip_value(slice) && ExtraCurrencyCollection::<C>::skip_value(slice)
+    }
+}
+
 /// Dictionary with amounts for multiple currencies.
 #[derive(CustomDebug, CustomClone, CustomEq, Store, Load)]
 #[repr(transparent)]
@@ -71,5 +78,16 @@ impl<C: CellFamily> ExtraCurrencyCollection<C> {
     /// Returns the underlying dictionary.
     pub const fn as_dict(&self) -> &Dict<C, CellHash, VarUint248> {
         &self.0
+    }
+}
+
+impl<'a, C: CellFamily> AugDictSkipValue<'a, C> for ExtraCurrencyCollection<C> {
+    #[inline]
+    fn skip_value(slice: &mut CellSlice<'a, C>) -> bool {
+        if let Some(has_extra) = slice.load_bit() {
+            !has_extra || slice.try_advance(0, 1)
+        } else {
+            false
+        }
     }
 }
