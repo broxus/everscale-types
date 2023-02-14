@@ -2,8 +2,6 @@
 
 use everscale_types_proc::*;
 
-use crate::cell::*;
-
 macro_rules! decl_global_capability {
     ($(#[doc = $doc:expr])* $vis:vis enum $ident:ident {$(
         $(#[doc = $var_doc:expr])*
@@ -168,37 +166,13 @@ decl_global_capability! {
 }
 
 /// Software info.
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Store, Load)]
+#[tlb(tag = "#c4")]
 pub struct GlobalVersion {
     /// Software version.
     pub version: u32,
     /// Software capability flags.
     pub capabilities: GlobalCapabilities,
-}
-
-impl GlobalVersion {
-    const TAG: u8 = 0xc4;
-}
-
-impl<C: CellFamily> Store<C> for GlobalVersion {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
-        builder.store_u8(Self::TAG)
-            && builder.store_u32(self.version)
-            && builder.store_u64(self.capabilities.0)
-    }
-}
-
-impl<'a, C: CellFamily> Load<'a, C> for GlobalVersion {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        if slice.load_u8()? != Self::TAG {
-            return None;
-        }
-
-        Some(Self {
-            version: slice.load_u32()?,
-            capabilities: GlobalCapabilities(slice.load_u64()?),
-        })
-    }
 }
 
 /// A set of enabled capabilities.

@@ -155,36 +155,13 @@ impl<'a, C: CellFamily> Load<'a, C> for ShardStateUnsplit<C> {
 }
 
 /// Next indivisible states after shard split.
-#[derive(CustomDebug, CustomClone, CustomEq)]
+#[derive(CustomDebug, CustomClone, CustomEq, Store, Load)]
+#[tlb(tag = "#5f327da5")]
 pub struct ShardStateSplit<C: CellFamily> {
     /// Reference to the state of the left shard.
     pub left: Lazy<C, ShardStateUnsplit<C>>,
     /// Reference to the state of the right shard.
     pub right: Lazy<C, ShardStateUnsplit<C>>,
-}
-
-impl<C: CellFamily> ShardStateSplit<C> {
-    const TAG: u32 = 0x5f327da5;
-}
-
-impl<C: CellFamily> Store<C> for ShardStateSplit<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
-        builder.store_u32(Self::TAG)
-            && builder.store_reference(self.left.cell.clone())
-            && builder.store_reference(self.right.cell.clone())
-    }
-}
-
-impl<'a, C: CellFamily> Load<'a, C> for ShardStateSplit<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        if slice.load_u32()? != Self::TAG {
-            return None;
-        }
-        Some(Self {
-            left: Lazy::load_from(slice)?,
-            right: Lazy::load_from(slice)?,
-        })
-    }
 }
 
 #[cfg(test)]

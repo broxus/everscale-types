@@ -1,6 +1,9 @@
 pub const DEBUG: Symbol = Symbol("debug");
+pub const TLB: Symbol = Symbol("tlb");
 
+pub const VALIDATE_WITH: Symbol = Symbol("validate_with");
 pub const WITH: Symbol = Symbol("with");
+pub const TAG: Symbol = Symbol("tag");
 
 #[derive(Copy, Clone)]
 pub struct Symbol(&'static str);

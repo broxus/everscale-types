@@ -2,7 +2,7 @@ use everscale_types_proc::*;
 
 use crate::cell::*;
 use crate::num::*;
-use crate::util::DisplayHash;
+use crate::util::*;
 
 use crate::models::account::StorageUsedShort;
 use crate::models::currency::CurrencyCollection;

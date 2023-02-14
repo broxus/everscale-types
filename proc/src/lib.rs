@@ -46,7 +46,7 @@ pub fn derive_eq(input: TokenStream) -> TokenStream {
 }
 
 /// Implements `Load` for the type.
-#[proc_macro_derive(Load, attributes(bounds))]
+#[proc_macro_derive(Load, attributes(bounds, tlb))]
 pub fn derive_load(input: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(input as syn::DeriveInput);
     derive_load::impl_derive(input)
@@ -55,7 +55,7 @@ pub fn derive_load(input: TokenStream) -> TokenStream {
 }
 
 /// Implements `Store` for the type.
-#[proc_macro_derive(Store, attributes(bounds))]
+#[proc_macro_derive(Store, attributes(bounds, tlb))]
 pub fn derive_store(input: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(input as syn::DeriveInput);
     derive_store::impl_derive(input)

@@ -11,7 +11,8 @@ use crate::models::block::ShardIdent;
 use crate::models::Lazy;
 
 /// Config voting setup params.
-#[derive(CustomDebug, CustomClone, CustomEq)]
+#[derive(CustomDebug, CustomClone, CustomEq, Store, Load)]
+#[tlb(tag = "#91")]
 pub struct ConfigVotingSetup<C: CellFamily> {
     /// Proposal configuration for non-critical params.
     pub normal_params: Lazy<C, ConfigProposalSetup>,
@@ -19,32 +20,9 @@ pub struct ConfigVotingSetup<C: CellFamily> {
     pub critical_params: Lazy<C, ConfigProposalSetup>,
 }
 
-impl<C: CellFamily> ConfigVotingSetup<C> {
-    const TAG: u8 = 0x91;
-}
-
-impl<C: CellFamily> Store<C> for ConfigVotingSetup<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        builder.store_u8(Self::TAG)
-            && self.normal_params.store_into(builder, finalizer)
-            && self.critical_params.store_into(builder, finalizer)
-    }
-}
-
-impl<'a, C: CellFamily> Load<'a, C> for ConfigVotingSetup<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        if slice.load_u8()? != Self::TAG {
-            return None;
-        }
-        Some(Self {
-            normal_params: Lazy::load_from(slice)?,
-            critical_params: Lazy::load_from(slice)?,
-        })
-    }
-}
-
 /// Config proposal setup params.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[tlb(tag = "#36")]
 pub struct ConfigProposalSetup {
     /// The minimal number of voting rounds for the proposal.
     pub min_total_rounds: u8,
@@ -62,42 +40,6 @@ pub struct ConfigProposalSetup {
     pub bit_price: u32,
     /// Cell price for storage price computation.
     pub cell_price: u32,
-}
-
-impl ConfigProposalSetup {
-    const TAG: u8 = 0x36;
-}
-
-impl<C: CellFamily> Store<C> for ConfigProposalSetup {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
-        builder.store_u8(Self::TAG)
-            && builder.store_u8(self.min_total_rounds)
-            && builder.store_u8(self.max_total_rounds)
-            && builder.store_u8(self.min_wins)
-            && builder.store_u8(self.max_losses)
-            && builder.store_u32(self.min_store_sec)
-            && builder.store_u32(self.max_store_sec)
-            && builder.store_u32(self.bit_price)
-            && builder.store_u32(self.cell_price)
-    }
-}
-
-impl<'a, C: CellFamily> Load<'a, C> for ConfigProposalSetup {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        if slice.load_u8()? != Self::TAG {
-            return None;
-        }
-        Some(Self {
-            min_total_rounds: slice.load_u8()?,
-            max_total_rounds: slice.load_u8()?,
-            min_wins: slice.load_u8()?,
-            max_losses: slice.load_u8()?,
-            min_store_sec: slice.load_u32()?,
-            max_store_sec: slice.load_u32()?,
-            bit_price: slice.load_u32()?,
-            cell_price: slice.load_u32()?,
-        })
-    }
 }
 
 /// Workchain description.
@@ -252,7 +194,8 @@ pub struct WorkchainFormatBasic {
 }
 
 /// Extended workchain format description.
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Store, Load)]
+#[tlb(validate_with = "Self::is_valid")]
 pub struct WorkchainFormatExtended {
     /// The minimal address length in bits.
     pub min_addr_len: Uint12,
@@ -274,59 +217,14 @@ impl WorkchainFormatExtended {
     }
 }
 
-impl<C: CellFamily> Store<C> for WorkchainFormatExtended {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        self.is_valid()
-            && self.min_addr_len.store_into(builder, finalizer)
-            && self.max_addr_len.store_into(builder, finalizer)
-            && self.addr_len_step.store_into(builder, finalizer)
-            && builder.store_u32(self.workchain_type_id.get())
-    }
-}
-
-impl<'a, C: CellFamily> Load<'a, C> for WorkchainFormatExtended {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let result = Self {
-            min_addr_len: Uint12::load_from(slice)?,
-            max_addr_len: Uint12::load_from(slice)?,
-            addr_len_step: Uint12::load_from(slice)?,
-            workchain_type_id: NonZeroU32::load_from(slice)?,
-        };
-        result.is_valid().then_some(result)
-    }
-}
-
 /// Block creation reward.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[tlb(tag = "#6b")]
 pub struct BlockCreationRewards {
     /// Reward for each created masterchain block.
     pub masterchain_block_fee: Tokens,
     /// Base reward for basechain blocks.
     pub basechain_block_fee: Tokens,
-}
-
-impl BlockCreationRewards {
-    const TAG: u8 = 0x6b;
-}
-
-impl<C: CellFamily> Store<C> for BlockCreationRewards {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        builder.store_u8(Self::TAG)
-            && self.masterchain_block_fee.store_into(builder, finalizer)
-            && self.basechain_block_fee.store_into(builder, finalizer)
-    }
-}
-
-impl<'a, C: CellFamily> Load<'a, C> for BlockCreationRewards {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        if slice.load_u8()? != Self::TAG {
-            return None;
-        }
-        Some(Self {
-            masterchain_block_fee: Tokens::load_from(slice)?,
-            basechain_block_fee: Tokens::load_from(slice)?,
-        })
-    }
 }
 
 /// Validators election timings.
@@ -367,7 +265,8 @@ pub struct ValidatorStakeParams {
 }
 
 /// Storage prices for some interval.
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Store, Load)]
+#[tlb(tag = "#cc")]
 pub struct StoragePrices {
     /// Unix timestamp since which this prices are used.
     pub utime_since: u32,
@@ -379,36 +278,6 @@ pub struct StoragePrices {
     pub mc_bit_price_ps: u64,
     /// Cell price in masterchain.
     pub mc_cell_price_ps: u64,
-}
-
-impl StoragePrices {
-    const TAG: u8 = 0xcc;
-}
-
-impl<C: CellFamily> Store<C> for StoragePrices {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
-        builder.store_u8(Self::TAG)
-            && builder.store_u32(self.utime_since)
-            && builder.store_u64(self.bit_price_ps)
-            && builder.store_u64(self.cell_price_ps)
-            && builder.store_u64(self.mc_bit_price_ps)
-            && builder.store_u64(self.mc_cell_price_ps)
-    }
-}
-
-impl<'a, C: CellFamily> Load<'a, C> for StoragePrices {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        if slice.load_u8()? != Self::TAG {
-            return None;
-        }
-        Some(Self {
-            utime_since: slice.load_u32()?,
-            bit_price_ps: slice.load_u64()?,
-            cell_price_ps: slice.load_u64()?,
-            mc_bit_price_ps: slice.load_u64()?,
-            mc_cell_price_ps: slice.load_u64()?,
-        })
-    }
 }
 
 /// Gas limits and prices.
@@ -493,7 +362,8 @@ impl<'a, C: CellFamily> Load<'a, C> for GasLimitsPrices {
 }
 
 /// Block limits parameter.
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Store, Load)]
+#[tlb(tag = "#c3", validate_with = "Self::is_valid")]
 pub struct BlockParamLimits {
     /// Value below which the parameter is considered underloaded.
     pub underload: u32,
@@ -504,38 +374,15 @@ pub struct BlockParamLimits {
 }
 
 impl BlockParamLimits {
-    const TAG: u8 = 0xc3;
-
     /// Returns `true` if parameter limits are valid.
     pub fn is_valid(&self) -> bool {
         self.underload <= self.soft_limit && self.soft_limit <= self.hard_limit
     }
 }
 
-impl<C: CellFamily> Store<C> for BlockParamLimits {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
-        builder.store_u8(Self::TAG)
-            && builder.store_u32(self.underload)
-            && builder.store_u32(self.soft_limit)
-            && builder.store_u32(self.hard_limit)
-    }
-}
-
-impl<'a, C: CellFamily> Load<'a, C> for BlockParamLimits {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        if slice.load_u8()? != Self::TAG {
-            return None;
-        }
-        Some(Self {
-            underload: slice.load_u32()?,
-            soft_limit: slice.load_u32()?,
-            hard_limit: slice.load_u32()?,
-        })
-    }
-}
-
 /// Block limits.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[tlb(tag = "#5d")]
 pub struct BlockLimits {
     /// Block size limits in bytes.
     pub bytes: BlockParamLimits,
@@ -545,34 +392,9 @@ pub struct BlockLimits {
     pub lt_delta: BlockParamLimits,
 }
 
-impl BlockLimits {
-    const TAG: u8 = 0x5d;
-}
-
-impl<C: CellFamily> Store<C> for BlockLimits {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        builder.store_u8(Self::TAG)
-            && self.bytes.store_into(builder, finalizer)
-            && self.gas.store_into(builder, finalizer)
-            && self.lt_delta.store_into(builder, finalizer)
-    }
-}
-
-impl<'a, C: CellFamily> Load<'a, C> for BlockLimits {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        if slice.load_u8()? != Self::TAG {
-            return None;
-        }
-        Some(Self {
-            bytes: BlockParamLimits::load_from(slice)?,
-            gas: BlockParamLimits::load_from(slice)?,
-            lt_delta: BlockParamLimits::load_from(slice)?,
-        })
-    }
-}
-
 /// Message forwarding prices.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[tlb(tag = "#ea")]
 pub struct MsgForwardPrices {
     /// Fixed price in addition to the dynamic part.
     pub lump_price: u64,
@@ -586,38 +408,6 @@ pub struct MsgForwardPrices {
     pub first_frac: u16,
     /// TODO: add docs
     pub next_frac: u16,
-}
-
-impl MsgForwardPrices {
-    const TAG: u8 = 0xea;
-}
-
-impl<C: CellFamily> Store<C> for MsgForwardPrices {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
-        builder.store_u8(Self::TAG)
-            && builder.store_u64(self.lump_price)
-            && builder.store_u64(self.bit_price)
-            && builder.store_u64(self.cell_price)
-            && builder.store_u32(self.ihr_price_factor)
-            && builder.store_u16(self.first_frac)
-            && builder.store_u16(self.next_frac)
-    }
-}
-
-impl<'a, C: CellFamily> Load<'a, C> for MsgForwardPrices {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        if slice.load_u8()? != Self::TAG {
-            return None;
-        }
-        Some(Self {
-            lump_price: slice.load_u64()?,
-            bit_price: slice.load_u64()?,
-            cell_price: slice.load_u64()?,
-            ihr_price_factor: slice.load_u32()?,
-            first_frac: slice.load_u16()?,
-            next_frac: slice.load_u16()?,
-        })
-    }
 }
 
 /// Catchain configuration params.

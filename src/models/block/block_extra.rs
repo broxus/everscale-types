@@ -14,7 +14,8 @@ use crate::models::Lazy;
 use super::ShardHashes;
 
 /// Block content.
-#[derive(CustomDebug, CustomClone)]
+#[derive(CustomDebug, CustomClone, Store, Load)]
+#[tlb(tag = "#4a33f6fd")]
 pub struct BlockExtra<C: CellFamily> {
     /// Incoming message description.
     pub in_msg_description: CellContainer<C>,
@@ -33,8 +34,6 @@ pub struct BlockExtra<C: CellFamily> {
 }
 
 impl<C: CellFamily> BlockExtra<C> {
-    const TAG: u32 = 0x4a33f6fd;
-
     /// Tries to load additional block content.
     pub fn load_custom(&self) -> Result<Option<McBlockExtra<C>>, Error> {
         match &self.custom {
@@ -44,35 +43,6 @@ impl<C: CellFamily> BlockExtra<C> {
             },
             None => Ok(None),
         }
-    }
-}
-
-impl<C: CellFamily> Store<C> for BlockExtra<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        builder.store_u32(Self::TAG)
-            && builder.store_reference(self.in_msg_description.clone())
-            && builder.store_reference(self.out_msg_description.clone())
-            && self.account_blocks.store_into(builder, finalizer)
-            && builder.store_u256(&self.rand_seed)
-            && builder.store_u256(&self.created_by)
-            && self.custom.store_into(builder, finalizer)
-    }
-}
-
-impl<'a, C: CellFamily> Load<'a, C> for BlockExtra<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        if slice.load_u32()? != Self::TAG {
-            return None;
-        }
-
-        Some(Self {
-            in_msg_description: slice.load_reference_cloned()?,
-            out_msg_description: slice.load_reference_cloned()?,
-            account_blocks: Lazy::load_from(slice)?,
-            rand_seed: slice.load_u256()?,
-            created_by: slice.load_u256()?,
-            custom: Option::<Lazy<C, McBlockExtra<C>>>::load_from(slice)?,
-        })
     }
 }
 

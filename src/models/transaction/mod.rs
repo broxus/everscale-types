@@ -389,7 +389,8 @@ impl<'a, C: CellFamily> Load<'a, C> for TickTock {
 }
 
 /// Account state hash update.
-#[derive(CustomDebug, Clone, Copy, Eq, PartialEq)]
+#[derive(CustomDebug, Clone, Copy, Eq, PartialEq, Store, Load)]
+#[tlb(tag = "#72")]
 pub struct HashUpdate {
     /// Old account state hash.
     #[debug(with = "DisplayHash")]
@@ -397,40 +398,6 @@ pub struct HashUpdate {
     /// New account state hash.
     #[debug(with = "DisplayHash")]
     pub new: CellHash,
-}
-
-impl HashUpdate {
-    /// The number of data bits that this struct occupies.
-    pub const BITS: u16 = 8 + 256 + 256;
-
-    /// update_hashes#72
-    const TAG: u8 = 0x72;
-}
-
-impl<C: CellFamily> Store<C> for HashUpdate {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
-        builder.has_capacity(Self::BITS, 0)
-            && builder.store_u8(Self::TAG)
-            && builder.store_u256(&self.old)
-            && builder.store_u256(&self.new)
-    }
-}
-
-impl<'a, C: CellFamily> Load<'a, C> for HashUpdate {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        if unlikely(!slice.has_remaining(Self::BITS, 0)) {
-            return None;
-        }
-
-        if slice.load_u8()? != Self::TAG {
-            return None;
-        }
-
-        Some(Self {
-            old: slice.load_u256()?,
-            new: slice.load_u256()?,
-        })
-    }
 }
 
 #[cfg(test)]

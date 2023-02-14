@@ -8,10 +8,16 @@ use syn::NestedMeta::{Lit, Meta};
 use super::ctxt::*;
 use super::symbol::*;
 
-pub struct Container;
+pub struct Container {
+    pub tlb_tag: Option<TlbTag>,
+    pub tlb_validate_with: Option<syn::Expr>,
+}
 
 impl Container {
     pub fn from_ast(cx: &Ctxt, item: &syn::DeriveInput) -> Self {
+        let mut tlb_tag = Attr::none(cx, TAG);
+        let mut tlb_validate_with = Attr::none(cx, VALIDATE_WITH);
+
         for meta_item in item
             .attrs
             .iter()
@@ -19,6 +25,18 @@ impl Container {
             .flatten()
         {
             match &meta_item {
+                // Parse `#[tlb(tag = "#ab"]`
+                (MetaContext::Tlb, Meta(NameValue(m))) if m.path == TAG => {
+                    if let Ok(value) = parse_lit_into_tlb_tag(cx, TAG, &m.lit) {
+                        tlb_tag.set(&m.path, value);
+                    }
+                }
+                // Parse `#[tlb(validate_with = "some_module"]`
+                (MetaContext::Tlb, Meta(NameValue(m))) if m.path == VALIDATE_WITH => {
+                    if let Ok(expr) = parse_lit_into_expr(cx, VALIDATE_WITH, &m.lit) {
+                        tlb_validate_with.set(&m.path, expr);
+                    }
+                }
                 (_, Meta(meta_item)) => {
                     let path = meta_item
                         .path()
@@ -36,7 +54,10 @@ impl Container {
             }
         }
 
-        Self
+        Self {
+            tlb_tag: tlb_tag.get(),
+            tlb_validate_with: tlb_validate_with.get(),
+        }
     }
 }
 
@@ -117,12 +138,41 @@ impl Field {
     }
 }
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct TlbTag {
+    pub value: u32,
+    pub bits: u8,
+}
+
+fn parse_lit_into_tlb_tag(cx: &Ctxt, attr_name: Symbol, lit: &syn::Lit) -> Result<TlbTag, ()> {
+    let string = get_lit_str(cx, attr_name, lit)?.value();
+    let string = string.trim();
+    if let Some(hex_tag) = string.strip_prefix('#') {
+        let value = u32::from_str_radix(hex_tag, 16)
+            .map_err(|_| cx.error_spanned_by(lit, format!("failed to parse hex tag: {string}")))?;
+        Ok(TlbTag {
+            value,
+            bits: (hex_tag.len() * 4) as u8,
+        })
+    } else if let Some(binary_tag) = string.strip_prefix('$') {
+        let value = u32::from_str_radix(binary_tag, 2).map_err(|_| {
+            cx.error_spanned_by(lit, format!("failed to parse binary tag: {string}"))
+        })?;
+        Ok(TlbTag {
+            value,
+            bits: binary_tag.len() as u8,
+        })
+    } else {
+        cx.error_spanned_by(lit, format!("failed to parse tag: {string}"));
+        Err(())
+    }
+}
+
 fn parse_lit_into_expr(cx: &Ctxt, attr_name: Symbol, lit: &syn::Lit) -> Result<syn::Expr, ()> {
     let string = get_lit_str(cx, attr_name, lit)?;
 
-    parse_lit_str(string).map_err(|_| {
-        cx.error_spanned_by(lit, format!("failed to parse expr: {:?}", string.value()))
-    })
+    parse_lit_str(string)
+        .map_err(|_| cx.error_spanned_by(lit, format!("failed to parse expr: {}", string.value())))
 }
 
 fn parse_lit_str<T>(s: &syn::LitStr) -> syn::parse::Result<T>
@@ -171,6 +221,8 @@ fn get_meta_items(
 ) -> Result<Vec<(MetaContext, syn::NestedMeta)>, ()> {
     let meta_context = if attr.path == DEBUG {
         MetaContext::Debug
+    } else if attr.path == TLB {
+        MetaContext::Tlb
     } else {
         return Ok(Vec::new());
     };
@@ -195,12 +247,14 @@ fn get_meta_items(
 #[derive(Copy, Clone)]
 enum MetaContext {
     Debug,
+    Tlb,
 }
 
 impl std::fmt::Display for MetaContext {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Debug => std::fmt::Display::fmt(&DEBUG, f),
+            Self::Tlb => std::fmt::Display::fmt(&TLB, f),
         }
     }
 }

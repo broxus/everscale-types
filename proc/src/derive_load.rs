@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use crate::internals::{ast, ctxt};
+use crate::internals::{ast, attr, ctxt};
 use crate::{bound, Derive};
 
 pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Error>> {
@@ -52,7 +52,7 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Erro
         ast::Data::Enum(variants) => (variants.len() < 2, build_enum(variants)),
         ast::Data::Struct(style, fields) => {
             let inline = fields.len() < 2;
-            let body = build_struct(&tlb_lifetime, &cell_family, *style, fields);
+            let body = build_struct(&container, &tlb_lifetime, &cell_family, *style, fields);
             (inline, body)
         }
     };
@@ -77,11 +77,14 @@ fn build_enum(_: &[ast::Variant<'_>]) -> TokenStream {
 }
 
 fn build_struct(
+    container: &ast::Container<'_>,
     lifetime_def: &syn::LifetimeDef,
     cell_family: &syn::Ident,
     style: ast::Style,
     fields: &[ast::Field<'_>],
 ) -> TokenStream {
+    let condition = container.attrs.tlb_tag.and_then(load_tag_op);
+
     let members = fields.iter().map(|field| {
         let ident = &field.member;
         let op = load_op(lifetime_def, cell_family, field.ty);
@@ -90,14 +93,67 @@ fn build_struct(
         }
     });
 
-    match style {
-        ast::Style::Unit => quote!(Some(Self)),
+    let result = match style {
+        ast::Style::Unit => quote!(Self),
         _ => quote! {
-            Some(Self {
+            Self {
                 #(#members),*,
-            })
+            }
         },
+    };
+
+    let result = match &container.attrs.tlb_validate_with {
+        Some(expr) => quote! {
+            let result = #result;
+            if #expr(&result) {
+                Some(result)
+            } else {
+                None
+            }
+        },
+        None => quote!(Some(#result)),
+    };
+
+    quote! {
+        #condition
+        #result
     }
+}
+
+fn load_tag_op(tag: attr::TlbTag) -> Option<TokenStream> {
+    let bits = tag.bits;
+
+    let neg_condition = match bits {
+        0 => return None,
+        1 if tag.value == 0 => quote!(__slice.load_bit()?),
+        1 => quote!(!__slice.load_bit()?),
+        2..=7 => {
+            let value = tag.value as u8;
+            quote!(__slice.load_small_uint(#bits)? != #value)
+        }
+        8 => {
+            let value = tag.value as u8;
+            quote!(__slice.load_u8()? != #value)
+        }
+        16 => {
+            let value = tag.value as u16;
+            quote!(__slice.load_u16()? != #value)
+        }
+        32 => {
+            let value = tag.value;
+            quote!(__slice.load_u32()? != #value)
+        }
+        _ => {
+            let value = tag.value as u64;
+            quote!(__slice.load_uint(#bits) != #value)
+        }
+    };
+
+    Some(quote!(
+        if #neg_condition {
+            return None;
+        }
+    ))
 }
 
 fn load_op(
@@ -130,7 +186,7 @@ fn load_op(
                 }
             }
             syn::Type::Reference(syn::TypeReference { elem, .. }) => {
-                return load_op(lifetime_def, cell_family, elem)
+                return load_op(lifetime_def, cell_family, elem);
             }
             _ => break 'fallback,
         }
