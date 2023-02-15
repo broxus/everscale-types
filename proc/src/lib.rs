@@ -15,8 +15,6 @@ enum Derive {
 }
 
 /// Implements [`Clone`] for the type.
-///
-/// [`Clone`]: std::fmt::Clone
 #[proc_macro_derive(CustomClone, attributes(bounds))]
 pub fn derive_clone(input: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(input as syn::DeriveInput);
