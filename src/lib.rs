@@ -91,11 +91,12 @@ pub mod error;
 
 #[cfg(test)]
 mod tests {
+    use self::util::decode_base64;
     use super::*;
 
     #[test]
     fn correct_deserialization() {
-        let data = base64::decode("te6ccgEBBAEAzwACg4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAIBAEAAAAAAAAAAAAAAAAAAAAAAAAAAm2c6ClpzoTVSAHvzVQGDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHKq1w7OAAkYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACRwAwBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEljGP8=").unwrap();
+        let data = decode_base64("te6ccgEBBAEAzwACg4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAIBAEAAAAAAAAAAAAAAAAAAAAAAAAAAm2c6ClpzoTVSAHvzVQGDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHKq1w7OAAkYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACRwAwBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEljGP8=").unwrap();
 
         let arc_cell = ArcBoc::decode(&data).unwrap();
         let rc_cell = RcBoc::decode(&data).unwrap();
@@ -115,13 +116,13 @@ mod tests {
 
     #[test]
     fn big_cell_deserialization() {
-        let data = base64::decode("te6ccgIDAAwAAQAAAACIAAAEBAABAAEAAQABAAEEBAACAAIAAgACAAIEBAADAAMAAwADAAMEBAAEAAQABAAEAAQEBAAFAAUABQAFAAUEBAAGAAYABgAGAAYEBAAHAAcABwAHAAcEBAAIAAgACAAIAAgEBAAJAAkACQAJAAkEBAAKAAoACgAKAAoEBAALAAsACwALAAsABAAA").unwrap();
+        let data = decode_base64("te6ccgIDAAwAAQAAAACIAAAEBAABAAEAAQABAAEEBAACAAIAAgACAAIEBAADAAMAAwADAAMEBAAEAAQABAAEAAQEBAAFAAUABQAFAAUEBAAGAAYABgAGAAYEBAAHAAcABwAHAAcEBAAIAAgACAAIAAgEBAAJAAkACQAJAAkEBAAKAAoACgAKAAoEBAALAAsACwALAAsABAAA").unwrap();
         _ = RcBoc::decode(data).unwrap();
     }
 
     #[test]
     fn cell_slices() {
-        let data = base64::decode(
+        let data = decode_base64(
             "te6ccgEBAQEALQAAVb23gAA3/WsCOdnvw2dedGrVhjTaZxn/TYcWb7TR8Im/MkK13n6c883gt8A=",
         )
         .unwrap();
@@ -158,8 +159,7 @@ mod tests {
 
     #[test]
     fn test_builder() {
-        let data = base64::decode("te6ccgEBAQEAAwAAAbE=").unwrap();
-        let parsed_cell = Boc::<RcCellFamily>::decode(data).unwrap();
+        let parsed_cell = Boc::<RcCellFamily>::decode_base64("te6ccgEBAQEAAwAAAbE=").unwrap();
 
         let mut builder = CellBuilder::<RcCellFamily>::new();
         assert!(builder.store_bit_one());
@@ -173,8 +173,7 @@ mod tests {
 
         assert_eq!(parsed_cell.repr_hash(), built_cell.repr_hash());
 
-        let data = base64::decode("te6ccgEBAQEAggAA////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////").unwrap();
-        let parsed_cell = RcBoc::decode(data).unwrap();
+        let parsed_cell = RcBoc::decode_base64("te6ccgEBAQEAggAA////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////").unwrap();
 
         let mut builder = RcCellBuilder::new();
         for _ in 0..cell::MAX_BIT_LEN {
@@ -210,9 +209,8 @@ mod tests {
         ]));
         let cell = builder.build().unwrap();
 
-        let target_cell = RcBoc::decode(
-            base64::decode("te6ccgEBAQEAIwAAQbvw2dedGrVhjTaZxn/TYcWb7TR8Im/MkK13n6c883gt8A==")
-                .unwrap(),
+        let target_cell = RcBoc::decode_base64(
+            "te6ccgEBAQEAIwAAQbvw2dedGrVhjTaZxn/TYcWb7TR8Im/MkK13n6c883gt8A==",
         )
         .unwrap();
         assert_eq!(cell.as_ref(), target_cell.as_ref());

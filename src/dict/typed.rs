@@ -674,7 +674,7 @@ mod tests {
     #[test]
     fn dict_iter() {
         let boc = RcBoc::decode_base64("te6ccgEBFAEAeAABAcABAgPOQAUCAgHUBAMACQAAAI3gAAkAAACjoAIBIA0GAgEgCgcCASAJCAAJAAAAciAACQAAAIfgAgEgDAsACQAAAFZgAAkAAABsIAIBIBEOAgEgEA8ACQAAADqgAAkAAABQYAIBIBMSAAkAAAAe4AAJAAAAv2A=").unwrap();
-        let dict = Dict::<RcCellFamily, u32, u32>::load_from(&mut boc.as_slice()).unwrap();
+        let dict = boc.parse::<Dict<_, u32, u32>>().unwrap();
 
         let size = dict.values().count();
         assert_eq!(size, 10);

@@ -571,7 +571,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{RcBoc, RcCellFamily};
+    use crate::RcBoc;
 
     // #[test]
     // fn dict_set() {
@@ -617,7 +617,7 @@ mod tests {
     #[test]
     fn dict_iter() {
         let boc = RcBoc::decode_base64("te6ccgEBFAEApAABCYAAAABAAQIDzkAFAgIB1AQDABEAAAACQAAAACAAEQAAAAIAAAAAYAIBIA0GAgEgCgcCASAJCAARAAAAAcAAAACgABEAAAABgAAAAOACASAMCwARAAAAAUAAAAEgABEAAAABAAAAAWACASARDgIBIBAPABEAAAAAwAAAAaAAEQAAAACAAAAB4AIBIBMSABEAAAAAQAAAAiAAEQAAAAAAAAACYA==").unwrap();
-        let dict = AugDict::<RcCellFamily, u32, u32, u32>::load_from(&mut boc.as_slice()).unwrap();
+        let dict = boc.parse::<AugDict<_, u32, u32, u32>>().unwrap();
 
         assert_eq!(*dict.root_extra(), 0);
 

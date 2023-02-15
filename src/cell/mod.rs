@@ -134,7 +134,7 @@ impl<C: CellFamily> dyn Cell<C> + '_ {
 
     /// Returns whether the cell is not [`Ordinary`].
     ///
-    /// [`Ordinary`]: crate::cell::CellType::Ordinary
+    /// [`Ordinary`]: CellType::Ordinary
     #[inline]
     pub fn is_exotic(&self) -> bool {
         self.descriptor().is_exotic()
@@ -201,6 +201,14 @@ impl<C: CellFamily> dyn Cell<C> + '_ {
     #[inline]
     pub fn display_tree(&'_ self) -> DisplayCellTree<'_, C> {
         DisplayCellTree(self)
+    }
+
+    /// Converts this cell into a slice and tries to load the specified type from it.
+    ///
+    /// NOTE: parsing `Cell` will load the first reference!
+    #[inline]
+    pub fn parse<'a, T: Load<'a, C>>(&'a self) -> Option<T> {
+        T::load_from(&mut self.as_slice())
     }
 }
 
@@ -560,7 +568,7 @@ impl CellDescriptor {
 
     /// Returns whether the cell is not [`Ordinary`].
     ///
-    /// [`Ordinary`]: crate::cell::CellType::Ordinary
+    /// [`Ordinary`]: CellType::Ordinary
     #[inline(always)]
     pub const fn is_exotic(self) -> bool {
         self.d1 & Self::IS_EXOTIC_MASK != 0

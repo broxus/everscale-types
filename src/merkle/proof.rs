@@ -22,6 +22,7 @@ pub struct MerkleProof<C: CellFamily> {
 }
 
 impl<C: CellFamily> Eq for MerkleProof<C> {}
+
 impl<C: CellFamily> PartialEq for MerkleProof<C> {
     fn eq(&self, other: &Self) -> bool {
         self.hash == other.hash
@@ -373,7 +374,7 @@ mod tests {
         assert!(default.store_into(&mut builder, &mut RcCellFamily::default_finalizer()));
         let cell = builder.build().unwrap();
 
-        let parsed = MerkleProof::load_from(&mut cell.as_slice()).unwrap();
+        let parsed = cell.parse::<MerkleProof<_>>().unwrap();
         assert_eq!(default, parsed);
     }
 
@@ -434,7 +435,7 @@ mod tests {
         // Create a usage tree for accessing an element with keys 0 and 9
         let usage_tree = RcUsageTree::new(UsageTreeMode::OnDataAccess);
         let tracked_cell = usage_tree.track(&serialize_dict(dict));
-        let tracked_dict = RcDict::<32>::load_from(&mut tracked_cell.as_slice()).unwrap();
+        let tracked_dict = tracked_cell.parse::<RcDict<32>>().unwrap();
         tracked_dict.get(build_u32(0).as_slice()).unwrap().unwrap();
         tracked_dict.get(build_u32(9).as_slice()).unwrap().unwrap();
 
@@ -444,7 +445,8 @@ mod tests {
             .unwrap();
 
         // Try to read some keys
-        let dict = RcDict::<32>::load_from(&mut merkle_proof.cell.virtualize().as_slice()).unwrap();
+        let dict = merkle_proof.cell.virtualize();
+        let dict = dict.parse::<RcDict<32>>().unwrap();
         dict.get(build_u32(0).as_slice()).unwrap().unwrap();
         dict.get(build_u32(9).as_slice()).unwrap().unwrap();
 

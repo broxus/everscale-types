@@ -898,7 +898,7 @@ mod tests {
                 assert!(value.store_into(&mut builder, finalizer));
                 let cell = builder.build().unwrap();
 
-                let parsed_value = $ident::load_from(&mut cell.as_slice()).unwrap();
+                let parsed_value = cell.parse::<$ident>().unwrap();
                 assert_eq!(parsed_value, value);
 
                 value >>= 1;
@@ -947,12 +947,12 @@ mod tests {
     }
 
     #[test]
-    fn var_uint3_operations() {
+    fn var_uint24_operations() {
         impl_operation_tests!(VarUint24, check_max_div);
     }
 
     #[test]
-    fn var_uint7_operations() {
+    fn var_uint56_operations() {
         impl_operation_tests!(VarUint56, check_max_div);
     }
 
@@ -962,12 +962,12 @@ mod tests {
     }
 
     #[test]
-    fn var_uint3_serialization() {
+    fn var_uint24_serialization() {
         impl_serialization_tests!(VarUint24, 32);
     }
 
     #[test]
-    fn var_uint7_serialization() {
+    fn var_uint56_serialization() {
         impl_serialization_tests!(VarUint56, 64);
     }
 
@@ -977,12 +977,12 @@ mod tests {
     }
 
     #[test]
-    fn var_uint3_deserialization() {
+    fn var_uint24_deserialization() {
         impl_deserialization_tests!(VarUint24, 24, 0xabcdef);
     }
 
     #[test]
-    fn var_uint7_deserialization() {
+    fn var_uint56_deserialization() {
         impl_deserialization_tests!(VarUint56, 56, 0xabcdef89abcdef);
     }
 
@@ -992,7 +992,7 @@ mod tests {
     }
 
     #[test]
-    fn var_uint31_serialization() {
+    fn var_uint248_serialization() {
         let finalizer = &mut RcCellFamily::default_finalizer();
 
         for i in 0..128 {
@@ -1007,7 +1007,7 @@ mod tests {
     }
 
     #[test]
-    fn var_uint31_deserialization() {
+    fn var_uint248_deserialization() {
         let finalizer = &mut RcCellFamily::default_finalizer();
 
         let mut lo: u128 = 0xababcdef89abcdefdeadbeeffafacafe;
@@ -1018,7 +1018,7 @@ mod tests {
             assert!(value.store_into(&mut builder, finalizer));
             let cell = builder.build().unwrap();
 
-            let parsed_value = VarUint248::load_from(&mut cell.as_slice()).unwrap();
+            let parsed_value = cell.parse::<VarUint248>().unwrap();
             assert_eq!(parsed_value, value);
 
             lo >>= 1;

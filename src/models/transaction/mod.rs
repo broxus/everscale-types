@@ -414,7 +414,7 @@ mod tests {
 
     fn check_tx(boc: &str) -> RcCell {
         let boc = RcBoc::decode_base64(boc).unwrap();
-        let tx = Transaction::load_from(&mut boc.as_slice()).unwrap();
+        let tx = boc.parse::<Transaction<_>>().unwrap();
         println!("tx: {tx:#?}");
 
         let in_msg = tx.load_in_msg().unwrap();
@@ -422,7 +422,7 @@ mod tests {
 
         for (i, entry) in tx.out_msgs.iter().enumerate() {
             let (number, cell) = entry.unwrap();
-            let message = Message::load_from(&mut cell.as_slice()).unwrap();
+            let message = cell.parse::<Message<_>>().unwrap();
             assert_eq!(number, i as u16);
             println!("Out message: {i}, message: {message:?}");
         }

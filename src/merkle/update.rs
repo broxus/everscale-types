@@ -500,7 +500,7 @@ mod tests {
         assert!(default.store_into(&mut builder, &mut RcCellFamily::default_finalizer()));
         let cell = builder.build().unwrap();
 
-        let parsed = MerkleUpdate::load_from(&mut cell.as_slice()).unwrap();
+        let parsed = cell.parse::<MerkleUpdate<_>>().unwrap();
         assert_eq!(default, parsed);
     }
 

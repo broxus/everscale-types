@@ -9,7 +9,7 @@ impl<C: CellFamily> Serialize for dyn Cell<C> + '_ {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let boc = Boc::<C>::encode(self);
         if serializer.is_human_readable() {
-            serializer.serialize_str(&base64::encode(boc))
+            serializer.serialize_str(&crate::util::encode_base64(boc))
         } else {
             serializer.serialize_bytes(&boc)
         }
@@ -39,7 +39,7 @@ impl<C: DefaultFinalizer> Boc<C> {
         let mut boc = ok!(borrow_cow_bytes(deserializer));
 
         if is_human_readable {
-            match base64::decode(boc) {
+            match crate::util::decode_base64(boc) {
                 Ok(bytes) => {
                     boc = Cow::Owned(bytes);
                 }
@@ -49,7 +49,7 @@ impl<C: DefaultFinalizer> Boc<C> {
 
         match Boc::<C>::decode(boc) {
             Ok(cell) => Ok(cell),
-            Err(e) => Err(D::Error::custom(e)),
+            Err(e) => Err(Error::custom(e)),
         }
     }
 }
@@ -218,22 +218,16 @@ mod tests {
             merkle_update,
         } = serde_json::from_str(&test).unwrap();
 
-        let orig_dict = crate::dict::RawDict::<RcCellFamily, 32>::load_from(
-            &mut RcBoc::decode_base64(boc_dict).unwrap().as_slice(),
-        )
-        .unwrap();
+        let boc = RcBoc::decode_base64(boc_dict).unwrap();
+        let orig_dict = boc.parse::<crate::dict::RawDict<_, 32>>().unwrap();
         assert_eq!(dict, orig_dict);
 
-        let orig_merkle_proof = crate::merkle::MerkleProof::load_from(
-            &mut RcBoc::decode_base64(boc_merkle_proof).unwrap().as_slice(),
-        )
-        .unwrap();
+        let boc = RcBoc::decode_base64(boc_merkle_proof).unwrap();
+        let orig_merkle_proof = boc.parse::<crate::merkle::MerkleProof<_>>().unwrap();
         assert_eq!(merkle_proof, orig_merkle_proof);
 
-        let orig_merkle_update = crate::merkle::MerkleUpdate::load_from(
-            &mut RcBoc::decode_base64(boc_merkle_update).unwrap().as_slice(),
-        )
-        .unwrap();
+        let boc = RcBoc::decode_base64(boc_merkle_update).unwrap();
+        let orig_merkle_update = boc.parse::<crate::merkle::MerkleUpdate<_>>().unwrap();
         assert_eq!(merkle_update, orig_merkle_update);
     }
 }

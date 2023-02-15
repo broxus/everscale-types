@@ -501,7 +501,7 @@ mod tests {
 
     fn check_block(boc: &str) -> RcCell {
         let boc = RcBoc::decode_base64(boc).unwrap();
-        let block = Block::load_from(&mut boc.as_slice()).unwrap();
+        let block = boc.parse::<Block<_>>().unwrap();
         println!("block: {block:#?}");
 
         let info = block.load_info().unwrap();
@@ -727,7 +727,7 @@ mod tests {
             let cell = builder.build().unwrap();
             assert_eq!(cell.bit_len(), ShardIdent::BITS);
 
-            let parsed_shard = ShardIdent::load_from(&mut cell.as_slice()).unwrap();
+            let parsed_shard = cell.parse::<ShardIdent>().unwrap();
             assert_eq!(shard, parsed_shard);
         }
 
@@ -745,7 +745,7 @@ mod tests {
             let mut builder = RcCellBuilder::new();
             assert!(f(&mut builder));
             let cell = builder.build().unwrap();
-            assert!(ShardIdent::load_from(&mut cell.as_slice()).is_none())
+            assert!(cell.parse::<ShardIdent>().is_none())
         }
 
         check_invalid(|b| b.store_bit_one());

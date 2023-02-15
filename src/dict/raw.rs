@@ -764,7 +764,7 @@ mod tests {
         let boc =
             RcBoc::decode_base64("te6ccgECOwEAASoAAQHAAQIBIBACAgEgAwMCASAEBAIBIAUFAgEgBgYCASAHBwIBIAgIAgEgCQkCASAoCgIBIAsZAgEgDBsCASArDQIBIA4fAgEgLQ8CASAuIQIBIBERAgEgEhICASATEwIBIBQUAgEgFRUCASAWFgIBIBcXAgEgKBgCASAaGQIBIBsbAgEgHRsCASAcHAIBIB8fAgEgKx4CASAiHwIBICAgAgEgISECASAlJQIBIC0jAgEgLiQCASAvJQIBIDMmAgFiNicCAUg4OAIBICkpAgEgKioCASArKwIBICwsAgEgLS0CASAuLgIBIC8vAgEgMzACAWI2MQIBIDcyAAnWAAAmbwIBIDQ0AgEgNTUCASA2NgIBIDc3AgEgODgCASA5OQIBIDo6AAnQAAAmbw==").unwrap();
 
-        let dict = RawDict::<RcCellFamily, 32>::load_from(&mut boc.as_slice()).unwrap();
+        let dict = boc.parse::<RawDict<_, 32>>().unwrap();
 
         let key = {
             let mut builder = RcCellBuilder::new();
@@ -784,7 +784,7 @@ mod tests {
     #[test]
     fn dict_iter() {
         let boc = RcBoc::decode_base64("te6ccgEBFAEAeAABAcABAgPOQAUCAgHUBAMACQAAAI3gAAkAAACjoAIBIA0GAgEgCgcCASAJCAAJAAAAciAACQAAAIfgAgEgDAsACQAAAFZgAAkAAABsIAIBIBEOAgEgEA8ACQAAADqgAAkAAABQYAIBIBMSAAkAAAAe4AAJAAAAv2A=").unwrap();
-        let dict = RawDict::<RcCellFamily, 32>::load_from(&mut boc.as_slice()).unwrap();
+        let dict = boc.parse::<RawDict<_, 32>>().unwrap();
 
         let size = dict.values().count();
         assert_eq!(size, 10);

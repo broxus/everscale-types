@@ -56,12 +56,12 @@ pub struct Boc<C> {
 impl<C: CellFamily> Boc<C> {
     /// Encodes the specified cell tree as BOC and
     /// returns the `base64` encoded bytes as a string.
-    #[cfg(feature = "base64")]
+    #[cfg(any(feature = "base64", test))]
     pub fn encode_base64<'a, T>(cell: T) -> String
     where
         T: Borrow<dyn Cell<C> + 'a>,
     {
-        base64::encode(Self::encode(cell))
+        crate::util::encode_base64(Self::encode(cell))
     }
 
     /// Encodes the specified cell tree as BOC.
@@ -97,13 +97,13 @@ impl<C: CellFamily> Boc<C> {
 impl<C: DefaultFinalizer> Boc<C> {
     /// Decodes a `base64` encoded BOC into a cell tree
     /// using the default Cell family finalizer.
-    #[cfg(feature = "base64")]
+    #[cfg(any(feature = "base64", test))]
     #[inline]
     pub fn decode_base64<T: AsRef<[u8]>>(data: T) -> Result<CellContainer<C>, de::Error> {
         fn decode_base64_impl<C: DefaultFinalizer>(
             data: &[u8],
         ) -> Result<CellContainer<C>, de::Error> {
-            match base64::decode(data) {
+            match crate::util::decode_base64(data) {
                 Ok(data) => Boc::<C>::decode_ext(data.as_slice(), &mut C::default_finalizer()),
                 Err(_) => Err(de::Error::UnknownBocTag),
             }
@@ -199,13 +199,13 @@ pub struct BocRepr<C> {
 impl<C: DefaultFinalizer> BocRepr<C> {
     /// Encodes the specified cell tree as BOC using default finalizer and
     /// returns the `base64` encoded bytes as a string.
-    #[cfg(feature = "base64")]
+    #[cfg(any(feature = "base64", test))]
     pub fn encode_base64<T>(data: T) -> Option<String>
     where
         T: Store<C>,
     {
         let boc = Self::encode_ext(data, &mut C::default_finalizer())?;
-        Some(base64::encode(boc))
+        Some(crate::util::encode_base64(boc))
     }
 
     /// Encodes the specified cell tree as BOC using default finalizer.
@@ -218,7 +218,7 @@ impl<C: DefaultFinalizer> BocRepr<C> {
 
     /// Decodes a `base64` encoded BOC into an object
     /// using the default Cell family finalizer.
-    #[cfg(feature = "base64")]
+    #[cfg(any(feature = "base64", test))]
     #[inline]
     pub fn decode_base64<T, D>(data: D) -> Result<T, BocReprError>
     where
@@ -230,7 +230,7 @@ impl<C: DefaultFinalizer> BocRepr<C> {
             C: DefaultFinalizer,
             for<'a> T: Load<'a, C>,
         {
-            match base64::decode(data) {
+            match crate::util::decode_base64(data) {
                 Ok(data) => BocRepr::<C>::decode_ext(data.as_slice(), &mut C::default_finalizer()),
                 Err(_) => Err(BocReprError::InvalidBoc(de::Error::UnknownBocTag)),
             }

@@ -13,6 +13,26 @@ pub const fn unlikely(b: bool) -> bool {
     }
 }
 
+#[cfg(any(feature = "base64", test))]
+#[inline]
+pub(crate) fn encode_base64<T: AsRef<[u8]>>(data: T) -> String {
+    use base64::Engine;
+    fn encode_base64_impl(data: &[u8]) -> String {
+        base64::engine::general_purpose::STANDARD.encode(data)
+    }
+    encode_base64_impl(data.as_ref())
+}
+
+#[cfg(any(feature = "base64", test))]
+#[inline]
+pub(crate) fn decode_base64<T: AsRef<[u8]>>(data: T) -> Result<Vec<u8>, base64::DecodeError> {
+    use base64::Engine;
+    fn decode_base64_impl(data: &[u8]) -> Result<Vec<u8>, base64::DecodeError> {
+        base64::engine::general_purpose::STANDARD.decode(data)
+    }
+    decode_base64_impl(data.as_ref())
+}
+
 /// Helper struct to pretty-print hash.
 #[derive(Clone, Copy)]
 pub struct DisplayHash<'a>(pub &'a [u8; 32]);
