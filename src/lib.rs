@@ -21,7 +21,7 @@ pub use self::cell::{
     Cell, CellBuilder, CellDescriptor, CellFamily, CellHash, CellSlice, CellType, LevelMask, Load,
     RcUsageTree, Store, UsageTreeMode,
 };
-pub use self::dict::RawDict;
+pub use self::dict::{Dict, RawDict};
 pub use self::error::Error;
 
 /// BOC (Bag Of Cells) helper for the `Arc` family of cells.
@@ -39,10 +39,15 @@ pub type ArcCellSlice<'a> = CellSlice<'a, ArcCellFamily>;
 /// A read-only view for the `Rc` family of cells.
 pub type RcCellSlice<'a> = CellSlice<'a, RcCellFamily>;
 
+/// A typed ordinary dictionary with fixed length keys for the `Arc` family of cells.
+pub type ArcDict<K, V> = Dict<ArcCellFamily, K, V>;
+/// A typed ordinary dictionary with fixed length keys for the `Rc` family of cells.
+pub type RcDict<K, V> = Dict<RcCellFamily, K, V>;
+
 /// An ordinary dictionary with fixed length keys for the `Arc` family of cells.
-pub type ArcDict<const N: u16> = RawDict<ArcCellFamily, N>;
+pub type ArcRawDict<const N: u16> = RawDict<ArcCellFamily, N>;
 /// An ordinary dictionary with fixed length keys for the `Rc` family of cells.
-pub type RcDict<const N: u16> = RawDict<RcCellFamily, N>;
+pub type RcRawDict<const N: u16> = RawDict<RcCellFamily, N>;
 
 impl Store<RcCellFamily> for RcCell {
     fn store_into(

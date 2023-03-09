@@ -504,13 +504,7 @@ mod tests {
 
     #[test]
     fn dict_merkle_update() {
-        fn build_u32(key: u32) -> RcCell {
-            let mut builder = RcCellBuilder::new();
-            builder.store_u32(key);
-            builder.build().unwrap()
-        }
-
-        fn serialize_dict(dict: RcDict<32>) -> RcCell {
+        fn serialize_dict(dict: RcDict<u32, u32>) -> RcCell {
             let mut builder = RcCellBuilder::new();
             dict.store_into(&mut builder, &mut RcCellFamily::default_finalizer());
             builder.build().unwrap()
@@ -535,12 +529,10 @@ mod tests {
         }
 
         // Create dict with keys 0..10
-        let mut dict = RcDict::<32>::new();
+        let mut dict = RcDict::<u32, u32>::new();
 
         for i in 0..10 {
-            let key = build_u32(i);
-            let value = build_u32(i * 10);
-            dict.add(key.as_slice(), value.as_slice()).unwrap();
+            dict.add(i, i * 10).unwrap();
         }
 
         // Serialize old dict
@@ -548,8 +540,7 @@ mod tests {
         let old_dict_hashes = visit_all_cells(&old_dict_cell);
 
         // Serialize new dict
-        dict.set(build_u32(0).as_slice(), build_u32(1).as_slice())
-            .unwrap();
+        dict.set(0, 1).unwrap();
         let new_dict_cell = serialize_dict(dict);
 
         assert_ne!(old_dict_cell.as_ref(), new_dict_cell.as_ref());

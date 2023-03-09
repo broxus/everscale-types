@@ -409,33 +409,25 @@ mod tests {
 
     #[test]
     fn create_proof_for_dict() {
-        fn build_u32(key: u32) -> RcCell {
-            let mut builder = RcCellBuilder::new();
-            builder.store_u32(key);
-            builder.build().unwrap()
-        }
-
-        fn serialize_dict(dict: RcDict<32>) -> RcCell {
+        fn serialize_dict(dict: RcDict<u32, u32>) -> RcCell {
             let mut builder = RcCellBuilder::new();
             dict.store_into(&mut builder, &mut RcCellFamily::default_finalizer());
             builder.build().unwrap()
         }
 
         // Create dict with keys 0..10
-        let mut dict = RcDict::<32>::new();
+        let mut dict = RcDict::<u32, u32>::new();
 
         for i in 0..10 {
-            let key = build_u32(i);
-            let value = build_u32(i * 10);
-            dict.add(key.as_slice(), value.as_slice()).unwrap();
+            dict.add(i, i * 10).unwrap();
         }
 
         // Create a usage tree for accessing an element with keys 0 and 9
         let usage_tree = RcUsageTree::new(UsageTreeMode::OnDataAccess);
         let tracked_cell = usage_tree.track(&serialize_dict(dict));
-        let tracked_dict = tracked_cell.parse::<RcDict<32>>().unwrap();
-        tracked_dict.get(build_u32(0).as_slice()).unwrap().unwrap();
-        tracked_dict.get(build_u32(9).as_slice()).unwrap().unwrap();
+        let tracked_dict = tracked_cell.parse::<RcDict<u32, u32>>().unwrap();
+        tracked_dict.get(0).unwrap().unwrap();
+        tracked_dict.get(9).unwrap().unwrap();
 
         // Create proof from the usage tree
         let merkle_proof = MerkleProof::create(tracked_cell.as_ref(), usage_tree)
@@ -444,13 +436,10 @@ mod tests {
 
         // Try to read some keys
         let dict = merkle_proof.cell.virtualize();
-        let dict = dict.parse::<RcDict<32>>().unwrap();
-        dict.get(build_u32(0).as_slice()).unwrap().unwrap();
-        dict.get(build_u32(9).as_slice()).unwrap().unwrap();
+        let dict = dict.parse::<RcDict<u32, u32>>().unwrap();
+        dict.get(0).unwrap().unwrap();
+        dict.get(9).unwrap().unwrap();
 
-        assert!(matches!(
-            dict.get(build_u32(5).as_slice()),
-            Err(crate::Error::PrunedBranchAccess)
-        ));
+        assert!(matches!(dict.get(5), Err(crate::Error::PrunedBranchAccess)));
     }
 }
