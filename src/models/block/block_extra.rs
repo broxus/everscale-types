@@ -1,10 +1,8 @@
-use everscale_types_proc::*;
-
 use crate::cell::*;
 use crate::dict::{AugDict, AugDictSkipValue, Dict};
 use crate::error::Error;
 use crate::num::Uint15;
-use crate::util::DisplayHash;
+use crate::util::{CustomClone, CustomDebug, DisplayHash};
 
 use crate::models::config::BlockchainConfig;
 use crate::models::currency::CurrencyCollection;

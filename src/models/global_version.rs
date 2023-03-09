@@ -1,6 +1,6 @@
 //! Global version and capabilities.
 
-use everscale_types_proc::*;
+use crate::cell::{Load, Store};
 
 macro_rules! decl_global_capability {
     ($(#[doc = $doc:expr])* $vis:vis enum $ident:ident {$(

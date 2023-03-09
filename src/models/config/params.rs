@@ -1,7 +1,5 @@
 use std::num::{NonZeroU16, NonZeroU32, NonZeroU8};
 
-use everscale_types_proc::*;
-
 use crate::cell::*;
 use crate::dict::Dict;
 use crate::num::{Tokens, Uint12};

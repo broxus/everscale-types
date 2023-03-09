@@ -147,40 +147,40 @@ where
         }
         (ast::Style::Tuple, 1) => {
             let args = make_args();
-            quote! { crate::util::debug_tuple_field1_finish(__f, #ident_str, #(#args),*) }
+            quote! { ::everscale_types::util::debug_tuple_field1_finish(__f, #ident_str, #(#args),*) }
         }
         (ast::Style::Tuple, 2) => {
             let args = make_args();
-            quote! { crate::util::debug_tuple_field2_finish(__f, #ident_str, #(#args),*) }
+            quote! { ::everscale_types::util::debug_tuple_field2_finish(__f, #ident_str, #(#args),*) }
         }
         (ast::Style::Tuple, _) => {
             let values = fields.iter().map(|field| build_field_ref(field, &mut f));
             quote! {
                 {
                     let values: &[&dyn ::core::fmt::Debug] = &[#(#values),*];
-                    crate::util::debug_tuple_fields_finish(__f, #ident_str, values)
+                    ::everscale_types::util::debug_tuple_fields_finish(__f, #ident_str, values)
                 }
             }
         }
         (ast::Style::Struct, 1) => {
             let args = make_args();
-            quote! { crate::util::debug_struct_field1_finish(__f, #ident_str, #(#args),*) }
+            quote! { ::everscale_types::util::debug_struct_field1_finish(__f, #ident_str, #(#args),*) }
         }
         (ast::Style::Struct, 2) => {
             let args = make_args();
-            quote! { crate::util::debug_struct_field2_finish(__f, #ident_str, #(#args),*) }
+            quote! { ::everscale_types::util::debug_struct_field2_finish(__f, #ident_str, #(#args),*) }
         }
         (ast::Style::Struct, 3) => {
             let args = make_args();
-            quote! { crate::util::debug_struct_field3_finish(__f, #ident_str, #(#args),*) }
+            quote! { ::everscale_types::util::debug_struct_field3_finish(__f, #ident_str, #(#args),*) }
         }
         (ast::Style::Struct, 4) => {
             let args = make_args();
-            quote! { crate::util::debug_struct_field4_finish(__f, #ident_str, #(#args),*) }
+            quote! { ::everscale_types::util::debug_struct_field4_finish(__f, #ident_str, #(#args),*) }
         }
         (ast::Style::Struct, 5) => {
             let args = make_args();
-            quote! { crate::util::debug_struct_field5_finish(__f, #ident_str, #(#args),*) }
+            quote! { ::everscale_types::util::debug_struct_field5_finish(__f, #ident_str, #(#args),*) }
         }
         (ast::Style::Struct, _) => {
             let names = fields.iter().map(ast::Field::member_name);
@@ -190,7 +190,7 @@ where
                 {
                     let names: &[&'static _] = &[#(#names),*];
                     let values: &[&dyn ::core::fmt::Debug] = &[#(#values),*];
-                    crate::util::debug_struct_fields_finish(__f, #ident_str, names, values)
+                    ::everscale_types::util::debug_struct_fields_finish(__f, #ident_str, names, values)
                 }
             }
         }

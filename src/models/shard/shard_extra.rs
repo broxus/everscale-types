@@ -1,8 +1,7 @@
-use everscale_types_proc::*;
-
 use crate::cell::*;
 use crate::dict::{AugDict, Dict};
 use crate::num::*;
+use crate::util::{CustomClone, CustomDebug};
 
 use crate::models::block::{BlockRef, ShardHashes};
 use crate::models::config::BlockchainConfig;

@@ -1,8 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasher;
 
-use everscale_types_proc::{CustomClone, CustomDebug};
-
 use super::{make_pruned_branch, FilterAction, MerkleFilter, MerkleProofBuilder};
 use crate::cell::*;
 use crate::util::*;

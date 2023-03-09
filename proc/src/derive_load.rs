@@ -14,7 +14,8 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Erro
 
     let tlb_lifetime: syn::LifetimeDef = syn::parse_quote!('tlb);
     let cell_family: syn::Ident = quote::format_ident!("C");
-    let cell_family_ty: syn::TypeParam = syn::parse_quote!(#cell_family: crate::cell::CellFamily);
+    let cell_family_ty: syn::TypeParam =
+        syn::parse_quote!(#cell_family: ::everscale_types::cell::CellFamily);
 
     let ident = &container.ident;
     let generics = bound::without_default(container.generics);
@@ -61,9 +62,9 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Erro
 
     let result = quote! {
         #[automatically_derived]
-        impl #impl_generics crate::cell::Load<#tlb_lifetime, #cell_family> for #ident #ty_generics #where_clause {
+        impl #impl_generics ::everscale_types::cell::Load<#tlb_lifetime, #cell_family> for #ident #ty_generics #where_clause {
             #inline
-            fn load_from(__slice: &mut crate::cell::CellSlice<#tlb_lifetime, #cell_family>) -> Option<Self> {
+            fn load_from(__slice: &mut ::everscale_types::cell::CellSlice<#tlb_lifetime, #cell_family>) -> Option<Self> {
                 #body
             }
         }
@@ -192,5 +193,5 @@ fn load_op(
         }
     };
 
-    quote! { <#ty as crate::cell::Load<#lifetime_def, #cell_family>>::load_from(__slice)? }
+    quote! { <#ty as ::everscale_types::cell::Load<#lifetime_def, #cell_family>>::load_from(__slice)? }
 }

@@ -1,10 +1,9 @@
 use std::borrow::Borrow;
 
-use everscale_types_proc::*;
-
 use crate::cell::*;
 use crate::dict::{self, AugDict, AugDictSkipValue};
 use crate::error::*;
+use crate::util::{CustomClone, CustomDebug, CustomEq};
 
 use crate::models::currency::CurrencyCollection;
 use crate::models::ShardAccount;

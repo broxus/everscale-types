@@ -50,7 +50,7 @@ impl DefaultFinalizer for RcCellFamily {
 }
 
 /// Single-threaded cell.
-pub type RcCell = CellContainer<RcCellFamily>;
+pub type RcCell = Rc<dyn Cell<RcCellFamily>>;
 
 /// Single-threaded cell finalizer.
 #[derive(Default, Clone, Copy)]

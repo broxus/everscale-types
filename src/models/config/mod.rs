@@ -1,7 +1,5 @@
 //! Blockchain config and params.
 
-use everscale_types_proc::*;
-
 use crate::cell::*;
 use crate::dict::{Dict, DictKey};
 use crate::error::Error;

@@ -2,9 +2,8 @@ use std::num::{NonZeroU16, NonZeroU32, NonZeroU8};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use everscale_types_proc::CustomDebug;
-
 use crate::cell::{Cell, CellContainer, CellFamily, CellHash, CellType, LevelMask, RefsIter};
+use crate::util::CustomDebug;
 
 /// A data structure that can be deserialized from cells.
 pub trait Load<'a, C: CellFamily>: Sized {

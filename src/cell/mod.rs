@@ -10,6 +10,7 @@ pub use self::cell_impl::{rc, sync, StaticCell};
 pub use self::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 pub use self::slice::{CellSlice, Load};
 pub use self::usage_tree::{RcUsageTree, UsageTreeMode};
+pub use everscale_types_proc::{Load, Store};
 
 /// Generic cell implementation.
 mod cell_impl;

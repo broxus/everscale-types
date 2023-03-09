@@ -1,10 +1,9 @@
 //! Shard state models.
 
-use everscale_types_proc::*;
-
 use crate::cell::*;
 use crate::dict::RawDict;
 use crate::error::*;
+use crate::util::{CustomClone, CustomDebug, CustomEq};
 
 use crate::models::block::{BlockRef, ShardIdent};
 use crate::models::currency::CurrencyCollection;

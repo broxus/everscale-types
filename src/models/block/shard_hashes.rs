@@ -1,5 +1,3 @@
-use everscale_types_proc::*;
-
 use crate::cell::*;
 use crate::dict::{self, Dict, DictKey};
 use crate::error::Error;

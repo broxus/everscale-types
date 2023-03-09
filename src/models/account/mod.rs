@@ -1,7 +1,5 @@
 //! Account state models.
 
-use everscale_types_proc::*;
-
 use crate::cell::*;
 use crate::dict::*;
 use crate::error::*;

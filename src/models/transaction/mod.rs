@@ -1,7 +1,5 @@
 //! Message models.
 
-use everscale_types_proc::*;
-
 use crate::cell::*;
 use crate::dict::{self, Dict};
 use crate::error::*;

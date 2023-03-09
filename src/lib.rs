@@ -12,6 +12,8 @@ macro_rules! ok {
     };
 }
 
+extern crate self as everscale_types;
+
 pub use self::boc::Boc;
 pub use self::cell::rc::{RcCell, RcCellFamily};
 pub use self::cell::sync::{ArcCell, ArcCellFamily};

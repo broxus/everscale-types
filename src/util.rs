@@ -2,6 +2,8 @@
 
 use std::mem::MaybeUninit;
 
+pub use everscale_types_proc::{CustomClone, CustomDebug, CustomEq};
+
 /// Brings [unlikely](core::intrinsics::unlikely) to stable rust.
 #[inline(always)]
 pub const fn unlikely(b: bool) -> bool {
@@ -178,8 +180,8 @@ impl IterStatus {
     }
 }
 
-#[allow(unused)]
-pub(crate) fn debug_tuple_field1_finish(
+#[doc(hidden)]
+pub fn debug_tuple_field1_finish(
     f: &mut std::fmt::Formatter<'_>,
     name: &str,
     value1: &dyn std::fmt::Debug,
@@ -189,8 +191,8 @@ pub(crate) fn debug_tuple_field1_finish(
     builder.finish()
 }
 
-#[allow(unused)]
-pub(crate) fn debug_tuple_field2_finish(
+#[doc(hidden)]
+pub fn debug_tuple_field2_finish(
     f: &mut std::fmt::Formatter<'_>,
     name: &str,
     value1: &dyn std::fmt::Debug,
@@ -202,8 +204,8 @@ pub(crate) fn debug_tuple_field2_finish(
     builder.finish()
 }
 
-#[allow(unused)]
-pub(crate) fn debug_tuple_fields_finish(
+#[doc(hidden)]
+pub fn debug_tuple_fields_finish(
     f: &mut std::fmt::Formatter<'_>,
     name: &str,
     values: &[&dyn std::fmt::Debug],
@@ -215,8 +217,8 @@ pub(crate) fn debug_tuple_fields_finish(
     builder.finish()
 }
 
-#[allow(unused)]
-pub(crate) fn debug_struct_field1_finish(
+#[doc(hidden)]
+pub fn debug_struct_field1_finish(
     f: &mut std::fmt::Formatter<'_>,
     name: &str,
     name1: &str,
@@ -227,8 +229,8 @@ pub(crate) fn debug_struct_field1_finish(
     builder.finish()
 }
 
-#[allow(unused)]
-pub(crate) fn debug_struct_field2_finish(
+#[doc(hidden)]
+pub fn debug_struct_field2_finish(
     f: &mut std::fmt::Formatter<'_>,
     name: &str,
     name1: &str,
@@ -242,9 +244,9 @@ pub(crate) fn debug_struct_field2_finish(
     builder.finish()
 }
 
-#[allow(unused)]
+#[doc(hidden)]
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn debug_struct_field3_finish(
+pub fn debug_struct_field3_finish(
     f: &mut std::fmt::Formatter<'_>,
     name: &str,
     name1: &str,
@@ -261,9 +263,9 @@ pub(crate) fn debug_struct_field3_finish(
     builder.finish()
 }
 
-#[allow(unused)]
+#[doc(hidden)]
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn debug_struct_field4_finish(
+pub fn debug_struct_field4_finish(
     f: &mut std::fmt::Formatter<'_>,
     name: &str,
     name1: &str,
@@ -283,9 +285,9 @@ pub(crate) fn debug_struct_field4_finish(
     builder.finish()
 }
 
-#[allow(unused)]
+#[doc(hidden)]
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn debug_struct_field5_finish(
+pub fn debug_struct_field5_finish(
     f: &mut std::fmt::Formatter<'_>,
     name: &str,
     name1: &str,
@@ -308,8 +310,8 @@ pub(crate) fn debug_struct_field5_finish(
     builder.finish()
 }
 
-#[allow(unused)]
-pub(crate) fn debug_struct_fields_finish(
+#[doc(hidden)]
+pub fn debug_struct_fields_finish(
     f: &mut std::fmt::Formatter<'_>,
     name: &str,
     names: &[&str],

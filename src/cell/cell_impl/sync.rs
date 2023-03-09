@@ -51,7 +51,7 @@ impl DefaultFinalizer for ArcCellFamily {
 }
 
 /// Thread-safe cell.
-pub type ArcCell = CellContainer<ArcCellFamily>;
+pub type ArcCell = Arc<dyn Cell<ArcCellFamily>>;
 
 /// Thread-safe cell finalizer.
 #[derive(Default, Clone, Copy)]

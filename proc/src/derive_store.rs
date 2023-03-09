@@ -13,7 +13,7 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Erro
     cx.check()?;
 
     let cell_family: syn::Ident = quote::format_ident!("C");
-    let cell_family_ty: syn::TypeParam = syn::parse_quote!(#cell_family: crate::cell::CellFamily);
+    let cell_family_ty: syn::TypeParam = syn::parse_quote!(#cell_family: ::everscale_types::cell::CellFamily);
 
     let ident = &container.ident;
     let generics = bound::without_default(container.generics);
@@ -43,12 +43,12 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Erro
 
     let result = quote! {
         #[automatically_derived]
-        impl #impl_generics crate::cell::Store<#cell_family> for #ident #ty_generics #where_clause {
+        impl #impl_generics ::everscale_types::cell::Store<#cell_family> for #ident #ty_generics #where_clause {
             #inline
             fn store_into(
                 &self,
-                __builder: &mut crate::cell::CellBuilder<#cell_family>,
-                __finalizer: &mut dyn crate::cell::Finalizer<#cell_family>
+                __builder: &mut ::everscale_types::cell::CellBuilder<#cell_family>,
+                __finalizer: &mut dyn ::everscale_types::cell::Finalizer<#cell_family>
             ) -> bool {
                 #body
             }
@@ -161,5 +161,5 @@ fn store_op(cell_family: &syn::Ident, field_ident: &TokenStream, ty: &syn::Type)
         }
     };
 
-    quote! { <#ty as crate::cell::Store<#cell_family>>::store_into(&#field_ident, __builder, __finalizer) }
+    quote! { <#ty as ::everscale_types::cell::Store<#cell_family>>::store_into(&#field_ident, __builder, __finalizer) }
 }

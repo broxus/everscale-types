@@ -1,10 +1,9 @@
 //! Currency collection stuff.
 
-use everscale_types_proc::*;
-
 use crate::cell::*;
 use crate::dict::{AugDictSkipValue, Dict};
 use crate::num::{Tokens, VarUint248};
+use crate::util::{CustomClone, CustomDebug, CustomEq};
 
 /// Amounts collection.
 #[derive(CustomDebug, CustomClone, CustomEq, Store, Load)]

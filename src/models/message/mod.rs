@@ -1,9 +1,8 @@
 //! Message models.
 
-use everscale_types_proc::*;
-
 use crate::cell::*;
 use crate::num::*;
+use crate::util::{CustomClone, CustomDebug, CustomEq};
 
 use crate::models::account::StateInit;
 use crate::models::currency::CurrencyCollection;

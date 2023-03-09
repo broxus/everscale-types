@@ -1,7 +1,5 @@
 use std::str::FromStr;
 
-use everscale_types_proc::*;
-
 use crate::cell::*;
 use crate::error::ParseBlockIdError;
 use crate::util::*;
