@@ -410,15 +410,9 @@ impl<'a, C: CellFamily> Iterator for WorkchainShardHashesRawIter<'a, C> {
             Some(leaf) => leaf,
             None => loop {
                 let segment = self.segments.last()?;
-                let mut slice = match segment.data.reference(segment.is_right as u8) {
-                    Some(child) => {
-                        // Handle pruned branch access
-                        if unlikely(child.descriptor().is_pruned_branch()) {
-                            return Some(Err(self.finish(Error::PrunedBranchAccess)));
-                        }
-                        child.as_slice()
-                    }
-                    None => return Some(Err(self.finish(Error::CellUnderflow))),
+                let mut slice = match segment.data.get_reference_as_slice(segment.is_right as u8) {
+                    Ok(child) => child,
+                    Err(e) => return Some(Err(self.finish(e))),
                 };
 
                 match slice.load_bit() {

@@ -13,7 +13,8 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Erro
     cx.check()?;
 
     let cell_family: syn::Ident = quote::format_ident!("C");
-    let cell_family_ty: syn::TypeParam = syn::parse_quote!(#cell_family: ::everscale_types::cell::CellFamily);
+    let cell_family_ty: syn::TypeParam =
+        syn::parse_quote!(#cell_family: ::everscale_types::cell::CellFamily);
 
     let ident = &container.ident;
     let generics = bound::without_default(container.generics);

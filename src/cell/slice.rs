@@ -3,7 +3,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::cell::{Cell, CellContainer, CellFamily, CellHash, CellType, LevelMask, RefsIter};
-use crate::util::CustomDebug;
+use crate::error::Error;
+use crate::util::{unlikely, CustomDebug};
 
 /// A data structure that can be deserialized from cells.
 pub trait Load<'a, C: CellFamily>: Sized {
@@ -1068,6 +1069,25 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
         }
     }
 
+    /// Tries to load the specified child cell as slice.
+    /// Returns an error if the loaded cell is absent or is pruned.
+    pub fn get_reference_as_slice(&self, index: u8) -> Result<CellSlice<'a, C>, Error> {
+        if self.refs_window_start + index < self.refs_window_end {
+            let Some(cell) = self.cell.reference(self.refs_window_start + index) else {
+                return Err(Error::CellUnderflow);
+            };
+
+            // Handle pruned branch access
+            if unlikely(cell.descriptor().is_pruned_branch()) {
+                Err(Error::PrunedBranchAccess)
+            } else {
+                Ok(CellSlice::new(cell))
+            }
+        } else {
+            Err(Error::CellUnderflow)
+        }
+    }
+
     /// Creates an iterator through child nodes.
     pub fn references(&self) -> RefsIter<'a, C> {
         RefsIter {
@@ -1111,6 +1131,28 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
             Some(cell)
         } else {
             None
+        }
+    }
+
+    /// Tries to load the next child cell as slice.
+    /// Returns an error if the loaded cell is absent or is pruned.
+    ///
+    /// NOTE: In case of prunced cell access the current slice remains unchanged.
+    pub fn load_reference_as_slice(&mut self) -> Result<CellSlice<'a, C>, Error> {
+        if self.refs_window_start < self.refs_window_end {
+            let Some(cell) = self.cell.reference(self.refs_window_start) else {
+                return Err(Error::CellUnderflow);
+            };
+
+            // Handle pruned branch access
+            if unlikely(cell.descriptor().is_pruned_branch()) {
+                Err(Error::PrunedBranchAccess)
+            } else {
+                self.refs_window_start += 1;
+                Ok(CellSlice::new(cell))
+            }
+        } else {
+            Err(Error::CellUnderflow)
         }
     }
 }

@@ -3,13 +3,15 @@
 use std::borrow::Borrow;
 use std::ops::{BitOr, BitOrAssign};
 
-use crate::util::DisplayHash;
+use crate::error::Error;
+use crate::util::{unlikely, DisplayHash};
 
 pub use self::builder::{CellBuilder, CellRefsBuilder, Store};
 pub use self::cell_impl::{rc, sync, StaticCell};
 pub use self::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 pub use self::slice::{CellSlice, Load};
 pub use self::usage_tree::{RcUsageTree, UsageTreeMode};
+
 pub use everscale_types_proc::{Load, Store};
 
 /// Generic cell implementation.
@@ -131,6 +133,22 @@ impl<C: CellFamily> dyn Cell<C> + '_ {
     #[inline]
     pub fn reference_count(&self) -> u8 {
         self.descriptor().reference_count()
+    }
+
+    /// Tries to load the specified child cell as slice.
+    /// Returns an error if the loaded cell is absent or is pruned.
+    pub fn get_reference_as_slice(&self, index: u8) -> Result<CellSlice<'_, C>, Error> {
+        match self.reference(index) {
+            Some(cell) => {
+                // Handle pruned branch access
+                if unlikely(cell.descriptor().is_pruned_branch()) {
+                    Err(Error::PrunedBranchAccess)
+                } else {
+                    Ok(CellSlice::new(cell))
+                }
+            }
+            None => Err(Error::CellUnderflow),
+        }
     }
 
     /// Returns whether the cell is not [`Ordinary`].

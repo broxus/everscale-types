@@ -237,18 +237,11 @@ where
                     None => return Err(Error::CellUnderflow),
                 };
 
-                match data.cell().reference(next_branch as u8) {
-                    Some(child) => {
-                        // Handle pruned branch access
-                        if unlikely(child.descriptor().is_pruned_branch()) {
-                            return Err(Error::PrunedBranchAccess);
-                        }
-                        // Push an intermediate edge to the stack
-                        stack.push(Segment { data, next_branch });
-                        data = child.as_slice()
-                    }
-                    None => return Err(Error::CellUnderflow),
-                }
+                let child = ok!(cell.get_reference_as_slice(next_branch as u8));
+
+                // Push an intermediate edge to the stack
+                stack.push(Segment { data, next_branch });
+                data = child;
             }
             std::cmp::Ordering::Greater => {
                 debug_assert!(false, "LCP of prefix and key can't be greater than key");
@@ -340,13 +333,7 @@ where
             Some(index) => index as u8,
             None => return Err(Error::CellUnderflow),
         };
-        data = match data.cell().reference(child_index) {
-            Some(child) if unlikely(child.descriptor().is_pruned_branch()) => {
-                return Err(Error::PrunedBranchAccess);
-            }
-            Some(child) => child.as_slice(),
-            None => return Err(Error::CellUnderflow),
-        };
+        data = ok!(data.cell().get_reference_as_slice(child_index));
     };
 
     // Return the last slice as data
