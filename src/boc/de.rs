@@ -155,6 +155,7 @@ impl<'a> BocHeader<'a> {
         // `root_count` <= `cell_count` so this expression doesn't overflow
         let min_total_cell_size = (cell_count as u64) * (MIN_CELL_SIZE + ref_size as u64)
             - (root_count * ref_size) as u64;
+        #[cfg(not(fuzzing))]
         if unlikely(total_cells_size < min_total_cell_size) {
             return Err(Error::InvalidTotalSize);
         }
@@ -166,6 +167,7 @@ impl<'a> BocHeader<'a> {
         // 128 - max data length
         // 4*{ref_size} - max references
         let max_cell_size = 2 + 4 * (2 + 32) + 128 + (MAX_REF_COUNT as u64) * ref_size as u64; // ~282 bytes
+        #[cfg(not(fuzzing))]
         if unlikely(total_cells_size > (cell_count as u64) * max_cell_size) {
             return Err(Error::InvalidTotalSize);
         }
@@ -192,6 +194,7 @@ impl<'a> BocHeader<'a> {
 
         // NOTE: `cell_count` is in range ..=u32::MAX, `offset_size` is in range 1..=8
         let index_size = has_index as u64 * cell_count as u64 * offset_size as u64;
+        #[cfg(not(fuzzing))]
         if unlikely(!reader.require((index_size + total_cells_size + has_crc as u64 * 4) as usize))
         {
             return Err(Error::UnexpectedEof);
@@ -200,6 +203,8 @@ impl<'a> BocHeader<'a> {
         if has_index {
             reader.advance(cell_count * offset_size);
         }
+
+        let cells_start_offset = reader.offset;
 
         let mut cells = SmallVec::with_capacity(cell_count);
 
@@ -253,6 +258,26 @@ impl<'a> BocHeader<'a> {
             // SAFETY: We have already requested {total_len} bytes
             let cell = unsafe { std::slice::from_raw_parts(start_ptr, total_len) };
             cells.push(cell);
+        }
+
+        // Check that `total_cells_size` is correct
+        #[cfg(not(fuzzing))]
+        if (cells_start_offset as u64).saturating_add(total_cells_size) != reader.offset as u64 {
+            return Err(Error::InvalidTotalSize);
+        }
+
+        // Verify checksum if specified
+        #[cfg(not(fuzzing))]
+        if has_crc {
+            if unlikely(!reader.require(4)) {
+                return Err(Error::UnexpectedEof);
+            }
+
+            // SAFETY: we have already requested 4 bytes
+            let is_checksum_correct = unsafe { reader.check_crc(data) };
+            if !is_checksum_correct {
+                return Err(Error::InvalidChecksum);
+            }
         }
 
         Ok(Self {
@@ -454,6 +479,17 @@ impl BocReader {
             .as_ptr()
             .add(self.offset + 2 + data_offset + data_len - 1)
     }
+
+    #[inline(always)]
+    unsafe fn check_crc(&self, data: &[u8]) -> bool {
+        let data_ptr = data.as_ptr();
+        let crc_start_ptr = data_ptr.add(self.offset);
+
+        let parsed_crc = u32::from_le_bytes(*(crc_start_ptr as *const [u8; 4]));
+        let real_crc = crc32c::crc32c(std::slice::from_raw_parts(data_ptr, self.offset));
+
+        parsed_crc == real_crc
+    }
 }
 
 impl Deref for BocReader {
@@ -536,4 +572,7 @@ pub enum Error {
     /// Failed to parse cell.
     #[error("invalid cell")]
     InvalidCell,
+    /// Crc mismatch.
+    #[error("invalid checksum")]
+    InvalidChecksum,
 }

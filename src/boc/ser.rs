@@ -101,6 +101,8 @@ where
             + u64::from(self.include_crc) * 4;
         target.reserve(total_size as usize);
 
+        let target_len_before = target.len();
+
         target.extend_from_slice(&BocTag::GENERIC);
         target.extend_from_slice(&[flags, offset_size as u8]);
         target.extend_from_slice(&self.cell_count.to_be_bytes()[4 - ref_size..]);
@@ -136,6 +138,16 @@ where
                 }
             }
         }
+
+        if self.include_crc {
+            let target_len_after = target.len();
+            debug_assert!(target_len_before < target_len_after);
+
+            let crc = crc32c::crc32c(&target[target_len_before..target_len_after]);
+            target.extend_from_slice(&crc.to_le_bytes());
+        }
+
+        debug_assert_eq!(target.len() as u64, target_len_before as u64 + total_size);
     }
 
     fn fill(&mut self, root: &'a dyn Cell<C>) -> u32 {
