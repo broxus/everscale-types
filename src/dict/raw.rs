@@ -679,6 +679,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)] // takes too long to execute on miri
     fn dict_set_complex() {
         let value = build_cell(|b| b.store_bit_one());
 

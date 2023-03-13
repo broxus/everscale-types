@@ -393,6 +393,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)] // takes too long to execute on miri
     fn create_proof_for_deep_cell() {
         let mut cell = RcCellFamily::empty_cell();
         for i in 0..3000 {

@@ -641,6 +641,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)] // takes too long to execute on miri
     fn dict_set_complex() {
         let mut dict = Dict::<RcCellFamily, u32, bool>::new();
         for i in 0..520 {
