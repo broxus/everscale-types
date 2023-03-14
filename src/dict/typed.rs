@@ -687,6 +687,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn big_dict() {
         use rand::{Rng, SeedableRng};
 

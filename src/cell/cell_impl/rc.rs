@@ -54,6 +54,7 @@ impl DefaultFinalizer for RcCellFamily {
 pub type RcCell = Rc<dyn Cell<RcCellFamily>>;
 
 impl<T: ?Sized> TryAsMut<T> for Rc<T> {
+    #[inline]
     fn try_as_mut(&mut self) -> Option<&mut T> {
         Rc::get_mut(self)
     }

@@ -55,6 +55,7 @@ impl DefaultFinalizer for ArcCellFamily {
 pub type ArcCell = Arc<dyn Cell<ArcCellFamily>>;
 
 impl<T: ?Sized> TryAsMut<T> for Arc<T> {
+    #[inline]
     fn try_as_mut(&mut self) -> Option<&mut T> {
         Arc::get_mut(self)
     }

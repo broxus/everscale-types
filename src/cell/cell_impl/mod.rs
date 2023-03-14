@@ -289,27 +289,33 @@ impl<C: CellFamily> OrdinaryCellHeader<C> {
 
 impl<C: CellFamily> Drop for OrdinaryCellHeader<C> {
     fn drop(&mut self) {
+        // Returns the nearest ancestor and its consumed next child.
+        // Returns `None` if no ancestors with children found.
         #[inline]
         fn take_ancestor_next_child<C: CellFamily>(
             parent: CellContainer<C>,
-        ) -> (CellContainer<C>, Option<CellContainer<C>>) {
+        ) -> Option<(CellContainer<C>, CellContainer<C>)> {
             let mut ancestor = parent;
             while let Some(ancestor_ref) = ancestor.try_as_mut() {
+                // Try to get the next child from the direct ancestor
                 if let Some(next_child) = ancestor_ref.take_next_child() {
-                    return (ancestor, Some(next_child));
+                    return Some((ancestor, next_child));
                 } else if let Some(grandancestor) = ancestor_ref.take_first_child() {
+                    // Drop `ancestor` as it is now a leaf node
                     drop(ancestor);
+
+                    // Move one level deeper
                     ancestor = grandancestor;
                 } else {
+                    // Break on leaf node
                     break;
                 }
             }
-            (ancestor, None)
+            None
         }
 
-        fn main_deep_safe_drop<C: CellFamily>(top: CellContainer<C>) {
-            let mut parent = top;
-
+        fn main_deep_safe_drop<C: CellFamily>(mut parent: CellContainer<C>) {
+            // Consume first child from parent.
             let mut current = 'curr: {
                 if let Some(parent) = parent.try_as_mut() {
                     if let Some(first_child) = parent.take_first_child() {
@@ -319,28 +325,33 @@ impl<C: CellFamily> Drop for OrdinaryCellHeader<C> {
                 return;
             };
 
-            while let Some(current_ref) = current.try_as_mut() {
-                match current_ref.replace_first_child(parent) {
-                    Ok(first_child) => {
-                        parent = current;
-                        current = first_child;
-                    }
-                    Err(returned_parent) => {
-                        parent = returned_parent;
-                        drop(current);
+            loop {
+                // If current node is unique
+                if let Some(current_ref) = current.try_as_mut() {
+                    // Try to replace its first child with the current parent
+                    match current_ref.replace_first_child(parent) {
+                        Ok(first_child) => {
+                            // Move one layer lower
+                            parent = current;
+                            current = first_child;
+                            continue;
+                        }
+                        Err(returned_parent) => {
+                            parent = returned_parent;
 
-                        let (ancestor, ancestor_child) = take_ancestor_next_child::<C>(parent);
-                        parent = ancestor;
-
-                        match ancestor_child {
-                            Some(child) => current = child,
-                            None => {
-                                drop(parent);
-                                break;
-                            }
+                            // Current node is now a leaf, drop it
+                            drop(current);
                         }
                     }
                 }
+
+                // Find the next child
+                let Some((ancestor, child)) = take_ancestor_next_child::<C>(parent) else {
+                    return;
+                };
+
+                parent = ancestor;
+                current = child;
             }
         }
 
