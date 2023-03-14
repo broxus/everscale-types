@@ -4,7 +4,7 @@ use std::borrow::Borrow;
 use std::ops::{BitOr, BitOrAssign};
 
 use crate::error::Error;
-use crate::util::{unlikely, DisplayHash};
+use crate::util::{unlikely, DisplayHash, TryAsMut};
 
 pub use self::builder::{CellBuilder, CellRefsBuilder, Store};
 pub use self::cell_impl::{rc, sync, StaticCell};
@@ -33,6 +33,7 @@ pub trait CellFamily: Sized {
     /// Owning container with cell tree node.
     type Container: AsRef<dyn Cell<Self>>
         + Borrow<dyn Cell<Self>>
+        + TryAsMut<dyn Cell<Self>>
         + Store<Self>
         + for<'a> Load<'a, Self>
         + Eq
@@ -103,6 +104,21 @@ pub trait Cell<C: CellFamily> {
 
     /// Returns cell depth for the specified level.
     fn depth(&self, level: u8) -> u16;
+
+    /// Consumes the first child during the deep drop.
+    fn take_first_child(&mut self) -> Option<CellContainer<C>>;
+
+    /// Replaces the first child with the provided parent during the deep drop.
+    ///
+    /// Returns `Ok(child)` if child was successfully replaced,
+    /// `Err(parent)` otherwise.
+    fn replace_first_child(
+        &mut self,
+        parent: CellContainer<C>,
+    ) -> Result<CellContainer<C>, CellContainer<C>>;
+
+    /// Consumes the next child (except first) during the deep drop.
+    fn take_next_child(&mut self) -> Option<CellContainer<C>>;
 
     /// Returns the sum of all bits and cells of all elements in the cell tree
     /// (including this cell).

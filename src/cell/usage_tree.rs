@@ -3,6 +3,7 @@ use std::rc::{Rc, Weak};
 use super::cell_impl::VirtualCellWrapper;
 use super::rc::{RcCell, RcCellFamily};
 use super::{Cell, CellDescriptor, CellHash};
+use crate::util::TryAsMut;
 
 #[cfg(feature = "stats")]
 use super::CellTreeStats;
@@ -148,6 +149,21 @@ impl Cell<RcCellFamily> for RcUsageCell {
 
     fn depth(&self, level: u8) -> u16 {
         self.cell.as_ref().depth(level)
+    }
+
+    fn take_first_child(&mut self) -> Option<RcCell> {
+        self.cell.try_as_mut()?.take_first_child()
+    }
+
+    fn replace_first_child(&mut self, parent: RcCell) -> Result<RcCell, RcCell> {
+        match self.cell.try_as_mut() {
+            Some(cell) => cell.replace_first_child(parent),
+            None => Err(parent),
+        }
+    }
+
+    fn take_next_child(&mut self) -> Option<RcCell> {
+        self.cell.try_as_mut()?.take_next_child()
     }
 
     #[cfg(feature = "stats")]

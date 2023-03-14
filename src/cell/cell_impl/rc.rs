@@ -7,6 +7,7 @@ use super::{
 };
 use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 use crate::cell::{Cell, CellContainer, CellFamily, CellHash, CellType};
+use crate::util::TryAsMut;
 
 /// Single-threaded cell family.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
@@ -51,6 +52,12 @@ impl DefaultFinalizer for RcCellFamily {
 
 /// Single-threaded cell.
 pub type RcCell = Rc<dyn Cell<RcCellFamily>>;
+
+impl<T: ?Sized> TryAsMut<T> for Rc<T> {
+    fn try_as_mut(&mut self) -> Option<&mut T> {
+        Rc::get_mut(self)
+    }
+}
 
 /// Single-threaded cell finalizer.
 #[derive(Default, Clone, Copy)]
@@ -103,6 +110,7 @@ unsafe fn make_cell(ctx: CellParts<RcCellFamily>, hashes: Vec<(CellHash, u16)>) 
                 hashes,
                 descriptor: ctx.descriptor,
                 references: ctx.references.into_inner(),
+                without_first: false,
             },
             ctx.data,
         )),

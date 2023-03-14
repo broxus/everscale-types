@@ -685,4 +685,20 @@ mod tests {
             assert_eq!(key, i as u32);
         }
     }
+
+    #[test]
+    fn big_dict() {
+        use rand::{Rng, SeedableRng};
+
+        let mut rng = rand_xorshift::XorShiftRng::from_seed([0u8; 16]);
+
+        let values = (0..100000)
+            .map(|_| (rng.gen::<u32>(), rng.gen::<u64>()))
+            .collect::<Vec<_>>();
+
+        let mut result = Dict::<RcCellFamily, u32, u64>::new();
+        for (key, value) in &values {
+            result.set(key, value).unwrap();
+        }
+    }
 }

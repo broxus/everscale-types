@@ -8,6 +8,7 @@ use super::{
 };
 use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 use crate::cell::{Cell, CellContainer, CellFamily, CellHash, CellType};
+use crate::util::TryAsMut;
 
 /// Thread-safe cell family.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
@@ -52,6 +53,12 @@ impl DefaultFinalizer for ArcCellFamily {
 
 /// Thread-safe cell.
 pub type ArcCell = Arc<dyn Cell<ArcCellFamily>>;
+
+impl<T: ?Sized> TryAsMut<T> for Arc<T> {
+    fn try_as_mut(&mut self) -> Option<&mut T> {
+        Arc::get_mut(self)
+    }
+}
 
 /// Thread-safe cell finalizer.
 #[derive(Default, Clone, Copy)]
@@ -107,6 +114,7 @@ unsafe fn make_cell(
                 hashes,
                 descriptor: ctx.descriptor,
                 references: ctx.references.into_inner(),
+                without_first: false,
             },
             ctx.data,
         )),

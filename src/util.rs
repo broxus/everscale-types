@@ -180,6 +180,12 @@ impl IterStatus {
     }
 }
 
+/// Used to get a mutable reference of the inner type if possible.
+pub trait TryAsMut<T: ?Sized> {
+    /// Tries to convert this type into a mutable reference of the (usually inferred) input type.
+    fn try_as_mut(&mut self) -> Option<&mut T>;
+}
+
 #[doc(hidden)]
 pub fn debug_tuple_field1_finish(
     f: &mut std::fmt::Formatter<'_>,
