@@ -697,9 +697,16 @@ mod tests {
             .map(|_| (rng.gen::<u32>(), rng.gen::<u64>()))
             .collect::<Vec<_>>();
 
-        let mut result = Dict::<RcCellFamily, u32, u64>::new();
-        for (key, value) in &values {
-            result.set(key, value).unwrap();
+        // Wrap builder into a new function for the flamegraph
+        #[inline(never)]
+        fn test_big_dict(values: &[(u32, u64)]) -> Dict<RcCellFamily, u32, u64> {
+            let mut result = Dict::<RcCellFamily, u32, u64>::new();
+            for (key, value) in values {
+                result.set(key, value).unwrap();
+            }
+            result
         }
+
+        test_big_dict(&values);
     }
 }

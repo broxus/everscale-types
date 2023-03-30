@@ -1092,7 +1092,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     pub fn references(&self) -> RefsIter<'a, C> {
         RefsIter {
             cell: self.cell,
-            len: self.refs_window_end - self.refs_window_start,
+            max: self.refs_window_end,
             index: self.refs_window_start,
         }
     }

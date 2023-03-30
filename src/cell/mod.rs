@@ -197,7 +197,7 @@ impl<C: CellFamily> dyn Cell<C> + '_ {
     pub fn references(&self) -> RefsIter<'_, C> {
         RefsIter {
             cell: self,
-            len: self.reference_count(),
+            max: self.reference_count(),
             index: 0,
         }
     }
@@ -273,7 +273,7 @@ impl<C1: CellFamily, C2: CellFamily> PartialEq<dyn Cell<C2> + '_> for dyn Cell<C
 #[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct RefsIter<'a, C> {
     cell: &'a dyn Cell<C>,
-    len: u8,
+    max: u8,
     index: u8,
 }
 
@@ -287,7 +287,7 @@ impl<'a, C: CellFamily> RefsIter<'a, C> {
     /// Returns a reference to the next() value without advancing the iterator.
     #[inline]
     pub fn peek(&self) -> Option<&'a dyn Cell<C>> {
-        if self.index >= self.len {
+        if self.index >= self.max {
             None
         } else {
             self.cell.reference(self.index)
@@ -297,7 +297,7 @@ impl<'a, C: CellFamily> RefsIter<'a, C> {
     /// Returns a cloned reference to the next() value without advancing the iterator.
     #[inline]
     pub fn peek_cloned(&self) -> Option<CellContainer<C>> {
-        if self.index >= self.len {
+        if self.index >= self.max {
             None
         } else {
             self.cell.reference_cloned(self.index)
@@ -336,7 +336,7 @@ impl<C> Clone for RefsIter<'_, C> {
     fn clone(&self) -> Self {
         Self {
             cell: self.cell,
-            len: self.len,
+            max: self.max,
             index: self.index,
         }
     }
@@ -347,7 +347,7 @@ impl<'a, C: CellFamily> Iterator for RefsIter<'a, C> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index >= self.len {
+        if self.index >= self.max {
             None
         } else {
             let child = self.cell.reference(self.index);
@@ -358,7 +358,7 @@ impl<'a, C: CellFamily> Iterator for RefsIter<'a, C> {
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.len.saturating_sub(self.index) as usize;
+        let remaining = self.max.saturating_sub(self.index) as usize;
         (remaining, Some(remaining))
     }
 }
@@ -366,9 +366,9 @@ impl<'a, C: CellFamily> Iterator for RefsIter<'a, C> {
 impl<'a, C: CellFamily> DoubleEndedIterator for RefsIter<'a, C> {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
-        if self.len > self.index {
-            self.len -= 1;
-            self.cell.reference(self.len)
+        if self.max > self.index {
+            self.max -= 1;
+            self.cell.reference(self.max)
         } else {
             None
         }
@@ -422,7 +422,7 @@ impl<'a, C: CellFamily> Iterator for ClonedRefsIter<'a, C> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.inner.index >= self.inner.len {
+        if self.inner.index >= self.inner.max {
             None
         } else {
             let child = self.inner.cell.reference_cloned(self.inner.index);
@@ -440,9 +440,9 @@ impl<'a, C: CellFamily> Iterator for ClonedRefsIter<'a, C> {
 impl<'a, C: CellFamily> DoubleEndedIterator for ClonedRefsIter<'a, C> {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
-        if self.inner.len > self.inner.index {
-            self.inner.len -= 1;
-            self.inner.cell.reference_cloned(self.inner.len)
+        if self.inner.max > self.inner.index {
+            self.inner.max -= 1;
+            self.inner.cell.reference_cloned(self.inner.max)
         } else {
             None
         }
