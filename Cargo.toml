@@ -6,7 +6,7 @@ repository = "https://github.com/broxus/everscale-types"
 version = "0.1.0-pre.8"
 edition = "2021"
 rust-version = "1.65"
-include = ["src/**/*.rs", "LICENSE-*", "README.md"]
+include = ["src/**/*.rs", "benches/**/*.rs", "LICENSE-*", "README.md"]
 license = "MIT OR Apache-2.0"
 
 [[bench]]
