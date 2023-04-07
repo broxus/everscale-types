@@ -177,7 +177,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     /// # Examples
     ///
     /// ```
-    /// # use everscale_types::{CellFamily, RcCellBuilder, RcCellFamily};
+    /// # use everscale_types::prelude::{CellFamily, RcCellBuilder, RcCellFamily};
     /// // Cell with empty data
     /// let empty_cell = RcCellFamily::empty_cell();
     /// assert!(empty_cell.as_slice().is_data_empty());
@@ -199,7 +199,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     /// # Examples
     ///
     /// ```
-    /// # use everscale_types::{CellFamily, RcCellBuilder, RcCellFamily};
+    /// # use everscale_types::prelude::{CellFamily, RcCellBuilder, RcCellFamily};
     /// // Cell without references
     /// let empty_cell = RcCellFamily::empty_cell();
     /// assert!(empty_cell.as_slice().is_refs_empty());
@@ -239,7 +239,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     /// # Examples
     ///
     /// ```
-    /// # use everscale_types::RcCellBuilder;
+    /// # use everscale_types::prelude::RcCellBuilder;
     /// let cell = {
     ///     let mut builder = RcCellBuilder::new();
     ///     builder.store_zeros(100);
@@ -260,7 +260,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     /// # Examples
     ///
     /// ```
-    /// # use everscale_types::{CellFamily, RcCellBuilder, RcCellFamily};
+    /// # use everscale_types::prelude::{CellFamily, RcCellBuilder, RcCellFamily};
     /// let cell = {
     ///     let mut builder = RcCellBuilder::new();
     ///     builder.store_reference(RcCellFamily::empty_cell());
@@ -281,7 +281,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     /// # Examples
     ///
     /// ```
-    /// # use everscale_types::{CellFamily, RcCellBuilder, RcCellFamily};
+    /// # use everscale_types::prelude::{CellFamily, RcCellBuilder, RcCellFamily};
     /// let cell = {
     ///     let mut builder = RcCellBuilder::new();
     ///     builder.store_zeros(100);
@@ -337,7 +337,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     /// # Examples
     ///
     /// ```
-    /// # use everscale_types::{RcCellBuilder};
+    /// # use everscale_types::prelude::RcCellBuilder;
     /// let cell = {
     ///     let mut builder = RcCellBuilder::new();
     ///     builder.store_u32(0xdeadbeaf);
@@ -378,7 +378,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     /// # Examples
     ///
     /// ```
-    /// # use everscale_types::{RcCellBuilder};
+    /// # use everscale_types::prelude::RcCellBuilder;
     /// let cell = {
     ///     let mut builder = RcCellBuilder::new();
     ///     builder.store_u32(0xdeadbeaf);
@@ -491,7 +491,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     /// # Examples
     ///
     /// ```
-    /// # use everscale_types::{CellFamily, RcCellBuilder, RcCellFamily};
+    /// # use everscale_types::prelude::{CellFamily, RcCellBuilder, RcCellFamily};
     /// // Uniform cell consisting of only 0s
     /// let uniform_cell = {
     ///     let mut builder = RcCellBuilder::new();
