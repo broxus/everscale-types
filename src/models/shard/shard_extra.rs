@@ -126,6 +126,15 @@ pub struct ValidatorInfo {
     pub nx_cc_updated: bool,
 }
 
+/// Brief validator basic info.
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Store, Load)]
+pub struct ValidatorBaseInfo {
+    /// Last 4 bytes of the hash of the validator list.
+    pub validator_list_hash_short: u32,
+    /// Seqno of the catchain session.
+    pub catchain_seqno: u32,
+}
+
 /// A dictionary with old masterchain blocks by seqno.
 #[derive(CustomDebug, CustomClone, Store, Load)]
 pub struct OldMcBlocksInfo<C: CellFamily>(AugDict<C, u32, KeyMaxLt, KeyBlockRef>);
