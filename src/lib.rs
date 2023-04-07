@@ -1,4 +1,5 @@
 #![warn(missing_docs)]
+
 //! Everscale types.
 //!
 //! This crate is a collection of basic structures and models for the
@@ -65,20 +66,39 @@
 //! ### Numeric stuff
 //!
 //! This crate introduces some unusual number types with custom bit size or variable
-//! encoding. They are only used in models, but can be useful in user code.
+//! encoding. They are only used in models, but may be useful in user code.
+//!
+//! ### Dictionaries
+//!
+//! Dictionary, erroneously called HashmapE in the original TLB schema, is an
+//! important building block of blockchain models. It is similar to `BTreeMap`.
+//! Dictionary is an immutable structure over tree of cells with fixed-length
+//! keys and arbitrary values. Updates create a new cell tree each time, so
+//! it's quite an expensive data structure to work with.
 //!
 //! ### Models
 //!
 //! There is a simple definition of nearly all blockchain models. This definition
-//! doesn't contain any complex logic, but can be extended via extension traits.
+//! doesn't contain any complex logic, but could be extended via extension traits.
 //! The names and structure of the models are slightly different from the
 //! definition in the TLB for the sake of consistency of use.
 //!
-//! All models implement [`Load`] and [`Store`] traits for conversion to/from cells.
+//! All models implement [`Load`] and [`Store`] traits for conversion from/to cells.
 //! Due to the presence of a template cell family parameter, there is some difficulty
 //! with deriving std traits, so this crate re-exports some of the procedural macros
 //! like [`CustomClone`], [`CustomDebug`] and [`CustomEq`] that ignore
 //! parameter bounds.
+//!
+//! - [`RawDict`] constrains only key size in bits. It is useful when a dictionary
+//! can contain multiple types of values.
+//!
+//! - [`Dict`] is a strongly typed version of definition and is a preferable way
+//! of working with this data structure. Key type must implement [`DictKey`] trait,
+//! which is implemented for numbers and addresses.
+//!
+//! - [`AugDict`] adds additional values for all nodes. You can use it to quickly
+//! access a subtotal of values for each subtree.
+//! NOTE: this type is partially implemented due to its complexity.
 //!
 //! ## Supported Rust Versions
 //!
@@ -105,12 +125,15 @@
 //! [`UsageTree`]: cell::UsageTree
 //! [`MerkleProof`]: merkle::MerkleProof
 //! [`MerkleUpdate`]: merkle::MerkleUpdate
+//! [`RawDict`]: dict::RawDict
+//! [`Dict`]: dict::Dict
+//! [`DictKey`]: dict::DictKey
+//! [`AugDict`]: dict::AugDict
 //! [`Load`]: cell::Load
 //! [`Store`]: cell::Store
 //! [`CustomClone`]: util::CustomClone
 //! [`CustomDebug`]: util::CustomDebug
 //! [`CustomEq`]: util::CustomEq
-
 /// Prevents using `From::from` for plain error conversion.
 macro_rules! ok {
     ($e:expr $(,)?) => {
