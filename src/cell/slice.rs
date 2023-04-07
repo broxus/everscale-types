@@ -1159,7 +1159,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{RcCell, RcCellBuilder, RcCellSlice};
+    use crate::prelude::{RcCell, RcCellBuilder, RcCellSlice};
 
     fn build_cell<F: FnOnce(&mut RcCellBuilder) -> bool>(f: F) -> RcCell {
         let mut builder = RcCellBuilder::new();

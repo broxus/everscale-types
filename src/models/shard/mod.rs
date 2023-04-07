@@ -185,8 +185,8 @@ pub struct ShardStateSplit<C: CellFamily> {
 mod tests {
     use super::*;
     use crate::models::Block;
+    use crate::prelude::{RcBoc, RcCell};
     use crate::util::DisplayHash;
-    use crate::{RcBoc, RcCell};
 
     fn check_state(data: RcCell) {
         let data = data.parse::<ShardStateUnsplit<_>>().unwrap();

@@ -5,10 +5,10 @@ use std::sync::Arc;
 
 use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 use crate::cell::{
-    Cell, CellContainer, CellFamily, CellHash, LevelMask, MAX_BIT_LEN, MAX_REF_COUNT,
+    Cell, CellContainer, CellDescriptor, CellFamily, CellHash, CellSlice, LevelMask, MAX_BIT_LEN,
+    MAX_REF_COUNT,
 };
 use crate::util::ArrayVec;
-use crate::{CellDescriptor, CellSlice};
 
 #[cfg(feature = "stats")]
 use super::CellTreeStats;
@@ -862,7 +862,7 @@ impl<C: CellFamily> CellRefsBuilder<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::RcCellFamily;
+    use crate::cell::rc::RcCellFamily;
 
     type RcCellBuilder = CellBuilder<RcCellFamily>;
 

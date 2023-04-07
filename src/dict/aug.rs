@@ -4,7 +4,6 @@ use std::marker::PhantomData;
 use crate::cell::*;
 use crate::error::*;
 use crate::util::*;
-use crate::CellFamily;
 
 use super::raw::*;
 use super::typed::*;
@@ -571,7 +570,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::RcBoc;
+    use crate::prelude::RcBoc;
 
     // #[test]
     // fn dict_set() {

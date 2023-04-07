@@ -360,9 +360,9 @@ fn make_pruned_branch_cold<C: CellFamily>(
 
 #[cfg(test)]
 mod tests {
-    use crate::{ArcCellFamily, Boc, Dict, RcCellFamily};
-
     use super::*;
+    use crate::error::Error;
+    use crate::prelude::{ArcCellFamily, Boc, Dict, RcCellFamily};
 
     #[test]
     fn correct_store_load() {
@@ -475,7 +475,7 @@ mod tests {
             dict.get(0).unwrap().unwrap();
             dict.get(9).unwrap().unwrap();
 
-            assert!(matches!(dict.get(5), Err(crate::Error::PrunedBranchAccess)));
+            assert!(matches!(dict.get(5), Err(Error::PrunedBranchAccess)));
         }
 
         test_impl::<RcCellFamily>();

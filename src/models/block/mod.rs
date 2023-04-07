@@ -487,9 +487,8 @@ impl<'a, C: CellFamily> Load<'a, C> for ValueFlow<C> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{RcBoc, RcCell, RcCellBuilder, RcCellFamily};
-
     use super::*;
+    use crate::prelude::{RcBoc, RcCell, RcCellBuilder, RcCellFamily};
 
     fn serialize_any<T: Store<RcCellFamily>>(data: T) -> RcCell {
         let mut builder = RcCellBuilder::new();

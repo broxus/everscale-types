@@ -164,7 +164,7 @@ where
 mod tests {
     use crate::boc::*;
     use crate::cell::*;
-    use crate::{RcBoc, RcCellFamily};
+    use crate::prelude::{RcBoc, RcCellFamily};
 
     #[derive(::serde::Serialize)]
     struct SerdeWithCellRef<'a, C: CellFamily> {

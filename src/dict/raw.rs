@@ -1,6 +1,6 @@
 use crate::cell::*;
+use crate::error::Error;
 use crate::util::{unlikely, IterStatus};
-use crate::Error;
 
 use super::{dict_get, dict_insert, dict_load_from_root, read_label, SetMode};
 
@@ -634,7 +634,7 @@ impl<C: CellFamily> Clone for ValuesSegment<'_, C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{RcBoc, RcCell, RcCellBuilder, RcCellFamily};
+    use crate::prelude::{RcBoc, RcCell, RcCellBuilder, RcCellFamily};
 
     fn build_cell<F: FnOnce(&mut RcCellBuilder) -> bool>(f: F) -> RcCell {
         let mut builder = RcCellBuilder::new();

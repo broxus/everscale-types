@@ -47,8 +47,8 @@ impl<C: CellFamily + Trackable> UsageTree<C> {
     }
 }
 
-/// Cell family which can be used with [`UsageTree`]
-pub trait Trackable: UsageTreeImpl {}
+/// Cell family which can be used with [`UsageTree`].
+pub trait Trackable: CellFamily + UsageTreeImpl {}
 
 pub struct VisitedCell<C: CellFamily> {
     include: bool,
@@ -195,7 +195,6 @@ impl ArcUsageCell {
                 .get_or_init(|| {
                     let child = self.cell.as_ref().reference_cloned(index)?;
                     if let Some(usage_tree) = self.usage_tree.upgrade() {
-                        //ArcCellFamily::insert(&usage_tree.visited, child, )
                         usage_tree.insert(&child, UsageTreeMode::OnLoad);
                     }
 

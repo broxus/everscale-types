@@ -2,8 +2,8 @@ use std::borrow::Borrow;
 use std::marker::PhantomData;
 
 use crate::cell::*;
+use crate::error::Error;
 use crate::util::*;
-use crate::Error;
 
 use super::raw::*;
 use super::{dict_get, dict_insert, dict_load_from_root, serialize_entry, DictKey, SetMode};
@@ -628,7 +628,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{RcBoc, RcCellFamily};
+    use crate::prelude::{RcBoc, RcCellFamily};
 
     #[test]
     fn dict_set() {

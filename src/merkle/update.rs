@@ -486,9 +486,8 @@ impl<'a: 'b, 'b, C: CellFamily> BuilderImpl<'a, 'b, C> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{RcCell, RcCellBuilder, RcCellFamily, RcDict};
-
     use super::*;
+    use crate::prelude::{RcCell, RcCellBuilder, RcCellFamily, RcDict};
 
     #[test]
     fn correct_store_load() {

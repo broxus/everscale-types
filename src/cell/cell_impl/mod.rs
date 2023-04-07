@@ -745,7 +745,7 @@ fn aligned_leaf_stats(descriptor: CellDescriptor) -> CellTreeStats {
 mod tests {
     use crate::boc::Boc;
     use crate::cell::{CellBuilder, DefaultFinalizer};
-    use crate::{ArcCellFamily, RcCellFamily};
+    use crate::prelude::{ArcCellFamily, RcCellFamily};
 
     #[test]
     fn static_cells() {

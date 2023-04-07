@@ -30,7 +30,7 @@ pub fn make_pruned_branch<C: CellFamily>(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{RcCellBuilder, RcCellFamily};
+    use crate::prelude::{RcCellBuilder, RcCellFamily};
 
     #[test]
     fn correct_pruned_branch() {

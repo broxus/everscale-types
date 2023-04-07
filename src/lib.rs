@@ -1,6 +1,115 @@
 #![warn(missing_docs)]
-
-//! Everscale types
+//! Everscale types.
+//!
+//! This crate is a collection of basic structures and models for the
+//! Everscale blockchain. The [`Cell`] trait represents the core
+//! data structure which is used as an atom for building other structures.
+//!
+//! *Compiler support: [requires `rustc` 1.65+][msrv]*
+//!
+//! [msrv]: #supported-rust-versions
+//!
+//! ## Cell families
+//!
+//! The [`Cell`] trait has a generic parameter of type [`CellFamily`], which
+//! provides an abstraction over cell container (e.g. [`RcCellFamily`]
+//! for [`Rc`] container, and [`ArcCellFamily`] for [`Arc`] container).
+//!
+//! A measured performance boost of using [`RcCell`] over [`ArcCell`]
+//! is 8~10%, therefore, the complication of implementation only for this
+//! would be strange. However, an abstraction over cell container allows
+//! using the same logic for some lifetime bound cases e.g. using pointers
+//! and bump allocators.
+//!
+//! Note that you should probably stick to one container type in your code
+//! to prevent bloating the binary (e.g. use only [`RcCell`] for WASM and ledger,
+//! or use [`ArcCell`] for indexers and other stuff).
+//!
+//! ## `Cell` vs `CellSlice` vs `CellBuilder`
+//!
+//! - [`Cell`] is an immutable tree and provides only basic methods for accessing
+//! nodes and some meta info.
+//!
+//! - [`CellSlice`] is a read-only view for a part of some cell. It can only
+//! be obtained from an existing cell. A cell contains **up to 1023 bits** and
+//! **up to 4 references**. Minimal data unit is bit, so a cell slice is similar
+//! to a couple of ranges (bit range and refs range).
+//!
+//! - [`CellBuilder`] is used to create a new cell. It is used as an append-only
+//! data structure and is the only way to create a new cell with the provided data.
+//! Cell creation depends on a context (e.g. message creation in a wallet or a
+//! TVM execution with gas tracking), so [`CellBuilder::build_ext`] accepts
+//! a [`Finalizer`] parameter which can be used to track and modify cells creation.
+//! All basic cell families implement [`DefaultFinalizer`] for a noop finalization.
+//!
+//! ## BOC
+//!
+//! BOC (Bag Of Cells) is a format for representing a tree of cells as bytes.
+//! [`Boc`] type is used to convert between bytes and **cells** of the same family.
+//! [`BocRepr`] helper can be used to convert between bytes and **models** (which
+//! are representable as cells).
+//!
+//! ### Merkle stuff
+//!
+//! - Pruned branch is a "building block" of merkle structures. A single pruned branch
+//! cell replaces a whole subtree and contains just the hash of its root cell hash.
+//!
+//! - [`MerkleProof`] contains a subset of original tree of cells. In most cases
+//! it is created from [`UsageTree`] of some visited cells. Merkle proof is used
+//! to proof that something was presented in the origin tree and provide some additional
+//! context.
+//!
+//! - [`MerkleUpdate`] describes a difference between two trees of cells. It can be
+//! applied to old cell to create a new cell.
+//!
+//! ### Numeric stuff
+//!
+//! This crate introduces some unusual number types with custom bit size or variable
+//! encoding. They are only used in models, but can be useful in user code.
+//!
+//! ### Models
+//!
+//! There is a simple definition of nearly all blockchain models. This definition
+//! doesn't contain any complex logic, but can be extended via extension traits.
+//! The names and structure of the models are slightly different from the
+//! definition in the TLB for the sake of consistency of use.
+//!
+//! All models implement [`Load`] and [`Store`] traits for conversion to/from cells.
+//! Due to the presence of a template cell family parameter, there is some difficulty
+//! with deriving std traits, so this crate re-exports some of the procedural macros
+//! like [`CustomClone`], [`CustomDebug`] and [`CustomEq`] that ignore
+//! parameter bounds.
+//!
+//! ## Supported Rust Versions
+//!
+//! This crate is built against the latest stable release. The minimum supported
+//! version is 1.65. The current crate version is not guaranteed to build on
+//! Rust versions earlier than the minimum supported version.
+//!
+//! [`Cell`]: cell::Cell
+//! [`CellFamily`]: cell::CellFamily
+//! [`RcCellFamily`]: cell::rc::RcCellFamily
+//! [`ArcCellFamily`]: cell::sync::ArcCellFamily
+//! [`Rc`]: std::rc::Rc
+//! [`Arc`]: std::sync::Arc
+//! [`RcCell`]: prelude::RcCell
+//! [`ArcCell`]: prelude::ArcCell
+//! [`CellSlice`]: cell::CellSlice
+//! [`CellBuilder`]: cell::CellBuilder
+//! [`Cell::as_slice`]: cell::Cell::as_slice
+//! [`CellBuilder::build_ext`]: cell::CellBuilder::build_ext
+//! [`Finalizer`]: cell::Finalizer
+//! [`DefaultFinalizer`]: cell::DefaultFinalizer
+//! [`Boc`]: boc::Boc
+//! [`BocRepr`]: boc::BocRepr
+//! [`UsageTree`]: cell::UsageTree
+//! [`MerkleProof`]: merkle::MerkleProof
+//! [`MerkleUpdate`]: merkle::MerkleUpdate
+//! [`Load`]: cell::Load
+//! [`Store`]: cell::Store
+//! [`CustomClone`]: util::CustomClone
+//! [`CustomDebug`]: util::CustomDebug
+//! [`CustomEq`]: util::CustomEq
 
 /// Prevents using `From::from` for plain error conversion.
 macro_rules! ok {
@@ -14,83 +123,12 @@ macro_rules! ok {
 
 extern crate self as everscale_types;
 
-pub use self::boc::Boc;
-pub use self::cell::rc::{RcCell, RcCellFamily};
-pub use self::cell::sync::{ArcCell, ArcCellFamily};
-pub use self::cell::{
-    Cell, CellBuilder, CellDescriptor, CellFamily, CellHash, CellSlice, CellType, LevelMask, Load,
-    Store, UsageTree, UsageTreeMode,
-};
-pub use self::dict::{Dict, RawDict};
-pub use self::error::Error;
-
-/// BOC (Bag Of Cells) helper for the `Arc` family of cells.
-pub type ArcBoc = Boc<ArcCellFamily>;
-/// BOC (Bag Of Cells) helper for the `Rc` family of cells.
-pub type RcBoc = Boc<RcCellFamily>;
-
-/// Cell builder for the `Arc` family of cells.
-pub type ArcCellBuilder = CellBuilder<ArcCellFamily>;
-/// Cell builder for the `Rc` family of cells.
-pub type RcCellBuilder = CellBuilder<RcCellFamily>;
-
-/// A read-only view for the `Arc` family of cells.
-pub type ArcCellSlice<'a> = CellSlice<'a, ArcCellFamily>;
-/// A read-only view for the `Rc` family of cells.
-pub type RcCellSlice<'a> = CellSlice<'a, RcCellFamily>;
-
-/// Usage tree for the `Arc` family of cells.
-pub type ArcUsageTree = UsageTree<ArcCellFamily>;
-/// Usage tree for the `Rc` family of cells.
-pub type RcUsageTree = UsageTree<RcCellFamily>;
-
-/// A typed ordinary dictionary with fixed length keys for the `Arc` family of cells.
-pub type ArcDict<K, V> = Dict<ArcCellFamily, K, V>;
-/// A typed ordinary dictionary with fixed length keys for the `Rc` family of cells.
-pub type RcDict<K, V> = Dict<RcCellFamily, K, V>;
-
-/// An ordinary dictionary with fixed length keys for the `Arc` family of cells.
-pub type ArcRawDict<const N: u16> = RawDict<ArcCellFamily, N>;
-/// An ordinary dictionary with fixed length keys for the `Rc` family of cells.
-pub type RcRawDict<const N: u16> = RawDict<RcCellFamily, N>;
-
-impl Store<RcCellFamily> for RcCell {
-    fn store_into(
-        &self,
-        builder: &mut RcCellBuilder,
-        _: &mut dyn cell::Finalizer<RcCellFamily>,
-    ) -> bool {
-        builder.store_reference(self.clone())
-    }
-}
-
-impl Store<ArcCellFamily> for ArcCell {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder<ArcCellFamily>,
-        _: &mut dyn cell::Finalizer<ArcCellFamily>,
-    ) -> bool {
-        builder.store_reference(self.clone())
-    }
-}
-
-impl<'a> Load<'a, RcCellFamily> for RcCell {
-    fn load_from(slice: &mut CellSlice<'a, RcCellFamily>) -> Option<Self> {
-        slice.load_reference_cloned()
-    }
-}
-
-impl<'a> Load<'a, ArcCellFamily> for ArcCell {
-    fn load_from(slice: &mut CellSlice<'a, ArcCellFamily>) -> Option<Self> {
-        slice.load_reference_cloned()
-    }
-}
-
 pub mod boc;
 pub mod cell;
 pub mod dict;
 pub mod merkle;
 pub mod num;
+pub mod prelude;
 pub mod util;
 
 #[cfg(feature = "models")]
@@ -101,10 +139,43 @@ mod serde;
 
 pub mod error;
 
+impl cell::Store<cell::rc::RcCellFamily> for cell::rc::RcCell {
+    fn store_into(
+        &self,
+        builder: &mut cell::CellBuilder<cell::rc::RcCellFamily>,
+        _: &mut dyn cell::Finalizer<cell::rc::RcCellFamily>,
+    ) -> bool {
+        builder.store_reference(self.clone())
+    }
+}
+
+impl cell::Store<cell::sync::ArcCellFamily> for cell::sync::ArcCell {
+    fn store_into(
+        &self,
+        builder: &mut cell::CellBuilder<cell::sync::ArcCellFamily>,
+        _: &mut dyn cell::Finalizer<cell::sync::ArcCellFamily>,
+    ) -> bool {
+        builder.store_reference(self.clone())
+    }
+}
+
+impl<'a> cell::Load<'a, cell::rc::RcCellFamily> for cell::rc::RcCell {
+    fn load_from(slice: &mut cell::CellSlice<'a, cell::rc::RcCellFamily>) -> Option<Self> {
+        slice.load_reference_cloned()
+    }
+}
+
+impl<'a> cell::Load<'a, cell::sync::ArcCellFamily> for cell::sync::ArcCell {
+    fn load_from(slice: &mut cell::CellSlice<'a, cell::sync::ArcCellFamily>) -> Option<Self> {
+        slice.load_reference_cloned()
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use self::util::decode_base64;
-    use super::*;
+    use crate::cell::MAX_BIT_LEN;
+    use crate::prelude::*;
+    use crate::util::decode_base64;
 
     #[test]
     fn correct_deserialization() {
@@ -133,43 +204,6 @@ mod tests {
     }
 
     #[test]
-    fn cell_slices() {
-        let data = decode_base64(
-            "te6ccgEBAQEALQAAVb23gAA3/WsCOdnvw2dedGrVhjTaZxn/TYcWb7TR8Im/MkK13n6c883gt8A=",
-        )
-        .unwrap();
-        let cell = RcBoc::decode(data).unwrap();
-
-        let mut slice = cell.as_slice();
-        assert!(!slice.is_data_empty());
-        assert_eq!(slice.remaining_bits(), 337);
-        assert!(slice.is_refs_empty());
-        assert_eq!(slice.remaining_refs(), 0);
-        assert!(slice.get_reference(0).is_none());
-        assert!(slice.get_reference_cloned(0).is_none());
-        assert!(slice.load_reference().is_none());
-        assert!(slice.load_reference_cloned().is_none());
-
-        assert_eq!(slice.get_bit(0), Some(true));
-        assert_eq!(slice.load_bit(), Some(true));
-        assert_eq!(slice.get_small_uint(0, 8), Some(123));
-        assert_eq!(slice.get_small_uint(8, 8), Some(111));
-        assert_eq!(slice.load_u16(), Some(0x7b6f));
-        assert_eq!(slice.get_u32(0), Some(0x00006ffa));
-        assert_eq!(slice.get_u32(32), Some(0xd60473b3));
-        assert_eq!(slice.load_u64(), Some(0x6ffad60473b3));
-        assert_eq!(
-            slice.load_u256(),
-            Some([
-                0xdf, 0x86, 0xce, 0xbc, 0xe8, 0xd5, 0xab, 0x0c, 0x69, 0xb4, 0xce, 0x33, 0xfe, 0x9b,
-                0x0e, 0x2c, 0xdf, 0x69, 0xa3, 0xe1, 0x13, 0x7e, 0x64, 0x85, 0x6b, 0xbc, 0xfd, 0x39,
-                0xe7, 0x9b, 0xc1, 0x6f,
-            ])
-        );
-        assert_eq!(slice.get_small_uint(0, 1), None);
-    }
-
-    #[test]
     fn test_builder() {
         let parsed_cell = Boc::<RcCellFamily>::decode_base64("te6ccgEBAQEAAwAAAbE=").unwrap();
 
@@ -188,7 +222,7 @@ mod tests {
         let parsed_cell = RcBoc::decode_base64("te6ccgEBAQEAggAA////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////").unwrap();
 
         let mut builder = RcCellBuilder::new();
-        for _ in 0..cell::MAX_BIT_LEN {
+        for _ in 0..MAX_BIT_LEN {
             assert!(builder.store_bit_one());
         }
         assert!(!builder.store_bit_one());

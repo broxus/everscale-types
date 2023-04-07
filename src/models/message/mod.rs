@@ -574,9 +574,8 @@ fn load_ext_addr<C: CellFamily>(slice: &mut CellSlice<'_, C>) -> Option<Option<E
 
 #[cfg(test)]
 mod tests {
-    use crate::{RcBoc, RcCell, RcCellBuilder, RcCellFamily};
-
     use super::*;
+    use crate::prelude::{RcBoc, RcCell, RcCellBuilder, RcCellFamily};
 
     fn serialize_message(message: Message<RcCellFamily>) -> RcCell {
         let mut builder = RcCellBuilder::new();

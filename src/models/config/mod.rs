@@ -480,7 +480,7 @@ mod tests {
     use std::num::NonZeroU32;
 
     use super::*;
-    use crate::RcBoc;
+    use crate::prelude::RcBoc;
 
     #[test]
     fn simple_config() {

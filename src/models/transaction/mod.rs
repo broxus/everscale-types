@@ -400,9 +400,8 @@ pub struct HashUpdate {
 
 #[cfg(test)]
 mod tests {
-    use crate::{RcBoc, RcCell, RcCellBuilder, RcCellFamily};
-
     use super::*;
+    use crate::prelude::{RcBoc, RcCell, RcCellBuilder, RcCellFamily};
 
     fn serialize_tx(tx: Transaction<RcCellFamily>) -> RcCell {
         let mut builder = RcCellBuilder::new();

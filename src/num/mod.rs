@@ -790,9 +790,8 @@ fn load_u128<C: CellFamily>(slice: &mut CellSlice<'_, C>, mut bytes: u8) -> Opti
 
 #[cfg(test)]
 mod tests {
-    use crate::{RcCellBuilder, RcCellFamily};
-
     use super::*;
+    use crate::prelude::{RcCellBuilder, RcCellFamily};
 
     macro_rules! impl_operation_tests {
         ($ident:ident$(, $check_max_div:ident)?) => {

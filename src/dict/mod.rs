@@ -1,8 +1,8 @@
 //! Dictionary implementation.
 
 use crate::cell::*;
+use crate::error::Error;
 use crate::util::unlikely;
-use crate::Error;
 
 pub use aug::*;
 pub use raw::*;
@@ -517,7 +517,7 @@ fn serialize_entry<C: CellFamily, T: Store<C>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{RcCell, RcCellBuilder};
+    use crate::prelude::{RcCell, RcCellBuilder};
 
     fn build_cell<F: FnOnce(&mut RcCellBuilder) -> bool>(f: F) -> RcCell {
         let mut builder = RcCellBuilder::new();
