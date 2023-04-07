@@ -19,7 +19,7 @@ pub use self::cell::rc::{RcCell, RcCellFamily};
 pub use self::cell::sync::{ArcCell, ArcCellFamily};
 pub use self::cell::{
     Cell, CellBuilder, CellDescriptor, CellFamily, CellHash, CellSlice, CellType, LevelMask, Load,
-    RcUsageTree, Store, UsageTreeMode,
+    Store, UsageTree, UsageTreeMode,
 };
 pub use self::dict::{Dict, RawDict};
 pub use self::error::Error;
@@ -38,6 +38,11 @@ pub type RcCellBuilder = CellBuilder<RcCellFamily>;
 pub type ArcCellSlice<'a> = CellSlice<'a, ArcCellFamily>;
 /// A read-only view for the `Rc` family of cells.
 pub type RcCellSlice<'a> = CellSlice<'a, RcCellFamily>;
+
+/// Usage tree for the `Arc` family of cells.
+pub type ArcUsageTree = UsageTree<ArcCellFamily>;
+/// Usage tree for the `Rc` family of cells.
+pub type RcUsageTree = UsageTree<RcCellFamily>;
 
 /// A typed ordinary dictionary with fixed length keys for the `Arc` family of cells.
 pub type ArcDict<K, V> = Dict<ArcCellFamily, K, V>;

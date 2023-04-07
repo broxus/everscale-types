@@ -360,87 +360,125 @@ fn make_pruned_branch_cold<C: CellFamily>(
 
 #[cfg(test)]
 mod tests {
-    use crate::{RcBoc, RcCell, RcCellBuilder, RcCellFamily, RcDict};
+    use crate::{ArcCellFamily, Boc, Dict, RcCellFamily};
 
     use super::*;
 
     #[test]
     fn correct_store_load() {
-        let default = MerkleProof::<RcCellFamily>::default();
+        fn test_impl<C>()
+        where
+            for<'c> C: DefaultFinalizer + 'c,
+        {
+            let default = MerkleProof::<C>::default();
 
-        let mut builder = RcCellBuilder::new();
-        assert!(default.store_into(&mut builder, &mut RcCellFamily::default_finalizer()));
-        let cell = builder.build().unwrap();
+            let mut builder = CellBuilder::<C>::new();
+            assert!(default.store_into(&mut builder, &mut C::default_finalizer()));
+            let cell = builder.build().unwrap();
 
-        let parsed = cell.parse::<MerkleProof<_>>().unwrap();
-        assert_eq!(default, parsed);
+            let parsed = cell.as_ref().parse::<MerkleProof<C>>().unwrap();
+            assert_eq!(default, parsed);
+        }
+
+        test_impl::<RcCellFamily>();
+        test_impl::<ArcCellFamily>();
     }
 
     #[test]
     fn test_proof() {
-        let root = RcBoc::decode_base64("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").unwrap();
-        let target_hash = root.reference(1).unwrap().repr_hash();
+        const BOC: &str = "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";
 
-        let merkle_proof = MerkleProof::create_for_cell(root.as_ref(), target_hash)
-            .build()
-            .unwrap();
+        fn test_impl<C>()
+        where
+            for<'c> C: DefaultFinalizer + 'c,
+        {
+            let root = Boc::<C>::decode_base64(BOC).unwrap();
+            let target_hash = root.as_ref().reference(1).unwrap().repr_hash();
 
-        let virtual_root = merkle_proof.cell.virtualize();
-        println!("{}", virtual_root.display_tree());
+            let merkle_proof = MerkleProof::create_for_cell(root.as_ref(), target_hash)
+                .build()
+                .unwrap();
 
-        assert_eq!(root.repr_hash(), virtual_root.repr_hash());
-        assert_eq!(root.repr_depth(), virtual_root.repr_depth());
+            let virtual_root = merkle_proof.cell.as_ref().virtualize();
+            println!("{}", virtual_root.display_tree());
+
+            assert_eq!(root.as_ref().repr_hash(), virtual_root.repr_hash());
+            assert_eq!(root.as_ref().repr_depth(), virtual_root.repr_depth());
+        }
+
+        test_impl::<RcCellFamily>();
+        test_impl::<ArcCellFamily>();
     }
 
     #[test]
     #[cfg_attr(miri, ignore)] // takes too long to execute on miri
     fn create_proof_for_deep_cell() {
-        let mut cell = RcCellFamily::empty_cell();
-        for i in 0..65000 {
-            let mut builder = RcCellBuilder::new();
-            builder.store_u32(i);
-            builder.store_reference(cell);
-            cell = builder.build().unwrap();
+        fn test_impl<C>()
+        where
+            for<'c> C: DefaultFinalizer + 'c,
+        {
+            let mut cell = C::empty_cell();
+            for i in 0..65000 {
+                let mut builder = CellBuilder::<C>::new();
+                builder.store_u32(i);
+                builder.store_reference(cell);
+                cell = builder.build().unwrap();
+            }
+
+            MerkleProof::create_for_cell(cell.as_ref(), EMPTY_CELL_HASH)
+                .build()
+                .unwrap();
         }
 
-        MerkleProof::create_for_cell(cell.as_ref(), EMPTY_CELL_HASH)
-            .build()
-            .unwrap();
+        test_impl::<RcCellFamily>();
+        test_impl::<ArcCellFamily>();
     }
 
     #[test]
     fn create_proof_for_dict() {
-        fn serialize_dict(dict: RcDict<u32, u32>) -> RcCell {
-            let mut builder = RcCellBuilder::new();
-            dict.store_into(&mut builder, &mut RcCellFamily::default_finalizer());
+        fn serialize_dict<C>(dict: Dict<C, u32, u32>) -> CellContainer<C>
+        where
+            for<'c> C: DefaultFinalizer + 'c,
+        {
+            let mut builder = CellBuilder::<C>::new();
+            dict.store_into(&mut builder, &mut C::default_finalizer());
             builder.build().unwrap()
         }
 
-        // Create dict with keys 0..10
-        let mut dict = RcDict::<u32, u32>::new();
+        fn test_impl<C>()
+        where
+            C: Trackable,
+            for<'c> C: DefaultFinalizer + 'c,
+        {
+            // Create dict with keys 0..10
+            let mut dict = Dict::<C, u32, u32>::new();
 
-        for i in 0..10 {
-            dict.add(i, i * 10).unwrap();
+            for i in 0..10 {
+                dict.add(i, i * 10).unwrap();
+            }
+
+            // Create a usage tree for accessing an element with keys 0 and 9
+            let usage_tree = UsageTree::<C>::new(UsageTreeMode::OnDataAccess);
+            let tracked_cell = usage_tree.track(&serialize_dict(dict));
+            let tracked_dict = tracked_cell.as_ref().parse::<Dict<C, u32, u32>>().unwrap();
+            tracked_dict.get(0).unwrap().unwrap();
+            tracked_dict.get(9).unwrap().unwrap();
+
+            // Create proof from the usage tree
+            let merkle_proof = MerkleProof::create(tracked_cell.as_ref(), usage_tree)
+                .build()
+                .unwrap();
+
+            // Try to read some keys
+            let dict = merkle_proof.cell.as_ref().virtualize();
+            let dict = dict.parse::<Dict<C, u32, u32>>().unwrap();
+            dict.get(0).unwrap().unwrap();
+            dict.get(9).unwrap().unwrap();
+
+            assert!(matches!(dict.get(5), Err(crate::Error::PrunedBranchAccess)));
         }
 
-        // Create a usage tree for accessing an element with keys 0 and 9
-        let usage_tree = RcUsageTree::new(UsageTreeMode::OnDataAccess);
-        let tracked_cell = usage_tree.track(&serialize_dict(dict));
-        let tracked_dict = tracked_cell.parse::<RcDict<u32, u32>>().unwrap();
-        tracked_dict.get(0).unwrap().unwrap();
-        tracked_dict.get(9).unwrap().unwrap();
-
-        // Create proof from the usage tree
-        let merkle_proof = MerkleProof::create(tracked_cell.as_ref(), usage_tree)
-            .build()
-            .unwrap();
-
-        // Try to read some keys
-        let dict = merkle_proof.cell.virtualize();
-        let dict = dict.parse::<RcDict<u32, u32>>().unwrap();
-        dict.get(0).unwrap().unwrap();
-        dict.get(9).unwrap().unwrap();
-
-        assert!(matches!(dict.get(5), Err(crate::Error::PrunedBranchAccess)));
+        test_impl::<RcCellFamily>();
+        test_impl::<ArcCellFamily>();
     }
 }

@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::hash::BuildHasher;
 
-use crate::cell::{CellHash, RcUsageTree};
+use crate::cell::{CellHash, Trackable, UsageTree};
 
 pub use self::proof::{MerkleProof, MerkleProofBuilder, MerkleProofExtBuilder};
 pub use self::pruned_branch::make_pruned_branch;
@@ -38,9 +38,9 @@ impl<T: MerkleFilter + ?Sized> MerkleFilter for &T {
     }
 }
 
-impl MerkleFilter for RcUsageTree {
+impl<C: Trackable> MerkleFilter for UsageTree<C> {
     fn check(&self, cell: &CellHash) -> FilterAction {
-        if RcUsageTree::contains(self, cell) {
+        if UsageTree::contains(self, cell) {
             FilterAction::Include
         } else {
             FilterAction::Skip
