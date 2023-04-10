@@ -236,6 +236,8 @@ pub struct BlockSignature {
 pub struct Signature(pub [u8; 64]);
 
 impl Signature {
+    const TAG_LEN: u16 = 4;
+
     const TAG: u8 = 0x5;
 }
 
@@ -248,13 +250,13 @@ impl Default for Signature {
 
 impl<C: CellFamily> Store<C> for Signature {
     fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
-        builder.store_small_uint(Self::TAG, 5) && builder.store_raw(&self.0, 512)
+        builder.store_small_uint(Self::TAG, Self::TAG_LEN) && builder.store_raw(&self.0, 512)
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for Signature {
     fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        if slice.load_small_uint(4)? != Self::TAG {
+        if slice.load_small_uint(Self::TAG_LEN)? != Self::TAG {
             return None;
         }
         let mut result = Self::default();
