@@ -7,7 +7,7 @@ pub use crate::cell::rc::{RcCell, RcCellFamily};
 pub use crate::cell::sync::{ArcCell, ArcCellFamily};
 pub use crate::cell::{
     Cell, CellBuilder, CellDescriptor, CellFamily, CellHash, CellSlice, CellType, Load, Store,
-    UsageTree, UsageTreeMode,
+    UsageTree, UsageTreeMode, UsageTreeWithSubtrees,
 };
 pub use crate::dict::{Dict, RawDict};
 

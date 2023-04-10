@@ -262,13 +262,19 @@ impl<C: CellFamily> BocRepr<C> {
     where
         T: Store<C>,
     {
-        let mut builder = CellBuilder::<C>::new();
-        if !data.store_into(&mut builder, finalizer) {
-            return None;
-        }
+        fn encode_ext_impl<C: CellFamily>(
+            data: &dyn Store<C>,
+            finalizer: &mut dyn Finalizer<C>,
+        ) -> Option<Vec<u8>> {
+            let mut builder = CellBuilder::<C>::new();
+            if !data.store_into(&mut builder, finalizer) {
+                return None;
+            }
 
-        let cell = builder.build_ext(finalizer)?;
-        Some(Boc::<C>::encode(cell))
+            let cell = builder.build_ext(finalizer)?;
+            Some(Boc::<C>::encode(cell))
+        }
+        encode_ext_impl::<C>(&data, finalizer)
     }
 
     /// Decodes object from BOC using the specified finalizer.

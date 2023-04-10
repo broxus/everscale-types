@@ -498,8 +498,8 @@ mod tests {
         builder.build().unwrap()
     }
 
-    fn check_block(boc: &str) -> RcCell {
-        let boc = RcBoc::decode_base64(boc).unwrap();
+    fn check_block(boc_str: &str) -> RcCell {
+        let boc = RcBoc::decode_base64(boc_str).unwrap();
         let block = boc.parse::<Block<_>>().unwrap();
         println!("block: {block:#?}");
 

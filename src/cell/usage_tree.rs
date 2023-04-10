@@ -45,6 +45,47 @@ impl<C: CellFamily + Trackable> UsageTree<C> {
     pub fn contains(&self, repr_hash: &CellHash) -> bool {
         self.state.as_ref().contains(repr_hash)
     }
+
+    /// Extends the usage tree with subtree tracker.
+    pub fn with_subtrees(self) -> UsageTreeWithSubtrees<C> {
+        UsageTreeWithSubtrees {
+            state: self.state,
+            subtrees: Default::default(),
+        }
+    }
+}
+
+/// Usage tree for a family of cells with subtrees.
+pub struct UsageTreeWithSubtrees<C: CellFamily + Trackable> {
+    state: C::SharedState,
+    subtrees: ahash::HashSet<CellHash>,
+}
+
+impl<C: CellFamily + Trackable> UsageTreeWithSubtrees<C> {
+    /// Wraps the specified cell in a usage cell to keep track
+    /// of the data or links being accessed.
+    pub fn track(&self, cell: &CellContainer<C>) -> CellContainer<C> {
+        self.state.as_ref().insert(cell, UsageTreeMode::OnLoad);
+        <C as UsageTreeImpl>::wrap_cell(&self.state, cell.clone())
+    }
+
+    /// Returns `true` if the cell with the specified representation hash
+    /// is present in this usage tree.
+    pub fn contains_direct(&self, repr_hash: &CellHash) -> bool {
+        self.state.as_ref().contains(repr_hash)
+    }
+
+    /// Returns `true` if the subtree root with the specified representation hash
+    /// is present in this usage tree.
+    pub fn contains_subtree(&self, repr_hash: &CellHash) -> bool {
+        self.subtrees.contains(repr_hash)
+    }
+
+    /// Adds a subtree to the usage tree.
+    /// Returns whether the value was newly inserted.
+    pub fn add_subtree(&mut self, root: &dyn Cell<C>) -> bool {
+        self.subtrees.insert(*root.repr_hash())
+    }
 }
 
 /// Cell family which can be used with [`UsageTree`].

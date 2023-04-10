@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::hash::BuildHasher;
 
-use crate::cell::{CellHash, Trackable, UsageTree};
+use crate::cell::{CellHash, Trackable, UsageTree, UsageTreeWithSubtrees};
 
 pub use self::proof::{MerkleProof, MerkleProofBuilder, MerkleProofExtBuilder};
 pub use self::pruned_branch::make_pruned_branch;
@@ -42,6 +42,18 @@ impl<C: Trackable> MerkleFilter for UsageTree<C> {
     fn check(&self, cell: &CellHash) -> FilterAction {
         if UsageTree::contains(self, cell) {
             FilterAction::Include
+        } else {
+            FilterAction::Skip
+        }
+    }
+}
+
+impl<C: Trackable> MerkleFilter for UsageTreeWithSubtrees<C> {
+    fn check(&self, cell: &CellHash) -> FilterAction {
+        if UsageTreeWithSubtrees::contains_direct(self, cell) {
+            FilterAction::Include
+        } else if UsageTreeWithSubtrees::contains_subtree(self, cell) {
+            FilterAction::IncludeSubtree
         } else {
             FilterAction::Skip
         }
