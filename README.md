@@ -36,6 +36,7 @@ but with much more emphasis on speed.
 ### How to bench
 
 ```bash
+cargo bench boc
 cargo bench dict
 ```
 

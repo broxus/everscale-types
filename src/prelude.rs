@@ -2,7 +2,7 @@
 //!
 //! This brings into scope a number of traits and commonly used type aliases.
 
-pub use crate::boc::Boc;
+pub use crate::boc::{Boc, BocRepr};
 pub use crate::cell::rc::{RcCell, RcCellFamily};
 pub use crate::cell::sync::{ArcCell, ArcCellFamily};
 pub use crate::cell::{
