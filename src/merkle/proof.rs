@@ -362,7 +362,7 @@ fn make_pruned_branch_cold<C: CellFamily>(
 mod tests {
     use super::*;
     use crate::error::Error;
-    use crate::prelude::{ArcCellFamily, Boc, Dict, RcCellFamily};
+    use crate::prelude::{ArcCellFamily, Boc, BocRepr, Dict, RcCellFamily};
 
     #[test]
     fn correct_store_load() {
@@ -425,9 +425,24 @@ mod tests {
                 cell = builder.build().unwrap();
             }
 
-            MerkleProof::create_for_cell(cell.as_ref(), EMPTY_CELL_HASH)
+            {
+                let encoded = Boc::<C>::encode_base64(cell.as_ref());
+                let decoded = Boc::<C>::decode_base64(encoded).unwrap();
+                assert_eq!(decoded.as_ref(), cell.as_ref());
+            }
+
+            let cell = MerkleProof::create_for_cell(cell.as_ref(), EMPTY_CELL_HASH)
                 .build()
                 .unwrap();
+
+            let encoded = BocRepr::<C>::encode_base64(&cell).unwrap();
+            let decoded = Boc::<C>::decode_base64(encoded)
+                .unwrap()
+                .as_ref()
+                .parse::<MerkleProof<C>>()
+                .unwrap();
+
+            assert_eq!(cell, decoded);
         }
 
         test_impl::<RcCellFamily>();

@@ -7,7 +7,7 @@ use crate::cell::{Cell, CellDescriptor, CellFamily, CellHash};
 /// Intermediate BOC serializer state.
 pub struct BocHeader<'a, C, S = ahash::RandomState> {
     root_rev_indices: Vec<u32>,
-    rev_indices: HashMap<CellHash, u32, S>,
+    rev_indices: HashMap<&'a CellHash, u32, S>,
     rev_cells: Vec<&'a dyn Cell<C>>,
     total_data_size: u64,
     reference_count: u64,
@@ -151,43 +151,65 @@ where
     }
 
     fn fill(&mut self, root: &'a dyn Cell<C>) -> u32 {
+        const SAFE_DEPTH: u16 = 128;
+
         if let Some(index) = self.rev_indices.get(root.repr_hash()) {
             return *index;
         }
 
-        for child in root.references() {
-            self.fill_iter(child);
+        let repr_depth = root.repr_depth();
+        if repr_depth <= SAFE_DEPTH {
+            self.fill_recursive(root);
+        } else {
+            self.fill_deep(root, repr_depth);
         }
 
-        let index = self.cell_count;
-        self.rev_indices.insert(*root.repr_hash(), index);
-        self.rev_cells.push(root);
-
-        let descriptor = root.descriptor();
-        self.total_data_size += descriptor.byte_len_full(self.without_hashes);
-        self.reference_count += descriptor.reference_count() as u64;
-        self.cell_count += 1;
-
-        index
+        debug_assert!(self.cell_count > 0);
+        self.cell_count - 1
     }
 
-    // NOTE: Duplicate iteration method to reduce operations per child
-    fn fill_iter(&mut self, cell: &'a dyn Cell<C>) {
-        if self.rev_indices.contains_key(cell.repr_hash()) {
-            return;
-        }
-
+    fn fill_recursive(&mut self, cell: &'a dyn Cell<C>) {
         for child in cell.references() {
-            self.fill_iter(child);
+            if !self.rev_indices.contains_key(child.repr_hash()) {
+                self.fill_recursive(child);
+            }
         }
 
-        self.rev_indices.insert(*cell.repr_hash(), self.cell_count);
+        self.rev_indices.insert(cell.repr_hash(), self.cell_count);
         self.rev_cells.push(cell);
 
         let descriptor = cell.descriptor();
         self.total_data_size += descriptor.byte_len_full(self.without_hashes);
         self.reference_count += descriptor.reference_count() as u64;
         self.cell_count += 1;
+    }
+
+    #[cold]
+    fn fill_deep(&mut self, root: &'a dyn Cell<C>, repr_depth: u16) {
+        const MAX_DEFAULT_CAPACITY: u16 = 256;
+
+        let mut stack = Vec::with_capacity(repr_depth.min(MAX_DEFAULT_CAPACITY) as usize);
+        stack.push(root.references());
+
+        while let Some(children) = stack.last_mut() {
+            if let Some(cell) = children.next() {
+                if !self.rev_indices.contains_key(cell.repr_hash()) {
+                    stack.push(cell.references());
+                }
+            } else {
+                let cell = children.cell();
+
+                self.rev_indices.insert(cell.repr_hash(), self.cell_count);
+                self.rev_cells.push(cell);
+
+                let descriptor = cell.descriptor();
+                self.total_data_size += descriptor.byte_len_full(self.without_hashes);
+                self.reference_count += descriptor.reference_count() as u64;
+                self.cell_count += 1;
+
+                stack.pop();
+            }
+        }
     }
 }
 
