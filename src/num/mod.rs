@@ -992,30 +992,22 @@ mod tests {
 
     #[test]
     fn var_uint248_serialization() {
-        let finalizer = &mut RcCellFamily::default_finalizer();
-
         for i in 0..128 {
             let lo = 1u128 << i;
-            let mut builder = RcCellBuilder::new();
 
             let value = VarUint248::new(lo);
-            assert!(value.store_into(&mut builder, finalizer));
-            let cell = builder.build().unwrap();
+            let cell = RcCellBuilder::build_from(value).unwrap();
             assert_eq!(value.bit_len().unwrap(), cell.bit_len());
         }
     }
 
     #[test]
     fn var_uint248_deserialization() {
-        let finalizer = &mut RcCellFamily::default_finalizer();
-
         let mut lo: u128 = 0xababcdef89abcdefdeadbeeffafacafe;
         for _ in 0..=128 {
             let value = VarUint248::new(lo);
 
-            let mut builder = RcCellBuilder::new();
-            assert!(value.store_into(&mut builder, finalizer));
-            let cell = builder.build().unwrap();
+            let cell = RcCellBuilder::build_from(value).unwrap();
 
             let parsed_value = cell.parse::<VarUint248>().unwrap();
             assert_eq!(parsed_value, value);

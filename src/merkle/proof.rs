@@ -370,14 +370,11 @@ mod tests {
         where
             for<'c> C: DefaultFinalizer + 'c,
         {
-            let default = MerkleProof::<C>::default();
-
-            let mut builder = CellBuilder::<C>::new();
-            assert!(default.store_into(&mut builder, &mut C::default_finalizer()));
-            let cell = builder.build().unwrap();
+            let proof = MerkleProof::<C>::default();
+            let cell = CellBuilder::<C>::build_from(&proof).unwrap();
 
             let parsed = cell.as_ref().parse::<MerkleProof<C>>().unwrap();
-            assert_eq!(default, parsed);
+            assert_eq!(proof, parsed);
         }
 
         test_impl::<RcCellFamily>();
@@ -451,15 +448,6 @@ mod tests {
 
     #[test]
     fn create_proof_for_dict() {
-        fn serialize_dict<C>(dict: Dict<C, u32, u32>) -> CellContainer<C>
-        where
-            for<'c> C: DefaultFinalizer + 'c,
-        {
-            let mut builder = CellBuilder::<C>::new();
-            dict.store_into(&mut builder, &mut C::default_finalizer());
-            builder.build().unwrap()
-        }
-
         fn test_impl<C>()
         where
             C: Trackable,
@@ -474,7 +462,7 @@ mod tests {
 
             // Create a usage tree for accessing an element with keys 0 and 9
             let usage_tree = UsageTree::<C>::new(UsageTreeMode::OnDataAccess);
-            let tracked_cell = usage_tree.track(&serialize_dict(dict));
+            let tracked_cell = usage_tree.track(&CellBuilder::build_from(dict).unwrap());
             let tracked_dict = tracked_cell.as_ref().parse::<Dict<C, u32, u32>>().unwrap();
             tracked_dict.get(0).unwrap().unwrap();
             tracked_dict.get(9).unwrap().unwrap();

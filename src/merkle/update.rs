@@ -503,12 +503,6 @@ mod tests {
 
     #[test]
     fn dict_merkle_update() {
-        fn serialize_dict(dict: RcDict<u32, u32>) -> RcCell {
-            let mut builder = RcCellBuilder::new();
-            dict.store_into(&mut builder, &mut RcCellFamily::default_finalizer());
-            builder.build().unwrap()
-        }
-
         fn visit_all_cells(cell: &RcCell) -> ahash::HashSet<&CellHash> {
             let mut result = ahash::HashSet::default();
 
@@ -535,12 +529,12 @@ mod tests {
         }
 
         // Serialize old dict
-        let old_dict_cell = serialize_dict(dict.clone());
+        let old_dict_cell = CellBuilder::build_from(&dict).unwrap();
         let old_dict_hashes = visit_all_cells(&old_dict_cell);
 
         // Serialize new dict
         dict.set(0, 1).unwrap();
-        let new_dict_cell = serialize_dict(dict);
+        let new_dict_cell = CellBuilder::build_from(dict).unwrap();
 
         assert_ne!(old_dict_cell.as_ref(), new_dict_cell.as_ref());
 

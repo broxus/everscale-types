@@ -493,9 +493,7 @@ mod tests {
     use crate::prelude::{RcBoc, RcCell, RcCellBuilder, RcCellFamily};
 
     fn serialize_any<T: Store<RcCellFamily>>(data: T) -> RcCell {
-        let mut builder = RcCellBuilder::new();
-        assert!(data.store_into(&mut builder, &mut RcCellFamily::default_finalizer()));
-        builder.build().unwrap()
+        CellBuilder::build_from(data).unwrap()
     }
 
     fn check_block(boc_str: &str) -> RcCell {

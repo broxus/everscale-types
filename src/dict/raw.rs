@@ -646,18 +646,10 @@ mod tests {
     fn dict_set() {
         let mut dict = RawDict::<RcCellFamily, 32>::new();
 
-        let key = {
-            let mut builder = RcCellBuilder::new();
-            builder.store_u32(123);
-            builder.build().unwrap()
-        };
+        let key = RcCellBuilder::build_from(123u32).unwrap();
 
         let empty_value = RcCellFamily::empty_cell();
-        let not_empty_value = {
-            let mut builder = RcCellBuilder::new();
-            builder.store_u16(0xffff);
-            builder.build().unwrap()
-        };
+        let not_empty_value = RcCellBuilder::build_from(0xffffu16).unwrap();
 
         dict.set(key.as_slice(), empty_value.as_slice()).unwrap();
         {
@@ -767,11 +759,7 @@ mod tests {
 
         let dict = boc.parse::<RawDict<_, 32>>().unwrap();
 
-        let key = {
-            let mut builder = RcCellBuilder::new();
-            builder.store_u32(u32::from_be_bytes(123u32.to_le_bytes()));
-            builder.build().unwrap()
-        };
+        let key = RcCellBuilder::build_from(u32::from_be_bytes(123u32.to_le_bytes())).unwrap();
         let value = dict.get(key.as_slice()).unwrap().unwrap();
 
         let value = {

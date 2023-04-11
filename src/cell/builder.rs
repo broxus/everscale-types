@@ -179,6 +179,36 @@ macro_rules! impl_store_uint {
 }
 
 impl<C: CellFamily> CellBuilder<C> {
+    /// Builds a new cell from the specified data using the default finalizer.
+    #[inline]
+    pub fn build_from<T>(data: T) -> Option<CellContainer<C>>
+    where
+        T: Store<C>,
+        for<'c> C: DefaultFinalizer + 'c,
+    {
+        Self::build_from_ext(data, &mut C::default_finalizer())
+    }
+
+    /// Builds a new cell from the specified data using the provided finalizer.
+    #[inline]
+    pub fn build_from_ext<T>(data: T, finalizer: &mut dyn Finalizer<C>) -> Option<CellContainer<C>>
+    where
+        T: Store<C>,
+    {
+        fn build_from_ext_impl<C: CellFamily>(
+            data: &dyn Store<C>,
+            finalizer: &mut dyn Finalizer<C>,
+        ) -> Option<CellContainer<C>> {
+            let mut builder = CellBuilder::<C>::new();
+            if data.store_into(&mut builder, finalizer) {
+                builder.build_ext(finalizer)
+            } else {
+                None
+            }
+        }
+        build_from_ext_impl(&data, finalizer)
+    }
+
     /// Creates an empty cell builder.
     pub fn new() -> Self {
         Self {

@@ -401,13 +401,7 @@ pub struct HashUpdate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prelude::{RcBoc, RcCell, RcCellBuilder, RcCellFamily};
-
-    fn serialize_tx(tx: Transaction<RcCellFamily>) -> RcCell {
-        let mut builder = RcCellBuilder::new();
-        assert!(tx.store_into(&mut builder, &mut RcCellFamily::default_finalizer()));
-        builder.build().unwrap()
-    }
+    use crate::prelude::{CellBuilder, RcBoc, RcCell};
 
     fn check_tx(boc: &str) -> RcCell {
         let boc = RcBoc::decode_base64(boc).unwrap();
@@ -438,7 +432,7 @@ mod tests {
         let info = tx.load_info().unwrap();
         println!("info: {info:#?}");
 
-        let serialized = serialize_tx(tx);
+        let serialized = CellBuilder::build_from(tx).unwrap();
         assert_eq!(serialized.as_ref(), boc.as_ref());
         serialized
     }

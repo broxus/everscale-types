@@ -575,12 +575,10 @@ fn load_ext_addr<C: CellFamily>(slice: &mut CellSlice<'_, C>) -> Option<Option<E
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prelude::{RcBoc, RcCell, RcCellBuilder, RcCellFamily};
+    use crate::prelude::{RcBoc, RcCell, RcCellFamily};
 
     fn serialize_message(message: Message<RcCellFamily>) -> RcCell {
-        let mut builder = RcCellBuilder::new();
-        assert!(message.store_into(&mut builder, &mut RcCellFamily::default_finalizer()));
-        builder.build().unwrap()
+        CellBuilder::build_from(message).unwrap()
     }
 
     fn check_message(boc: &str) -> RcCell {
@@ -589,9 +587,7 @@ mod tests {
         println!("message: {message:#?}");
 
         if let Some(init) = &message.init {
-            let mut builder = RcCellBuilder::new();
-            init.store_into(&mut builder, &mut RcCellFamily::default_finalizer());
-            let init = builder.build().unwrap();
+            let init = CellBuilder::build_from(init).unwrap();
             println!("{}", RcBoc::encode_base64(init));
         }
 
