@@ -57,10 +57,11 @@ cargo +nightly miri test
 cargo install cargo-fuzz
 
 # Run any of the fuzzer targets
-cargo +nightly fuzz run boc_arc_decode_pair -j 12
-cargo +nightly fuzz run boc_arc_decode -j 12
-cargo +nightly fuzz run boc_rc_decode_pair -j 12
-cargo +nightly fuzz run boc_rc_decode -j 12
+cargo +nightly fuzz run boc_arc_decode_pair -j 12 -- -merge=1 fuzz/corpus/boc_*_decode*
+cargo +nightly fuzz run boc_arc_decode -j 12 -- -merge=1 fuzz/corpus/boc_*_decode*
+cargo +nightly fuzz run boc_rc_decode_pair -j 12 -- -merge=1 fuzz/corpus/boc_*_decode*
+cargo +nightly fuzz run boc_rc_decode -j 12 -- -merge=1 fuzz/corpus/boc_*_decode*
+
 ```
 
 ## Contributing
