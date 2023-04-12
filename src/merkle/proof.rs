@@ -277,6 +277,8 @@ where
 
                     // Check if child is in a tree
                     match self.filter.check(child_repr_hash) {
+                        // Included subtrees are used as is
+                        FilterAction::IncludeSubtree => last.references.peek_prev_cloned()?,
                         // Replace all skipped subtrees with pruned branch cells
                         FilterAction::Skip if descriptor.reference_count() > 0 => {
                             // Create pruned branch
@@ -291,8 +293,6 @@ where
                             // Use new pruned branch as a child
                             child
                         }
-                        // Included subtrees are used as is
-                        FilterAction::IncludeSubtree => last.references.peek_prev_cloned()?,
                         // All other cells will be included in a different branch
                         _ => {
                             // Add merkle offset to the current merkle depth
@@ -479,6 +479,72 @@ mod tests {
             dict.get(9).unwrap().unwrap();
 
             assert!(matches!(dict.get(5), Err(Error::PrunedBranchAccess)));
+        }
+
+        test_impl::<RcCellFamily>();
+        test_impl::<ArcCellFamily>();
+    }
+
+    #[test]
+    fn proof_with_subtree() {
+        fn test_impl<C>()
+        where
+            C: Trackable,
+            for<'c> C: DefaultFinalizer + 'c,
+        {
+            let mut dict = Dict::<C, u32, u32>::new();
+            for i in 0..10 {
+                dict.add(i, i * 10).unwrap();
+            }
+            let dict = CellBuilder::<C>::build_from(dict).unwrap();
+
+            let some_other_cell = {
+                let mut builder = CellBuilder::<C>::new();
+                assert!(builder.store_u128(123123));
+                assert!(builder.store_reference(C::empty_cell()));
+                assert!(builder.store_reference(C::empty_cell()));
+                builder.build().unwrap()
+            };
+
+            let root_cell = {
+                let mut builder = CellBuilder::<C>::new();
+                assert!(builder.store_u128(321321));
+                assert!(builder.store_reference(some_other_cell));
+                assert!(builder.store_reference(dict.clone()));
+                builder.build().unwrap()
+            };
+
+            let mut usage_tree = UsageTree::<C>::new(UsageTreeMode::OnDataAccess).with_subtrees();
+            let root_cell = usage_tree.track(&root_cell);
+
+            {
+                let mut root_cell = root_cell.as_ref().as_slice();
+                root_cell.load_u32().unwrap();
+
+                assert!(usage_tree.add_subtree(dict.as_ref()));
+            }
+
+            let proof = MerkleProof::create(root_cell.as_ref(), usage_tree)
+                .build()
+                .unwrap();
+            let mut virtual_cell = proof.cell.as_ref().virtualize().as_slice();
+
+            assert_eq!(virtual_cell.load_u128(), Some(321321));
+
+            let first_ref = virtual_cell.load_reference().unwrap();
+            assert_eq!(first_ref.cell_type(), CellType::PrunedBranch);
+
+            let second_ref = virtual_cell.load_reference().unwrap();
+            assert_eq!(second_ref.cell_type(), CellType::Ordinary);
+            assert!(second_ref.descriptor().level_mask().is_empty());
+
+            let dict = second_ref.parse::<Dict<C, u32, u32>>().unwrap();
+            for (i, entry) in dict.iter().enumerate() {
+                let (key, value) = entry.unwrap();
+                assert_eq!(i, key as usize);
+                assert_eq!(key * 10, value);
+            }
+            assert_eq!(dict.values().count(), 10);
         }
 
         test_impl::<RcCellFamily>();
