@@ -61,8 +61,13 @@ impl<'a, C: CellFamily, K, A: Load<'a, C>, V> Load<'a, C> for AugDict<C, K, A, V
 
 impl<C: CellFamily, K, A: Store<C>, V> Store<C> for AugDict<C, K, A, V> {
     #[inline]
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        self.dict.store_into(builder, finalizer) && self.extra.store_into(builder, finalizer)
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
+        ok!(self.dict.store_into(builder, finalizer));
+        self.extra.store_into(builder, finalizer)
     }
 }
 
@@ -162,12 +167,9 @@ where
     let root_bits = root.remaining_bits() - slice.remaining_bits();
     let root_refs = root.remaining_refs() - slice.remaining_refs();
 
-    let mut builder = CellBuilder::<C>::new();
-    if builder.store_slice(root.get_prefix(root_bits, root_refs)) {
-        Some((extra, builder.build_ext(finalizer)?))
-    } else {
-        None
-    }
+    let mut b = CellBuilder::<C>::new();
+    b.store_slice(root.get_prefix(root_bits, root_refs)).ok()?;
+    Some((extra, b.build_ext(finalizer).ok()?))
 }
 
 impl<C: CellFamily, K, A, V> AugDict<C, K, A, V> {

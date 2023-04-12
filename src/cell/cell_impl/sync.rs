@@ -8,6 +8,7 @@ use super::{
 };
 use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 use crate::cell::{Cell, CellContainer, CellFamily, CellHash, CellType};
+use crate::error::Error;
 use crate::util::TryAsMut;
 
 /// Thread-safe cell family.
@@ -66,30 +67,27 @@ impl<T: ?Sized> TryAsMut<T> for Arc<T> {
 pub struct ArcCellFinalizer;
 
 impl Finalizer<ArcCellFamily> for ArcCellFinalizer {
-    fn finalize_cell(&mut self, ctx: CellParts<ArcCellFamily>) -> Option<ArcCell> {
+    fn finalize_cell(&mut self, ctx: CellParts<ArcCellFamily>) -> Result<ArcCell, Error> {
         let hashes = ctx.compute_hashes()?;
         // SAFETY: ctx now represents a well-formed cell
-        unsafe { make_cell(ctx, hashes) }
+        Ok(unsafe { make_cell(ctx, hashes) })
     }
 }
 
-unsafe fn make_cell(
-    ctx: CellParts<ArcCellFamily>,
-    hashes: Vec<(CellHash, u16)>,
-) -> Option<ArcCell> {
+unsafe fn make_cell(ctx: CellParts<ArcCellFamily>, hashes: Vec<(CellHash, u16)>) -> ArcCell {
     match ctx.descriptor.cell_type() {
         CellType::PrunedBranch => {
             debug_assert!(hashes.len() == 1);
             let repr = hashes.get_unchecked(0);
 
-            Some(make_pruned_branch(
+            make_pruned_branch(
                 PrunedBranchHeader {
                     repr_hash: repr.0,
                     level: ctx.descriptor.level_mask().level(),
                     descriptor: ctx.descriptor,
                 },
                 ctx.data,
-            ))
+            )
         }
         CellType::LibraryReference => {
             debug_assert!(hashes.len() == 1);
@@ -98,16 +96,16 @@ unsafe fn make_cell(
             debug_assert!(ctx.descriptor.byte_len() == 33);
             debug_assert!(ctx.data.len() == 33);
 
-            Some(Arc::new(LibraryReference {
+            Arc::new(LibraryReference {
                 repr_hash: repr.0,
                 descriptor: ctx.descriptor,
                 data: *(ctx.data.as_ptr() as *const [u8; 33]),
-            }))
+            })
         }
         CellType::Ordinary if ctx.descriptor.d1 == 0 && ctx.descriptor.d2 == 0 => {
-            Some(Arc::new(EmptyOrdinaryCell))
+            Arc::new(EmptyOrdinaryCell)
         }
-        _ => Some(make_ordinary_cell(
+        _ => make_ordinary_cell(
             OrdinaryCellHeader {
                 bit_len: ctx.bit_len,
                 #[cfg(feature = "stats")]
@@ -118,7 +116,7 @@ unsafe fn make_cell(
                 without_first: false,
             },
             ctx.data,
-        )),
+        ),
     }
 }
 

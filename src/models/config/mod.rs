@@ -24,12 +24,17 @@ pub struct BlockchainConfig<C: CellFamily> {
 }
 
 impl<C: CellFamily> Store<C> for BlockchainConfig<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        _: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         let params_root = match self.params.root() {
             Some(root) => root.clone(),
-            None => return false,
+            None => return Err(Error::InvalidData),
         };
-        builder.store_u256(&self.address) && builder.store_reference(params_root)
+        ok!(builder.store_u256(&self.address));
+        builder.store_reference(params_root)
     }
 }
 

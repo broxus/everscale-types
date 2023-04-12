@@ -99,14 +99,9 @@ where
         finalizer: &mut dyn Finalizer<C>,
     ) -> Result<CellContainer<C>, Error> {
         let mut builder = CellBuilder::<C>::new();
-        if write_label(key, key_bit_len, &mut builder) && builder.store_slice(value) {
-            match builder.build_ext(finalizer) {
-                Some(data) => Ok(data),
-                None => Err(Error::CellOverflow), // TODO: use errors in finalizer
-            }
-        } else {
-            Err(Error::CellOverflow)
-        }
+        ok!(write_label(key, key_bit_len, &mut builder));
+        ok!(builder.store_slice(value));
+        builder.build_ext(finalizer)
     }
 
     // Splits an edge or leaf
@@ -143,17 +138,10 @@ where
 
         // Create fork
         let mut builder = CellBuilder::<C>::new();
-        if write_label(lcp, prev_key_bit_len, &mut builder)
-            && builder.store_reference(left)
-            && builder.store_reference(right)
-        {
-            match builder.build_ext(finalizer) {
-                Some(data) => Ok(data),
-                None => Err(Error::CellOverflow), // TODO: use errors in finalizer
-            }
-        } else {
-            Err(Error::CellOverflow)
-        }
+        ok!(write_label(lcp, prev_key_bit_len, &mut builder));
+        ok!(builder.store_reference(left));
+        ok!(builder.store_reference(right));
+        builder.build_ext(finalizer)
     }
 
     #[derive(Clone, Copy, Eq, PartialEq)]
@@ -265,17 +253,10 @@ where
         };
 
         let mut builder = CellBuilder::<C>::new();
-        if builder.store_slice_data(last.data)
-            && builder.store_reference(left)
-            && builder.store_reference(right)
-        {
-            leaf = match builder.build_ext(finalizer) {
-                Some(data) => data,
-                None => return Err(Error::CellOverflow), // TODO: use errors in finalizer
-            };
-        } else {
-            return Err(Error::CellOverflow);
-        }
+        ok!(builder.store_slice_data(last.data));
+        ok!(builder.store_reference(left));
+        ok!(builder.store_reference(right));
+        leaf = ok!(builder.build_ext(finalizer));
     }
 
     Ok(Some(leaf))
@@ -364,8 +345,8 @@ where
     }
 
     let mut builder = CellBuilder::<C>::new();
-    if builder.store_slice(root) {
-        Some(builder.build_ext(finalizer)?)
+    if builder.store_slice(root).is_ok() {
+        builder.build_ext(finalizer).ok()
     } else {
         None
     }
@@ -375,7 +356,7 @@ fn write_label<C: CellFamily>(
     key: &CellSlice<C>,
     key_bit_len: u16,
     label: &mut CellBuilder<C>,
-) -> bool {
+) -> Result<(), Error> {
     if key_bit_len == 0 || key.is_data_empty() {
         return write_hml_empty(label);
     }
@@ -399,7 +380,7 @@ fn write_label<C: CellFamily>(
     } else if hml_long_len <= MAX_BIT_LEN {
         write_hml_long(key, bits_for_len, label)
     } else {
-        false
+        Err(Error::InvalidData)
     }
 }
 
@@ -420,27 +401,27 @@ where
     }
 }
 
-fn write_hml_empty<C: CellFamily>(label: &mut CellBuilder<C>) -> bool {
+fn write_hml_empty<C: CellFamily>(label: &mut CellBuilder<C>) -> Result<(), Error> {
     label.store_zeros(2)
 }
 
-fn write_hml_short<C: CellFamily>(key: &CellSlice<C>, label: &mut CellBuilder<C>) -> bool {
-    if !label.store_bit_zero() {
-        return false;
-    }
+fn write_hml_short<C: CellFamily>(
+    key: &CellSlice<C>,
+    label: &mut CellBuilder<C>,
+) -> Result<(), Error> {
+    ok!(label.store_bit_zero());
 
     let len = key.remaining_bits();
     for _ in 0..len / 32 {
-        if !label.store_u32(u32::MAX) {
-            return false;
-        }
+        ok!(label.store_u32(u32::MAX));
     }
 
     let rem = len % 32;
-    if rem != 0 && !label.store_uint(u64::MAX, rem) {
-        return false;
+    if rem != 0 {
+        ok!(label.store_uint(u64::MAX, rem));
     }
-    label.store_bit_zero() && label.store_slice_data(key)
+    ok!(label.store_bit_zero());
+    label.store_slice_data(key)
 }
 
 fn read_hml_short<'a, C: CellFamily>(label: &mut CellSlice<'a, C>) -> Option<CellSlice<'a, C>> {
@@ -460,11 +441,11 @@ fn write_hml_long<C: CellFamily>(
     key: &CellSlice<C>,
     bits_for_len: u16,
     label: &mut CellBuilder<C>,
-) -> bool {
-    label.store_bit_one()
-        && label.store_bit_zero()
-        && label.store_uint(key.remaining_bits() as u64, bits_for_len)
-        && label.store_slice_data(key)
+) -> Result<(), Error> {
+    ok!(label.store_bit_one());
+    ok!(label.store_bit_zero());
+    ok!(label.store_uint(key.remaining_bits() as u64, bits_for_len));
+    label.store_slice_data(key)
 }
 
 fn read_hml_long<'a, C: CellFamily>(
@@ -485,8 +466,9 @@ fn write_hml_same<C: CellFamily>(
     len: u16,
     bits_for_len: u16,
     label: &mut CellBuilder<C>,
-) -> bool {
-    label.store_small_uint(0b110 | bit as u8, 3) && label.store_uint(len as u64, bits_for_len)
+) -> Result<(), Error> {
+    ok!(label.store_small_uint(0b110 | bit as u8, 3));
+    label.store_uint(len as u64, bits_for_len)
 }
 
 fn read_hml_same<'a, C>(label: &mut CellSlice<'a, C>, bits_for_len: u16) -> Option<CellSlice<'a, C>>
@@ -506,12 +488,8 @@ fn serialize_entry<C: CellFamily, T: Store<C>>(
     finalizer: &mut dyn Finalizer<C>,
 ) -> Result<CellContainer<C>, Error> {
     let mut builder = CellBuilder::<C>::new();
-    if entry.store_into(&mut builder, finalizer) {
-        if let Some(key) = builder.build_ext(finalizer) {
-            return Ok(key);
-        }
-    }
-    Err(Error::CellOverflow)
+    ok!(entry.store_into(&mut builder, finalizer));
+    builder.build_ext(finalizer)
 }
 
 #[cfg(test)]
@@ -519,9 +497,9 @@ mod tests {
     use super::*;
     use crate::prelude::{RcCell, RcCellBuilder};
 
-    fn build_cell<F: FnOnce(&mut RcCellBuilder) -> bool>(f: F) -> RcCell {
+    fn build_cell<F: FnOnce(&mut RcCellBuilder) -> Result<(), Error>>(f: F) -> RcCell {
         let mut builder = RcCellBuilder::new();
-        assert!(f(&mut builder));
+        f(&mut builder).unwrap();
         builder.build().unwrap()
     }
 
@@ -532,15 +510,15 @@ mod tests {
         // Build key
         let key = {
             let mut builder = RcCellBuilder::new();
-            builder.store_zeros(5);
-            builder.store_bit_one();
+            builder.store_zeros(5).unwrap();
+            builder.store_bit_one().unwrap();
             builder.build().unwrap()
         };
 
         // Build label
         let label = {
             let mut builder = RcCellBuilder::new();
-            assert!(write_label(&key.as_slice(), key_bit_len, &mut builder));
+            write_label(&key.as_slice(), key_bit_len, &mut builder).unwrap();
             builder.build().unwrap()
         };
 
@@ -548,7 +526,7 @@ mod tests {
         let parsed_key = read_label(&mut label.as_slice(), key_bit_len).unwrap();
         let parsed_key = {
             let mut builder = RcCellBuilder::new();
-            builder.store_slice(parsed_key);
+            builder.store_slice(parsed_key).unwrap();
             builder.build().unwrap()
         };
 

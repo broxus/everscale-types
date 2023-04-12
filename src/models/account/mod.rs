@@ -78,7 +78,11 @@ impl AccountStatus {
 
 impl<C: CellFamily> Store<C> for AccountStatus {
     #[inline]
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        _: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         builder.store_small_uint(*self as u8, 2)
     }
 }
@@ -136,28 +140,32 @@ impl<C: CellFamily> OptionalAccount<C> {
 }
 
 impl<C: CellFamily> Store<C> for OptionalAccount<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         match &self.0 {
             None => builder.store_bit_zero(),
             Some(account) => {
                 let with_init_code_hash = account.init_code_hash.is_some();
-                let prefix_stored = if with_init_code_hash {
+                ok!(if with_init_code_hash {
                     builder.store_small_uint(0b0001, 4)
                 } else {
                     builder.store_bit_one()
-                };
+                });
 
-                prefix_stored
-                    && account.address.store_into(builder, finalizer)
-                    && account.storage_stat.store_into(builder, finalizer)
-                    && builder.store_u64(account.last_trans_lt)
-                    && account.balance.store_into(builder, finalizer)
-                    && account.state.store_into(builder, finalizer)
-                    && if let Some(init_code_hash) = &account.init_code_hash {
-                        builder.store_bit_one() && builder.store_u256(init_code_hash)
-                    } else {
-                        true
-                    }
+                ok!(account.address.store_into(builder, finalizer));
+                ok!(account.storage_stat.store_into(builder, finalizer));
+                ok!(builder.store_u64(account.last_trans_lt));
+                ok!(account.balance.store_into(builder, finalizer));
+                ok!(account.state.store_into(builder, finalizer));
+                if let Some(init_code_hash) = &account.init_code_hash {
+                    ok!(builder.store_bit_one());
+                    builder.store_u256(init_code_hash)
+                } else {
+                    Ok(())
+                }
             }
         }
     }
@@ -223,11 +231,21 @@ pub enum AccountState<C: CellFamily> {
 }
 
 impl<C: CellFamily> Store<C> for AccountState<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         match self {
             Self::Uninit => builder.store_small_uint(0b00, 2),
-            Self::Active(state) => builder.store_bit_one() && state.store_into(builder, finalizer),
-            Self::Frozen(hash) => builder.store_small_uint(0b01, 2) && builder.store_u256(hash),
+            Self::Active(state) => {
+                ok!(builder.store_bit_one());
+                state.store_into(builder, finalizer)
+            }
+            Self::Frozen(hash) => {
+                ok!(builder.store_small_uint(0b01, 2));
+                builder.store_u256(hash)
+            }
         }
     }
 }
@@ -300,7 +318,11 @@ impl SpecialFlags {
 }
 
 impl<C: CellFamily> Store<C> for SpecialFlags {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        _: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         builder.store_small_uint(((self.tick as u8) << 1) | self.tock as u8, 2)
     }
 }

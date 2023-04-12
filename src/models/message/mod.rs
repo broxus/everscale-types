@@ -1,6 +1,7 @@
 //! Message models.
 
 use crate::cell::*;
+use crate::error::Error;
 use crate::num::*;
 use crate::util::{CustomClone, CustomDebug, CustomEq};
 
@@ -25,7 +26,11 @@ pub struct Message<'a, C: CellFamily> {
 }
 
 impl<'a, C: CellFamily> Store<C> for Message<'a, C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         let (layout, bits, refs) = match self.layout {
             Some(layout) => {
                 let (bits, refs) = layout.compute_full_len(&self.info, &self.init, &self.body);
@@ -36,37 +41,34 @@ impl<'a, C: CellFamily> Store<C> for Message<'a, C> {
 
         // Check capacity
         if !builder.has_capacity(bits, refs) {
-            return false;
+            return Err(Error::CellOverflow);
         }
 
         // Try to store info
-        if !self.info.store_into(builder, finalizer) {
-            return false;
-        }
+        ok!(self.info.store_into(builder, finalizer));
 
         // Try to store init
-        let init_stored = match &self.init {
+        ok!(match &self.init {
             Some(value) => {
-                builder.store_bit_one() // just$1
-                    && SliceOrCell {
+                ok!(builder.store_bit_one()); // just$1
+                SliceOrCell {
                     to_cell: layout.init_to_cell,
                     value,
                 }
-                    .store_into(builder, finalizer)
+                .store_into(builder, finalizer)
             }
             None => builder.store_bit_zero(), // nothing$0
-        };
+        });
 
         // Try to store body
-        init_stored
-            && match &self.body {
-                Some(value) => SliceOrCell {
-                    to_cell: layout.body_to_cell,
-                    value,
-                }
-                .store_into(builder, finalizer),
-                None => builder.store_bit_zero(),
+        match &self.body {
+            Some(value) => SliceOrCell {
+                to_cell: layout.body_to_cell,
+                value,
             }
+            .store_into(builder, finalizer),
+            None => builder.store_bit_zero(),
+        }
     }
 }
 
@@ -108,24 +110,25 @@ struct SliceOrCell<T> {
 
 impl<C: CellFamily, T: Store<C>> Store<C> for SliceOrCell<T> {
     #[inline]
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         if self.to_cell {
             let cell = {
                 let mut builder = CellBuilder::<C>::new();
-                if !self.value.store_into(&mut builder, finalizer) {
-                    return false;
-                }
-                match builder.build_ext(finalizer) {
-                    Some(value) => value,
-                    None => return false,
-                }
+                ok!(self.value.store_into(&mut builder, finalizer));
+                ok!(builder.build_ext(finalizer))
             };
 
             // right$1 ^Cell
-            builder.store_bit_one() && builder.store_reference(cell)
+            ok!(builder.store_bit_one());
+            builder.store_reference(cell)
         } else {
             // left$0 X
-            builder.store_bit_zero() && self.value.store_into(builder, finalizer)
+            ok!(builder.store_bit_zero());
+            self.value.store_into(builder, finalizer)
         }
     }
 }
@@ -326,14 +329,23 @@ impl<C: CellFamily> MsgInfo<C> {
 }
 
 impl<C: CellFamily> Store<C> for MsgInfo<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         match self {
-            Self::Int(info) => builder.store_bit_zero() && info.store_into(builder, finalizer),
+            Self::Int(info) => {
+                ok!(builder.store_bit_zero());
+                info.store_into(builder, finalizer)
+            }
             Self::ExtIn(info) => {
-                builder.store_small_uint(0b10, 2) && info.store_into(builder, finalizer)
+                ok!(builder.store_small_uint(0b10, 2));
+                info.store_into(builder, finalizer)
             }
             Self::ExtOut(info) => {
-                builder.store_small_uint(0b11, 2) && info.store_into(builder, finalizer)
+                ok!(builder.store_small_uint(0b11, 2));
+                info.store_into(builder, finalizer)
             }
         }
     }
@@ -409,17 +421,21 @@ impl<C: CellFamily> IntMsgInfo<C> {
 }
 
 impl<C: CellFamily> Store<C> for IntMsgInfo<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         let flags =
             ((self.ihr_disabled as u8) << 2) | ((self.bounce as u8) << 1) | self.bounced as u8;
-        builder.store_small_uint(flags, 3)
-            && self.src.store_into(builder, finalizer)
-            && self.dst.store_into(builder, finalizer)
-            && self.value.store_into(builder, finalizer)
-            && self.ihr_fee.store_into(builder, finalizer)
-            && self.fwd_fee.store_into(builder, finalizer)
-            && builder.store_u64(self.created_lt)
-            && builder.store_u32(self.created_at)
+        ok!(builder.store_small_uint(flags, 3));
+        ok!(self.src.store_into(builder, finalizer));
+        ok!(self.dst.store_into(builder, finalizer));
+        ok!(self.value.store_into(builder, finalizer));
+        ok!(self.ihr_fee.store_into(builder, finalizer));
+        ok!(self.fwd_fee.store_into(builder, finalizer));
+        ok!(builder.store_u64(self.created_lt));
+        builder.store_u32(self.created_at)
     }
 }
 
@@ -464,14 +480,20 @@ impl ExtInMsgInfo {
 }
 
 impl<C: CellFamily> Store<C> for ExtInMsgInfo {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         if !self.import_fee.is_valid() {
-            return false;
+            return Err(Error::InvalidData);
         }
-        builder.has_capacity(self.bit_len(), 0)
-            && store_ext_addr(builder, finalizer, &self.src)
-            && self.dst.store_into(builder, finalizer)
-            && self.import_fee.store_into(builder, finalizer)
+        if !builder.has_capacity(self.bit_len(), 0) {
+            return Err(Error::CellOverflow);
+        }
+        ok!(store_ext_addr(builder, finalizer, &self.src));
+        ok!(self.dst.store_into(builder, finalizer));
+        self.import_fee.store_into(builder, finalizer)
     }
 }
 
@@ -506,13 +528,19 @@ impl ExtOutMsgInfo {
 }
 
 impl<C: CellFamily> Store<C> for ExtOutMsgInfo {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        builder.has_capacity(self.bit_len(), 0)
-            && builder.store_small_uint(0b11, 2)
-            && self.src.store_into(builder, finalizer)
-            && store_ext_addr(builder, finalizer, &self.dst)
-            && builder.store_u64(self.created_lt)
-            && builder.store_u32(self.created_at)
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
+        if !builder.has_capacity(self.bit_len(), 0) {
+            return Err(Error::CellOverflow);
+        }
+        ok!(builder.store_small_uint(0b11, 2));
+        ok!(self.src.store_into(builder, finalizer));
+        ok!(store_ext_addr(builder, finalizer, &self.dst));
+        ok!(builder.store_u64(self.created_lt));
+        builder.store_u32(self.created_at)
     }
 }
 
@@ -539,15 +567,17 @@ fn store_ext_addr<C: CellFamily>(
     builder: &mut CellBuilder<C>,
     finalizer: &mut dyn Finalizer<C>,
     addr: &Option<ExtAddr>,
-) -> bool {
+) -> Result<(), Error> {
     match addr {
         None => builder.store_zeros(2),
         Some(ExtAddr { data_bit_len, data }) => {
-            builder.has_capacity(2 + Uint9::BITS + data_bit_len.into_inner(), 0)
-                && builder.store_bit_zero()
-                && builder.store_bit_one()
-                && data_bit_len.store_into(builder, finalizer)
-                && builder.store_raw(data, data_bit_len.into_inner())
+            if !builder.has_capacity(2 + Uint9::BITS + data_bit_len.into_inner(), 0) {
+                return Err(Error::CellOverflow);
+            }
+            ok!(builder.store_bit_zero());
+            ok!(builder.store_bit_one());
+            ok!(data_bit_len.store_into(builder, finalizer));
+            builder.store_raw(data, data_bit_len.into_inner())
         }
     }
 }

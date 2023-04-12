@@ -2,6 +2,7 @@ use std::num::{NonZeroU16, NonZeroU32, NonZeroU8};
 
 use crate::cell::*;
 use crate::dict::Dict;
+use crate::error::Error;
 use crate::num::{Tokens, Uint12};
 use crate::util::*;
 
@@ -79,21 +80,29 @@ impl WorkchainDescription {
 }
 
 impl<C: CellFamily> Store<C> for WorkchainDescription {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
+        if !self.is_valid() {
+            return Err(Error::InvalidData);
+        }
+
         let flags: u16 = ((self.format.is_basic() as u16) << 15)
             | ((self.active as u16) << 14)
             | ((self.accept_msgs as u16) << 13);
-        self.is_valid()
-            && builder.store_u8(Self::TAG)
-            && builder.store_u32(self.enabled_since)
-            && builder.store_u8(self.actual_min_split)
-            && builder.store_u8(self.min_split)
-            && builder.store_u8(self.max_split)
-            && builder.store_u16(flags)
-            && builder.store_u256(&self.zerostate_root_hash)
-            && builder.store_u256(&self.zerostate_file_hash)
-            && builder.store_u32(self.version)
-            && self.format.store_into(builder, finalizer)
+
+        ok!(builder.store_u8(Self::TAG));
+        ok!(builder.store_u32(self.enabled_since));
+        ok!(builder.store_u8(self.actual_min_split));
+        ok!(builder.store_u8(self.min_split));
+        ok!(builder.store_u8(self.max_split));
+        ok!(builder.store_u16(flags));
+        ok!(builder.store_u256(&self.zerostate_root_hash));
+        ok!(builder.store_u256(&self.zerostate_file_hash));
+        ok!(builder.store_u32(self.version));
+        self.format.store_into(builder, finalizer)
     }
 }
 
@@ -160,13 +169,19 @@ impl WorkchainFormat {
 }
 
 impl<C: CellFamily> Store<C> for WorkchainFormat {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         match self {
             Self::Basic(value) => {
-                builder.store_small_uint(0x1, 4) && value.store_into(builder, finalizer)
+                ok!(builder.store_small_uint(0x1, 4));
+                value.store_into(builder, finalizer)
             }
             Self::Extended(value) => {
-                builder.store_small_uint(0x0, 4) && value.store_into(builder, finalizer)
+                ok!(builder.store_small_uint(0x0, 4));
+                value.store_into(builder, finalizer)
             }
         }
     }
@@ -310,18 +325,22 @@ impl GasLimitsPrices {
 }
 
 impl<C: CellFamily> Store<C> for GasLimitsPrices {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
-        builder.store_u8(Self::TAG_FLAT_PFX)
-            && builder.store_u64(self.flat_gas_limit)
-            && builder.store_u64(self.flat_gas_price)
-            && builder.store_u8(Self::TAG_EXT)
-            && builder.store_u64(self.gas_price)
-            && builder.store_u64(self.gas_limit)
-            && builder.store_u64(self.special_gas_limit)
-            && builder.store_u64(self.gas_credit)
-            && builder.store_u64(self.block_gas_limit)
-            && builder.store_u64(self.freeze_due_limit)
-            && builder.store_u64(self.delete_due_limit)
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        _: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
+        ok!(builder.store_u8(Self::TAG_FLAT_PFX));
+        ok!(builder.store_u64(self.flat_gas_limit));
+        ok!(builder.store_u64(self.flat_gas_price));
+        ok!(builder.store_u8(Self::TAG_EXT));
+        ok!(builder.store_u64(self.gas_price));
+        ok!(builder.store_u64(self.gas_limit));
+        ok!(builder.store_u64(self.special_gas_limit));
+        ok!(builder.store_u64(self.gas_credit));
+        ok!(builder.store_u64(self.block_gas_limit));
+        ok!(builder.store_u64(self.freeze_due_limit));
+        builder.store_u64(self.delete_due_limit)
     }
 }
 
@@ -431,14 +450,18 @@ impl CatchainConfig {
 }
 
 impl<C: CellFamily> Store<C> for CatchainConfig {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        _: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         let flags = ((self.isolate_mc_validators as u8) << 1) | (self.shuffle_mc_validators as u8);
-        builder.store_u8(Self::TAG_V2)
-            && builder.store_u8(flags)
-            && builder.store_u32(self.mc_catchain_lifetime)
-            && builder.store_u32(self.shard_catchain_lifetime)
-            && builder.store_u32(self.shard_validators_lifetime)
-            && builder.store_u32(self.shard_validators_num)
+        ok!(builder.store_u8(Self::TAG_V2));
+        ok!(builder.store_u8(flags));
+        ok!(builder.store_u32(self.mc_catchain_lifetime));
+        ok!(builder.store_u32(self.shard_catchain_lifetime));
+        ok!(builder.store_u32(self.shard_validators_lifetime));
+        builder.store_u32(self.shard_validators_num)
     }
 }
 
@@ -492,19 +515,23 @@ impl ConsensusConfig {
 }
 
 impl<C: CellFamily> Store<C> for ConsensusConfig {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        _: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         let flags = self.new_catchain_ids as u8;
 
-        builder.store_u8(Self::TAG_V2)
-            && builder.store_u8(flags)
-            && builder.store_u8(self.round_candidates.get() as u8)
-            && builder.store_u32(self.next_candidate_delay_ms)
-            && builder.store_u32(self.consensus_timeout_ms)
-            && builder.store_u32(self.fast_attempts)
-            && builder.store_u32(self.attempt_duration)
-            && builder.store_u32(self.catchain_max_deps)
-            && builder.store_u32(self.max_block_bytes)
-            && builder.store_u32(self.max_collated_bytes)
+        ok!(builder.store_u8(Self::TAG_V2));
+        ok!(builder.store_u8(flags));
+        ok!(builder.store_u8(self.round_candidates.get() as u8));
+        ok!(builder.store_u32(self.next_candidate_delay_ms));
+        ok!(builder.store_u32(self.consensus_timeout_ms));
+        ok!(builder.store_u32(self.fast_attempts));
+        ok!(builder.store_u32(self.attempt_duration));
+        ok!(builder.store_u32(self.catchain_max_deps));
+        ok!(builder.store_u32(self.max_block_bytes));
+        builder.store_u32(self.max_collated_bytes)
     }
 }
 
@@ -559,23 +586,28 @@ impl<C> Store<C> for ValidatorSet
 where
     for<'c> C: CellFamily + 'c,
 {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        let Ok(total) = u16::try_from(self.list.len()) else { return false };
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
+        let Ok(total) = u16::try_from(self.list.len()) else {
+            return Err(Error::InvalidData)
+        };
 
+        // TODO: optimize
         let mut validators = Dict::<C, u16, ValidatorDescription>::new();
         for (i, item) in self.list.iter().enumerate() {
-            if validators.set_ext(i as u16, item, finalizer).is_err() {
-                return false;
-            }
+            ok!(validators.set_ext(i as u16, item, finalizer));
         }
 
-        builder.store_u8(Self::TAG_V2)
-            && builder.store_u32(self.utime_since)
-            && builder.store_u32(self.utime_until)
-            && builder.store_u16(total)
-            && builder.store_u16(self.main.get())
-            && builder.store_u64(self.total_weight)
-            && validators.store_into(builder, finalizer)
+        ok!(builder.store_u8(Self::TAG_V2));
+        ok!(builder.store_u32(self.utime_since));
+        ok!(builder.store_u32(self.utime_until));
+        ok!(builder.store_u16(total));
+        ok!(builder.store_u16(self.main.get()));
+        ok!(builder.store_u64(self.total_weight));
+        validators.store_into(builder, finalizer)
     }
 }
 
@@ -667,8 +699,14 @@ impl ValidatorDescription {
 }
 
 impl<C: CellFamily> Store<C> for ValidatorDescription {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
-        let tag = if self.mc_seqno_since != 0 {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        _: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
+        let with_mc_seqno = self.mc_seqno_since != 0;
+
+        let tag = if with_mc_seqno {
             Self::TAG_WITH_MC_SEQNO
         } else if self.adnl_addr.is_some() {
             Self::TAG_WITH_ADNL
@@ -676,26 +714,25 @@ impl<C: CellFamily> Store<C> for ValidatorDescription {
             Self::TAG_BASIC
         };
 
-        if !(builder.store_u8(tag)
-            && builder.store_u32(Self::PUBKEY_TAG)
-            && builder.store_u256(&self.public_key)
-            && builder.store_u64(self.weight))
-        {
-            return false;
-        }
+        ok!(builder.store_u8(tag));
+        ok!(builder.store_u32(Self::PUBKEY_TAG));
+        ok!(builder.store_u256(&self.public_key));
+        ok!(builder.store_u64(self.weight));
 
         let mut adnl = self.adnl_addr.as_ref();
-        if self.mc_seqno_since != 0 {
+        if with_mc_seqno {
             adnl = Some(&[0; 32]);
         }
 
         if let Some(adnl) = adnl {
-            if !builder.store_u256(adnl) {
-                return false;
-            }
+            ok!(builder.store_u256(adnl));
         }
 
-        self.mc_seqno_since == 0 || builder.store_u32(self.mc_seqno_since)
+        if with_mc_seqno {
+            builder.store_u32(self.mc_seqno_since)
+        } else {
+            Ok(())
+        }
     }
 }
 

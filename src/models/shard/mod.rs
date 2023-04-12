@@ -25,7 +25,11 @@ pub enum ShardState<C: CellFamily> {
 }
 
 impl<C: CellFamily> Store<C> for ShardState<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         match self {
             Self::Unsplit(state) => state.store_into(builder, finalizer),
             Self::Split(state) => state.store_into(builder, finalizer),
@@ -103,38 +107,37 @@ impl<C: CellFamily> ShardStateUnsplit<C> {
 }
 
 impl<C: CellFamily> Store<C> for ShardStateUnsplit<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        let child_cell = 'cell: {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
+        let child_cell = {
             let mut builder = CellBuilder::<C>::new();
-            if builder.store_u64(self.overload_history)
-                && builder.store_u64(self.underload_history)
-                && self.total_balance.store_into(&mut builder, finalizer)
-                && self
-                    .total_validator_fees
-                    .store_into(&mut builder, finalizer)
-                && self.libraries.store_into(&mut builder, finalizer)
-                && self.master_ref.store_into(&mut builder, finalizer)
-            {
-                if let Some(cell) = builder.build_ext(finalizer) {
-                    break 'cell cell;
-                }
-            }
-            return false;
+            ok!(builder.store_u64(self.overload_history));
+            ok!(builder.store_u64(self.underload_history));
+            ok!(self.total_balance.store_into(&mut builder, finalizer));
+            ok!(self
+                .total_validator_fees
+                .store_into(&mut builder, finalizer));
+            ok!(self.libraries.store_into(&mut builder, finalizer));
+            ok!(self.master_ref.store_into(&mut builder, finalizer));
+            ok!(builder.build_ext(finalizer))
         };
 
-        builder.store_u32(Self::TAG)
-            && builder.store_u32(self.global_id as u32)
-            && self.shard_ident.store_into(builder, finalizer)
-            && builder.store_u32(self.seqno)
-            && builder.store_u32(self.vert_seqno)
-            && builder.store_u32(self.gen_utime)
-            && builder.store_u64(self.gen_lt)
-            && builder.store_u32(self.min_ref_mc_seqno)
-            && builder.store_reference(self.out_msg_queue_info.clone())
-            && builder.store_bit(self.before_split)
-            && builder.store_reference(self.accounts.cell.clone())
-            && builder.store_reference(child_cell)
-            && self.custom.store_into(builder, finalizer)
+        ok!(builder.store_u32(Self::TAG));
+        ok!(builder.store_u32(self.global_id as u32));
+        ok!(self.shard_ident.store_into(builder, finalizer));
+        ok!(builder.store_u32(self.seqno));
+        ok!(builder.store_u32(self.vert_seqno));
+        ok!(builder.store_u32(self.gen_utime));
+        ok!(builder.store_u64(self.gen_lt));
+        ok!(builder.store_u32(self.min_ref_mc_seqno));
+        ok!(builder.store_reference(self.out_msg_queue_info.clone()));
+        ok!(builder.store_bit(self.before_split));
+        ok!(builder.store_reference(self.accounts.cell.clone()));
+        ok!(builder.store_reference(child_cell));
+        self.custom.store_into(builder, finalizer)
     }
 }
 

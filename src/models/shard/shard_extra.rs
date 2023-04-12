@@ -1,5 +1,6 @@
 use crate::cell::*;
 use crate::dict::{AugDict, Dict};
+use crate::error::Error;
 use crate::num::*;
 use crate::util::{CustomClone, CustomDebug};
 
@@ -37,39 +38,39 @@ impl<C: CellFamily> McStateExtra<C> {
 }
 
 impl<C: CellFamily> Store<C> for McStateExtra<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         let flags = ((!self.copyleft_rewards.is_empty() as u16) << 1)
             | (self.block_create_stats.is_some() as u16);
 
-        let cell = 'cell: {
+        let cell = {
             let mut builder = CellBuilder::<C>::new();
-            if builder.store_u16(flags)
-                && self.validator_info.store_into(&mut builder, finalizer)
-                && self.prev_blocks.store_into(&mut builder, finalizer)
-                && builder.store_bit(self.after_key_block)
-                && self.last_key_block.store_into(&mut builder, finalizer)
-                && match &self.block_create_stats {
-                    Some(stats) => {
-                        builder.store_u8(Self::BLOCK_STATS_TAG)
-                            && stats.store_into(&mut builder, finalizer)
-                    }
-                    None => true,
-                }
-                && (self.copyleft_rewards.is_empty()
-                    || self.copyleft_rewards.store_into(&mut builder, finalizer))
-            {
-                if let Some(cell) = builder.build_ext(finalizer) {
-                    break 'cell cell;
-                }
+            ok!(builder.store_u16(flags));
+            ok!(self.validator_info.store_into(&mut builder, finalizer));
+            ok!(self.prev_blocks.store_into(&mut builder, finalizer));
+            ok!(builder.store_bit(self.after_key_block));
+            ok!(self.last_key_block.store_into(&mut builder, finalizer));
+
+            if let Some(stats) = &self.block_create_stats {
+                ok!(builder.store_u8(Self::BLOCK_STATS_TAG));
+                ok!(stats.store_into(&mut builder, finalizer));
             }
-            return false;
+
+            if !self.copyleft_rewards.is_empty() {
+                ok!(self.copyleft_rewards.store_into(&mut builder, finalizer));
+            }
+
+            ok!(builder.build_ext(finalizer))
         };
 
-        builder.store_u16(Self::TAG)
-            && self.shards.store_into(builder, finalizer)
-            && self.config.store_into(builder, finalizer)
-            && builder.store_reference(cell)
-            && self.global_balance.store_into(builder, finalizer)
+        ok!(builder.store_u16(Self::TAG));
+        ok!(self.shards.store_into(builder, finalizer));
+        ok!(self.config.store_into(builder, finalizer));
+        ok!(builder.store_reference(cell));
+        self.global_balance.store_into(builder, finalizer)
     }
 }
 

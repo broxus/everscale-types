@@ -134,10 +134,16 @@ impl<C: CellFamily> DepthBalanceInfo<C> {
 }
 
 impl<C: CellFamily> Store<C> for DepthBalanceInfo<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        self.is_valid()
-            && builder.store_small_uint(self.split_depth, Self::SPLIT_DEPTH_BITS)
-            && self.balance.store_into(builder, finalizer)
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
+        if !self.is_valid() {
+            return Err(Error::InvalidData);
+        }
+        ok!(builder.store_small_uint(self.split_depth, Self::SPLIT_DEPTH_BITS));
+        self.balance.store_into(builder, finalizer)
     }
 }
 

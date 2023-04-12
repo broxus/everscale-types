@@ -1,11 +1,12 @@
 use crate::cell::*;
+use crate::error::Error;
 
 /// Creates a pruned branch cell with the specified merkle depth.
 pub fn make_pruned_branch<C: CellFamily>(
     cell: &dyn Cell<C>,
     merkle_depth: u8,
     finalizer: &mut dyn Finalizer<C>,
-) -> Option<CellContainer<C>> {
+) -> Result<CellContainer<C>, Error> {
     let descriptor = cell.descriptor();
 
     let mut builder = CellBuilder::new();
@@ -14,14 +15,18 @@ pub fn make_pruned_branch<C: CellFamily>(
 
     builder.set_level_mask(level_mask);
     builder.set_exotic(true);
-    builder.store_u8(CellType::PrunedBranch.to_byte());
-    builder.store_u8(level_mask.to_byte());
+
+    _ = builder.store_u16(u16::from_be_bytes([
+        CellType::PrunedBranch.to_byte(),
+        level_mask.to_byte(),
+    ]));
+
     for i in 0..hash_count {
-        builder.store_u256(cell.hash(i));
+        _ = builder.store_u256(cell.hash(i));
     }
 
     for i in 0..hash_count {
-        builder.store_u16(cell.depth(i));
+        _ = builder.store_u16(cell.depth(i));
     }
 
     builder.build_ext(finalizer)
@@ -36,8 +41,8 @@ mod test {
     fn correct_pruned_branch() {
         let cell = {
             let mut builder = RcCellBuilder::new();
-            assert!(builder.store_u128(0xdeafbeaf123123));
-            assert!(builder.store_reference(RcCellFamily::empty_cell()));
+            builder.store_u128(0xdeafbeaf123123).unwrap();
+            builder.store_reference(RcCellFamily::empty_cell()).unwrap();
             builder.build().unwrap()
         };
 

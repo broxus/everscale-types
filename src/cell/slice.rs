@@ -1137,7 +1137,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     /// Tries to load the next child cell as slice.
     /// Returns an error if the loaded cell is absent or is pruned.
     ///
-    /// NOTE: In case of prunced cell access the current slice remains unchanged.
+    /// NOTE: In case of pruned cell access the current slice remains unchanged.
     pub fn load_reference_as_slice(&mut self) -> Result<CellSlice<'a, C>, Error> {
         if self.refs_window_start < self.refs_window_end {
             let Some(cell) = self.cell.reference(self.refs_window_start) else {
@@ -1159,11 +1159,12 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
 #[cfg(test)]
 mod tests {
+    use crate::error::Error;
     use crate::prelude::{RcCell, RcCellBuilder, RcCellSlice};
 
-    fn build_cell<F: FnOnce(&mut RcCellBuilder) -> bool>(f: F) -> RcCell {
+    fn build_cell<F: FnOnce(&mut RcCellBuilder) -> Result<(), Error>>(f: F) -> RcCell {
         let mut builder = RcCellBuilder::new();
-        assert!(f(&mut builder));
+        f(&mut builder).unwrap();
         builder.build().unwrap()
     }
 
@@ -1203,12 +1204,18 @@ mod tests {
 
     #[test]
     fn strip_data_prefix() {
-        let cell1 =
-            build_cell(|b| b.store_u16(0xabcd) && b.store_bit_zero() && b.store_u16(0xffff));
+        let cell1 = build_cell(|b| {
+            b.store_u16(0xabcd)?;
+            b.store_bit_zero()?;
+            b.store_u16(0xffff)
+        });
         let mut slice1 = cell1.as_slice();
         slice1.try_advance(4, 0);
 
-        let cell2 = build_cell(|b| b.store_uint(0xbcd, 12) && b.store_bit_zero());
+        let cell2 = build_cell(|b| {
+            b.store_uint(0xbcd, 12)?;
+            b.store_bit_zero()
+        });
 
         print_slice("A", slice1);
         print_slice("B", cell2.as_slice());
@@ -1298,13 +1305,22 @@ mod tests {
         let cell = build_cell(|b| b.store_u16(123));
         assert_eq!(cell.as_slice().test_uniform(), None);
 
-        let cell = build_cell(|b| b.store_zeros(9) && b.store_bit_one());
+        let cell = build_cell(|b| {
+            b.store_zeros(9)?;
+            b.store_bit_one()
+        });
         assert_eq!(cell.as_slice().test_uniform(), None);
 
-        let cell = build_cell(|b| b.store_zeros(20) && b.store_bit_one());
+        let cell = build_cell(|b| {
+            b.store_zeros(20)?;
+            b.store_bit_one()
+        });
         assert_eq!(cell.as_slice().test_uniform(), None);
 
-        let cell = build_cell(|b| b.store_bit_zero() && b.store_uint(u64::MAX, 29));
+        let cell = build_cell(|b| {
+            b.store_bit_zero()?;
+            b.store_uint(u64::MAX, 29)
+        });
         let mut slice = cell.as_slice();
         slice.try_advance(1, 0);
         assert_eq!(slice.test_uniform(), Some(true));

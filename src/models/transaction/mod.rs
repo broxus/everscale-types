@@ -119,34 +119,31 @@ impl<C: CellFamily> Transaction<C> {
 }
 
 impl<C: CellFamily> Store<C> for Transaction<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         let messages = {
             let mut builder = CellBuilder::<C>::new();
-            if self.in_msg.store_into(&mut builder, finalizer)
-                && self.out_msgs.store_into(&mut builder, finalizer)
-            {
-                match builder.build_ext(finalizer) {
-                    Some(cell) => cell,
-                    None => return false,
-                }
-            } else {
-                return false;
-            }
+            ok!(self.in_msg.store_into(&mut builder, finalizer));
+            ok!(self.out_msgs.store_into(&mut builder, finalizer));
+            ok!(builder.build_ext(finalizer))
         };
 
-        builder.store_small_uint(Self::TAG, 4)
-            && builder.store_u256(&self.account)
-            && builder.store_u64(self.lt)
-            && builder.store_u256(&self.prev_trans_hash)
-            && builder.store_u64(self.prev_trans_lt)
-            && builder.store_u32(self.now)
-            && self.out_msg_count.store_into(builder, finalizer)
-            && self.orig_status.store_into(builder, finalizer)
-            && self.end_status.store_into(builder, finalizer)
-            && builder.store_reference(messages)
-            && self.total_fees.store_into(builder, finalizer)
-            && self.state_update.store_into(builder, finalizer)
-            && self.info.store_into(builder, finalizer)
+        ok!(builder.store_small_uint(Self::TAG, 4));
+        ok!(builder.store_u256(&self.account));
+        ok!(builder.store_u64(self.lt));
+        ok!(builder.store_u256(&self.prev_trans_hash));
+        ok!(builder.store_u64(self.prev_trans_lt));
+        ok!(builder.store_u32(self.now));
+        ok!(self.out_msg_count.store_into(builder, finalizer));
+        ok!(self.orig_status.store_into(builder, finalizer));
+        ok!(self.end_status.store_into(builder, finalizer));
+        ok!(builder.store_reference(messages));
+        ok!(self.total_fees.store_into(builder, finalizer));
+        ok!(self.state_update.store_into(builder, finalizer));
+        self.info.store_into(builder, finalizer)
     }
 }
 
@@ -191,13 +188,19 @@ pub enum TxInfo<C: CellFamily> {
 }
 
 impl<C: CellFamily> Store<C> for TxInfo<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         match self {
             Self::Ordinary(info) => {
-                builder.store_small_uint(0b0000, 4) && info.store_into(builder, finalizer)
+                ok!(builder.store_small_uint(0b0000, 4));
+                info.store_into(builder, finalizer)
             }
             Self::TickTock(info) => {
-                builder.store_small_uint(0b001, 3) && info.store_into(builder, finalizer)
+                ok!(builder.store_small_uint(0b001, 3));
+                info.store_into(builder, finalizer)
             }
         }
     }
@@ -248,29 +251,28 @@ pub struct OrdinaryTxInfo<C: CellFamily> {
 }
 
 impl<C: CellFamily> Store<C> for OrdinaryTxInfo<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         let action_phase = match &self.action_phase {
             Some(action_phase) => {
                 let mut builder = CellBuilder::<C>::new();
-                if !action_phase.store_into(&mut builder, finalizer) {
-                    return false;
-                }
-                match builder.build_ext(finalizer) {
-                    Some(cell) => Some(cell),
-                    None => return false,
-                }
+                ok!(action_phase.store_into(&mut builder, finalizer));
+                Some(ok!(builder.build_ext(finalizer)))
             }
             None => None,
         };
 
-        builder.store_bit(self.credit_first)
-            && self.storage_phase.store_into(builder, finalizer)
-            && self.credit_phase.store_into(builder, finalizer)
-            && self.compute_phase.store_into(builder, finalizer)
-            && action_phase.store_into(builder, finalizer)
-            && builder.store_bit(self.aborted)
-            && self.bounce_phase.store_into(builder, finalizer)
-            && builder.store_bit(self.destroyed)
+        ok!(builder.store_bit(self.credit_first));
+        ok!(self.storage_phase.store_into(builder, finalizer));
+        ok!(self.credit_phase.store_into(builder, finalizer));
+        ok!(self.compute_phase.store_into(builder, finalizer));
+        ok!(action_phase.store_into(builder, finalizer));
+        ok!(builder.store_bit(self.aborted));
+        ok!(self.bounce_phase.store_into(builder, finalizer));
+        builder.store_bit(self.destroyed)
     }
 }
 
@@ -312,28 +314,27 @@ pub struct TickTockTxInfo {
 }
 
 impl<C: CellFamily> Store<C> for TickTockTxInfo {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         let action_phase = match &self.action_phase {
             Some(action_phase) => {
                 let mut builder = CellBuilder::<C>::new();
-                if !action_phase.store_into(&mut builder, finalizer) {
-                    return false;
-                }
-                match builder.build_ext(finalizer) {
-                    Some(cell) => Some(cell),
-                    None => return false,
-                }
+                ok!(action_phase.store_into(&mut builder, finalizer));
+                Some(ok!(builder.build_ext(finalizer)))
             }
             None => None,
         };
 
         let flags = ((self.aborted as u8) << 1) | (self.destroyed as u8);
 
-        self.kind.store_into(builder, finalizer)
-            && self.storage_phase.store_into(builder, finalizer)
-            && self.compute_phase.store_into(builder, finalizer)
-            && action_phase.store_into(builder, finalizer)
-            && builder.store_small_uint(flags, 2)
+        ok!(self.kind.store_into(builder, finalizer));
+        ok!(self.storage_phase.store_into(builder, finalizer));
+        ok!(self.compute_phase.store_into(builder, finalizer));
+        ok!(action_phase.store_into(builder, finalizer));
+        builder.store_small_uint(flags, 2)
     }
 }
 
@@ -370,7 +371,11 @@ pub enum TickTock {
 
 impl<C: CellFamily> Store<C> for TickTock {
     #[inline]
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        _: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         builder.store_bit(*self == Self::Tock)
     }
 }

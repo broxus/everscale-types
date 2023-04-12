@@ -50,7 +50,7 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Erro
                 &self,
                 __builder: &mut ::everscale_types::cell::CellBuilder<#cell_family>,
                 __finalizer: &mut dyn ::everscale_types::cell::Finalizer<#cell_family>
-            ) -> bool {
+            ) -> ::core::result::Result<(), ::everscale_types::error::Error> {
                 #body
             }
         }
@@ -69,30 +69,37 @@ fn build_struct(
     style: ast::Style,
     fields: &[ast::Field<'_>],
 ) -> TokenStream {
-    let validate_with = container
-        .attrs
-        .tlb_validate_with
-        .as_ref()
-        .map(|expr| quote!(#expr(self)));
-
     let store_tag = container.attrs.tlb_tag.and_then(store_tag_op);
 
-    let members = fields.iter().map(|field| {
+    let fields_len = fields.len();
+    let members = fields.iter().enumerate().map(|(i, field)| {
         let ident = &field.member;
         let field_ident = quote!(self.#ident);
-        store_op(cell_family, &field_ident, field.ty)
+        let op = store_op(cell_family, &field_ident, field.ty);
+        if i + 1 == fields_len {
+            op
+        } else {
+            into_ok(op)
+        }
     });
 
     match style {
         ast::Style::Unit => match store_tag {
             Some(store_tag) => store_tag,
-            None => quote!(true),
+            None => quote!(::core::result::Result::Ok(())),
         },
         _ => {
-            let members = validate_with
-                .into_iter()
-                .chain(store_tag.into_iter().chain(members));
-            quote! { #(#members)&&* }
+            let validate_with = container.attrs.tlb_validate_with.as_ref().map(|expr| {
+                quote!(if !#expr(self) {
+                    return ::core::result::Result::Err(::everscale_types::error::Error::InvalidData);
+                })
+            });
+            let store_tag = store_tag.map(into_ok);
+            quote! {
+                #validate_with
+                #store_tag
+                #(#members)*
+            }
         }
     }
 }
@@ -163,4 +170,11 @@ fn store_op(cell_family: &syn::Ident, field_ident: &TokenStream, ty: &syn::Type)
     };
 
     quote! { <#ty as ::everscale_types::cell::Store<#cell_family>>::store_into(&#field_ident, __builder, __finalizer) }
+}
+
+fn into_ok(tokens: TokenStream) -> TokenStream {
+    quote!(match #tokens {
+        ::core::result::Result::Ok(_) => {},
+        ::core::result::Result::Err(err) => return ::core::result::Result::Err(err),
+    })
 }

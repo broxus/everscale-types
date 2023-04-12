@@ -612,7 +612,11 @@ impl<C: CellFamily> ShardDescription<C> {
 }
 
 impl<C: CellFamily> Store<C> for ShardDescription<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         let tag = if self.proof_chain.is_some() {
             Self::TAG_V4
         } else if !self.copyleft_rewards.is_empty() {
@@ -627,51 +631,38 @@ impl<C: CellFamily> Store<C> for ShardDescription<C> {
             | ((self.want_merge as u8) << 4)
             | ((self.nx_cc_updated as u8) << 3);
 
-        if !(builder.store_small_uint(tag, Self::TAG_LEN)
-            && builder.store_u32(self.seqno)
-            && builder.store_u32(self.reg_mc_seqno)
-            && builder.store_u64(self.start_lt)
-            && builder.store_u64(self.end_lt)
-            && builder.store_u256(&self.root_hash)
-            && builder.store_u256(&self.file_hash)
-            && builder.store_u8(flags)
-            && builder.store_u32(self.next_catchain_seqno)
-            && builder.store_u64(self.next_validator_shard)
-            && builder.store_u32(self.min_ref_mc_seqno)
-            && builder.store_u32(self.gen_utime)
-            && self.split_merge_at.store_into(builder, finalizer))
-        {
-            return false;
-        }
+        ok!(builder.store_small_uint(tag, Self::TAG_LEN));
+        ok!(builder.store_u32(self.seqno));
+        ok!(builder.store_u32(self.reg_mc_seqno));
+        ok!(builder.store_u64(self.start_lt));
+        ok!(builder.store_u64(self.end_lt));
+        ok!(builder.store_u256(&self.root_hash));
+        ok!(builder.store_u256(&self.file_hash));
+        ok!(builder.store_u8(flags));
+        ok!(builder.store_u32(self.next_catchain_seqno));
+        ok!(builder.store_u64(self.next_validator_shard));
+        ok!(builder.store_u32(self.min_ref_mc_seqno));
+        ok!(builder.store_u32(self.gen_utime));
+        ok!(self.split_merge_at.store_into(builder, finalizer));
 
-        let cell = 'cell: {
+        let cell = {
             let mut builder = CellBuilder::<C>::new();
-            if !(self.fees_collected.store_into(&mut builder, finalizer)
-                && self.funds_created.store_into(&mut builder, finalizer))
-            {
-                return false;
-            }
+            ok!(self.fees_collected.store_into(&mut builder, finalizer));
+            ok!(self.funds_created.store_into(&mut builder, finalizer));
 
-            let stored = if let Some(proof_chain) = &self.proof_chain {
-                let stored = if self.copyleft_rewards.is_empty() {
+            if let Some(proof_chain) = &self.proof_chain {
+                ok!(if self.copyleft_rewards.is_empty() {
                     builder.store_bit_zero()
                 } else {
-                    builder.store_bit_one()
-                        && self.copyleft_rewards.store_into(&mut builder, finalizer)
-                };
-                stored && proof_chain.store_into(&mut builder, finalizer)
+                    ok!(builder.store_bit_one());
+                    self.copyleft_rewards.store_into(&mut builder, finalizer)
+                });
+                ok!(proof_chain.store_into(&mut builder, finalizer));
             } else if !self.copyleft_rewards.is_empty() {
-                self.copyleft_rewards.store_into(&mut builder, finalizer)
-            } else {
-                true
-            };
-
-            if stored {
-                if let Some(cell) = builder.build_ext(finalizer) {
-                    break 'cell cell;
-                }
+                ok!(self.copyleft_rewards.store_into(&mut builder, finalizer));
             }
-            return false;
+
+            ok!(builder.build_ext(finalizer))
         };
 
         builder.store_reference(cell)
@@ -795,23 +786,27 @@ pub enum FutureSplitMerge {
 }
 
 impl<C: CellFamily> Store<C> for FutureSplitMerge {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        _: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         match *self {
             Self::Split {
                 split_utime,
                 interval,
             } => {
-                builder.store_bit_zero()
-                    && builder.store_u32(split_utime)
-                    && builder.store_u32(interval)
+                ok!(builder.store_bit_zero());
+                ok!(builder.store_u32(split_utime));
+                builder.store_u32(interval)
             }
             Self::Merge {
                 merge_utime,
                 interval,
             } => {
-                builder.store_bit_one()
-                    && builder.store_u32(merge_utime)
-                    && builder.store_u32(interval)
+                ok!(builder.store_bit_one());
+                ok!(builder.store_u32(merge_utime));
+                builder.store_u32(interval)
             }
         }
     }
@@ -846,8 +841,13 @@ pub struct ProofChain<C: CellFamily> {
 }
 
 impl<C: CellFamily> Store<C> for ProofChain<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
-        builder.store_u8(self.len) && builder.store_reference(self.child.clone())
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        _: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
+        ok!(builder.store_u8(self.len));
+        builder.store_reference(self.child.clone())
     }
 }
 

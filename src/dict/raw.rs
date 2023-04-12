@@ -41,7 +41,11 @@ impl<'a, C: CellFamily, const N: u16> Load<'a, C> for RawDict<C, N> {
 
 impl<C: CellFamily, const N: u16> Store<C> for RawDict<C, N> {
     #[inline]
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         self.0.store_into(builder, finalizer)
     }
 }
@@ -361,8 +365,8 @@ where
                 // for each value
                 Some(remaining) => {
                     // Try to store the next prefix into the segment key
-                    if unlikely(!segment.key.store_slice_data(prefix)) {
-                        return Some(Err(self.finish(Error::CellOverflow)));
+                    if let Err(e) = segment.key.store_slice_data(prefix) {
+                        return Some(Err(self.finish(e)));
                     } else if remaining == 0 {
                         // Return the next entry if there are no remaining bits to read
                         return Some(Ok((segment.key, data)));
@@ -405,7 +409,7 @@ where
                 remaining_bit_len: segment.remaining_bit_len - 1,
                 key: {
                     let mut key = segment.key.clone();
-                    key.store_bit_one();
+                    _ = key.store_bit_one();
                     key
                 },
             });
@@ -413,7 +417,7 @@ where
                 data: left_child,
                 remaining_bit_len: segment.remaining_bit_len - 1,
                 key: {
-                    segment.key.store_bit_zero();
+                    _ = segment.key.store_bit_zero();
                     segment.key
                 },
             });
@@ -636,9 +640,9 @@ mod tests {
     use super::*;
     use crate::prelude::{RcBoc, RcCell, RcCellBuilder, RcCellFamily};
 
-    fn build_cell<F: FnOnce(&mut RcCellBuilder) -> bool>(f: F) -> RcCell {
+    fn build_cell<F: FnOnce(&mut RcCellBuilder) -> Result<(), Error>>(f: F) -> RcCell {
         let mut builder = RcCellBuilder::new();
-        assert!(f(&mut builder));
+        f(&mut builder).unwrap();
         builder.build().unwrap()
     }
 
@@ -764,7 +768,7 @@ mod tests {
 
         let value = {
             let mut builder = RcCellBuilder::new();
-            builder.store_slice(value);
+            builder.store_slice(value).unwrap();
             builder.build().unwrap()
         };
         println!("{}", value.display_tree());

@@ -67,13 +67,13 @@ impl<C: DefaultFinalizer> BocRepr<C> {
         let mut finalizer = C::default_finalizer();
 
         let mut builder = CellBuilder::<C>::new();
-        if !data.store_into(&mut builder, &mut finalizer) {
+        if data.store_into(&mut builder, &mut finalizer).is_err() {
             return Err(Error::custom("cell overflow"));
         }
 
         let cell = match builder.build_ext(&mut finalizer) {
-            Some(cell) => cell,
-            None => return Err(Error::custom("failed to store into builder")),
+            Ok(cell) => cell,
+            Err(_) => return Err(Error::custom("failed to store into builder")),
         };
 
         cell.as_ref().serialize(serializer)

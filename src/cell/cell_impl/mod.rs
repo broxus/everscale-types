@@ -754,7 +754,7 @@ mod tests {
             for<'c> C: DefaultFinalizer + 'c,
         {
             let mut builder = CellBuilder::<C>::new();
-            assert!(builder.store_zeros(1023));
+            builder.store_zeros(1023).unwrap();
             let cell = builder.build().unwrap();
             let all_zeros = C::all_zeros_ref();
             assert_eq!(cell.as_ref().repr_hash(), all_zeros.repr_hash());

@@ -61,16 +61,20 @@ impl<C: CellFamily> AccountBlock<C> {
 }
 
 impl<C: CellFamily> Store<C> for AccountBlock<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         let transactions_root = match self.transactions.dict().root() {
             Some(root) => root.as_ref().as_slice(),
-            None => return false,
+            None => return Err(Error::InvalidData),
         };
 
-        builder.store_small_uint(Self::TAG, 4)
-            && builder.store_u256(&self.account)
-            && builder.store_slice(transactions_root)
-            && self.state_update.store_into(builder, finalizer)
+        ok!(builder.store_small_uint(Self::TAG, 4));
+        ok!(builder.store_u256(&self.account));
+        ok!(builder.store_slice(transactions_root));
+        self.state_update.store_into(builder, finalizer)
     }
 }
 
@@ -123,7 +127,11 @@ impl<C: CellFamily> McBlockExtra<C> {
 }
 
 impl<C: CellFamily> Store<C> for McBlockExtra<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         let tag = if self.copyleft_msgs.is_empty() {
             Self::TAG_V1
         } else {
@@ -132,44 +140,30 @@ impl<C: CellFamily> Store<C> for McBlockExtra<C> {
 
         let cell = {
             let mut builder = CellBuilder::<C>::new();
-            if !(self
+            ok!(self
                 .prev_block_signatures
-                .store_into(&mut builder, finalizer)
-                && self.recover_create_msg.store_into(&mut builder, finalizer)
-                && self.mint_msg.store_into(&mut builder, finalizer))
-            {
-                return false;
+                .store_into(&mut builder, finalizer));
+            ok!(self.recover_create_msg.store_into(&mut builder, finalizer));
+            ok!(self.mint_msg.store_into(&mut builder, finalizer));
+
+            if !self.copyleft_msgs.is_empty() {
+                ok!(self.copyleft_msgs.store_into(&mut builder, finalizer));
             }
 
-            if !self.copyleft_msgs.is_empty()
-                && !self.copyleft_msgs.store_into(&mut builder, finalizer)
-            {
-                return false;
-            }
-
-            if let Some(cell) = builder.build_ext(finalizer) {
-                cell
-            } else {
-                return false;
-            }
+            ok!(builder.build_ext(finalizer))
         };
 
-        if !(builder.store_u16(tag)
-            && builder.store_bit(self.config.is_some())
-            && self.shards.store_into(builder, finalizer)
-            && self.fees.store_into(builder, finalizer)
-            && builder.store_reference(cell))
-        {
-            return false;
-        }
+        ok!(builder.store_u16(tag));
+        ok!(builder.store_bit(self.config.is_some()));
+        ok!(self.shards.store_into(builder, finalizer));
+        ok!(self.fees.store_into(builder, finalizer));
+        ok!(builder.store_reference(cell));
 
         if let Some(config) = &self.config {
-            if !config.store_into(builder, finalizer) {
-                return false;
-            }
+            config.store_into(builder, finalizer)
+        } else {
+            Ok(())
         }
-
-        true
     }
 }
 
@@ -249,8 +243,13 @@ impl Default for Signature {
 }
 
 impl<C: CellFamily> Store<C> for Signature {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
-        builder.store_small_uint(Self::TAG, Self::TAG_LEN) && builder.store_raw(&self.0, 512)
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        _: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
+        ok!(builder.store_small_uint(Self::TAG, Self::TAG_LEN));
+        builder.store_raw(&self.0, 512)
     }
 }
 

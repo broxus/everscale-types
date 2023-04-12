@@ -28,7 +28,11 @@ impl<'a, C: CellFamily, K, V> Load<'a, C> for Dict<C, K, V> {
 
 impl<C: CellFamily, K, V> Store<C> for Dict<C, K, V> {
     #[inline]
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         self.root.store_into(builder, finalizer)
     }
 }

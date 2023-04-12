@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use crate::cell::*;
-use crate::error::ParseAddrError;
+use crate::error::{Error, ParseAddrError};
 use crate::num::*;
 use crate::util::*;
 
@@ -50,7 +50,11 @@ impl std::fmt::Display for IntAddr {
 }
 
 impl<C: CellFamily> Store<C> for IntAddr {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         match self {
             Self::Std(addr) => addr.store_into(builder, finalizer),
             Self::Var(addr) => addr.store_into(builder, finalizer),
@@ -192,12 +196,18 @@ impl FromStr for StdAddr {
 }
 
 impl<C: CellFamily> Store<C> for StdAddr {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        builder.has_capacity(self.bit_len(), 0)
-            && builder.store_small_uint(0b10, 2)
-            && self.anycast.store_into(builder, finalizer)
-            && builder.store_u8(self.workchain as u8)
-            && builder.store_u256(&self.address)
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
+        if !builder.has_capacity(self.bit_len(), 0) {
+            return Err(Error::CellOverflow);
+        }
+        ok!(builder.store_small_uint(0b10, 2));
+        ok!(self.anycast.store_into(builder, finalizer));
+        ok!(builder.store_u8(self.workchain as u8));
+        builder.store_u256(&self.address)
     }
 }
 
@@ -304,13 +314,19 @@ impl From<VarAddr> for IntAddr {
 }
 
 impl<C: CellFamily> Store<C> for VarAddr {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        builder.has_capacity(self.bit_len(), 0)
-            && builder.store_small_uint(0b11, 2)
-            && self.anycast.store_into(builder, finalizer)
-            && self.address_len.store_into(builder, finalizer)
-            && builder.store_u32(self.workchain as u32)
-            && builder.store_raw(&self.address, self.address_len.into_inner())
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
+        if !builder.has_capacity(self.bit_len(), 0) {
+            return Err(Error::CellOverflow);
+        }
+        ok!(builder.store_small_uint(0b11, 2));
+        ok!(self.anycast.store_into(builder, finalizer));
+        ok!(self.address_len.store_into(builder, finalizer));
+        ok!(builder.store_u32(self.workchain as u32));
+        builder.store_raw(&self.address, self.address_len.into_inner())
     }
 }
 
@@ -443,10 +459,16 @@ impl std::fmt::Display for Anycast {
 }
 
 impl<C: CellFamily> Store<C> for Anycast {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        builder.has_capacity(self.bit_len(), 0)
-            && self.depth.store_into(builder, finalizer)
-            && builder.store_raw(&self.rewrite_prefix, self.depth.into_bit_len())
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
+        if !builder.has_capacity(self.bit_len(), 0) {
+            return Err(Error::CellOverflow);
+        }
+        ok!(self.depth.store_into(builder, finalizer));
+        builder.store_raw(&self.rewrite_prefix, self.depth.into_bit_len())
     }
 }
 

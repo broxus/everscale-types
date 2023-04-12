@@ -200,16 +200,16 @@ impl<C: DefaultFinalizer> BocRepr<C> {
     /// Encodes the specified cell tree as BOC using default finalizer and
     /// returns the `base64` encoded bytes as a string.
     #[cfg(any(feature = "base64", test))]
-    pub fn encode_base64<T>(data: T) -> Option<String>
+    pub fn encode_base64<T>(data: T) -> Result<String, crate::error::Error>
     where
         T: Store<C>,
     {
-        let boc = Self::encode_ext(data, &mut C::default_finalizer())?;
-        Some(crate::util::encode_base64(boc))
+        let boc = ok!(Self::encode_ext(data, &mut C::default_finalizer()));
+        Ok(crate::util::encode_base64(boc))
     }
 
     /// Encodes the specified cell tree as BOC using default finalizer.
-    pub fn encode<T>(data: T) -> Option<Vec<u8>>
+    pub fn encode<T>(data: T) -> Result<Vec<u8>, crate::error::Error>
     where
         T: Store<C>,
     {
@@ -258,21 +258,21 @@ impl<C: DefaultFinalizer> BocRepr<C> {
 
 impl<C: CellFamily> BocRepr<C> {
     /// Encodes the specified object as BOC.
-    pub fn encode_ext<T>(data: T, finalizer: &mut dyn Finalizer<C>) -> Option<Vec<u8>>
+    pub fn encode_ext<T>(
+        data: T,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<Vec<u8>, crate::error::Error>
     where
         T: Store<C>,
     {
         fn encode_ext_impl<C: CellFamily>(
             data: &dyn Store<C>,
             finalizer: &mut dyn Finalizer<C>,
-        ) -> Option<Vec<u8>> {
+        ) -> Result<Vec<u8>, crate::error::Error> {
             let mut builder = CellBuilder::<C>::new();
-            if !data.store_into(&mut builder, finalizer) {
-                return None;
-            }
-
-            let cell = builder.build_ext(finalizer)?;
-            Some(Boc::<C>::encode(cell))
+            ok!(data.store_into(&mut builder, finalizer));
+            let cell = ok!(builder.build_ext(finalizer));
+            Ok(Boc::<C>::encode(cell))
         }
         encode_ext_impl::<C>(&data, finalizer)
     }

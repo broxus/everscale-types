@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use crate::cell::*;
-use crate::error::ParseBlockIdError;
+use crate::error::{Error, ParseBlockIdError};
 use crate::util::*;
 
 /// Full block id.
@@ -374,12 +374,16 @@ impl ShardIdent {
 }
 
 impl<C: CellFamily> Store<C> for ShardIdent {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        _: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         let prefix_len = self.prefix_len() as u8;
         let prefix_without_tag = self.prefix - self.prefix_tag();
-        builder.store_u8(prefix_len)
-            && builder.store_u32(self.workchain as u32)
-            && builder.store_u64(prefix_without_tag)
+        ok!(builder.store_u8(prefix_len));
+        ok!(builder.store_u32(self.workchain as u32));
+        builder.store_u64(prefix_without_tag)
     }
 }
 

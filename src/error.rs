@@ -12,6 +12,18 @@ pub enum Error {
     /// Something tried to load a pruned branch cell.
     #[error("pruned branch access")]
     PrunedBranchAccess,
+    /// Cell contains invalid descriptor or data.
+    #[error("invalid cell")]
+    InvalidCell,
+    /// Data does not satisfy some constraints.
+    #[error("invalid data")]
+    InvalidData,
+    /// Merkle proof does not contain the root cell.
+    #[error("empty proof")]
+    EmptyProof,
+    /// Tree of cells is too deep.
+    #[error("cell depth overflow")]
+    DepthOverflow,
 }
 
 /// Error type for integer parsing related errors.
