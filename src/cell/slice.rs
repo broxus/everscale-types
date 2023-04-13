@@ -391,7 +391,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     /// };
     ///
     /// let without_prefix = slice.strip_data_prefix(&prefix.as_slice()).unwrap();
-    /// assert_eq!(without_prefix.get_u16(0), Some(0xbeaf));
+    /// assert_eq!(without_prefix.get_u16(0), Ok(0xbeaf));
     /// ```
     pub fn strip_data_prefix(&self, prefix: &CellSlice<'a, C>) -> Option<CellSlice<'a, C>> {
         let prefix_len = prefix.remaining_bits();
@@ -432,7 +432,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     /// };
     ///
     /// let lcp = slice.longest_common_data_prefix(&prefix.as_slice());
-    /// assert_eq!(lcp.get_u16(0), Some(0xdead));
+    /// assert_eq!(lcp.get_u16(0), Ok(0xdead));
     /// assert_eq!(lcp.remaining_bits(), 16);
     /// ```
     pub fn longest_common_data_prefix(&self, other: &Self) -> Self {
