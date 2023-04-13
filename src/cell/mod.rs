@@ -242,7 +242,7 @@ impl<C: CellFamily> dyn Cell<C> + '_ {
     ///
     /// NOTE: parsing `Cell` will load the first reference!
     #[inline]
-    pub fn parse<'a, T: Load<'a, C>>(&'a self) -> Option<T> {
+    pub fn parse<'a, T: Load<'a, C>>(&'a self) -> Result<T, Error> {
         T::load_from(&mut self.as_slice())
     }
 }

@@ -73,10 +73,10 @@ impl<'a, C: CellFamily> Store<C> for Message<'a, C> {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for Message<'a, C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let info = MsgInfo::<C>::load_from(slice)?;
-        let init = Option::<SliceOrCell<StateInit<C>>>::load_from(slice)?;
-        let body = SliceOrCell::<CellSlice<'a, C>>::load_from(slice)?;
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let info = ok!(MsgInfo::<C>::load_from(slice));
+        let init = ok!(Option::<SliceOrCell<StateInit<C>>>::load_from(slice));
+        let body = ok!(SliceOrCell::<CellSlice<'a, C>>::load_from(slice));
 
         let (init, init_to_cell) = match init {
             Some(SliceOrCell { to_cell, value }) => (Some(value), to_cell),
@@ -94,7 +94,7 @@ impl<'a, C: CellFamily> Load<'a, C> for Message<'a, C> {
             Some(body.value)
         };
 
-        Some(Self {
+        Ok(Self {
             info,
             init,
             body,
@@ -109,7 +109,6 @@ struct SliceOrCell<T> {
 }
 
 impl<C: CellFamily, T: Store<C>> Store<C> for SliceOrCell<T> {
-    #[inline]
     fn store_into(
         &self,
         builder: &mut CellBuilder<C>,
@@ -134,12 +133,11 @@ impl<C: CellFamily, T: Store<C>> Store<C> for SliceOrCell<T> {
 }
 
 impl<'a, C: CellFamily, T: Load<'a, C>> Load<'a, C> for SliceOrCell<T> {
-    #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let to_cell = slice.load_bit()?;
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let to_cell = ok!(slice.load_bit());
 
         let mut child_cell = if to_cell {
-            Some(slice.load_reference()?.as_slice())
+            Some(ok!(slice.load_reference()).as_slice())
         } else {
             None
         };
@@ -149,9 +147,9 @@ impl<'a, C: CellFamily, T: Load<'a, C>> Load<'a, C> for SliceOrCell<T> {
             None => slice,
         };
 
-        Some(Self {
+        Ok(Self {
             to_cell,
-            value: T::load_from(slice)?,
+            value: ok!(T::load_from(slice)),
         })
     }
 }
@@ -352,13 +350,22 @@ impl<C: CellFamily> Store<C> for MsgInfo<C> {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for MsgInfo<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(if !slice.load_bit()? {
-            Self::Int(IntMsgInfo::<C>::load_from(slice)?)
-        } else if !slice.load_bit()? {
-            Self::ExtIn(ExtInMsgInfo::load_from(slice)?)
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        Ok(if !ok!(slice.load_bit()) {
+            match IntMsgInfo::<C>::load_from(slice) {
+                Ok(info) => Self::Int(info),
+                Err(e) => return Err(e),
+            }
+        } else if !ok!(slice.load_bit()) {
+            match ExtInMsgInfo::load_from(slice) {
+                Ok(info) => Self::ExtIn(info),
+                Err(e) => return Err(e),
+            }
         } else {
-            Self::ExtOut(ExtOutMsgInfo::load_from(slice)?)
+            match ExtOutMsgInfo::load_from(slice) {
+                Ok(info) => Self::ExtOut(info),
+                Err(e) => return Err(e),
+            }
         })
     }
 }
@@ -440,19 +447,19 @@ impl<C: CellFamily> Store<C> for IntMsgInfo<C> {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for IntMsgInfo<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let flags = slice.load_small_uint(3)?;
-        Some(Self {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let flags = ok!(slice.load_small_uint(3));
+        Ok(Self {
             ihr_disabled: flags & 0b100 != 0,
             bounce: flags & 0b010 != 0,
             bounced: flags & 0b001 != 0,
-            src: IntAddr::load_from(slice)?,
-            dst: IntAddr::load_from(slice)?,
-            value: CurrencyCollection::load_from(slice)?,
-            ihr_fee: Tokens::load_from(slice)?,
-            fwd_fee: Tokens::load_from(slice)?,
-            created_lt: slice.load_u64()?,
-            created_at: slice.load_u32()?,
+            src: ok!(IntAddr::load_from(slice)),
+            dst: ok!(IntAddr::load_from(slice)),
+            value: ok!(CurrencyCollection::load_from(slice)),
+            ihr_fee: ok!(Tokens::load_from(slice)),
+            fwd_fee: ok!(Tokens::load_from(slice)),
+            created_lt: ok!(slice.load_u64()),
+            created_at: ok!(slice.load_u32()),
         })
     }
 }
@@ -498,11 +505,11 @@ impl<C: CellFamily> Store<C> for ExtInMsgInfo {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for ExtInMsgInfo {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self {
-            src: load_ext_addr(slice)?,
-            dst: IntAddr::load_from(slice)?,
-            import_fee: Tokens::load_from(slice)?,
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        Ok(Self {
+            src: ok!(load_ext_addr(slice)),
+            dst: ok!(IntAddr::load_from(slice)),
+            import_fee: ok!(Tokens::load_from(slice)),
         })
     }
 }
@@ -545,12 +552,12 @@ impl<C: CellFamily> Store<C> for ExtOutMsgInfo {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for ExtOutMsgInfo {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self {
-            src: IntAddr::load_from(slice)?,
-            dst: load_ext_addr(slice)?,
-            created_lt: slice.load_u64()?,
-            created_at: slice.load_u32()?,
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        Ok(Self {
+            src: ok!(IntAddr::load_from(slice)),
+            dst: ok!(load_ext_addr(slice)),
+            created_lt: ok!(slice.load_u64()),
+            created_at: ok!(slice.load_u32()),
         })
     }
 }
@@ -583,23 +590,23 @@ fn store_ext_addr<C: CellFamily>(
 }
 
 #[inline]
-fn load_ext_addr<C: CellFamily>(slice: &mut CellSlice<'_, C>) -> Option<Option<ExtAddr>> {
-    if slice.load_bit()? {
-        return None;
+fn load_ext_addr<C: CellFamily>(slice: &mut CellSlice<'_, C>) -> Result<Option<ExtAddr>, Error> {
+    if ok!(slice.load_bit()) {
+        return Err(Error::InvalidTag);
     }
 
-    if !slice.load_bit()? {
-        return Some(None);
+    if !ok!(slice.load_bit()) {
+        return Ok(None);
     }
 
-    let data_bit_len = Uint9::load_from(slice)?;
+    let data_bit_len = ok!(Uint9::load_from(slice));
     if !slice.has_remaining(data_bit_len.into_inner(), 0) {
-        return None;
+        return Err(Error::CellUnderflow);
     }
 
     let mut data = vec![0; (data_bit_len.into_inner() as usize + 7) / 8];
-    slice.load_raw(&mut data, data_bit_len.into_inner())?;
-    Some(Some(ExtAddr { data_bit_len, data }))
+    ok!(slice.load_raw(&mut data, data_bit_len.into_inner()));
+    Ok(Some(ExtAddr { data_bit_len, data }))
 }
 
 #[cfg(test)]

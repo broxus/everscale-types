@@ -89,7 +89,7 @@ impl<C: DefaultFinalizer, T: Store<C>> Lazy<C, T> {
 
 impl<'a, C: CellFamily, T: Load<'a, C> + 'a> Lazy<C, T> {
     /// Loads inner data from cell.
-    pub fn load(&'a self) -> Option<T> {
+    pub fn load(&'a self) -> Result<T, Error> {
         T::load_from(&mut self.cell.as_ref().as_slice())
     }
 }
@@ -105,10 +105,13 @@ impl<C: CellFamily, T> Store<C> for Lazy<C, T> {
 }
 
 impl<'a, C: CellFamily, T> Load<'a, C> for Lazy<C, T> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self {
-            cell: slice.load_reference_cloned()?,
-            _marker: PhantomData,
-        })
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        match slice.load_reference_cloned() {
+            Ok(cell) => Ok(Self {
+                cell,
+                _marker: PhantomData,
+            }),
+            Err(e) => Err(e),
+        }
     }
 }

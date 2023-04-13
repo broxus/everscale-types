@@ -107,17 +107,20 @@ impl<C: CellFamily> Store<C> for WorkchainDescription {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for WorkchainDescription {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        if slice.load_u8()? != Self::TAG {
-            return None;
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        match slice.load_u8() {
+            Ok(Self::TAG) => {}
+            Ok(_) => return Err(Error::InvalidTag),
+            Err(e) => return Err(e),
         }
-        let enabled_since = slice.load_u32()?;
-        let actual_min_split = slice.load_u8()?;
-        let min_split = slice.load_u8()?;
-        let max_split = slice.load_u8()?;
-        let flags = slice.load_u16()?;
+
+        let enabled_since = ok!(slice.load_u32());
+        let actual_min_split = ok!(slice.load_u8());
+        let min_split = ok!(slice.load_u8());
+        let max_split = ok!(slice.load_u8());
+        let flags = ok!(slice.load_u16());
         if flags << 3 != 0 {
-            return None;
+            return Err(Error::InvalidData);
         }
 
         let result = Self {
@@ -127,18 +130,18 @@ impl<'a, C: CellFamily> Load<'a, C> for WorkchainDescription {
             max_split,
             active: flags & 0b0100_0000_0000_0000 != 0,
             accept_msgs: flags & 0b0010_0000_0000_0000 != 0,
-            zerostate_root_hash: slice.load_u256()?,
-            zerostate_file_hash: slice.load_u256()?,
-            version: slice.load_u32()?,
-            format: WorkchainFormat::load_from(slice)?,
+            zerostate_root_hash: ok!(slice.load_u256()),
+            zerostate_file_hash: ok!(slice.load_u256()),
+            version: ok!(slice.load_u32()),
+            format: ok!(WorkchainFormat::load_from(slice)),
         };
 
         let basic = flags & 0b1000_0000_0000_0000 != 0;
         if basic != result.format.is_basic() {
-            return None;
+            return Err(Error::InvalidData);
         }
 
-        Some(result)
+        Ok(result)
     }
 }
 
@@ -188,11 +191,11 @@ impl<C: CellFamily> Store<C> for WorkchainFormat {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for WorkchainFormat {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(match slice.load_small_uint(4)? {
-            0x1 => Self::Basic(WorkchainFormatBasic::load_from(slice)?),
-            0x0 => Self::Extended(WorkchainFormatExtended::load_from(slice)?),
-            _ => return None,
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        Ok(match ok!(slice.load_small_uint(4)) {
+            0x1 => Self::Basic(ok!(WorkchainFormatBasic::load_from(slice))),
+            0x0 => Self::Extended(ok!(WorkchainFormatExtended::load_from(slice))),
+            _ => return Err(Error::InvalidTag),
         })
     }
 }
@@ -345,34 +348,35 @@ impl<C: CellFamily> Store<C> for GasLimitsPrices {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for GasLimitsPrices {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
         let mut result = Self::default();
         loop {
-            match slice.load_u8()? {
-                Self::TAG_FLAT_PFX => {
-                    result.flat_gas_limit = slice.load_u64()?;
-                    result.flat_gas_price = slice.load_u64()?;
+            match slice.load_u8() {
+                Ok(Self::TAG_FLAT_PFX) => {
+                    result.flat_gas_limit = ok!(slice.load_u64());
+                    result.flat_gas_price = ok!(slice.load_u64());
                 }
-                Self::TAG_EXT => {
-                    result.gas_price = slice.load_u64()?;
-                    result.gas_limit = slice.load_u64()?;
-                    result.special_gas_limit = slice.load_u64()?;
-                    result.gas_credit = slice.load_u64()?;
-                    result.block_gas_limit = slice.load_u64()?;
-                    result.freeze_due_limit = slice.load_u64()?;
-                    result.delete_due_limit = slice.load_u64()?;
-                    return Some(result);
+                Ok(Self::TAG_EXT) => {
+                    result.gas_price = ok!(slice.load_u64());
+                    result.gas_limit = ok!(slice.load_u64());
+                    result.special_gas_limit = ok!(slice.load_u64());
+                    result.gas_credit = ok!(slice.load_u64());
+                    result.block_gas_limit = ok!(slice.load_u64());
+                    result.freeze_due_limit = ok!(slice.load_u64());
+                    result.delete_due_limit = ok!(slice.load_u64());
+                    return Ok(result);
                 }
-                Self::TAG_BASE => {
-                    result.gas_price = slice.load_u64()?;
-                    result.gas_limit = slice.load_u64()?;
-                    result.gas_credit = slice.load_u64()?;
-                    result.block_gas_limit = slice.load_u64()?;
-                    result.freeze_due_limit = slice.load_u64()?;
-                    result.delete_due_limit = slice.load_u64()?;
-                    return Some(result);
+                Ok(Self::TAG_BASE) => {
+                    result.gas_price = ok!(slice.load_u64());
+                    result.gas_limit = ok!(slice.load_u64());
+                    result.gas_credit = ok!(slice.load_u64());
+                    result.block_gas_limit = ok!(slice.load_u64());
+                    result.freeze_due_limit = ok!(slice.load_u64());
+                    result.delete_due_limit = ok!(slice.load_u64());
+                    return Ok(result);
                 }
-                _ => return None,
+                Ok(_) => return Err(Error::InvalidTag),
+                Err(e) => return Err(e),
             }
         }
     }
@@ -466,22 +470,23 @@ impl<C: CellFamily> Store<C> for CatchainConfig {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for CatchainConfig {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let flags = match slice.load_u8()? {
-            Self::TAG_V1 => 0,
-            Self::TAG_V2 => slice.load_u8()?,
-            _ => return None,
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let flags = match slice.load_u8() {
+            Ok(Self::TAG_V1) => 0,
+            Ok(Self::TAG_V2) => ok!(slice.load_u8()),
+            Ok(_) => return Err(Error::InvalidTag),
+            Err(e) => return Err(e),
         };
         if flags >> 2 != 0 {
-            return None;
+            return Err(Error::InvalidData);
         }
-        Some(Self {
+        Ok(Self {
             isolate_mc_validators: flags & 0b10 != 0,
             shuffle_mc_validators: flags & 0b01 != 0,
-            mc_catchain_lifetime: slice.load_u32()?,
-            shard_catchain_lifetime: slice.load_u32()?,
-            shard_validators_lifetime: slice.load_u32()?,
-            shard_validators_num: slice.load_u32()?,
+            mc_catchain_lifetime: ok!(slice.load_u32()),
+            shard_catchain_lifetime: ok!(slice.load_u32()),
+            shard_validators_lifetime: ok!(slice.load_u32()),
+            shard_validators_num: ok!(slice.load_u32()),
         })
     }
 }
@@ -536,28 +541,29 @@ impl<C: CellFamily> Store<C> for ConsensusConfig {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for ConsensusConfig {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let (flags, round_candidates) = match slice.load_u8()? {
-            Self::TAG_V1 => (0, NonZeroU32::load_from(slice)?),
-            Self::TAG_V2 => {
-                let flags = slice.load_u8()?;
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let (flags, round_candidates) = match slice.load_u8() {
+            Ok(Self::TAG_V1) => (0, ok!(NonZeroU32::load_from(slice))),
+            Ok(Self::TAG_V2) => {
+                let flags = ok!(slice.load_u8());
                 if flags >> 1 != 0 {
-                    return None;
+                    return Err(Error::InvalidData);
                 }
-                (0, NonZeroU8::load_from(slice)?.into())
+                (0, ok!(NonZeroU8::load_from(slice)).into())
             }
-            _ => return None,
+            Ok(_) => return Err(Error::InvalidTag),
+            Err(e) => return Err(e),
         };
-        Some(Self {
+        Ok(Self {
             new_catchain_ids: flags & 0b1 != 0,
             round_candidates,
-            next_candidate_delay_ms: slice.load_u32()?,
-            consensus_timeout_ms: slice.load_u32()?,
-            fast_attempts: slice.load_u32()?,
-            attempt_duration: slice.load_u32()?,
-            catchain_max_deps: slice.load_u32()?,
-            max_block_bytes: slice.load_u32()?,
-            max_collated_bytes: slice.load_u32()?,
+            next_candidate_delay_ms: ok!(slice.load_u32()),
+            consensus_timeout_ms: ok!(slice.load_u32()),
+            fast_attempts: ok!(slice.load_u32()),
+            attempt_duration: ok!(slice.load_u32()),
+            catchain_max_deps: ok!(slice.load_u32()),
+            max_block_bytes: ok!(slice.load_u32()),
+            max_collated_bytes: ok!(slice.load_u32()),
         })
     }
 }
@@ -615,29 +621,32 @@ impl<'a, C> Load<'a, C> for ValidatorSet
 where
     for<'c> C: DefaultFinalizer + 'c,
 {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let with_total_weight = match slice.load_u8()? {
-            Self::TAG_V1 => false,
-            Self::TAG_V2 => true,
-            _ => return None,
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let with_total_weight = match slice.load_u8() {
+            Ok(Self::TAG_V1) => false,
+            Ok(Self::TAG_V2) => true,
+            Ok(_) => return Err(Error::InvalidTag),
+            Err(e) => return Err(e),
         };
 
-        let utime_since = slice.load_u32()?;
-        let utime_until = slice.load_u32()?;
-        let total = slice.load_u16()? as usize;
-        let main = NonZeroU16::load_from(slice)?;
+        let utime_since = ok!(slice.load_u32());
+        let utime_until = ok!(slice.load_u32());
+        let total = ok!(slice.load_u16()) as usize;
+        let main = ok!(NonZeroU16::load_from(slice));
         if main.get() as usize > total {
-            return None;
+            return Err(Error::InvalidData);
         }
 
         let finalizer = &mut C::default_finalizer();
 
         let (mut total_weight, validators) = if with_total_weight {
-            let total_weight = slice.load_u64()?;
-            let dict = Dict::<C, u16, ValidatorDescription>::load_from(slice)?;
+            let total_weight = ok!(slice.load_u64());
+            let dict = ok!(Dict::<C, u16, ValidatorDescription>::load_from(slice));
             (total_weight, dict)
         } else {
-            let dict = Dict::<C, u16, ValidatorDescription>::load_from_root_ext(slice, finalizer)?;
+            let dict = ok!(Dict::<C, u16, ValidatorDescription>::load_from_root_ext(
+                slice, finalizer
+            ));
             (0, dict)
         };
 
@@ -646,7 +655,8 @@ where
         for (i, entry) in validators.iter().enumerate().take(total) {
             let descr = match entry {
                 Ok((idx, descr)) if idx as usize == i => descr,
-                _ => return None,
+                Ok(_) => return Err(Error::InvalidData),
+                Err(e) => return Err(e),
             };
 
             computed_total_weight += descr.weight;
@@ -654,18 +664,18 @@ where
         }
 
         if list.is_empty() {
-            return None;
+            return Err(Error::InvalidData);
         }
 
         if with_total_weight {
             if total_weight != computed_total_weight {
-                return None;
+                return Err(Error::InvalidData);
             }
         } else {
             total_weight = computed_total_weight;
         }
 
-        Some(Self {
+        Ok(Self {
             utime_since,
             utime_until,
             main,
@@ -737,28 +747,34 @@ impl<C: CellFamily> Store<C> for ValidatorDescription {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for ValidatorDescription {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let (with_adnl, with_mc_seqno) = match slice.load_u8()? {
-            Self::TAG_BASIC => (false, false),
-            Self::TAG_WITH_ADNL => (true, false),
-            Self::TAG_WITH_MC_SEQNO => (true, true),
-            _ => return None,
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let (with_adnl, with_mc_seqno) = match slice.load_u8() {
+            Ok(Self::TAG_BASIC) => (false, false),
+            Ok(Self::TAG_WITH_ADNL) => (true, false),
+            Ok(Self::TAG_WITH_MC_SEQNO) => (true, true),
+            Ok(_) => return Err(Error::InvalidTag),
+            Err(e) => return Err(e),
         };
 
-        Some(Self {
+        Ok(Self {
             public_key: {
-                if slice.load_u32()? != Self::PUBKEY_TAG {
-                    return None;
+                match slice.load_u32() {
+                    Ok(Self::PUBKEY_TAG) => ok!(slice.load_u256()),
+                    Ok(_) => return Err(Error::InvalidTag),
+                    Err(e) => return Err(e),
                 }
-                slice.load_u256()?
             },
-            weight: slice.load_u64()?,
+            weight: ok!(slice.load_u64()),
             adnl_addr: if with_adnl {
-                Some(slice.load_u256()?)
+                Some(ok!(slice.load_u256()))
             } else {
                 None
             },
-            mc_seqno_since: if with_mc_seqno { slice.load_u32()? } else { 0 },
+            mc_seqno_since: if with_mc_seqno {
+                ok!(slice.load_u32())
+            } else {
+                0
+            },
         })
     }
 }

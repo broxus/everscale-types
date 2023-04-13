@@ -617,9 +617,7 @@ impl<C: CellFamily> CellBuilder<C> {
             if builder.bit_len + bits <= MAX_BIT_LEN {
                 let mut slice_data = MaybeUninit::<[u8; 128]>::uninit();
                 let slice_data = unsafe { &mut *(slice_data.as_mut_ptr() as *mut [u8; 128]) };
-                let Some(slice_data) = value.get_raw(0, slice_data, bits) else {
-                    return Err(Error::CellUnderflow);
-                };
+                let slice_data = ok!(value.get_raw(0, slice_data, bits));
 
                 builder.store_raw(slice_data, bits)
             } else {

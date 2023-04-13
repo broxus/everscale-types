@@ -75,39 +75,41 @@ impl<C: CellFamily> Store<C> for McStateExtra<C> {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for McStateExtra<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        if slice.load_u16()? != Self::TAG {
-            return None;
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        match slice.load_u16() {
+            Ok(Self::TAG) => {}
+            Ok(_) => return Err(Error::InvalidTag),
+            Err(e) => return Err(e),
         }
 
-        let shards = ShardHashes::<C>::load_from(slice)?;
-        let config = BlockchainConfig::<C>::load_from(slice)?;
+        let shards = ok!(ShardHashes::<C>::load_from(slice));
+        let config = ok!(BlockchainConfig::<C>::load_from(slice));
 
-        let child_slice = &mut slice.load_reference()?.as_slice();
-        let flags = child_slice.load_u16()?;
+        let child_slice = &mut ok!(slice.load_reference()).as_slice();
+        let flags = ok!(child_slice.load_u16());
 
         if flags >> 2 != 0 {
-            return None;
+            return Err(Error::InvalidData);
         }
 
-        Some(Self {
+        Ok(Self {
             shards,
             config,
-            validator_info: ValidatorInfo::load_from(child_slice)?,
-            prev_blocks: OldMcBlocksInfo::load_from(child_slice)?,
-            after_key_block: child_slice.load_bit()?,
-            last_key_block: Option::<BlockRef>::load_from(child_slice)?,
+            validator_info: ok!(ValidatorInfo::load_from(child_slice)),
+            prev_blocks: ok!(OldMcBlocksInfo::load_from(child_slice)),
+            after_key_block: ok!(child_slice.load_bit()),
+            last_key_block: ok!(Option::<BlockRef>::load_from(child_slice)),
             block_create_stats: if flags & 0b01 != 0 {
-                if child_slice.load_u8()? != Self::BLOCK_STATS_TAG {
-                    return None;
+                if ok!(child_slice.load_u8()) != Self::BLOCK_STATS_TAG {
+                    return Err(Error::InvalidTag);
                 }
-                Some(Dict::load_from(child_slice)?)
+                Some(ok!(Dict::load_from(child_slice)))
             } else {
                 None
             },
-            global_balance: CurrencyCollection::<C>::load_from(slice)?,
+            global_balance: ok!(CurrencyCollection::<C>::load_from(slice)),
             copyleft_rewards: if flags & 0b10 != 0 {
-                Dict::load_from(child_slice)?
+                ok!(Dict::load_from(child_slice))
             } else {
                 Dict::new()
             },

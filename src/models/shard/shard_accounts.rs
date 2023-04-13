@@ -49,11 +49,13 @@ where
             match dict.get_raw_ext(key, finalizer) {
                 Ok(Some(mut value)) => {
                     if DepthBalanceInfo::skip_value(&mut value) {
-                        if let Some(value) = ShardAccount::<C>::load_from(&mut value) {
-                            return Ok(Some(value));
+                        match ShardAccount::<C>::load_from(&mut value) {
+                            Ok(value) => Ok(Some(value)),
+                            Err(e) => Err(e),
                         }
+                    } else {
+                        Err(Error::CellUnderflow)
                     }
-                    Err(Error::CellUnderflow)
                 }
                 Ok(None) => Ok(None),
                 Err(e) => Err(e),
@@ -148,12 +150,16 @@ impl<C: CellFamily> Store<C> for DepthBalanceInfo<C> {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for DepthBalanceInfo<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
         let result = Self {
-            split_depth: slice.load_small_uint(Self::SPLIT_DEPTH_BITS)?,
-            balance: CurrencyCollection::load_from(slice)?,
+            split_depth: ok!(slice.load_small_uint(Self::SPLIT_DEPTH_BITS)),
+            balance: ok!(CurrencyCollection::load_from(slice)),
         };
-        result.is_valid().then_some(result)
+        if result.is_valid() {
+            Ok(result)
+        } else {
+            Err(Error::InvalidData)
+        }
     }
 }
 
@@ -194,13 +200,18 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         Some(match self.inner.next()? {
             Ok((key, mut value)) => {
-                if DepthBalanceInfo::skip_value(&mut value) {
-                    if let Some(value) = ShardAccount::<C>::load_from(&mut value) {
-                        return Some(Ok((key.raw_data()[..32].try_into().unwrap(), value)));
+                let e = if DepthBalanceInfo::skip_value(&mut value) {
+                    match ShardAccount::<C>::load_from(&mut value) {
+                        Ok(value) => {
+                            return Some(Ok((key.raw_data()[..32].try_into().unwrap(), value)))
+                        }
+                        Err(e) => e,
                     }
-                }
+                } else {
+                    Error::CellUnderflow
+                };
 
-                Err(self.inner.finish(Error::CellUnderflow))
+                Err(self.inner.finish(e))
             }
             Err(e) => Err(e),
         })

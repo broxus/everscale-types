@@ -50,15 +50,21 @@ impl<C: CellFamily> Store<C> for BlockProof<C> {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for BlockProof<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        if slice.load_u8()? != Self::TAG {
-            return None;
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        match slice.load_u8() {
+            Ok(Self::TAG) => {}
+            Ok(_) => return Err(Error::InvalidTag),
+            Err(e) => return Err(e),
         }
-        Some(Self {
-            proof_for: BlockId::load_from(slice)?,
-            root: slice.load_reference_cloned()?,
-            signatures: if slice.load_bit()? {
-                Some(slice.load_reference()?.parse::<BlockSignatures<C>>()?)
+
+        Ok(Self {
+            proof_for: ok!(BlockId::load_from(slice)),
+            root: ok!(slice.load_reference_cloned()),
+            signatures: if ok!(slice.load_bit()) {
+                match slice.load_reference() {
+                    Ok(cell) => Some(ok!(cell.parse::<BlockSignatures<C>>())),
+                    Err(e) => return Err(e),
+                }
             } else {
                 None
             },

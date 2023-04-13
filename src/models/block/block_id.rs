@@ -388,18 +388,18 @@ impl<C: CellFamily> Store<C> for ShardIdent {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for ShardIdent {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let prefix_len = slice.load_u8()?;
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let prefix_len = ok!(slice.load_u8());
         if prefix_len > Self::MAX_SPLIT_DEPTH {
-            return None;
+            return Err(Error::InvalidData);
         }
 
-        let workchain = slice.load_u32()? as i32;
-        let prefix_without_tag = slice.load_u64()?;
+        let workchain = ok!(slice.load_u32()) as i32;
+        let prefix_without_tag = ok!(slice.load_u64());
 
         let tag = 1u64 << (63 - prefix_len);
         let prefix = (prefix_without_tag & (!tag + 1)) | tag;
 
-        Some(Self { workchain, prefix })
+        Ok(Self { workchain, prefix })
     }
 }

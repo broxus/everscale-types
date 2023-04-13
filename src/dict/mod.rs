@@ -121,10 +121,7 @@ where
 
         // Read the next bit from the data
         prefix.try_advance(lcp.remaining_bits(), 0);
-        let old_to_right = match prefix.load_bit() {
-            Some(bit) => bit,
-            None => return Err(Error::CellUnderflow),
-        };
+        let old_to_right = ok!(prefix.load_bit());
 
         // Create a leaf for the old value
         let mut left = ok!(make_leaf(prefix, key.remaining_bits(), data, finalizer));
@@ -182,10 +179,7 @@ where
         let mut remaining_data = data;
 
         // Read the next part of the key from the current data
-        let prefix = &mut match read_label(&mut remaining_data, key.remaining_bits()) {
-            Some(prefix) => prefix,
-            None => return Err(Error::CellUnderflow),
-        };
+        let prefix = &mut ok!(read_label(&mut remaining_data, key.remaining_bits()));
 
         // Match the prefix with the key
         let lcp = key.longest_common_data_prefix(prefix);
@@ -220,9 +214,9 @@ where
 
                 // Load the next branch
                 let next_branch = match key.load_bit() {
-                    Some(false) => Branch::Left,
-                    Some(true) => Branch::Right,
-                    None => return Err(Error::CellUnderflow),
+                    Ok(false) => Branch::Left,
+                    Ok(true) => Branch::Right,
+                    Err(e) => return Err(e),
                 };
 
                 let child = ok!(cell.get_reference_as_slice(next_branch as u8));
@@ -288,10 +282,7 @@ where
     // Try to find the required leaf
     let is_key_empty = loop {
         // Read the key part written in the current edge
-        let prefix = match read_label(&mut data, key.remaining_bits()) {
-            Some(prefix) => prefix,
-            None => return Err(Error::CellUnderflow),
-        };
+        let prefix = ok!(read_label(&mut data, key.remaining_bits()));
 
         // Remove this prefix from the key
         match key.strip_data_prefix(&prefix) {
@@ -310,10 +301,7 @@ where
         }
 
         // Load next child based on the next bit
-        let child_index = match key.load_bit() {
-            Some(index) => index as u8,
-            None => return Err(Error::CellUnderflow),
-        };
+        let child_index = ok!(key.load_bit()) as u8;
         data = ok!(data.cell().get_reference_as_slice(child_index));
     };
 
@@ -326,16 +314,16 @@ pub fn dict_load_from_root<C>(
     slice: &mut CellSlice<'_, C>,
     key_bit_len: u16,
     finalizer: &mut dyn Finalizer<C>,
-) -> Option<CellContainer<C>>
+) -> Result<CellContainer<C>, Error>
 where
     for<'c> C: CellFamily + 'c,
 {
     let mut root = *slice;
 
-    let label = read_label(slice, key_bit_len)?;
+    let label = ok!(read_label(slice, key_bit_len));
     if label.remaining_bits() != key_bit_len {
         if !slice.try_advance(0, 2) {
-            return None;
+            return Err(Error::CellUnderflow);
         }
         let root_bits = root.remaining_bits() - slice.remaining_bits();
         let root_refs = root.remaining_refs() - slice.remaining_refs();
@@ -345,11 +333,8 @@ where
     }
 
     let mut builder = CellBuilder::<C>::new();
-    if builder.store_slice(root).is_ok() {
-        builder.build_ext(finalizer).ok()
-    } else {
-        None
-    }
+    ok!(builder.store_slice(root));
+    builder.build_ext(finalizer)
 }
 
 fn write_label<C: CellFamily>(
@@ -384,17 +369,20 @@ fn write_label<C: CellFamily>(
     }
 }
 
-fn read_label<'a, C>(label: &mut CellSlice<'a, C>, key_bit_len: u16) -> Option<CellSlice<'a, C>>
+fn read_label<'a, C>(
+    label: &mut CellSlice<'a, C>,
+    key_bit_len: u16,
+) -> Result<CellSlice<'a, C>, Error>
 where
     for<'c> C: CellFamily + 'c,
 {
     let bits_for_len = (16 - key_bit_len.leading_zeros()) as u16;
 
     if label.is_data_empty() && bits_for_len == 0 {
-        Some(label.get_prefix(0, 0))
-    } else if !label.load_bit()? {
+        Ok(label.get_prefix(0, 0))
+    } else if !ok!(label.load_bit()) {
         read_hml_short(label)
-    } else if !label.load_bit()? {
+    } else if !ok!(label.load_bit()) {
         read_hml_long(label, bits_for_len)
     } else {
         read_hml_same(label, bits_for_len)
@@ -424,16 +412,18 @@ fn write_hml_short<C: CellFamily>(
     label.store_slice_data(key)
 }
 
-fn read_hml_short<'a, C: CellFamily>(label: &mut CellSlice<'a, C>) -> Option<CellSlice<'a, C>> {
+fn read_hml_short<'a, C: CellFamily>(
+    label: &mut CellSlice<'a, C>,
+) -> Result<CellSlice<'a, C>, Error> {
     let mut len = 0;
-    while label.load_bit()? {
+    while ok!(label.load_bit()) {
         len += 1;
     }
     let result = *label;
     if label.try_advance(len, 0) {
-        Some(result.get_prefix(len, 0))
+        Ok(result.get_prefix(len, 0))
     } else {
-        None
+        Err(Error::CellUnderflow)
     }
 }
 
@@ -451,13 +441,13 @@ fn write_hml_long<C: CellFamily>(
 fn read_hml_long<'a, C: CellFamily>(
     label: &mut CellSlice<'a, C>,
     bits_for_len: u16,
-) -> Option<CellSlice<'a, C>> {
-    let len = label.load_uint(bits_for_len)? as u16;
+) -> Result<CellSlice<'a, C>, Error> {
+    let len = ok!(label.load_uint(bits_for_len)) as u16;
     let result = *label;
     if label.try_advance(len, 0) {
-        Some(result.get_prefix(len, 0))
+        Ok(result.get_prefix(len, 0))
     } else {
-        None
+        Err(Error::CellUnderflow)
     }
 }
 
@@ -471,16 +461,19 @@ fn write_hml_same<C: CellFamily>(
     label.store_uint(len as u64, bits_for_len)
 }
 
-fn read_hml_same<'a, C>(label: &mut CellSlice<'a, C>, bits_for_len: u16) -> Option<CellSlice<'a, C>>
+fn read_hml_same<'a, C>(
+    label: &mut CellSlice<'a, C>,
+    bits_for_len: u16,
+) -> Result<CellSlice<'a, C>, Error>
 where
     for<'c> C: CellFamily + 'c,
 {
-    let cell = match label.load_bit()? {
+    let cell = match ok!(label.load_bit()) {
         false => C::all_zeros_ref(),
         true => C::all_ones_ref(),
     };
-    let len = label.load_uint(bits_for_len)? as u16;
-    Some(cell.as_slice().get_prefix(len, 0))
+    let len = ok!(label.load_uint(bits_for_len)) as u16;
+    Ok(cell.as_slice().get_prefix(len, 0))
 }
 
 fn serialize_entry<C: CellFamily, T: Store<C>>(

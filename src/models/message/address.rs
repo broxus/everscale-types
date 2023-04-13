@@ -63,21 +63,21 @@ impl<C: CellFamily> Store<C> for IntAddr {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for IntAddr {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        if !slice.load_bit()? {
-            return None;
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        if !ok!(slice.load_bit()) {
+            return Err(Error::InvalidTag);
         }
 
-        Some(if unlikely(slice.load_bit()?) {
-            let anycast = Option::<Box<Anycast>>::load_from(slice)?;
-            let address_len = Uint9::load_from(slice)?;
-            let workchain = slice.load_u32()? as i32;
+        Ok(if unlikely(ok!(slice.load_bit())) {
+            let anycast = ok!(Option::<Box<Anycast>>::load_from(slice));
+            let address_len = ok!(Uint9::load_from(slice));
+            let workchain = ok!(slice.load_u32()) as i32;
             if !slice.has_remaining(address_len.into_inner(), 0) {
-                return None;
+                return Err(Error::CellUnderflow);
             }
 
             let mut address = vec![0; (address_len.into_inner() as usize + 7) / 8];
-            slice.load_raw(&mut address, address_len.into_inner())?;
+            ok!(slice.load_raw(&mut address, address_len.into_inner()));
 
             Self::Var(VarAddr {
                 anycast,
@@ -87,9 +87,9 @@ impl<'a, C: CellFamily> Load<'a, C> for IntAddr {
             })
         } else {
             Self::Std(StdAddr {
-                anycast: Option::<Box<Anycast>>::load_from(slice)?,
-                workchain: slice.load_u8()? as i8,
-                address: slice.load_u256()?,
+                anycast: ok!(Option::<Box<Anycast>>::load_from(slice)),
+                workchain: ok!(slice.load_u8()) as i8,
+                address: ok!(slice.load_u256()),
             })
         })
     }
@@ -212,15 +212,15 @@ impl<C: CellFamily> Store<C> for StdAddr {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for StdAddr {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        if !slice.load_bit()? || slice.load_bit()? {
-            return None;
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        if !ok!(slice.load_bit()) || ok!(slice.load_bit()) {
+            return Err(Error::InvalidTag);
         }
 
-        Some(Self {
-            anycast: Option::<Box<Anycast>>::load_from(slice)?,
-            workchain: slice.load_u8()? as i8,
-            address: slice.load_u256()?,
+        Ok(Self {
+            anycast: ok!(Option::<Box<Anycast>>::load_from(slice)),
+            workchain: ok!(slice.load_u8()) as i8,
+            address: ok!(slice.load_u256()),
         })
     }
 }
@@ -390,12 +390,12 @@ impl Anycast {
     pub const BITS_MAX: u16 = SplitDepth::BITS + Self::MAX_DEPTH as u16;
 
     /// Constructs anycast info from rewrite prefix.
-    pub fn from_slice<C: CellFamily>(rewrite_prefix: &CellSlice<'_, C>) -> Option<Self> {
-        let depth = SplitDepth::from_bit_len(rewrite_prefix.remaining_bits())?;
+    pub fn from_slice<C: CellFamily>(rewrite_prefix: &CellSlice<'_, C>) -> Result<Self, Error> {
+        let depth = ok!(SplitDepth::from_bit_len(rewrite_prefix.remaining_bits()));
         let mut data = Vec::with_capacity((depth.into_bit_len() as usize + 7) / 8);
-        rewrite_prefix.get_raw(0, &mut data, depth.into_bit_len())?;
+        ok!(rewrite_prefix.get_raw(0, &mut data, depth.into_bit_len()));
 
-        Some(Self {
+        Ok(Self {
             depth,
             rewrite_prefix: data,
         })
@@ -473,16 +473,16 @@ impl<C: CellFamily> Store<C> for Anycast {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for Anycast {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let depth = SplitDepth::load_from(slice)?;
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let depth = ok!(SplitDepth::load_from(slice));
         if !slice.has_remaining(depth.into_bit_len(), 0) {
-            return None;
+            return Err(Error::CellUnderflow);
         }
 
         let mut rewrite_prefix = vec![0; (depth.into_bit_len() as usize + 7) / 8];
-        slice.load_raw(&mut rewrite_prefix, depth.into_bit_len())?;
+        ok!(slice.load_raw(&mut rewrite_prefix, depth.into_bit_len()));
 
-        Some(Self {
+        Ok(Self {
             depth,
             rewrite_prefix,
         })

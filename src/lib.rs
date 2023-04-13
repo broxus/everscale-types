@@ -183,13 +183,17 @@ impl cell::Store<cell::sync::ArcCellFamily> for cell::sync::ArcCell {
 }
 
 impl<'a> cell::Load<'a, cell::rc::RcCellFamily> for cell::rc::RcCell {
-    fn load_from(slice: &mut cell::CellSlice<'a, cell::rc::RcCellFamily>) -> Option<Self> {
+    fn load_from(
+        slice: &mut cell::CellSlice<'a, cell::rc::RcCellFamily>,
+    ) -> Result<Self, error::Error> {
         slice.load_reference_cloned()
     }
 }
 
 impl<'a> cell::Load<'a, cell::sync::ArcCellFamily> for cell::sync::ArcCell {
-    fn load_from(slice: &mut cell::CellSlice<'a, cell::sync::ArcCellFamily>) -> Option<Self> {
+    fn load_from(
+        slice: &mut cell::CellSlice<'a, cell::sync::ArcCellFamily>,
+    ) -> Result<Self, error::Error> {
         slice.load_reference_cloned()
     }
 }

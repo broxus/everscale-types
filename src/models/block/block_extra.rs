@@ -36,8 +36,8 @@ impl<C: CellFamily> BlockExtra<C> {
     pub fn load_custom(&self) -> Result<Option<McBlockExtra<C>>, Error> {
         match &self.custom {
             Some(custom) => match custom.load() {
-                Some(custom) => Ok(Some(custom)),
-                None => Err(Error::CellUnderflow),
+                Ok(custom) => Ok(Some(custom)),
+                Err(e) => Err(e),
             },
             None => Ok(None),
         }
@@ -82,15 +82,17 @@ impl<'a, C> Load<'a, C> for AccountBlock<C>
 where
     for<'c> C: DefaultFinalizer + 'c,
 {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        if slice.load_small_uint(4)? != Self::TAG {
-            return None;
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        match slice.load_small_uint(4) {
+            Ok(Self::TAG) => {}
+            Ok(_) => return Err(Error::InvalidTag),
+            Err(e) => return Err(e),
         }
 
-        Some(Self {
-            account: slice.load_u256()?,
-            transactions: AugDict::load_from_root(slice, &mut C::default_finalizer())?,
-            state_update: Lazy::load_from(slice)?,
+        Ok(Self {
+            account: ok!(slice.load_u256()),
+            transactions: ok!(AugDict::load_from_root(slice, &mut C::default_finalizer())),
+            state_update: ok!(Lazy::load_from(slice)),
         })
     }
 }
@@ -168,34 +170,35 @@ impl<C: CellFamily> Store<C> for McBlockExtra<C> {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for McBlockExtra<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let with_copyleft = match slice.load_u16()? {
-            Self::TAG_V1 => false,
-            Self::TAG_V2 => true,
-            _ => return None,
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let with_copyleft = match slice.load_u16() {
+            Ok(Self::TAG_V1) => false,
+            Ok(Self::TAG_V2) => true,
+            Ok(_) => return Err(Error::InvalidTag),
+            Err(e) => return Err(e),
         };
 
-        let with_config = slice.load_bit()?;
-        let shards = ShardHashes::load_from(slice)?;
-        let fees = ShardFees::load_from(slice)?;
+        let with_config = ok!(slice.load_bit());
+        let shards = ok!(ShardHashes::load_from(slice));
+        let fees = ok!(ShardFees::load_from(slice));
 
-        let cont = slice.load_reference()?;
+        let cont = ok!(slice.load_reference());
 
         let config = if with_config {
-            Some(BlockchainConfig::load_from(slice)?)
+            Some(ok!(BlockchainConfig::load_from(slice)))
         } else {
             None
         };
 
         let slice = &mut cont.as_slice();
-        Some(Self {
+        Ok(Self {
             shards,
             fees,
-            prev_block_signatures: Dict::load_from(slice)?,
-            recover_create_msg: Option::<CellContainer<C>>::load_from(slice)?,
-            mint_msg: Option::<CellContainer<C>>::load_from(slice)?,
+            prev_block_signatures: ok!(Dict::load_from(slice)),
+            recover_create_msg: ok!(Option::<CellContainer<C>>::load_from(slice)),
+            mint_msg: ok!(Option::<CellContainer<C>>::load_from(slice)),
             copyleft_msgs: if with_copyleft {
-                Dict::load_from(slice)?
+                ok!(Dict::load_from(slice))
             } else {
                 Dict::new()
             },
@@ -254,12 +257,17 @@ impl<C: CellFamily> Store<C> for Signature {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for Signature {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        if slice.load_small_uint(Self::TAG_LEN)? != Self::TAG {
-            return None;
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        match slice.load_small_uint(Self::TAG_LEN) {
+            Ok(Self::TAG) => {}
+            Ok(_) => return Err(Error::InvalidTag),
+            Err(e) => return Err(e),
         }
+
         let mut result = Self::default();
-        slice.load_raw(&mut result.0, 512)?;
-        Some(result)
+        match slice.load_raw(&mut result.0, 512) {
+            Ok(_) => Ok(result),
+            Err(e) => Err(e),
+        }
     }
 }

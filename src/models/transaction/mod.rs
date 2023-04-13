@@ -53,15 +53,15 @@ impl<C: CellFamily> Transaction<C> {
     pub fn load_in_msg(&self) -> Result<Option<Message<'_, C>>, Error> {
         match &self.in_msg {
             Some(in_msg) => match Message::<C>::load_from(&mut in_msg.as_ref().as_slice()) {
-                Some(message) => Ok(Some(message)),
-                None => Err(Error::CellUnderflow),
+                Ok(message) => Ok(Some(message)),
+                Err(e) => Err(e),
             },
             None => Ok(None),
         }
     }
 
     /// Tries to load the detailed transaction info from the lazy cell.
-    pub fn load_info(&self) -> Option<TxInfo<C>> {
+    pub fn load_info(&self) -> Result<TxInfo<C>, Error> {
         self.info.load()
     }
 }
@@ -102,12 +102,15 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         match self.inner.next()? {
             Ok(mut value) => {
-                if let Some(value) = value.load_reference() {
-                    if let Some(message) = Message::<'a, C>::load_from(&mut value.as_slice()) {
-                        return Some(Ok(message));
-                    }
-                }
-                Some(Err(self.inner.finish(Error::CellUnderflow)))
+                let e = match value.load_reference() {
+                    Ok(value) => match Message::<'a, C>::load_from(&mut value.as_slice()) {
+                        Ok(message) => return Some(Ok(message)),
+                        Err(e) => e,
+                    },
+                    Err(e) => e,
+                };
+
+                Some(Err(self.inner.finish(e)))
             }
             Err(e) => Some(Err(e)),
         }
@@ -148,32 +151,34 @@ impl<C: CellFamily> Store<C> for Transaction<C> {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for Transaction<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        if slice.load_small_uint(4)? != Self::TAG {
-            return None;
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        match slice.load_small_uint(4) {
+            Ok(Self::TAG) => {}
+            Ok(_) => return Err(Error::InvalidTag),
+            Err(e) => return Err(e),
         }
 
         let (in_msg, out_msgs) = {
-            let slice = &mut slice.load_reference()?.as_slice();
-            let in_msg = Option::<CellContainer<C>>::load_from(slice)?;
-            let out_msgs = Dict::load_from(slice)?;
+            let slice = &mut ok!(slice.load_reference()).as_slice();
+            let in_msg = ok!(Option::<CellContainer<C>>::load_from(slice));
+            let out_msgs = ok!(Dict::load_from(slice));
             (in_msg, out_msgs)
         };
 
-        Some(Self {
-            account: slice.load_u256()?,
-            lt: slice.load_u64()?,
-            prev_trans_hash: slice.load_u256()?,
-            prev_trans_lt: slice.load_u64()?,
-            now: slice.load_u32()?,
-            out_msg_count: Uint15::load_from(slice)?,
-            orig_status: AccountStatus::load_from(slice)?,
-            end_status: AccountStatus::load_from(slice)?,
+        Ok(Self {
+            account: ok!(slice.load_u256()),
+            lt: ok!(slice.load_u64()),
+            prev_trans_hash: ok!(slice.load_u256()),
+            prev_trans_lt: ok!(slice.load_u64()),
+            now: ok!(slice.load_u32()),
+            out_msg_count: ok!(Uint15::load_from(slice)),
+            orig_status: ok!(AccountStatus::load_from(slice)),
+            end_status: ok!(AccountStatus::load_from(slice)),
             in_msg,
             out_msgs,
-            total_fees: CurrencyCollection::<C>::load_from(slice)?,
-            state_update: Lazy::<C, HashUpdate>::load_from(slice)?,
-            info: Lazy::<C, TxInfo<C>>::load_from(slice)?,
+            total_fees: ok!(CurrencyCollection::<C>::load_from(slice)),
+            state_update: ok!(Lazy::<C, HashUpdate>::load_from(slice)),
+            info: ok!(Lazy::<C, TxInfo<C>>::load_from(slice)),
         })
     }
 }
@@ -207,14 +212,20 @@ impl<C: CellFamily> Store<C> for TxInfo<C> {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for TxInfo<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let tag_part = slice.load_small_uint(3)?;
-        Some(if tag_part == 0b001 {
-            Self::TickTock(TickTockTxInfo::load_from(slice)?)
-        } else if tag_part == 0b000 && !slice.load_bit()? {
-            Self::Ordinary(OrdinaryTxInfo::<C>::load_from(slice)?)
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let tag_part = ok!(slice.load_small_uint(3));
+        Ok(if tag_part == 0b001 {
+            match TickTockTxInfo::load_from(slice) {
+                Ok(info) => Self::TickTock(info),
+                Err(e) => return Err(e),
+            }
+        } else if tag_part == 0b000 && !ok!(slice.load_bit()) {
+            match OrdinaryTxInfo::<C>::load_from(slice) {
+                Ok(info) => Self::Ordinary(info),
+                Err(e) => return Err(e),
+            }
         } else {
-            return None;
+            return Err(Error::InvalidTag);
         })
     }
 }
@@ -277,19 +288,19 @@ impl<C: CellFamily> Store<C> for OrdinaryTxInfo<C> {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for OrdinaryTxInfo<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self {
-            credit_first: slice.load_bit()?,
-            storage_phase: Option::<StoragePhase>::load_from(slice)?,
-            credit_phase: Option::<CreditPhase<C>>::load_from(slice)?,
-            compute_phase: ComputePhase::load_from(slice)?,
-            action_phase: match Option::<CellContainer<C>>::load_from(slice)? {
-                Some(cell) => Some(ActionPhase::load_from(&mut cell.as_ref().as_slice())?),
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        Ok(Self {
+            credit_first: ok!(slice.load_bit()),
+            storage_phase: ok!(Option::<StoragePhase>::load_from(slice)),
+            credit_phase: ok!(Option::<CreditPhase<C>>::load_from(slice)),
+            compute_phase: ok!(ComputePhase::load_from(slice)),
+            action_phase: match ok!(Option::<CellContainer<C>>::load_from(slice)) {
+                Some(cell) => Some(ok!(ActionPhase::load_from(&mut cell.as_ref().as_slice()))),
                 None => None,
             },
-            aborted: slice.load_bit()?,
-            bounce_phase: Option::<BouncePhase>::load_from(slice)?,
-            destroyed: slice.load_bit()?,
+            aborted: ok!(slice.load_bit()),
+            bounce_phase: ok!(Option::<BouncePhase>::load_from(slice)),
+            destroyed: ok!(slice.load_bit()),
         })
     }
 }
@@ -339,17 +350,17 @@ impl<C: CellFamily> Store<C> for TickTockTxInfo {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for TickTockTxInfo {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let kind = TickTock::load_from(slice)?;
-        let storage_phase = StoragePhase::load_from(slice)?;
-        let compute_phase = ComputePhase::load_from(slice)?;
-        let action_phase = match Option::<CellContainer<C>>::load_from(slice)? {
-            Some(cell) => Some(ActionPhase::load_from(&mut cell.as_ref().as_slice())?),
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let kind = ok!(TickTock::load_from(slice));
+        let storage_phase = ok!(StoragePhase::load_from(slice));
+        let compute_phase = ok!(ComputePhase::load_from(slice));
+        let action_phase = match ok!(Option::<CellContainer<C>>::load_from(slice)) {
+            Some(cell) => Some(ok!(ActionPhase::load_from(&mut cell.as_ref().as_slice()))),
             None => None,
         };
-        let flags = slice.load_small_uint(2)?;
+        let flags = ok!(slice.load_small_uint(2));
 
-        Some(Self {
+        Ok(Self {
             kind,
             storage_phase,
             compute_phase,
@@ -382,12 +393,12 @@ impl<C: CellFamily> Store<C> for TickTock {
 
 impl<'a, C: CellFamily> Load<'a, C> for TickTock {
     #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(if slice.load_bit()? {
-            Self::Tock
-        } else {
-            Self::Tick
-        })
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        match slice.load_bit() {
+            Ok(false) => Ok(Self::Tick),
+            Ok(true) => Ok(Self::Tock),
+            Err(e) => Err(e),
+        }
     }
 }
 

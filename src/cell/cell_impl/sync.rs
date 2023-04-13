@@ -68,7 +68,7 @@ pub struct ArcCellFinalizer;
 
 impl Finalizer<ArcCellFamily> for ArcCellFinalizer {
     fn finalize_cell(&mut self, ctx: CellParts<ArcCellFamily>) -> Result<ArcCell, Error> {
-        let hashes = ctx.compute_hashes()?;
+        let hashes = ok!(ctx.compute_hashes());
         // SAFETY: ctx now represents a well-formed cell
         Ok(unsafe { make_cell(ctx, hashes) })
     }

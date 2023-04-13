@@ -34,8 +34,11 @@ pub struct RawDict<C: CellFamily, const N: u16>(pub(crate) Option<CellContainer<
 
 impl<'a, C: CellFamily, const N: u16> Load<'a, C> for RawDict<C, N> {
     #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self(<_>::load_from(slice)?))
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        match <_>::load_from(slice) {
+            Ok(dict) => Ok(Self(dict)),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -119,8 +122,11 @@ where
     pub fn load_from_root_ext(
         slice: &mut CellSlice<'_, C>,
         finalizer: &mut dyn Finalizer<C>,
-    ) -> Option<Self> {
-        Some(Self(Some(dict_load_from_root(slice, N, finalizer)?)))
+    ) -> Result<Self, Error> {
+        match dict_load_from_root(slice, N, finalizer) {
+            Ok(root) => Ok(Self(Some(root))),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -352,8 +358,8 @@ where
 
             // Read the next key part from the latest segment
             let prefix = match read_label(&mut data, segment.remaining_bit_len) {
-                Some(prefix) => prefix,
-                None => return Some(Err(self.finish(Error::CellUnderflow))),
+                Ok(prefix) => prefix,
+                Err(e) => return Some(Err(self.finish(e))),
             };
 
             // Check remaining bits
@@ -562,8 +568,8 @@ where
 
             // Read the next key part from the latest segment
             let prefix = match read_label(&mut data, segment.remaining_bit_len) {
-                Some(prefix) => prefix,
-                None => return Some(Err(self.finish(Error::CellUnderflow))),
+                Ok(prefix) => prefix,
+                Err(e) => return Some(Err(self.finish(e))),
             };
 
             // Check remaining bits
@@ -668,7 +674,7 @@ mod tests {
         {
             let mut values = dict.values();
             let mut value = values.next().unwrap().unwrap();
-            assert_eq!(value.load_u16(), Some(0xffff));
+            assert_eq!(value.load_u16(), Ok(0xffff));
             assert!(value.is_data_empty() && value.is_refs_empty());
             assert!(values.next().is_none());
         }
@@ -729,7 +735,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(value.remaining_bits(), 1);
-        assert_eq!(value.load_bit(), Some(true));
+        assert_eq!(value.load_bit(), Ok(true));
     }
 
     #[test]
@@ -746,14 +752,14 @@ mod tests {
         .unwrap();
         let mut value = dict.get(key.as_slice()).unwrap().unwrap();
         assert_eq!(value.remaining_bits(), 1);
-        assert_eq!(value.load_bit(), Some(false));
+        assert_eq!(value.load_bit(), Ok(false));
 
         //
         dict.add(key.as_slice(), build_cell(|b| b.store_bit_one()).as_slice())
             .unwrap();
         let mut value = dict.get(key.as_slice()).unwrap().unwrap();
         assert_eq!(value.remaining_bits(), 1);
-        assert_eq!(value.load_bit(), Some(false));
+        assert_eq!(value.load_bit(), Ok(false));
     }
 
     #[test]

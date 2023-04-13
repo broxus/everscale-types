@@ -400,9 +400,12 @@ impl<C: CellFamily> Store<C> for VarUint24 {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for VarUint24 {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let bytes = slice.load_small_uint(Self::LEN_BITS)?;
-        Some(Self(slice.load_uint(bytes as u16 * 8)? as u32))
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let bytes = ok!(slice.load_small_uint(Self::LEN_BITS));
+        match slice.load_uint(bytes as u16 * 8) {
+            Ok(value) => Ok(Self(value as u32)),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -425,9 +428,12 @@ impl<C: CellFamily> Store<C> for VarUint56 {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for VarUint56 {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let bytes = slice.load_small_uint(Self::LEN_BITS)?;
-        Some(Self(slice.load_uint(bytes as u16 * 8)?))
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let bytes = ok!(slice.load_small_uint(Self::LEN_BITS));
+        match slice.load_uint(bytes as u16 * 8) {
+            Ok(value) => Ok(Self(value)),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -450,9 +456,12 @@ impl<C: CellFamily> Store<C> for Tokens {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for Tokens {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let bytes = slice.load_small_uint(Self::LEN_BITS)?;
-        Some(Self(load_u128(slice, bytes)?))
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let bytes = ok!(slice.load_small_uint(Self::LEN_BITS));
+        match load_u128(slice, bytes) {
+            Ok(value) => Ok(Self(value)),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -583,19 +592,21 @@ impl<C: CellFamily> Store<C> for VarUint248 {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for VarUint248 {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let mut bytes = slice.load_small_uint(Self::LEN_BITS)?;
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let mut bytes = ok!(slice.load_small_uint(Self::LEN_BITS));
 
         let mut hi: u128 = 0;
         if let Some(high_bytes) = bytes.checked_sub(16) {
             if high_bytes > 0 {
-                hi = load_u128(slice, high_bytes)?;
+                hi = ok!(load_u128(slice, high_bytes));
                 bytes -= high_bytes;
             }
         }
 
-        let lo = load_u128(slice, bytes)?;
-        Some(Self::from_words(hi, lo))
+        match load_u128(slice, bytes) {
+            Ok(lo) => Ok(Self::from_words(hi, lo)),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -704,8 +715,11 @@ macro_rules! impl_small_uints {
         }
 
         impl<'a, C: CellFamily> Load<'a, C> for $ident {
-            fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-                Some(Self(slice.load_uint(Self::BITS)? as u16))
+            fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+                match slice.load_uint(Self::BITS) {
+                    Ok(value) => Ok(Self(value as u16)),
+                    Err(e) => Err(e),
+                }
             }
         }
 
@@ -756,20 +770,20 @@ impl SplitDepth {
 
     /// Creates a new integer value from a primitive integer.
     #[inline]
-    pub const fn new(value: u8) -> Option<Self> {
+    pub const fn new(value: u8) -> Result<Self, Error> {
         match NonZeroU8::new(value) {
-            Some(value) => Some(Self(value)),
-            None => None,
+            Some(value) => Ok(Self(value)),
+            None => Err(Error::InvalidData),
         }
     }
 
     /// Creates a new integer value from bit len.
     #[inline]
-    pub const fn from_bit_len(bit_len: u16) -> Option<Self> {
+    pub const fn from_bit_len(bit_len: u16) -> Result<Self, Error> {
         if bit_len < u8::MAX as u16 {
             Self::new(bit_len as u8)
         } else {
-            None
+            Err(Error::InvalidData)
         }
     }
 
@@ -791,8 +805,11 @@ impl<C: CellFamily> Store<C> for SplitDepth {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for SplitDepth {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Self::new(slice.load_small_uint(Self::BITS)?)
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        match slice.load_small_uint(Self::BITS) {
+            Ok(value) => Self::new(value),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -808,16 +825,19 @@ fn store_u128<C: CellFamily>(
     builder.store_uint(value as u64, bits)
 }
 
-fn load_u128<C: CellFamily>(slice: &mut CellSlice<'_, C>, mut bytes: u8) -> Option<u128> {
+fn load_u128<C: CellFamily>(slice: &mut CellSlice<'_, C>, mut bytes: u8) -> Result<u128, Error> {
     let mut result: u128 = 0;
     if let Some(high_bytes) = bytes.checked_sub(8) {
         if high_bytes > 0 {
-            result = (slice.load_uint(high_bytes as u16 * 8)? as u128) << 64;
+            result = (ok!(slice.load_uint(high_bytes as u16 * 8)) as u128) << 64;
             bytes -= high_bytes;
         }
     }
-    result |= slice.load_uint(bytes as u16 * 8)? as u128;
-    Some(result)
+
+    match slice.load_uint(bytes as u16 * 8) {
+        Ok(value) => Ok(result | value as u128),
+        Err(e) => Err(e),
+    }
 }
 
 #[cfg(test)]

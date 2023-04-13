@@ -16,7 +16,7 @@ pub(crate) trait AugDictSkipValue<'a, C: CellFamily> {
 impl<'a, C: CellFamily> AugDictSkipValue<'a, C> for crate::num::Tokens {
     #[inline]
     fn skip_value(slice: &mut CellSlice<'a, C>) -> bool {
-        if let Some(token_bytes) = slice.load_small_uint(4) {
+        if let Ok(token_bytes) = slice.load_small_uint(4) {
             slice.try_advance(8 * token_bytes as u16, 0)
         } else {
             false
@@ -49,10 +49,10 @@ pub struct AugDict<C: CellFamily, K, A, V> {
 
 impl<'a, C: CellFamily, K, A: Load<'a, C>, V> Load<'a, C> for AugDict<C, K, A, V> {
     #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self {
-            dict: Dict::load_from(slice)?,
-            extra: A::load_from(slice)?,
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        Ok(Self {
+            dict: ok!(Dict::load_from(slice)),
+            extra: ok!(A::load_from(slice)),
             _key: PhantomData,
             _value: PhantomData,
         })
@@ -122,14 +122,14 @@ where
     pub(crate) fn load_from_root<'a>(
         slice: &mut CellSlice<'a, C>,
         finalizer: &mut dyn Finalizer<C>,
-    ) -> Option<Self>
+    ) -> Result<Self, Error>
     where
         A: Load<'a, C>,
         V: AugDictSkipValue<'a, C>,
     {
-        let (extra, root) = load_from_root::<C, A, V>(slice, K::BITS, finalizer)?;
+        let (extra, root) = ok!(load_from_root::<C, A, V>(slice, K::BITS, finalizer));
 
-        Some(Self {
+        Ok(Self {
             dict: Dict::from(Some(root)),
             extra,
             _key: PhantomData,
@@ -142,7 +142,7 @@ fn load_from_root<'a, C, A, V>(
     slice: &mut CellSlice<'a, C>,
     key_bit_len: u16,
     finalizer: &mut dyn Finalizer<C>,
-) -> Option<(A, CellContainer<C>)>
+) -> Result<(A, CellContainer<C>), Error>
 where
     for<'c> C: CellFamily + 'c,
     A: Load<'a, C>,
@@ -150,16 +150,16 @@ where
 {
     let root = *slice;
 
-    let label = read_label(slice, key_bit_len)?;
+    let label = ok!(read_label(slice, key_bit_len));
     let extra = if label.remaining_bits() != key_bit_len {
         if !slice.try_advance(0, 2) {
-            return None;
+            return Err(Error::CellUnderflow);
         }
-        A::load_from(slice)?
+        ok!(A::load_from(slice))
     } else {
-        let extra = A::load_from(slice)?;
+        let extra = ok!(A::load_from(slice));
         if !V::skip_value(slice) {
-            return None;
+            return Err(Error::CellUnderflow);
         }
         extra
     };
@@ -168,8 +168,11 @@ where
     let root_refs = root.remaining_refs() - slice.remaining_refs();
 
     let mut b = CellBuilder::<C>::new();
-    b.store_slice(root.get_prefix(root_bits, root_refs)).ok()?;
-    Some((extra, b.build_ext(finalizer).ok()?))
+    ok!(b.store_slice(root.get_prefix(root_bits, root_refs)));
+    match b.build_ext(finalizer) {
+        Ok(cell) => Ok((extra, cell)),
+        Err(e) => Err(e),
+    }
 }
 
 impl<C: CellFamily, K, A, V> AugDict<C, K, A, V> {

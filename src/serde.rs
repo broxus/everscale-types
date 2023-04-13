@@ -90,8 +90,8 @@ impl<C: DefaultFinalizer> BocRepr<C> {
 
         let cell = ok!(Boc::<C>::deserialize(deserializer));
         match T::load_from(&mut cell.as_ref().as_slice()) {
-            Some(data) => Ok(data),
-            None => Err(Error::custom("failed to decode object from cells")),
+            Ok(data) => Ok(data),
+            Err(_) => Err(Error::custom("failed to decode object from cells")),
         }
     }
 }

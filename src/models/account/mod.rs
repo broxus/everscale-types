@@ -89,15 +89,21 @@ impl<C: CellFamily> Store<C> for AccountStatus {
 
 impl<'a, C: CellFamily> Load<'a, C> for AccountStatus {
     #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let ty = slice.load_small_uint(2)?;
-        Some(match ty {
-            0b00 => Self::Uninit,
-            0b01 => Self::Frozen,
-            0b10 => Self::Active,
-            0b11 => Self::NotExists,
-            _ => return None,
-        })
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        match slice.load_small_uint(2) {
+            Ok(ty) => Ok(match ty {
+                0b00 => Self::Uninit,
+                0b01 => Self::Frozen,
+                0b10 => Self::Active,
+                0b11 => Self::NotExists,
+                _ => {
+                    debug_assert!(false, "unexpected small uint");
+                    // SAFETY: `load_small_uint` must return 2 bits
+                    unsafe { std::hint::unreachable_unchecked() }
+                }
+            }),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -116,10 +122,8 @@ pub struct ShardAccount<C: CellFamily> {
 impl<C: CellFamily> ShardAccount<C> {
     /// Tries to load account data.
     pub fn load_account(&self) -> Result<Option<Account<C>>, Error> {
-        match self.account.load() {
-            Some(OptionalAccount(account)) => Ok(account),
-            None => Err(Error::CellUnderflow),
-        }
+        let OptionalAccount(account) = ok!(self.account.load());
+        Ok(account)
     }
 }
 
@@ -172,28 +176,28 @@ impl<C: CellFamily> Store<C> for OptionalAccount<C> {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for OptionalAccount<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let with_init_code_hash = if slice.load_bit()? {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let with_init_code_hash = if ok!(slice.load_bit()) {
             false // old version
         } else if slice.is_data_empty() {
-            return Some(Self::EMPTY);
+            return Ok(Self::EMPTY);
         } else {
-            let tag = slice.load_small_uint(3)?;
+            let tag = ok!(slice.load_small_uint(3));
             match tag {
                 0 => false, // old version
                 1 => true,  // new version
-                _ => return None,
+                _ => return Err(Error::InvalidData),
             }
         };
 
-        Some(Self(Some(Account {
-            address: IntAddr::load_from(slice)?,
-            storage_stat: StorageInfo::load_from(slice)?,
-            last_trans_lt: slice.load_u64()?,
-            balance: CurrencyCollection::load_from(slice)?,
-            state: AccountState::load_from(slice)?,
+        Ok(Self(Some(Account {
+            address: ok!(IntAddr::load_from(slice)),
+            storage_stat: ok!(StorageInfo::load_from(slice)),
+            last_trans_lt: ok!(slice.load_u64()),
+            balance: ok!(CurrencyCollection::load_from(slice)),
+            state: ok!(AccountState::load_from(slice)),
             init_code_hash: if with_init_code_hash {
-                Option::<CellHash>::load_from(slice)?
+                ok!(Option::<CellHash>::load_from(slice))
             } else {
                 None
             },
@@ -251,11 +255,17 @@ impl<C: CellFamily> Store<C> for AccountState<C> {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for AccountState<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(if slice.load_bit()? {
-            Self::Active(StateInit::<C>::load_from(slice)?)
-        } else if slice.load_bit()? {
-            Self::Frozen(slice.load_u256()?)
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        Ok(if ok!(slice.load_bit()) {
+            match StateInit::<C>::load_from(slice) {
+                Ok(state) => Self::Active(state),
+                Err(e) => return Err(e),
+            }
+        } else if ok!(slice.load_bit()) {
+            match slice.load_u256() {
+                Ok(state) => Self::Frozen(state),
+                Err(e) => return Err(e),
+            }
         } else {
             Self::Uninit
         })
@@ -328,12 +338,14 @@ impl<C: CellFamily> Store<C> for SpecialFlags {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for SpecialFlags {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let data = slice.load_small_uint(2)?;
-        Some(Self {
-            tick: data & 0b10 != 0,
-            tock: data & 0b01 != 0,
-        })
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        match slice.load_small_uint(2) {
+            Ok(data) => Ok(Self {
+                tick: data & 0b10 != 0,
+                tock: data & 0b01 != 0,
+            }),
+            Err(e) => Err(e),
+        }
     }
 }
 

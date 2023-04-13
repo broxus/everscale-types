@@ -1,7 +1,7 @@
 //! Common error types.
 
 /// Error type for cell related errors.
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, Clone, Eq, PartialEq, thiserror::Error)]
 pub enum Error {
     /// There were not enough bits or refs in the cell slice.
     #[error("cell underflow")]
@@ -18,6 +18,9 @@ pub enum Error {
     /// Data does not satisfy some constraints.
     #[error("invalid data")]
     InvalidData,
+    /// Unknown TLB tag.
+    #[error("invalid tag")]
+    InvalidTag,
     /// Merkle proof does not contain the root cell.
     #[error("empty proof")]
     EmptyProof,

@@ -41,27 +41,27 @@ impl<C: CellFamily> Default for MerkleProof<C> {
 }
 
 impl<C: CellFamily> Load<'_, C> for MerkleProof<C> {
-    fn load_from(s: &mut CellSlice<C>) -> Option<Self> {
+    fn load_from(s: &mut CellSlice<C>) -> Result<Self, Error> {
         if !s.has_remaining(Self::BITS, Self::REFS) {
-            return None;
+            return Err(Error::CellUnderflow);
         }
 
-        if s.get_u8(0)? != CellType::MerkleProof.to_byte() {
-            return None;
+        if ok!(s.get_u8(0)) != CellType::MerkleProof.to_byte() {
+            return Err(Error::InvalidCell);
         }
 
         let res = Self {
-            hash: s.get_u256(8)?,
-            depth: s.get_u16(8 + 256)?,
-            cell: s.get_reference_cloned(0)?,
+            hash: ok!(s.get_u256(8)),
+            depth: ok!(s.get_u16(8 + 256)),
+            cell: ok!(s.get_reference_cloned(0)),
         };
         if res.cell.as_ref().hash(0) == &res.hash
             && res.cell.as_ref().depth(0) == res.depth
             && s.try_advance(Self::BITS, Self::REFS)
         {
-            Some(res)
+            Ok(res)
         } else {
-            None
+            Err(Error::InvalidCell)
         }
     }
 }
@@ -538,7 +538,7 @@ mod tests {
                 .unwrap();
             let mut virtual_cell = proof.cell.as_ref().virtualize().as_slice();
 
-            assert_eq!(virtual_cell.load_u128(), Some(321321));
+            assert_eq!(virtual_cell.load_u128(), Ok(321321));
 
             let first_ref = virtual_cell.load_reference().unwrap();
             assert_eq!(first_ref.cell_type(), CellType::PrunedBranch);

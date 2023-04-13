@@ -287,8 +287,8 @@ impl<C: CellFamily> BocRepr<C> {
             Err(e) => return Err(BocReprError::InvalidBoc(e)),
         };
         match T::load_from(&mut cell.as_ref().as_slice()) {
-            Some(data) => Ok(data),
-            None => Err(BocReprError::InvalidData),
+            Ok(data) => Ok(data),
+            Err(e) => Err(BocReprError::InvalidData(e)),
         }
     }
 }
@@ -301,7 +301,7 @@ pub enum BocReprError {
     InvalidBoc(#[source] de::Error),
     /// Failed to decode data from cells.
     #[error("failed to decode object from cells")]
-    InvalidData,
+    InvalidData(#[source] crate::error::Error),
 }
 
 type CellContainerPair<C> = (CellContainer<C>, CellContainer<C>);
