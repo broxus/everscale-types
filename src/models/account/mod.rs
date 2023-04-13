@@ -78,22 +78,32 @@ impl AccountStatus {
 
 impl<C: CellFamily> Store<C> for AccountStatus {
     #[inline]
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        _: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         builder.store_small_uint(*self as u8, 2)
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for AccountStatus {
     #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let ty = slice.load_small_uint(2)?;
-        Some(match ty {
-            0b00 => Self::Uninit,
-            0b01 => Self::Frozen,
-            0b10 => Self::Active,
-            0b11 => Self::NotExists,
-            _ => return None,
-        })
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        match slice.load_small_uint(2) {
+            Ok(ty) => Ok(match ty {
+                0b00 => Self::Uninit,
+                0b01 => Self::Frozen,
+                0b10 => Self::Active,
+                0b11 => Self::NotExists,
+                _ => {
+                    debug_assert!(false, "unexpected small uint");
+                    // SAFETY: `load_small_uint` must return 2 bits
+                    unsafe { std::hint::unreachable_unchecked() }
+                }
+            }),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -112,10 +122,8 @@ pub struct ShardAccount<C: CellFamily> {
 impl<C: CellFamily> ShardAccount<C> {
     /// Tries to load account data.
     pub fn load_account(&self) -> Result<Option<Account<C>>, Error> {
-        match self.account.load() {
-            Some(OptionalAccount(account)) => Ok(account),
-            None => Err(Error::CellUnderflow),
-        }
+        let OptionalAccount(account) = ok!(self.account.load());
+        Ok(account)
     }
 }
 
@@ -136,56 +144,60 @@ impl<C: CellFamily> OptionalAccount<C> {
 }
 
 impl<C: CellFamily> Store<C> for OptionalAccount<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         match &self.0 {
             None => builder.store_bit_zero(),
             Some(account) => {
                 let with_init_code_hash = account.init_code_hash.is_some();
-                let prefix_stored = if with_init_code_hash {
+                ok!(if with_init_code_hash {
                     builder.store_small_uint(0b0001, 4)
                 } else {
                     builder.store_bit_one()
-                };
+                });
 
-                prefix_stored
-                    && account.address.store_into(builder, finalizer)
-                    && account.storage_stat.store_into(builder, finalizer)
-                    && builder.store_u64(account.last_trans_lt)
-                    && account.balance.store_into(builder, finalizer)
-                    && account.state.store_into(builder, finalizer)
-                    && if let Some(init_code_hash) = &account.init_code_hash {
-                        builder.store_bit_one() && builder.store_u256(init_code_hash)
-                    } else {
-                        true
-                    }
+                ok!(account.address.store_into(builder, finalizer));
+                ok!(account.storage_stat.store_into(builder, finalizer));
+                ok!(builder.store_u64(account.last_trans_lt));
+                ok!(account.balance.store_into(builder, finalizer));
+                ok!(account.state.store_into(builder, finalizer));
+                if let Some(init_code_hash) = &account.init_code_hash {
+                    ok!(builder.store_bit_one());
+                    builder.store_u256(init_code_hash)
+                } else {
+                    Ok(())
+                }
             }
         }
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for OptionalAccount<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let with_init_code_hash = if slice.load_bit()? {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let with_init_code_hash = if ok!(slice.load_bit()) {
             false // old version
         } else if slice.is_data_empty() {
-            return Some(Self::EMPTY);
+            return Ok(Self::EMPTY);
         } else {
-            let tag = slice.load_small_uint(3)?;
+            let tag = ok!(slice.load_small_uint(3));
             match tag {
                 0 => false, // old version
                 1 => true,  // new version
-                _ => return None,
+                _ => return Err(Error::InvalidData),
             }
         };
 
-        Some(Self(Some(Account {
-            address: IntAddr::load_from(slice)?,
-            storage_stat: StorageInfo::load_from(slice)?,
-            last_trans_lt: slice.load_u64()?,
-            balance: CurrencyCollection::load_from(slice)?,
-            state: AccountState::load_from(slice)?,
+        Ok(Self(Some(Account {
+            address: ok!(IntAddr::load_from(slice)),
+            storage_stat: ok!(StorageInfo::load_from(slice)),
+            last_trans_lt: ok!(slice.load_u64()),
+            balance: ok!(CurrencyCollection::load_from(slice)),
+            state: ok!(AccountState::load_from(slice)),
             init_code_hash: if with_init_code_hash {
-                Option::<CellHash>::load_from(slice)?
+                ok!(Option::<CellHash>::load_from(slice))
             } else {
                 None
             },
@@ -223,21 +235,37 @@ pub enum AccountState<C: CellFamily> {
 }
 
 impl<C: CellFamily> Store<C> for AccountState<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         match self {
             Self::Uninit => builder.store_small_uint(0b00, 2),
-            Self::Active(state) => builder.store_bit_one() && state.store_into(builder, finalizer),
-            Self::Frozen(hash) => builder.store_small_uint(0b01, 2) && builder.store_u256(hash),
+            Self::Active(state) => {
+                ok!(builder.store_bit_one());
+                state.store_into(builder, finalizer)
+            }
+            Self::Frozen(hash) => {
+                ok!(builder.store_small_uint(0b01, 2));
+                builder.store_u256(hash)
+            }
         }
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for AccountState<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(if slice.load_bit()? {
-            Self::Active(StateInit::<C>::load_from(slice)?)
-        } else if slice.load_bit()? {
-            Self::Frozen(slice.load_u256()?)
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        Ok(if ok!(slice.load_bit()) {
+            match StateInit::<C>::load_from(slice) {
+                Ok(state) => Self::Active(state),
+                Err(e) => return Err(e),
+            }
+        } else if ok!(slice.load_bit()) {
+            match slice.load_u256() {
+                Ok(state) => Self::Frozen(state),
+                Err(e) => return Err(e),
+            }
         } else {
             Self::Uninit
         })
@@ -300,18 +328,24 @@ impl SpecialFlags {
 }
 
 impl<C: CellFamily> Store<C> for SpecialFlags {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        _: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         builder.store_small_uint(((self.tick as u8) << 1) | self.tock as u8, 2)
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for SpecialFlags {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let data = slice.load_small_uint(2)?;
-        Some(Self {
-            tick: data & 0b10 != 0,
-            tock: data & 0b01 != 0,
-        })
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        match slice.load_small_uint(2) {
+            Ok(data) => Ok(Self {
+                tick: data & 0b10 != 0,
+                tock: data & 0b01 != 0,
+            }),
+            Err(e) => Err(e),
+        }
     }
 }
 

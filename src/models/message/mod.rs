@@ -1,6 +1,7 @@
 //! Message models.
 
 use crate::cell::*;
+use crate::error::Error;
 use crate::num::*;
 use crate::util::{CustomClone, CustomDebug, CustomEq};
 
@@ -25,7 +26,11 @@ pub struct Message<'a, C: CellFamily> {
 }
 
 impl<'a, C: CellFamily> Store<C> for Message<'a, C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         let (layout, bits, refs) = match self.layout {
             Some(layout) => {
                 let (bits, refs) = layout.compute_full_len(&self.info, &self.init, &self.body);
@@ -36,45 +41,42 @@ impl<'a, C: CellFamily> Store<C> for Message<'a, C> {
 
         // Check capacity
         if !builder.has_capacity(bits, refs) {
-            return false;
+            return Err(Error::CellOverflow);
         }
 
         // Try to store info
-        if !self.info.store_into(builder, finalizer) {
-            return false;
-        }
+        ok!(self.info.store_into(builder, finalizer));
 
         // Try to store init
-        let init_stored = match &self.init {
+        ok!(match &self.init {
             Some(value) => {
-                builder.store_bit_one() // just$1
-                    && SliceOrCell {
+                ok!(builder.store_bit_one()); // just$1
+                SliceOrCell {
                     to_cell: layout.init_to_cell,
                     value,
                 }
-                    .store_into(builder, finalizer)
+                .store_into(builder, finalizer)
             }
             None => builder.store_bit_zero(), // nothing$0
-        };
+        });
 
         // Try to store body
-        init_stored
-            && match &self.body {
-                Some(value) => SliceOrCell {
-                    to_cell: layout.body_to_cell,
-                    value,
-                }
-                .store_into(builder, finalizer),
-                None => builder.store_bit_zero(),
+        match &self.body {
+            Some(value) => SliceOrCell {
+                to_cell: layout.body_to_cell,
+                value,
             }
+            .store_into(builder, finalizer),
+            None => builder.store_bit_zero(),
+        }
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for Message<'a, C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let info = MsgInfo::<C>::load_from(slice)?;
-        let init = Option::<SliceOrCell<StateInit<C>>>::load_from(slice)?;
-        let body = SliceOrCell::<CellSlice<'a, C>>::load_from(slice)?;
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let info = ok!(MsgInfo::<C>::load_from(slice));
+        let init = ok!(Option::<SliceOrCell<StateInit<C>>>::load_from(slice));
+        let body = ok!(SliceOrCell::<CellSlice<'a, C>>::load_from(slice));
 
         let (init, init_to_cell) = match init {
             Some(SliceOrCell { to_cell, value }) => (Some(value), to_cell),
@@ -92,7 +94,7 @@ impl<'a, C: CellFamily> Load<'a, C> for Message<'a, C> {
             Some(body.value)
         };
 
-        Some(Self {
+        Ok(Self {
             info,
             init,
             body,
@@ -107,36 +109,35 @@ struct SliceOrCell<T> {
 }
 
 impl<C: CellFamily, T: Store<C>> Store<C> for SliceOrCell<T> {
-    #[inline]
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         if self.to_cell {
             let cell = {
                 let mut builder = CellBuilder::<C>::new();
-                if !self.value.store_into(&mut builder, finalizer) {
-                    return false;
-                }
-                match builder.build_ext(finalizer) {
-                    Some(value) => value,
-                    None => return false,
-                }
+                ok!(self.value.store_into(&mut builder, finalizer));
+                ok!(builder.build_ext(finalizer))
             };
 
             // right$1 ^Cell
-            builder.store_bit_one() && builder.store_reference(cell)
+            ok!(builder.store_bit_one());
+            builder.store_reference(cell)
         } else {
             // left$0 X
-            builder.store_bit_zero() && self.value.store_into(builder, finalizer)
+            ok!(builder.store_bit_zero());
+            self.value.store_into(builder, finalizer)
         }
     }
 }
 
 impl<'a, C: CellFamily, T: Load<'a, C>> Load<'a, C> for SliceOrCell<T> {
-    #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let to_cell = slice.load_bit()?;
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let to_cell = ok!(slice.load_bit());
 
         let mut child_cell = if to_cell {
-            Some(slice.load_reference()?.as_slice())
+            Some(ok!(slice.load_reference()).as_slice())
         } else {
             None
         };
@@ -146,9 +147,9 @@ impl<'a, C: CellFamily, T: Load<'a, C>> Load<'a, C> for SliceOrCell<T> {
             None => slice,
         };
 
-        Some(Self {
+        Ok(Self {
             to_cell,
-            value: T::load_from(slice)?,
+            value: ok!(T::load_from(slice)),
         })
     }
 }
@@ -326,27 +327,45 @@ impl<C: CellFamily> MsgInfo<C> {
 }
 
 impl<C: CellFamily> Store<C> for MsgInfo<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         match self {
-            Self::Int(info) => builder.store_bit_zero() && info.store_into(builder, finalizer),
+            Self::Int(info) => {
+                ok!(builder.store_bit_zero());
+                info.store_into(builder, finalizer)
+            }
             Self::ExtIn(info) => {
-                builder.store_small_uint(0b10, 2) && info.store_into(builder, finalizer)
+                ok!(builder.store_small_uint(0b10, 2));
+                info.store_into(builder, finalizer)
             }
             Self::ExtOut(info) => {
-                builder.store_small_uint(0b11, 2) && info.store_into(builder, finalizer)
+                ok!(builder.store_small_uint(0b11, 2));
+                info.store_into(builder, finalizer)
             }
         }
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for MsgInfo<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(if !slice.load_bit()? {
-            Self::Int(IntMsgInfo::<C>::load_from(slice)?)
-        } else if !slice.load_bit()? {
-            Self::ExtIn(ExtInMsgInfo::load_from(slice)?)
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        Ok(if !ok!(slice.load_bit()) {
+            match IntMsgInfo::<C>::load_from(slice) {
+                Ok(info) => Self::Int(info),
+                Err(e) => return Err(e),
+            }
+        } else if !ok!(slice.load_bit()) {
+            match ExtInMsgInfo::load_from(slice) {
+                Ok(info) => Self::ExtIn(info),
+                Err(e) => return Err(e),
+            }
         } else {
-            Self::ExtOut(ExtOutMsgInfo::load_from(slice)?)
+            match ExtOutMsgInfo::load_from(slice) {
+                Ok(info) => Self::ExtOut(info),
+                Err(e) => return Err(e),
+            }
         })
     }
 }
@@ -409,34 +428,38 @@ impl<C: CellFamily> IntMsgInfo<C> {
 }
 
 impl<C: CellFamily> Store<C> for IntMsgInfo<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         let flags =
             ((self.ihr_disabled as u8) << 2) | ((self.bounce as u8) << 1) | self.bounced as u8;
-        builder.store_small_uint(flags, 3)
-            && self.src.store_into(builder, finalizer)
-            && self.dst.store_into(builder, finalizer)
-            && self.value.store_into(builder, finalizer)
-            && self.ihr_fee.store_into(builder, finalizer)
-            && self.fwd_fee.store_into(builder, finalizer)
-            && builder.store_u64(self.created_lt)
-            && builder.store_u32(self.created_at)
+        ok!(builder.store_small_uint(flags, 3));
+        ok!(self.src.store_into(builder, finalizer));
+        ok!(self.dst.store_into(builder, finalizer));
+        ok!(self.value.store_into(builder, finalizer));
+        ok!(self.ihr_fee.store_into(builder, finalizer));
+        ok!(self.fwd_fee.store_into(builder, finalizer));
+        ok!(builder.store_u64(self.created_lt));
+        builder.store_u32(self.created_at)
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for IntMsgInfo<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let flags = slice.load_small_uint(3)?;
-        Some(Self {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let flags = ok!(slice.load_small_uint(3));
+        Ok(Self {
             ihr_disabled: flags & 0b100 != 0,
             bounce: flags & 0b010 != 0,
             bounced: flags & 0b001 != 0,
-            src: IntAddr::load_from(slice)?,
-            dst: IntAddr::load_from(slice)?,
-            value: CurrencyCollection::load_from(slice)?,
-            ihr_fee: Tokens::load_from(slice)?,
-            fwd_fee: Tokens::load_from(slice)?,
-            created_lt: slice.load_u64()?,
-            created_at: slice.load_u32()?,
+            src: ok!(IntAddr::load_from(slice)),
+            dst: ok!(IntAddr::load_from(slice)),
+            value: ok!(CurrencyCollection::load_from(slice)),
+            ihr_fee: ok!(Tokens::load_from(slice)),
+            fwd_fee: ok!(Tokens::load_from(slice)),
+            created_lt: ok!(slice.load_u64()),
+            created_at: ok!(slice.load_u32()),
         })
     }
 }
@@ -464,23 +487,29 @@ impl ExtInMsgInfo {
 }
 
 impl<C: CellFamily> Store<C> for ExtInMsgInfo {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         if !self.import_fee.is_valid() {
-            return false;
+            return Err(Error::InvalidData);
         }
-        builder.has_capacity(self.bit_len(), 0)
-            && store_ext_addr(builder, finalizer, &self.src)
-            && self.dst.store_into(builder, finalizer)
-            && self.import_fee.store_into(builder, finalizer)
+        if !builder.has_capacity(self.bit_len(), 0) {
+            return Err(Error::CellOverflow);
+        }
+        ok!(store_ext_addr(builder, finalizer, &self.src));
+        ok!(self.dst.store_into(builder, finalizer));
+        self.import_fee.store_into(builder, finalizer)
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for ExtInMsgInfo {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self {
-            src: load_ext_addr(slice)?,
-            dst: IntAddr::load_from(slice)?,
-            import_fee: Tokens::load_from(slice)?,
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        Ok(Self {
+            src: ok!(load_ext_addr(slice)),
+            dst: ok!(IntAddr::load_from(slice)),
+            import_fee: ok!(Tokens::load_from(slice)),
         })
     }
 }
@@ -506,23 +535,29 @@ impl ExtOutMsgInfo {
 }
 
 impl<C: CellFamily> Store<C> for ExtOutMsgInfo {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        builder.has_capacity(self.bit_len(), 0)
-            && builder.store_small_uint(0b11, 2)
-            && self.src.store_into(builder, finalizer)
-            && store_ext_addr(builder, finalizer, &self.dst)
-            && builder.store_u64(self.created_lt)
-            && builder.store_u32(self.created_at)
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
+        if !builder.has_capacity(self.bit_len(), 0) {
+            return Err(Error::CellOverflow);
+        }
+        ok!(builder.store_small_uint(0b11, 2));
+        ok!(self.src.store_into(builder, finalizer));
+        ok!(store_ext_addr(builder, finalizer, &self.dst));
+        ok!(builder.store_u64(self.created_lt));
+        builder.store_u32(self.created_at)
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for ExtOutMsgInfo {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self {
-            src: IntAddr::load_from(slice)?,
-            dst: load_ext_addr(slice)?,
-            created_lt: slice.load_u64()?,
-            created_at: slice.load_u32()?,
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        Ok(Self {
+            src: ok!(IntAddr::load_from(slice)),
+            dst: ok!(load_ext_addr(slice)),
+            created_lt: ok!(slice.load_u64()),
+            created_at: ok!(slice.load_u32()),
         })
     }
 }
@@ -539,37 +574,39 @@ fn store_ext_addr<C: CellFamily>(
     builder: &mut CellBuilder<C>,
     finalizer: &mut dyn Finalizer<C>,
     addr: &Option<ExtAddr>,
-) -> bool {
+) -> Result<(), Error> {
     match addr {
         None => builder.store_zeros(2),
         Some(ExtAddr { data_bit_len, data }) => {
-            builder.has_capacity(2 + Uint9::BITS + data_bit_len.into_inner(), 0)
-                && builder.store_bit_zero()
-                && builder.store_bit_one()
-                && data_bit_len.store_into(builder, finalizer)
-                && builder.store_raw(data, data_bit_len.into_inner())
+            if !builder.has_capacity(2 + Uint9::BITS + data_bit_len.into_inner(), 0) {
+                return Err(Error::CellOverflow);
+            }
+            ok!(builder.store_bit_zero());
+            ok!(builder.store_bit_one());
+            ok!(data_bit_len.store_into(builder, finalizer));
+            builder.store_raw(data, data_bit_len.into_inner())
         }
     }
 }
 
 #[inline]
-fn load_ext_addr<C: CellFamily>(slice: &mut CellSlice<'_, C>) -> Option<Option<ExtAddr>> {
-    if slice.load_bit()? {
-        return None;
+fn load_ext_addr<C: CellFamily>(slice: &mut CellSlice<'_, C>) -> Result<Option<ExtAddr>, Error> {
+    if ok!(slice.load_bit()) {
+        return Err(Error::InvalidTag);
     }
 
-    if !slice.load_bit()? {
-        return Some(None);
+    if !ok!(slice.load_bit()) {
+        return Ok(None);
     }
 
-    let data_bit_len = Uint9::load_from(slice)?;
+    let data_bit_len = ok!(Uint9::load_from(slice));
     if !slice.has_remaining(data_bit_len.into_inner(), 0) {
-        return None;
+        return Err(Error::CellUnderflow);
     }
 
     let mut data = vec![0; (data_bit_len.into_inner() as usize + 7) / 8];
-    slice.load_raw(&mut data, data_bit_len.into_inner())?;
-    Some(Some(ExtAddr { data_bit_len, data }))
+    ok!(slice.load_raw(&mut data, data_bit_len.into_inner()));
+    Ok(Some(ExtAddr { data_bit_len, data }))
 }
 
 #[cfg(test)]

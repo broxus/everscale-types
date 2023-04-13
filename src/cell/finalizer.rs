@@ -3,6 +3,7 @@ use sha2::Digest;
 use crate::cell::{
     CellContainer, CellDescriptor, CellFamily, CellHash, CellType, LevelMask, MAX_REF_COUNT,
 };
+use crate::error::Error;
 use crate::util::{unlikely, ArrayVec};
 
 #[cfg(feature = "stats")]
@@ -11,14 +12,14 @@ use crate::cell::CellTreeStats;
 /// A trait for describing cell finalization logic.
 pub trait Finalizer<C: CellFamily + ?Sized> {
     /// Builds a new cell from cell parts.
-    fn finalize_cell(&mut self, cell: CellParts<'_, C>) -> Option<CellContainer<C>>;
+    fn finalize_cell(&mut self, cell: CellParts<'_, C>) -> Result<CellContainer<C>, Error>;
 }
 
 impl<F, C: CellFamily> Finalizer<C> for F
 where
-    F: FnMut(CellParts<C>) -> Option<CellContainer<C>>,
+    F: FnMut(CellParts<C>) -> Result<CellContainer<C>, Error>,
 {
-    fn finalize_cell(&mut self, cell: CellParts<C>) -> Option<CellContainer<C>> {
+    fn finalize_cell(&mut self, cell: CellParts<C>) -> Result<CellContainer<C>, Error> {
         (*self)(cell)
     }
 }
@@ -59,7 +60,7 @@ pub struct CellParts<'a, C: CellFamily + ?Sized> {
 
 impl<'a, C: CellFamily + 'a> CellParts<'a, C> {
     /// Validates cell and computes all hashes.
-    pub fn compute_hashes(&self) -> Option<Vec<(CellHash, u16)>> {
+    pub fn compute_hashes(&self) -> Result<Vec<(CellHash, u16)>, Error> {
         const HASH_BITS: usize = 256;
         const DEPTH_BITS: usize = 16;
 
@@ -75,7 +76,7 @@ impl<'a, C: CellFamily + 'a> CellParts<'a, C> {
 
         let (cell_type, computed_level_mask) = if unlikely(descriptor.is_exotic()) {
             let Some(&first_byte) = self.data.first() else {
-                return None;
+                return Err(Error::InvalidCell);
             };
 
             const PRUNED_BRANCH: u8 = CellType::PrunedBranch.to_byte();
@@ -87,17 +88,17 @@ impl<'a, C: CellFamily + 'a> CellParts<'a, C> {
                 // 8 bits type, 8 bits level mask, level x (hash, depth)
                 PRUNED_BRANCH => {
                     if unlikely(level == 0) {
-                        return None;
+                        return Err(Error::InvalidCell);
                     }
 
                     let expected_bit_len = 8 + 8 + level * (HASH_BITS + DEPTH_BITS);
                     if unlikely(bit_len != expected_bit_len || !references.is_empty()) {
-                        return None;
+                        return Err(Error::InvalidCell);
                     }
 
                     let stored_mask = self.data.get(1).copied().unwrap_or_default();
                     if unlikely(level_mask != stored_mask) {
-                        return None;
+                        return Err(Error::InvalidCell);
                     }
 
                     hashes_len = 1;
@@ -107,7 +108,7 @@ impl<'a, C: CellFamily + 'a> CellParts<'a, C> {
                 MERKLE_PROOF => {
                     const EXPECTED_BIT_LEN: usize = 8 + HASH_BITS + DEPTH_BITS;
                     if unlikely(bit_len != EXPECTED_BIT_LEN || references.len() != 1) {
-                        return None;
+                        return Err(Error::InvalidCell);
                     }
 
                     (CellType::MerkleProof, self.children_mask.virtualize(1))
@@ -116,7 +117,7 @@ impl<'a, C: CellFamily + 'a> CellParts<'a, C> {
                 MERKLE_UPDATE => {
                     const EXPECTED_BIT_LEN: usize = 8 + 2 * (HASH_BITS + DEPTH_BITS);
                     if unlikely(bit_len != EXPECTED_BIT_LEN || references.len() != 2) {
-                        return None;
+                        return Err(Error::InvalidCell);
                     }
 
                     (CellType::MerkleUpdate, self.children_mask.virtualize(1))
@@ -125,19 +126,19 @@ impl<'a, C: CellFamily + 'a> CellParts<'a, C> {
                 LIBRARY_REFERENCE => {
                     const EXPECTED_BIT_LEN: usize = 8 + HASH_BITS;
                     if unlikely(bit_len != EXPECTED_BIT_LEN || !references.is_empty()) {
-                        return None;
+                        return Err(Error::InvalidCell);
                     }
 
                     (CellType::LibraryReference, LevelMask::EMPTY)
                 }
-                _ => return None,
+                _ => return Err(Error::InvalidCell),
             }
         } else {
             (CellType::Ordinary, self.children_mask)
         };
 
         if unlikely(computed_level_mask != level_mask) {
-            return None;
+            return Err(Error::InvalidCell);
         }
 
         let level_offset = cell_type.is_merkle() as u8;
@@ -169,7 +170,11 @@ impl<'a, C: CellFamily + 'a> CellParts<'a, C> {
             let mut depth = 0;
             for child in references {
                 let child_depth = child.as_ref().depth(level as u8 + level_offset);
-                depth = std::cmp::max(depth, child_depth.checked_add(1)?);
+                let next_depth = match child_depth.checked_add(1) {
+                    Some(next_depth) => next_depth,
+                    None => return Err(Error::DepthOverflow),
+                };
+                depth = std::cmp::max(depth, next_depth);
 
                 hasher.update(child_depth.to_be_bytes());
             }
@@ -183,6 +188,6 @@ impl<'a, C: CellFamily + 'a> CellParts<'a, C> {
             hashes.push((hash, depth));
         }
 
-        Some(hashes)
+        Ok(hashes)
     }
 }

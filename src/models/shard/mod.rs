@@ -25,7 +25,11 @@ pub enum ShardState<C: CellFamily> {
 }
 
 impl<C: CellFamily> Store<C> for ShardState<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         match self {
             Self::Unsplit(state) => state.store_into(builder, finalizer),
             Self::Split(state) => state.store_into(builder, finalizer),
@@ -34,11 +38,17 @@ impl<C: CellFamily> Store<C> for ShardState<C> {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for ShardState<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(if slice.get_bit(0)? {
-            Self::Unsplit(ShardStateUnsplit::load_from(slice)?)
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        Ok(if ok!(slice.get_bit(0)) {
+            match ShardStateUnsplit::load_from(slice) {
+                Ok(state) => Self::Unsplit(state),
+                Err(e) => return Err(e),
+            }
         } else {
-            Self::Split(ShardStateSplit::load_from(slice)?)
+            match ShardStateSplit::load_from(slice) {
+                Ok(state) => Self::Split(state),
+                Err(e) => return Err(e),
+            }
         })
     }
 }
@@ -87,15 +97,15 @@ impl<C: CellFamily> ShardStateUnsplit<C> {
 
     /// Tries to load shard accounts dictionary.
     pub fn load_accounts(&self) -> Result<ShardAccounts<C>, Error> {
-        self.accounts.load().ok_or(Error::CellUnderflow)
+        self.accounts.load()
     }
 
     /// Tries to load additional masterchain data.
     pub fn load_custom(&self) -> Result<Option<McStateExtra<C>>, Error> {
         match &self.custom {
             Some(custom) => match custom.load() {
-                Some(custom) => Ok(Some(custom)),
-                None => Err(Error::CellUnderflow),
+                Ok(custom) => Ok(Some(custom)),
+                Err(e) => Err(e),
             },
             None => Ok(None),
         }
@@ -103,70 +113,71 @@ impl<C: CellFamily> ShardStateUnsplit<C> {
 }
 
 impl<C: CellFamily> Store<C> for ShardStateUnsplit<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        let child_cell = 'cell: {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
+        let child_cell = {
             let mut builder = CellBuilder::<C>::new();
-            if builder.store_u64(self.overload_history)
-                && builder.store_u64(self.underload_history)
-                && self.total_balance.store_into(&mut builder, finalizer)
-                && self
-                    .total_validator_fees
-                    .store_into(&mut builder, finalizer)
-                && self.libraries.store_into(&mut builder, finalizer)
-                && self.master_ref.store_into(&mut builder, finalizer)
-            {
-                if let Some(cell) = builder.build_ext(finalizer) {
-                    break 'cell cell;
-                }
-            }
-            return false;
+            ok!(builder.store_u64(self.overload_history));
+            ok!(builder.store_u64(self.underload_history));
+            ok!(self.total_balance.store_into(&mut builder, finalizer));
+            ok!(self
+                .total_validator_fees
+                .store_into(&mut builder, finalizer));
+            ok!(self.libraries.store_into(&mut builder, finalizer));
+            ok!(self.master_ref.store_into(&mut builder, finalizer));
+            ok!(builder.build_ext(finalizer))
         };
 
-        builder.store_u32(Self::TAG)
-            && builder.store_u32(self.global_id as u32)
-            && self.shard_ident.store_into(builder, finalizer)
-            && builder.store_u32(self.seqno)
-            && builder.store_u32(self.vert_seqno)
-            && builder.store_u32(self.gen_utime)
-            && builder.store_u64(self.gen_lt)
-            && builder.store_u32(self.min_ref_mc_seqno)
-            && builder.store_reference(self.out_msg_queue_info.clone())
-            && builder.store_bit(self.before_split)
-            && builder.store_reference(self.accounts.cell.clone())
-            && builder.store_reference(child_cell)
-            && self.custom.store_into(builder, finalizer)
+        ok!(builder.store_u32(Self::TAG));
+        ok!(builder.store_u32(self.global_id as u32));
+        ok!(self.shard_ident.store_into(builder, finalizer));
+        ok!(builder.store_u32(self.seqno));
+        ok!(builder.store_u32(self.vert_seqno));
+        ok!(builder.store_u32(self.gen_utime));
+        ok!(builder.store_u64(self.gen_lt));
+        ok!(builder.store_u32(self.min_ref_mc_seqno));
+        ok!(builder.store_reference(self.out_msg_queue_info.clone()));
+        ok!(builder.store_bit(self.before_split));
+        ok!(builder.store_reference(self.accounts.cell.clone()));
+        ok!(builder.store_reference(child_cell));
+        self.custom.store_into(builder, finalizer)
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for ShardStateUnsplit<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        if slice.load_u32()? != Self::TAG {
-            return None;
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        match slice.load_u32() {
+            Ok(Self::TAG) => {}
+            Ok(_) => return Err(Error::InvalidTag),
+            Err(e) => return Err(e),
         }
 
-        let out_msg_queue_info = slice.load_reference_cloned()?;
-        let accounts = Lazy::load_from(slice)?;
+        let out_msg_queue_info = ok!(slice.load_reference_cloned());
+        let accounts = ok!(Lazy::load_from(slice));
 
-        let child_slice = &mut slice.load_reference()?.as_slice();
+        let child_slice = &mut ok!(slice.load_reference()).as_slice();
 
-        Some(Self {
-            global_id: slice.load_u32()? as i32,
-            shard_ident: ShardIdent::load_from(slice)?,
-            seqno: slice.load_u32()?,
-            vert_seqno: slice.load_u32()?,
-            gen_utime: slice.load_u32()?,
-            gen_lt: slice.load_u64()?,
-            min_ref_mc_seqno: slice.load_u32()?,
+        Ok(Self {
+            global_id: ok!(slice.load_u32()) as i32,
+            shard_ident: ok!(ShardIdent::load_from(slice)),
+            seqno: ok!(slice.load_u32()),
+            vert_seqno: ok!(slice.load_u32()),
+            gen_utime: ok!(slice.load_u32()),
+            gen_lt: ok!(slice.load_u64()),
+            min_ref_mc_seqno: ok!(slice.load_u32()),
             out_msg_queue_info,
-            before_split: slice.load_bit()?,
+            before_split: ok!(slice.load_bit()),
             accounts,
-            overload_history: child_slice.load_u64()?,
-            underload_history: child_slice.load_u64()?,
-            total_balance: CurrencyCollection::load_from(child_slice)?,
-            total_validator_fees: CurrencyCollection::load_from(child_slice)?,
-            libraries: RawDict::load_from(child_slice)?,
-            master_ref: Option::<BlockRef>::load_from(child_slice)?,
-            custom: Option::<Lazy<C, McStateExtra<C>>>::load_from(slice)?,
+            overload_history: ok!(child_slice.load_u64()),
+            underload_history: ok!(child_slice.load_u64()),
+            total_balance: ok!(CurrencyCollection::load_from(child_slice)),
+            total_validator_fees: ok!(CurrencyCollection::load_from(child_slice)),
+            libraries: ok!(RawDict::load_from(child_slice)),
+            master_ref: ok!(Option::<BlockRef>::load_from(child_slice)),
+            custom: ok!(Option::<Lazy<C, McStateExtra<C>>>::load_from(slice)),
         })
     }
 }

@@ -1,7 +1,7 @@
 //! Common error types.
 
 /// Error type for cell related errors.
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, Clone, Eq, PartialEq, thiserror::Error)]
 pub enum Error {
     /// There were not enough bits or refs in the cell slice.
     #[error("cell underflow")]
@@ -12,6 +12,21 @@ pub enum Error {
     /// Something tried to load a pruned branch cell.
     #[error("pruned branch access")]
     PrunedBranchAccess,
+    /// Cell contains invalid descriptor or data.
+    #[error("invalid cell")]
+    InvalidCell,
+    /// Data does not satisfy some constraints.
+    #[error("invalid data")]
+    InvalidData,
+    /// Unknown TLB tag.
+    #[error("invalid tag")]
+    InvalidTag,
+    /// Merkle proof does not contain the root cell.
+    #[error("empty proof")]
+    EmptyProof,
+    /// Tree of cells is too deep.
+    #[error("cell depth overflow")]
+    DepthOverflow,
 }
 
 /// Error type for integer parsing related errors.

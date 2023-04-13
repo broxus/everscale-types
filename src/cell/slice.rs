@@ -9,42 +9,51 @@ use crate::util::{unlikely, CustomDebug};
 /// A data structure that can be deserialized from cells.
 pub trait Load<'a, C: CellFamily>: Sized {
     /// Tries to load itself from a cell slice.
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self>;
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error>;
 }
 
 impl<'a, C: CellFamily, T: Load<'a, C>> Load<'a, C> for Box<T> {
     #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Box::new(<T as Load<C>>::load_from(slice)?))
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        match <T as Load<C>>::load_from(slice) {
+            Ok(value) => Ok(Box::new(value)),
+            Err(e) => Err(e),
+        }
     }
 }
 
 impl<'a, C: CellFamily, T: Load<'a, C>> Load<'a, C> for Arc<T> {
     #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Arc::new(<T as Load<C>>::load_from(slice)?))
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        match <T as Load<C>>::load_from(slice) {
+            Ok(value) => Ok(Arc::new(value)),
+            Err(e) => Err(e),
+        }
     }
 }
 
 impl<'a, C: CellFamily, T: Load<'a, C>> Load<'a, C> for Rc<T> {
     #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Rc::new(<T as Load<C>>::load_from(slice)?))
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        match <T as Load<C>>::load_from(slice) {
+            Ok(value) => Ok(Rc::new(value)),
+            Err(e) => Err(e),
+        }
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for () {
     #[inline]
-    fn load_from(_: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(())
+    fn load_from(_: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        Ok(())
     }
 }
 
 macro_rules! impl_load_for_tuples {
     ($( ($($t:ident),+) ),*$(,)?) => {$(
         impl<'a, C: CellFamily, $($t: Load<'a, C>),+> Load<'a, C> for ($($t),*) {
-            fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-                Some(($(<$t>::load_from(slice)?),+))
+            fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+                Ok(($(ok!(<$t>::load_from(slice))),+))
             }
         }
     )*};
@@ -60,27 +69,39 @@ impl_load_for_tuples! {
 
 impl<'a, C: CellFamily, T: Load<'a, C>> Load<'a, C> for Option<T> {
     #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        if slice.load_bit()? {
-            Some(Some(T::load_from(slice)?))
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        if ok!(slice.load_bit()) {
+            match T::load_from(slice) {
+                Ok(value) => Ok(Some(value)),
+                Err(e) => Err(e),
+            }
         } else {
-            Some(None)
+            Ok(None)
         }
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for CellSlice<'a, C> {
     #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(slice.load_remaining())
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        Ok(slice.load_remaining())
     }
+}
+
+macro_rules! ok_map {
+    ($expr:expr => $ty:ty) => {
+        match $expr {
+            core::result::Result::Ok(s) => core::result::Result::Ok(s as $ty),
+            core::result::Result::Err(e) => core::result::Result::Err(e),
+        }
+    };
 }
 
 macro_rules! impl_primitive_loads {
     ($($type:ty => |$s:ident| $expr:expr),*$(,)?) => {
         $(impl<C: CellFamily> Load<'_, C> for $type {
             #[inline]
-            fn load_from($s: &mut CellSlice<C>) -> Option<Self> {
+            fn load_from($s: &mut CellSlice<C>) -> Result<Self, Error> {
                 $expr
             }
         })*
@@ -90,28 +111,46 @@ macro_rules! impl_primitive_loads {
 impl_primitive_loads! {
     bool => |s| s.load_bit(),
     u8 => |s| s.load_u8(),
-    i8 => |s| Some(s.load_u8()? as i8),
+    i8 => |s| ok_map!(s.load_u8() => i8),
     u16 => |s| s.load_u16(),
-    i16 => |s| Some(s.load_u16()? as i16),
+    i16 => |s| ok_map!(s.load_u16() => i16),
     u32 => |s| s.load_u32(),
-    i32 => |s| Some(s.load_u32()? as i32),
+    i32 => |s| ok_map!(s.load_u32() => i32),
     u64 => |s| s.load_u64(),
-    i64 => |s| Some(s.load_u64()? as i64),
+    i64 => |s| ok_map!(s.load_u64() => i64),
     u128 => |s| s.load_u128(),
-    i128 => |s| Some(s.load_u128()? as i128),
-    NonZeroU8 => |s| NonZeroU8::new(s.load_u8()?),
-    NonZeroU16 => |s| NonZeroU16::new(s.load_u16()?),
-    NonZeroU32 => |s| NonZeroU32::new(s.load_u32()?),
+    i128 => |s| ok_map!(s.load_u128() => i128),
+    NonZeroU8 => |s| match s.load_u8() {
+        Ok(s) => match NonZeroU8::new(s) {
+            Some(s) => Ok(s),
+            None => Err(Error::InvalidData)
+        }
+        Err(e) => Err(e),
+    },
+    NonZeroU16 => |s| match s.load_u16() {
+        Ok(s) => match NonZeroU16::new(s) {
+            Some(s) => Ok(s),
+            None => Err(Error::InvalidData)
+        }
+        Err(e) => Err(e),
+    },
+    NonZeroU32 => |s| match s.load_u32() {
+        Ok(s) => match NonZeroU32::new(s) {
+            Some(s) => Ok(s),
+            None => Err(Error::InvalidData)
+        }
+        Err(e) => Err(e),
+    },
     CellHash => |s| s.load_u256(),
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for &'a dyn Cell<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
         slice.load_reference()
     }
 }
 
-/// A read-only view for a subcell of a cell
+/// A read-only view for a subrange of a cell
 #[derive(CustomDebug)]
 pub struct CellSlice<'a, C: CellFamily> {
     cell: &'a dyn Cell<C>,
@@ -352,7 +391,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     /// };
     ///
     /// let without_prefix = slice.strip_data_prefix(&prefix.as_slice()).unwrap();
-    /// assert_eq!(without_prefix.get_u16(0), Some(0xbeaf));
+    /// assert_eq!(without_prefix.get_u16(0), Ok(0xbeaf));
     /// ```
     pub fn strip_data_prefix(&self, prefix: &CellSlice<'a, C>) -> Option<CellSlice<'a, C>> {
         let prefix_len = prefix.remaining_bits();
@@ -393,7 +432,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     /// };
     ///
     /// let lcp = slice.longest_common_data_prefix(&prefix.as_slice());
-    /// assert_eq!(lcp.get_u16(0), Some(0xdead));
+    /// assert_eq!(lcp.get_u16(0), Ok(0xdead));
     /// assert_eq!(lcp.remaining_bits(), 16);
     /// ```
     pub fn longest_common_data_prefix(&self, other: &Self) -> Self {
@@ -570,42 +609,42 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     }
 
     /// Tries to read the bit at the specified offset (relative to the current bits window).
-    pub fn get_bit(&self, offset: u16) -> Option<bool> {
+    pub fn get_bit(&self, offset: u16) -> Result<bool, Error> {
         if self.bits_window_start + offset < self.bits_window_end {
             let index = self.bits_window_start + offset;
-            let byte = *self.cell.data().get((index / 8) as usize)?;
-            Some((byte >> (7 - index % 8)) & 1 != 0)
-        } else {
-            None
+            if let Some(byte) = self.cell.data().get((index / 8) as usize) {
+                return Ok((byte >> (7 - index % 8)) & 1 != 0);
+            }
         }
+        Err(Error::CellUnderflow)
     }
 
     /// Tries to read the next bit, incrementing the bits window start.
-    pub fn load_bit(&mut self) -> Option<bool> {
+    pub fn load_bit(&mut self) -> Result<bool, Error> {
         if self.bits_window_start < self.bits_window_end {
             let index = self.bits_window_start;
-            let byte = *self.cell.data().get((index / 8) as usize)?;
-            self.bits_window_start += 1;
-            Some((byte >> (7 - index % 8)) & 1 != 0)
-        } else {
-            None
+            if let Some(byte) = self.cell.data().get((index / 8) as usize) {
+                self.bits_window_start += 1;
+                return Ok((byte >> (7 - index % 8)) & 1 != 0);
+            }
         }
+        Err(Error::CellUnderflow)
     }
 
     /// Reads `u8` starting from the `offset`.
     #[inline]
-    pub fn get_u8(&self, offset: u16) -> Option<u8> {
+    pub fn get_u8(&self, offset: u16) -> Result<u8, Error> {
         self.get_small_uint(offset, 8)
     }
 
     /// Tries to read the next `u8`, incrementing the bits window start.
     #[inline]
-    pub fn load_u8(&mut self) -> Option<u8> {
+    pub fn load_u8(&mut self) -> Result<u8, Error> {
         self.load_small_uint(8)
     }
 
     /// Reads `u16` starting from the `offset`.
-    pub fn get_u16(&self, offset: u16) -> Option<u16> {
+    pub fn get_u16(&self, offset: u16) -> Result<u16, Error> {
         if self.bits_window_start + offset + 16 <= self.bits_window_end {
             let index = self.bits_window_start + offset;
             let data = self.cell.data();
@@ -619,7 +658,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
                 //^r
 
                 // SAFETY: `q + 2 <= data_len`
-                Some(u16::from_be_bytes(unsafe {
+                Ok(u16::from_be_bytes(unsafe {
                     *(data.as_ptr().add(q) as *const [u8; 2])
                 }))
             } else if r != 0 && q + 3 <= data_len {
@@ -638,25 +677,24 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
                 };
 
                 let res = u32::from_be_bytes(bytes);
-                Some((res >> (8 - r)) as u16)
+                Ok((res >> (8 - r)) as u16)
             } else {
-                None
+                Err(Error::CellUnderflow)
             }
         } else {
-            None
+            Err(Error::CellUnderflow)
         }
     }
 
     /// Tries to read the next `u16`, incrementing the bits window start.
-    #[inline]
-    pub fn load_u16(&mut self) -> Option<u16> {
-        let res = self.get_u16(0)?;
-        self.bits_window_start += 16;
-        Some(res)
+    pub fn load_u16(&mut self) -> Result<u16, Error> {
+        let res = self.get_u16(0);
+        self.bits_window_start += 16 * res.is_ok() as u16;
+        res
     }
 
     /// Reads `u32` starting from the `offset`.
-    pub fn get_u32(&self, offset: u16) -> Option<u32> {
+    pub fn get_u32(&self, offset: u16) -> Result<u32, Error> {
         if self.bits_window_start + offset + 32 <= self.bits_window_end {
             let index = self.bits_window_start + offset;
             let data = self.cell.data();
@@ -670,7 +708,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
                 //^r
 
                 // SAFETY: `q + 4 <= data_len`
-                Some(u32::from_be_bytes(unsafe {
+                Ok(u32::from_be_bytes(unsafe {
                     *(data.as_ptr().add(q) as *const [u8; 4])
                 }))
             } else if r != 0 && q + 5 <= data_len {
@@ -689,25 +727,24 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
                 };
 
                 let res = u64::from_be_bytes(bytes);
-                Some((res >> (8 - r)) as u32)
+                Ok((res >> (8 - r)) as u32)
             } else {
-                None
+                Err(Error::CellUnderflow)
             }
         } else {
-            None
+            Err(Error::CellUnderflow)
         }
     }
 
     /// Tries to read the next `u32`, incrementing the bits window start.
-    #[inline]
-    pub fn load_u32(&mut self) -> Option<u32> {
-        let res = self.get_u32(0)?;
-        self.bits_window_start += 32;
-        Some(res)
+    pub fn load_u32(&mut self) -> Result<u32, Error> {
+        let res = self.get_u32(0);
+        self.bits_window_start += 32 * res.is_ok() as u16;
+        res
     }
 
     /// Reads `u64` starting from the `offset`.
-    pub fn get_u64(&self, offset: u16) -> Option<u64> {
+    pub fn get_u64(&self, offset: u16) -> Result<u64, Error> {
         if self.bits_window_start + offset + 64 <= self.bits_window_end {
             let index = self.bits_window_start + offset;
             let data = self.cell.data();
@@ -718,7 +755,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
             if r == 0 && q + 8 <= data_len {
                 // SAFETY: `q + 8 <= data_len`
-                Some(u64::from_be_bytes(unsafe {
+                Ok(u64::from_be_bytes(unsafe {
                     *(data.as_ptr().add(q) as *const [u8; 8])
                 }))
             } else if r != 0 && q + 9 <= data_len {
@@ -737,25 +774,24 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
                 };
 
                 let res = u128::from_be_bytes(bytes);
-                Some((res >> (8 - r)) as u64)
+                Ok((res >> (8 - r)) as u64)
             } else {
-                None
+                Err(Error::CellUnderflow)
             }
         } else {
-            None
+            Err(Error::CellUnderflow)
         }
     }
 
     /// Tries to read the next `u64`, incrementing the bits window start.
-    #[inline]
-    pub fn load_u64(&mut self) -> Option<u64> {
-        let res = self.get_u64(0)?;
-        self.bits_window_start += 64;
-        Some(res)
+    pub fn load_u64(&mut self) -> Result<u64, Error> {
+        let res = self.get_u64(0);
+        self.bits_window_start += 64 * res.is_ok() as u16;
+        res
     }
 
     /// Reads `u128` starting from the `offset`.
-    pub fn get_u128(&self, offset: u16) -> Option<u128> {
+    pub fn get_u128(&self, offset: u16) -> Result<u128, Error> {
         if self.bits_window_start + offset + 128 <= self.bits_window_end {
             let index = self.bits_window_start + offset;
             let data = self.cell.data();
@@ -766,7 +802,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
             if r == 0 && q + 16 <= data_len {
                 // SAFETY: `q + 16 <= data_len`
-                Some(u128::from_be_bytes(unsafe {
+                Ok(u128::from_be_bytes(unsafe {
                     *(data.as_ptr().add(q) as *const [u8; 16])
                 }))
             } else if r != 0 && q + 17 <= data_len {
@@ -781,25 +817,24 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
                 };
 
                 let res = u128::from_be_bytes(bytes[1..].try_into().unwrap());
-                Some(((bytes[0] as u128) << (120 + r)) | (res >> (8 - r)))
+                Ok(((bytes[0] as u128) << (120 + r)) | (res >> (8 - r)))
             } else {
-                None
+                Err(Error::CellUnderflow)
             }
         } else {
-            None
+            Err(Error::CellUnderflow)
         }
     }
 
     /// Tries to read the next `u128`, incrementing the bits window start.
-    #[inline]
-    pub fn load_u128(&mut self) -> Option<u128> {
-        let res = self.get_u128(0)?;
-        self.bits_window_start += 128;
-        Some(res)
+    pub fn load_u128(&mut self) -> Result<u128, Error> {
+        let res = self.get_u128(0);
+        self.bits_window_start += 128 * res.is_ok() as u16;
+        res
     }
 
     /// Reads 32 bytes starting from the `offset`.
-    pub fn get_u256(&self, offset: u16) -> Option<[u8; 32]> {
+    pub fn get_u256(&self, offset: u16) -> Result<[u8; 32], Error> {
         if self.bits_window_start + offset + 256 <= self.bits_window_end {
             let index = self.bits_window_start + offset;
             let data = self.cell.data();
@@ -810,7 +845,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
             if r == 0 && q + 32 <= data_len {
                 // SAFETY: `q + 32 <= data_len`
-                Some(unsafe { *(data.as_ptr().add(q) as *const [u8; 32]) })
+                Ok(unsafe { *(data.as_ptr().add(q) as *const [u8; 32]) })
             } else if r != 0 && q + 33 <= data_len {
                 // ___xxxxx|...|zzz_____ -> xxxxx...|...zzz
                 //  r^
@@ -835,34 +870,33 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
                     }
 
                     // Shift right, putting `ovf` to the high bits
-                    Some(std::mem::transmute([
+                    Ok(std::mem::transmute([
                         (hi >> shift | ((ovf as u128) << rev_shift)).to_be_bytes(),
                         (lo >> shift | (hi << rev_shift)).to_be_bytes(),
                     ]))
                 }
             } else {
-                None
+                Err(Error::CellUnderflow)
             }
         } else {
-            None
+            Err(Error::CellUnderflow)
         }
     }
 
     /// Tries to read the next 32 bytes, incrementing the bits window start.
-    #[inline]
-    pub fn load_u256(&mut self) -> Option<[u8; 32]> {
-        let res = self.get_u256(0)?;
-        self.bits_window_start += 256;
-        Some(res)
+    pub fn load_u256(&mut self) -> Result<[u8; 32], Error> {
+        let res = self.get_u256(0);
+        self.bits_window_start += 256 * res.is_ok() as u16;
+        res
     }
 
     /// Returns a small subset of `bits` (0..=8) starting from the `offset`.
     ///
     /// NOTE: Reading zero bits always succeeds,
     /// and reading more than 8 bits always fails.
-    pub fn get_small_uint(&self, offset: u16, bits: u16) -> Option<u8> {
+    pub fn get_small_uint(&self, offset: u16, bits: u16) -> Result<u8, Error> {
         if bits == 0 {
-            return Some(0);
+            return Ok(0);
         }
 
         if bits <= 8 && self.bits_window_start + offset + bits <= self.bits_window_end {
@@ -870,26 +904,32 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
             let r = index % 8;
             let q = (index / 8) as usize;
-            let byte = *self.cell.data().get(q)?;
+            let Some(&byte) = self.cell.data().get(q) else {
+                return Err(Error::CellUnderflow);
+            };
 
             if r == 0 {
                 // xxx_____ -> _____xxx
                 //^r
-                Some(byte >> (8 - bits))
+                Ok(byte >> (8 - bits))
             } else if bits <= (8 - r) {
                 // __xxx___ -> _____xxx
                 // r^
-                Some((byte >> (8 - r - bits)) & ((1 << bits) - 1))
+                Ok((byte >> (8 - r - bits)) & ((1 << bits) - 1))
             } else {
                 // ______xx|y_______ -> _____xxy
                 //     r^
 
                 let mut res = (byte as u16) << 8;
-                res |= *self.cell.data().get(q + 1)? as u16;
-                Some((res >> (8 - r)) as u8 >> (8 - bits))
+                let Some(&next_byte) = self.cell.data().get(q + 1) else {
+                    return Err(Error::CellUnderflow);
+                };
+
+                res |= next_byte as u16;
+                Ok((res >> (8 - r)) as u8 >> (8 - bits))
             }
         } else {
-            None
+            Err(Error::CellUnderflow)
         }
     }
 
@@ -897,11 +937,10 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     ///
     /// NOTE: Reading zero bits always succeeds,
     /// and reading more than 8 bits always fails.
-    #[inline]
-    pub fn load_small_uint(&mut self, bits: u16) -> Option<u8> {
-        let res = self.get_small_uint(0, bits)?;
-        self.bits_window_start += bits;
-        Some(res)
+    pub fn load_small_uint(&mut self, bits: u16) -> Result<u8, Error> {
+        let res = self.get_small_uint(0, bits);
+        self.bits_window_start += bits * res.is_ok() as u16;
+        res
     }
 
     /// Reads `u64` from the cell (but only the specified number of bits)
@@ -909,9 +948,9 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     ///
     /// NOTE: Reading zero bits always succeeds,
     /// and reading more than 64 bits always fails.
-    pub fn get_uint(&self, offset: u16, mut bits: u16) -> Option<u64> {
+    pub fn get_uint(&self, offset: u16, mut bits: u16) -> Result<u64, Error> {
         if bits == 0 {
-            return Some(0);
+            return Ok(0);
         }
 
         if bits <= 64 && self.bits_window_start + offset + bits <= self.bits_window_end {
@@ -921,7 +960,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
             // Check if data is enough
             if (self.bits_window_end + 7) / 8 > data_len as u16 {
-                return None;
+                return Err(Error::CellUnderflow);
             }
 
             let r = index % 8;
@@ -936,7 +975,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
                 if r + bits <= 8 {
                     // Special case if all remaining_bits are in the first byte
-                    Some((first_byte >> right_shift) as u64)
+                    Ok((first_byte >> right_shift) as u64)
                 } else {
                     let mut bytes = [0u8; 8];
 
@@ -950,11 +989,11 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
                     let mut result = u64::from_be_bytes(bytes) >> (64 - bits);
                     result |= (first_byte as u64) << bits;
-                    Some(result)
+                    Ok(result)
                 }
             }
         } else {
-            None
+            Err(Error::CellUnderflow)
         }
     }
 
@@ -963,11 +1002,10 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     ///
     /// NOTE: Reading zero bits always succeeds,
     /// and reading more than 64 bits always fails.
-    #[inline]
-    pub fn load_uint(&mut self, bits: u16) -> Option<u64> {
-        let res = self.get_uint(0, bits)?;
-        self.bits_window_start += bits;
-        Some(res)
+    pub fn load_uint(&mut self, bits: u16) -> Result<u64, Error> {
+        let res = self.get_uint(0, bits);
+        self.bits_window_start += bits * res.is_ok() as u16;
+        res
     }
 
     /// Reads the specified number of bits to the target starting from the `offset`.
@@ -976,9 +1014,9 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
         offset: u16,
         target: &'b mut [u8],
         bits: u16,
-    ) -> Option<&'b mut [u8]> {
+    ) -> Result<&'b mut [u8], Error> {
         if bits == 0 {
-            return Some(&mut target[..0]);
+            return Ok(&mut target[..0]);
         }
 
         if self.bits_window_start + bits <= self.bits_window_end {
@@ -990,7 +1028,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
             let target = if target_len <= target.len() {
                 &mut target[..target_len]
             } else {
-                return None;
+                return Err(Error::CellUnderflow);
             };
 
             let r = index % 8;
@@ -1007,7 +1045,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
                 } else if r != 0 {
                     let byte_len = ((bits + r + 7) / 8) as usize - 1;
                     if q + byte_len > data_len {
-                        return None;
+                        return Err(Error::CellUnderflow);
                     }
 
                     let shift = 8 - r;
@@ -1021,26 +1059,30 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
                         *target_ptr.add(byte_len) = *data_ptr << r;
                     }
                 } else {
-                    return None;
+                    return Err(Error::CellUnderflow);
                 }
 
                 let bits_r = bits % 8;
                 if bits_r != 0 {
                     *target_ptr.add(target_len - 1) &= 0xff << (8 - bits_r);
                 }
-                Some(target)
+                Ok(target)
             }
         } else {
-            None
+            Err(Error::CellUnderflow)
         }
     }
 
     /// Tries to read the specified number of bits, incrementing the bits window start.
     /// Returns the minimum subslice containing all bits.
-    pub fn load_raw<'b>(&'_ mut self, target: &'b mut [u8], bits: u16) -> Option<&'b mut [u8]> {
-        let res = self.get_raw(0, target, bits)?;
-        self.bits_window_start += bits;
-        Some(res)
+    pub fn load_raw<'b>(
+        &'_ mut self,
+        target: &'b mut [u8],
+        bits: u16,
+    ) -> Result<&'b mut [u8], Error> {
+        let res = self.get_raw(0, target, bits);
+        self.bits_window_start += bits * res.is_ok() as u16;
+        res
     }
 
     /// Reads all remaining bits and refs into the new slice.
@@ -1052,21 +1094,23 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     }
 
     /// Returns a reference to the Nth child cell (relative to this slice's refs window).
-    pub fn get_reference(&self, index: u8) -> Option<&'a dyn Cell<C>> {
+    pub fn get_reference(&self, index: u8) -> Result<&'a dyn Cell<C>, Error> {
         if self.refs_window_start + index < self.refs_window_end {
-            self.cell.reference(self.refs_window_start + index)
-        } else {
-            None
+            if let Some(cell) = self.cell.reference(self.refs_window_start + index) {
+                return Ok(cell);
+            }
         }
+        Err(Error::CellUnderflow)
     }
 
     /// Returns the Nth child cell (relative to this slice's refs window).
-    pub fn get_reference_cloned(&self, index: u8) -> Option<CellContainer<C>> {
+    pub fn get_reference_cloned(&self, index: u8) -> Result<CellContainer<C>, Error> {
         if self.refs_window_start + index < self.refs_window_end {
-            self.cell.reference_cloned(self.refs_window_start + index)
-        } else {
-            None
+            if let Some(cell) = self.cell.reference_cloned(self.refs_window_start + index) {
+                return Ok(cell);
+            }
         }
+        Err(Error::CellUnderflow)
     }
 
     /// Tries to load the specified child cell as slice.
@@ -1112,32 +1156,38 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
     /// Returns a reference to the next child cell (relative to this slice's refs window),
     /// incrementing the refs window start.
-    pub fn load_reference(&mut self) -> Option<&'a dyn Cell<C>> {
+    pub fn load_reference(&mut self) -> Result<&'a dyn Cell<C>, Error> {
         if self.refs_window_start < self.refs_window_end {
-            let cell = self.cell.reference(self.refs_window_start)?;
-            self.refs_window_start += 1;
-            Some(cell)
+            let res = match self.cell.reference(self.refs_window_start) {
+                Some(cell) => Ok(cell),
+                None => Err(Error::CellUnderflow),
+            };
+            self.refs_window_start += res.is_ok() as u8;
+            res
         } else {
-            None
+            Err(Error::CellUnderflow)
         }
     }
 
     /// Returns the next child cell (relative to this slice's refs window),
     /// incrementing the refs window start.
-    pub fn load_reference_cloned(&mut self) -> Option<CellContainer<C>> {
+    pub fn load_reference_cloned(&mut self) -> Result<CellContainer<C>, Error> {
         if self.refs_window_start < self.refs_window_end {
-            let cell = self.cell.reference_cloned(self.refs_window_start)?;
-            self.refs_window_start += 1;
-            Some(cell)
+            let res = match self.cell.reference_cloned(self.refs_window_start) {
+                Some(cell) => Ok(cell),
+                None => Err(Error::CellUnderflow),
+            };
+            self.refs_window_start += res.is_ok() as u8;
+            res
         } else {
-            None
+            Err(Error::CellUnderflow)
         }
     }
 
     /// Tries to load the next child cell as slice.
     /// Returns an error if the loaded cell is absent or is pruned.
     ///
-    /// NOTE: In case of prunced cell access the current slice remains unchanged.
+    /// NOTE: In case of pruned cell access the current slice remains unchanged.
     pub fn load_reference_as_slice(&mut self) -> Result<CellSlice<'a, C>, Error> {
         if self.refs_window_start < self.refs_window_end {
             let Some(cell) = self.cell.reference(self.refs_window_start) else {
@@ -1159,11 +1209,12 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
 #[cfg(test)]
 mod tests {
+    use crate::error::Error;
     use crate::prelude::{RcCell, RcCellBuilder, RcCellSlice};
 
-    fn build_cell<F: FnOnce(&mut RcCellBuilder) -> bool>(f: F) -> RcCell {
+    fn build_cell<F: FnOnce(&mut RcCellBuilder) -> Result<(), Error>>(f: F) -> RcCell {
         let mut builder = RcCellBuilder::new();
-        assert!(f(&mut builder));
+        f(&mut builder).unwrap();
         builder.build().unwrap()
     }
 
@@ -1183,10 +1234,10 @@ mod tests {
         let slice = cell.as_slice();
 
         let mut data = [0; 1];
-        assert!(slice.get_raw(0, &mut data, 100).is_none());
+        assert!(slice.get_raw(0, &mut data, 100).is_err());
 
         let mut data = [0; 64];
-        assert!(slice.get_raw(0, &mut data, 500).is_none());
+        assert!(slice.get_raw(0, &mut data, 500).is_err());
 
         let cell = RcCellBuilder::from_raw_data(&[0xff; 128], 1023)
             .and_then(RcCellBuilder::build)
@@ -1203,12 +1254,18 @@ mod tests {
 
     #[test]
     fn strip_data_prefix() {
-        let cell1 =
-            build_cell(|b| b.store_u16(0xabcd) && b.store_bit_zero() && b.store_u16(0xffff));
+        let cell1 = build_cell(|b| {
+            b.store_u16(0xabcd)?;
+            b.store_bit_zero()?;
+            b.store_u16(0xffff)
+        });
         let mut slice1 = cell1.as_slice();
         slice1.try_advance(4, 0);
 
-        let cell2 = build_cell(|b| b.store_uint(0xbcd, 12) && b.store_bit_zero());
+        let cell2 = build_cell(|b| {
+            b.store_uint(0xbcd, 12)?;
+            b.store_bit_zero()
+        });
 
         print_slice("A", slice1);
         print_slice("B", cell2.as_slice());
@@ -1217,7 +1274,7 @@ mod tests {
         let mut without_prefix = slice1.strip_data_prefix(&cell2.as_slice()).unwrap();
         print_slice("Result", without_prefix);
 
-        assert_eq!(without_prefix.load_u16(), Some(0xffff));
+        assert_eq!(without_prefix.load_u16(), Ok(0xffff));
         assert!(without_prefix.is_data_empty());
     }
 
@@ -1277,11 +1334,11 @@ mod tests {
         let cell = build_cell(|b| b.store_u64(0xfafafafafafafafa));
 
         let slice = cell.as_slice();
-        assert_eq!(slice.get_uint(0, 3), Some(0b111));
-        assert_eq!(slice.get_uint(0, 11), Some(0b11111010111));
-        assert_eq!(slice.get_uint(1, 11), Some(0b11110101111));
-        assert_eq!(slice.get_uint(8, 3), Some(0b111));
-        assert_eq!(slice.get_uint(0, 16), Some(0xfafa));
+        assert_eq!(slice.get_uint(0, 3), Ok(0b111));
+        assert_eq!(slice.get_uint(0, 11), Ok(0b11111010111));
+        assert_eq!(slice.get_uint(1, 11), Ok(0b11110101111));
+        assert_eq!(slice.get_uint(8, 3), Ok(0b111));
+        assert_eq!(slice.get_uint(0, 16), Ok(0xfafa));
     }
 
     #[test]
@@ -1298,13 +1355,22 @@ mod tests {
         let cell = build_cell(|b| b.store_u16(123));
         assert_eq!(cell.as_slice().test_uniform(), None);
 
-        let cell = build_cell(|b| b.store_zeros(9) && b.store_bit_one());
+        let cell = build_cell(|b| {
+            b.store_zeros(9)?;
+            b.store_bit_one()
+        });
         assert_eq!(cell.as_slice().test_uniform(), None);
 
-        let cell = build_cell(|b| b.store_zeros(20) && b.store_bit_one());
+        let cell = build_cell(|b| {
+            b.store_zeros(20)?;
+            b.store_bit_one()
+        });
         assert_eq!(cell.as_slice().test_uniform(), None);
 
-        let cell = build_cell(|b| b.store_bit_zero() && b.store_uint(u64::MAX, 29));
+        let cell = build_cell(|b| {
+            b.store_bit_zero()?;
+            b.store_uint(u64::MAX, 29)
+        });
         let mut slice = cell.as_slice();
         slice.try_advance(1, 0);
         assert_eq!(slice.test_uniform(), Some(true));

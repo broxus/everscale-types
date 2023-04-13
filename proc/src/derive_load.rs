@@ -64,7 +64,9 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Erro
         #[automatically_derived]
         impl #impl_generics ::everscale_types::cell::Load<#tlb_lifetime, #cell_family> for #ident #ty_generics #where_clause {
             #inline
-            fn load_from(__slice: &mut ::everscale_types::cell::CellSlice<#tlb_lifetime, #cell_family>) -> Option<Self> {
+            fn load_from(
+                __slice: &mut ::everscale_types::cell::CellSlice<#tlb_lifetime, #cell_family>
+            ) -> ::core::result::Result<Self, ::everscale_types::error::Error> {
                 #body
             }
         }
@@ -107,12 +109,12 @@ fn build_struct(
         Some(expr) => quote! {
             let result = #result;
             if #expr(&result) {
-                Some(result)
+                ::core::result::Result::Ok(result)
             } else {
-                None
+                ::core::result::Result::Err(::everscale_types::error::Error::InvalidData)
             }
         },
-        None => quote!(Some(#result)),
+        None => quote!(::core::result::Result::Ok(#result)),
     };
 
     quote! {
@@ -124,37 +126,41 @@ fn build_struct(
 fn load_tag_op(tag: attr::TlbTag) -> Option<TokenStream> {
     let bits = tag.bits as u16;
 
-    let neg_condition = match bits {
+    let (op, value) = match bits {
         0 => return None,
-        1 if tag.value == 0 => quote!(__slice.load_bit()?),
-        1 => quote!(!__slice.load_bit()?),
+        1 => {
+            let value = tag.value != 0;
+            (quote!(__slice.load_bit()), quote!(#value))
+        }
         2..=7 => {
             let value = tag.value as u8;
-            quote!(__slice.load_small_uint(#bits)? != #value)
+            (quote!(__slice.load_small_uint(#bits)), quote!(#value))
         }
         8 => {
             let value = tag.value as u8;
-            quote!(__slice.load_u8()? != #value)
+            (quote!(__slice.load_u8()), quote!(#value))
         }
         16 => {
             let value = tag.value as u16;
-            quote!(__slice.load_u16()? != #value)
+            (quote!(__slice.load_u16()), quote!(#value))
         }
         32 => {
             let value = tag.value;
-            quote!(__slice.load_u32()? != #value)
+            (quote!(__slice.load_u32()), quote!(#value))
         }
         _ => {
             let value = tag.value as u64;
-            quote!(__slice.load_uint(#bits) != #value)
+            (quote!(__slice.load_uint(#bits)), quote!(#value))
         }
     };
 
-    Some(quote!(
-        if #neg_condition {
-            return None;
+    Some(quote! {
+        match #op {
+            ::core::result::Result::Ok(#value) => {},
+            ::core::result::Result::Ok(_) => return ::core::result::Result::Err(::everscale_types::error::Error::InvalidTag),
+            ::core::result::Result::Err(e) => return ::core::result::Result::Err(e),
         }
-    ))
+    })
 }
 
 fn load_op(
@@ -167,23 +173,26 @@ fn load_op(
         match ty {
             syn::Type::Path(syn::TypePath { path, .. }) => {
                 if let Some(syn::PathSegment { ident, .. }) = path.segments.last() {
-                    let op = match ident.to_string().as_str() {
-                        "bool" => quote!(load_bit()?),
-                        "i8" => quote!(load_u8()? as i8),
-                        "u8" => quote!(load_u8()?),
-                        "i16" => quote!(load_u16()? as i16),
-                        "u16" => quote!(load_u16()?),
-                        "i32" => quote!(load_u32()? as i32),
-                        "u32" => quote!(load_u32()?),
-                        "i64" => quote!(load_u64()? as i64),
-                        "u64" => quote!(load_u64()?),
-                        "CellHash" => quote!(load_u256()?),
-                        "Cell" => quote!(load_reference()?),
-                        "CellContainer" => quote!(load_reference_cloned()?),
+                    let (op, cast) = match ident.to_string().as_str() {
+                        "bool" => (quote!(load_bit()), None),
+                        "i8" => (quote!(load_u8()), Some(quote!(as i8))),
+                        "u8" => (quote!(load_u8()), None),
+                        "i16" => (quote!(load_u16()), Some(quote!(as i16))),
+                        "u16" => (quote!(load_u16()), None),
+                        "i32" => (quote!(load_u32()), Some(quote!(as i32))),
+                        "u32" => (quote!(load_u32()), None),
+                        "i64" => (quote!(load_u64()), Some(quote!(as i64))),
+                        "u64" => (quote!(load_u64()), None),
+                        "CellHash" => (quote!(load_u256()), None),
+                        "Cell" => (quote!(load_reference()), None),
+                        "CellContainer" => (quote!(load_reference_cloned()), None),
                         _ => break 'fallback,
                     };
 
-                    return quote!(__slice.#op);
+                    return quote!(match __slice.#op {
+                        ::core::result::Result::Ok(val) => val #cast,
+                        ::core::result::Result::Err(err) => return ::core::result::Result::Err(err),
+                    });
                 }
             }
             syn::Type::Reference(syn::TypeReference { elem, .. }) => {
@@ -193,5 +202,10 @@ fn load_op(
         }
     };
 
-    quote! { <#ty as ::everscale_types::cell::Load<#lifetime_def, #cell_family>>::load_from(__slice)? }
+    quote! {
+        match <#ty as ::everscale_types::cell::Load<#lifetime_def, #cell_family>>::load_from(__slice) {
+            ::core::result::Result::Ok(val) => val,
+            ::core::result::Result::Err(err) => return ::core::result::Result::Err(err),
+        }
+    }
 }

@@ -8,6 +8,7 @@ use crate::cell::{
     Cell, CellContainer, CellDescriptor, CellFamily, CellHash, CellSlice, LevelMask, MAX_BIT_LEN,
     MAX_REF_COUNT,
 };
+use crate::error::Error;
 use crate::util::ArrayVec;
 
 #[cfg(feature = "stats")]
@@ -16,50 +17,75 @@ use super::CellTreeStats;
 /// A data structure that can be serialized into cells.
 pub trait Store<C: CellFamily> {
     /// Tries to store itself into the cell builder.
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool;
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error>;
 }
 
 impl<C: CellFamily, T: Store<C> + ?Sized> Store<C> for &T {
     #[inline]
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         <T as Store<C>>::store_into(self, builder, finalizer)
     }
 }
 
 impl<C: CellFamily, T: Store<C> + ?Sized> Store<C> for Box<T> {
     #[inline]
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         <T as Store<C>>::store_into(self.as_ref(), builder, finalizer)
     }
 }
 
 impl<C: CellFamily, T: Store<C> + ?Sized> Store<C> for Arc<T> {
     #[inline]
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         <T as Store<C>>::store_into(self.as_ref(), builder, finalizer)
     }
 }
 
 impl<C: CellFamily, T: Store<C> + ?Sized> Store<C> for Rc<T> {
     #[inline]
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         <T as Store<C>>::store_into(self.as_ref(), builder, finalizer)
     }
 }
 
 impl<C: CellFamily> Store<C> for () {
     #[inline]
-    fn store_into(&self, _: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
-        true
+    fn store_into(&self, _: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> Result<(), Error> {
+        Ok(())
     }
 }
 
 macro_rules! impl_store_for_tuples {
     ($( ($($field:ident: $t:ident),+) ),*$(,)?) => {$(
         impl<C: CellFamily, $($t: Store<C>),+> Store<C> for ($($t),*) {
-            fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+            fn store_into(
+                &self,
+                builder: &mut CellBuilder<C>,
+                finalizer: &mut dyn Finalizer<C>
+            ) -> Result<(), Error> {
                 let ($($field),+) = self;
-                $($field.store_into(builder, finalizer))&&*
+                $(ok!($field.store_into(builder, finalizer)));*;
+                Ok(())
             }
         }
     )*};
@@ -75,9 +101,16 @@ impl_store_for_tuples! {
 
 impl<C: CellFamily, T: Store<C>> Store<C> for Option<T> {
     #[inline]
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         match self {
-            Some(data) => builder.store_bit_one() && data.store_into(builder, finalizer),
+            Some(data) => {
+                ok!(builder.store_bit_one());
+                data.store_into(builder, finalizer)
+            }
             None => builder.store_bit_zero(),
         }
     }
@@ -85,7 +118,11 @@ impl<C: CellFamily, T: Store<C>> Store<C> for Option<T> {
 
 impl<'a, C: CellFamily> Store<C> for CellSlice<'a, C> {
     #[inline]
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        _: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         builder.store_slice(self)
     }
 }
@@ -94,7 +131,10 @@ macro_rules! impl_primitive_store {
     ($($type:ty => |$b:ident, $v:ident| $expr:expr),*$(,)?) => {
         $(impl<C: CellFamily> Store<C> for $type {
             #[inline]
-            fn store_into(&self, $b: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+            fn store_into(&self,
+                $b: &mut CellBuilder<C>,
+                _: &mut dyn Finalizer<C>
+            ) -> Result<(), Error> {
                 let $v = self;
                 $expr
             }
@@ -171,9 +211,9 @@ macro_rules! impl_store_uint {
                 }
             };
             $self.bit_len += $bits;
-            true
+            Ok(())
         } else {
-            false
+            Err(Error::CellOverflow)
         }
     };
 }
@@ -181,7 +221,7 @@ macro_rules! impl_store_uint {
 impl<C: CellFamily> CellBuilder<C> {
     /// Builds a new cell from the specified data using the default finalizer.
     #[inline]
-    pub fn build_from<T>(data: T) -> Option<CellContainer<C>>
+    pub fn build_from<T>(data: T) -> Result<CellContainer<C>, Error>
     where
         T: Store<C>,
         for<'c> C: DefaultFinalizer + 'c,
@@ -191,20 +231,20 @@ impl<C: CellFamily> CellBuilder<C> {
 
     /// Builds a new cell from the specified data using the provided finalizer.
     #[inline]
-    pub fn build_from_ext<T>(data: T, finalizer: &mut dyn Finalizer<C>) -> Option<CellContainer<C>>
+    pub fn build_from_ext<T>(
+        data: T,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<CellContainer<C>, Error>
     where
         T: Store<C>,
     {
         fn build_from_ext_impl<C: CellFamily>(
             data: &dyn Store<C>,
             finalizer: &mut dyn Finalizer<C>,
-        ) -> Option<CellContainer<C>> {
+        ) -> Result<CellContainer<C>, Error> {
             let mut builder = CellBuilder::<C>::new();
-            if data.store_into(&mut builder, finalizer) {
-                builder.build_ext(finalizer)
-            } else {
-                None
-            }
+            ok!(data.store_into(&mut builder, finalizer));
+            builder.build_ext(finalizer)
         }
         build_from_ext_impl(&data, finalizer)
     }
@@ -223,13 +263,10 @@ impl<C: CellFamily> CellBuilder<C> {
     /// Tries to create a cell builder with the specified data.
     ///
     /// NOTE: if `bits` is greater than `bytes * 8`, pads the value with zeros (as high bits).
-    pub fn from_raw_data(value: &[u8], bits: u16) -> Option<Self> {
+    pub fn from_raw_data(value: &[u8], bits: u16) -> Result<Self, Error> {
         let mut res = Self::new();
-        if res.store_raw(value, bits) {
-            Some(res)
-        } else {
-            None
-        }
+        ok!(res.store_raw(value, bits));
+        Ok(res)
     }
 
     /// Returns an underlying cell data.
@@ -283,40 +320,44 @@ impl<C: CellFamily> CellBuilder<C> {
 
     /// Tries to store the specified number of zero bits in the cell,
     /// returning `false` if there is not enough remaining capacity.
-    pub fn store_zeros(&mut self, bits: u16) -> bool {
+    pub fn store_zeros(&mut self, bits: u16) -> Result<(), Error> {
         if self.bit_len + bits <= MAX_BIT_LEN {
             self.bit_len += bits;
-            true
+            Ok(())
         } else {
-            false
+            Err(Error::CellOverflow)
         }
     }
 
     /// Tries to store one zero bit in the cell,
     /// returning `false` if there is not enough remaining capacity.
-    pub fn store_bit_zero(&mut self) -> bool {
+    pub fn store_bit_zero(&mut self) -> Result<(), Error> {
         let fits = self.bit_len < MAX_BIT_LEN;
         self.bit_len += fits as u16;
-        fits
+        if fits {
+            Ok(())
+        } else {
+            Err(Error::CellOverflow)
+        }
     }
 
     /// Tries to store one non-zero bit in the cell,
     /// returning `false` if there is not enough remaining capacity.
-    pub fn store_bit_one(&mut self) -> bool {
+    pub fn store_bit_one(&mut self) -> Result<(), Error> {
         if self.bit_len < MAX_BIT_LEN {
             let q = (self.bit_len / 8) as usize;
             let r = self.bit_len % 8;
             unsafe { *self.data.get_unchecked_mut(q) |= 1 << (7 - r) };
             self.bit_len += 1;
-            true
+            Ok(())
         } else {
-            false
+            Err(Error::CellOverflow)
         }
     }
 
     /// Tries to store one bit in the cell,
     /// returning `false` if there is not enough remaining capacity.
-    pub fn store_bit(&mut self, value: bool) -> bool {
+    pub fn store_bit(&mut self, value: bool) -> Result<(), Error> {
         if value {
             self.store_bit_one()
         } else {
@@ -326,7 +367,7 @@ impl<C: CellFamily> CellBuilder<C> {
 
     /// Tries to store `u8` in the cell,
     /// returning `false` if there is not enough remaining capacity.
-    pub fn store_u8(&mut self, value: u8) -> bool {
+    pub fn store_u8(&mut self, value: u8) -> Result<(), Error> {
         if self.bit_len + 8 <= MAX_BIT_LEN {
             let q = (self.bit_len / 8) as usize;
             let r = self.bit_len % 8;
@@ -343,39 +384,39 @@ impl<C: CellFamily> CellBuilder<C> {
                 }
             };
             self.bit_len += 8;
-            true
+            Ok(())
         } else {
-            false
+            Err(Error::CellOverflow)
         }
     }
 
     /// Tries to store `u16` in the cell,
     /// returning `false` if there is not enough remaining capacity.
-    pub fn store_u16(&mut self, value: u16) -> bool {
+    pub fn store_u16(&mut self, value: u16) -> Result<(), Error> {
         impl_store_uint!(self, value, bytes: 2, bits: 16)
     }
 
     /// Tries to store `u32` in the cell,
     /// returning `false` if there is not enough remaining capacity.
-    pub fn store_u32(&mut self, value: u32) -> bool {
+    pub fn store_u32(&mut self, value: u32) -> Result<(), Error> {
         impl_store_uint!(self, value, bytes: 4, bits: 32)
     }
 
     /// Tries to store `u64` in the cell,
     /// returning `false` if there is not enough remaining capacity.
-    pub fn store_u64(&mut self, value: u64) -> bool {
+    pub fn store_u64(&mut self, value: u64) -> Result<(), Error> {
         impl_store_uint!(self, value, bytes: 8, bits: 64)
     }
 
     /// Tries to store `u128` in the cell,
     /// returning `false` if there is not enough remaining capacity.
-    pub fn store_u128(&mut self, value: u128) -> bool {
+    pub fn store_u128(&mut self, value: u128) -> Result<(), Error> {
         impl_store_uint!(self, value, bytes: 16, bits: 128)
     }
 
     /// Tries to store 32 bytes in the cell,
     /// returning `false` if there is not enough remaining capacity.
-    pub fn store_u256(&mut self, value: &[u8; 32]) -> bool {
+    pub fn store_u256(&mut self, value: &[u8; 32]) -> Result<(), Error> {
         if self.bit_len + 256 <= MAX_BIT_LEN {
             let q = (self.bit_len / 8) as usize;
             let r = self.bit_len % 8;
@@ -409,9 +450,9 @@ impl<C: CellFamily> CellBuilder<C> {
                 }
             };
             self.bit_len += 256;
-            true
+            Ok(())
         } else {
-            false
+            Err(Error::CellOverflow)
         }
     }
 
@@ -419,9 +460,9 @@ impl<C: CellFamily> CellBuilder<C> {
     /// returning `false` if there is not enough remaining capacity.
     ///
     /// NOTE: if `bits` is greater than **8**, pads the value with zeros (as high bits).
-    pub fn store_small_uint(&mut self, mut value: u8, mut bits: u16) -> bool {
+    pub fn store_small_uint(&mut self, mut value: u8, mut bits: u16) -> Result<(), Error> {
         if bits == 0 {
-            return true;
+            return Ok(());
         }
 
         if self.bit_len + bits <= MAX_BIT_LEN {
@@ -452,9 +493,9 @@ impl<C: CellFamily> CellBuilder<C> {
                 }
             };
             self.bit_len += bits;
-            true
+            Ok(())
         } else {
-            false
+            Err(Error::CellOverflow)
         }
     }
 
@@ -462,9 +503,9 @@ impl<C: CellFamily> CellBuilder<C> {
     /// returning `false` if there is not enough remaining capacity.
     ///
     /// NOTE: if `bits` is greater than **64**, pads the value with zeros (as high bits).
-    pub fn store_uint(&mut self, mut value: u64, mut bits: u16) -> bool {
+    pub fn store_uint(&mut self, mut value: u64, mut bits: u16) -> Result<(), Error> {
         if bits == 0 {
-            return true;
+            return Ok(());
         }
 
         if self.bit_len + bits <= MAX_BIT_LEN {
@@ -517,9 +558,9 @@ impl<C: CellFamily> CellBuilder<C> {
                 }
             }
             self.bit_len += bits;
-            true
+            Ok(())
         } else {
-            false
+            Err(Error::CellOverflow)
         }
     }
 
@@ -527,18 +568,21 @@ impl<C: CellFamily> CellBuilder<C> {
     /// returning `false` if there is not enough remaining capacity.
     ///
     /// NOTE: if `bits` is greater than `bytes * 8`, pads the value with zeros (as high bits).
-    pub fn store_raw(&mut self, value: &[u8], bits: u16) -> bool {
+    pub fn store_raw(&mut self, value: &[u8], bits: u16) -> Result<(), Error> {
         store_raw(&mut self.data, &mut self.bit_len, value, bits)
     }
 
     /// Tries to store all data bits of the specified cell in the current cell,
     /// returning `false` if there is not enough remaining capacity.
     #[inline]
-    pub fn store_cell_data<'a, T, C1: CellFamily>(&mut self, value: T) -> bool
+    pub fn store_cell_data<'a, T, C1: CellFamily>(&mut self, value: T) -> Result<(), Error>
     where
         T: Borrow<dyn Cell<C1> + 'a>,
     {
-        fn store_cell_data_impl<C1, C2>(builder: &mut CellBuilder<C1>, value: &dyn Cell<C2>) -> bool
+        fn store_cell_data_impl<C1, C2>(
+            builder: &mut CellBuilder<C1>,
+            value: &dyn Cell<C2>,
+        ) -> Result<(), Error>
         where
             C1: CellFamily,
             C2: CellFamily,
@@ -556,7 +600,7 @@ impl<C: CellFamily> CellBuilder<C> {
     /// Tries to store the remaining slice data in the cell,
     /// returning `false` if there is not enough remaining capacity.
     #[inline]
-    pub fn store_slice_data<'a, T, C1>(&mut self, value: T) -> bool
+    pub fn store_slice_data<'a, T, C1>(&mut self, value: T) -> Result<(), Error>
     where
         T: Borrow<CellSlice<'a, C1>>,
         C1: CellFamily + 'a,
@@ -564,7 +608,7 @@ impl<C: CellFamily> CellBuilder<C> {
         fn store_slice_data_impl<C1, C2>(
             builder: &mut CellBuilder<C1>,
             value: &CellSlice<'_, C2>,
-        ) -> bool
+        ) -> Result<(), Error>
         where
             C1: CellFamily,
             C2: CellFamily,
@@ -573,13 +617,11 @@ impl<C: CellFamily> CellBuilder<C> {
             if builder.bit_len + bits <= MAX_BIT_LEN {
                 let mut slice_data = MaybeUninit::<[u8; 128]>::uninit();
                 let slice_data = unsafe { &mut *(slice_data.as_mut_ptr() as *mut [u8; 128]) };
-                let Some(slice_data) = value.get_raw(0, slice_data, bits) else {
-                    return false;
-                };
+                let slice_data = ok!(value.get_raw(0, slice_data, bits));
 
                 builder.store_raw(slice_data, bits)
             } else {
-                false
+                Err(Error::CellOverflow)
             }
         }
         store_slice_data_impl(self, value.borrow())
@@ -589,9 +631,9 @@ impl<C: CellFamily> CellBuilder<C> {
     /// returning `false` if there is not enough capacity.
     ///
     /// NOTE: if `bits` is greater than `bytes * 8`, pads the value with zeros (as high bits).
-    pub fn prepend_raw(&mut self, value: &[u8], bits: u16) -> bool {
+    pub fn prepend_raw(&mut self, value: &[u8], bits: u16) -> Result<(), Error> {
         if bits == 0 {
-            return true;
+            return Ok(());
         }
 
         // Prevent asm code bloat
@@ -600,30 +642,36 @@ impl<C: CellFamily> CellBuilder<C> {
             bit_len: &mut u16,
             value: &[u8],
             bits: u16,
-        ) -> bool {
+        ) -> Result<(), Error> {
             store_raw(data, bit_len, value, bits)
         }
 
         if self.bit_len + bits <= MAX_BIT_LEN {
             let mut data = [0; 128];
             let mut bit_len = 0;
-            if store_raw_impl(&mut data, &mut bit_len, value, bits)
-                && store_raw_impl(&mut data, &mut bit_len, &self.data, self.bit_len)
-            {
-                self.data = data;
-                self.bit_len = bit_len;
-                true
-            } else {
-                false
-            }
+            ok!(store_raw_impl(&mut data, &mut bit_len, value, bits));
+            ok!(store_raw_impl(
+                &mut data,
+                &mut bit_len,
+                &self.data,
+                self.bit_len
+            ));
+            self.data = data;
+            self.bit_len = bit_len;
+            Ok(())
         } else {
-            false
+            Err(Error::CellOverflow)
         }
     }
 }
 
 #[inline]
-fn store_raw(data: &mut [u8; 128], bit_len: &mut u16, value: &[u8], mut bits: u16) -> bool {
+fn store_raw(
+    data: &mut [u8; 128],
+    bit_len: &mut u16,
+    value: &[u8],
+    mut bits: u16,
+) -> Result<(), Error> {
     if *bit_len + bits <= MAX_BIT_LEN {
         let max_bit_len = value.len().saturating_mul(8) as u16;
         bits = if let Some(offset) = bits.checked_sub(max_bit_len) {
@@ -635,7 +683,7 @@ fn store_raw(data: &mut [u8; 128], bit_len: &mut u16, value: &[u8], mut bits: u1
 
         // Do nothing for empty slices or noop store
         if bits == 0 {
-            return true;
+            return Ok(());
         }
 
         let q = (*bit_len / 8) as usize;
@@ -680,9 +728,9 @@ fn store_raw(data: &mut [u8; 128], bit_len: &mut u16, value: &[u8], mut bits: u1
             }
         }
         *bit_len += bits;
-        true
+        Ok(())
     } else {
-        false
+        Err(Error::CellOverflow)
     }
 }
 
@@ -713,13 +761,13 @@ impl<C: CellFamily> CellBuilder<C> {
 
     /// Tries to store a child in the cell,
     /// returning `false` if there is not enough remaining capacity.
-    pub fn store_reference(&mut self, cell: CellContainer<C>) -> bool {
+    pub fn store_reference(&mut self, cell: CellContainer<C>) -> Result<(), Error> {
         if self.references.len() < MAX_REF_COUNT {
             // SAFETY: reference count is in the valid range
             unsafe { self.references.push(cell) }
-            true
+            Ok(())
         } else {
-            false
+            Err(Error::CellOverflow)
         }
     }
 
@@ -730,26 +778,24 @@ impl<C: CellFamily> CellBuilder<C> {
 
     /// Tries to append a builder (its data and references),
     /// returning `false` if there is not enough remaining capacity.
-    pub fn store_builder(&mut self, builder: &Self) -> bool {
+    pub fn store_builder(&mut self, builder: &Self) -> Result<(), Error> {
         if self.bit_len + builder.bit_len <= MAX_BIT_LEN
             && self.references.len() + builder.references.len() <= MAX_REF_COUNT
-            && self.store_raw(&builder.data, builder.bit_len)
         {
+            ok!(self.store_raw(&builder.data, builder.bit_len));
             for cell in builder.references.as_ref() {
-                if !self.store_reference(cell.clone()) {
-                    return false;
-                }
+                ok!(self.store_reference(cell.clone()));
             }
-            true
+            Ok(())
         } else {
-            false
+            Err(Error::CellOverflow)
         }
     }
 
     /// Tries to append a cell slice (its data and references),
     /// returning `false` if there is not enough remaining capacity.
     #[inline]
-    pub fn store_slice<'a, T>(&mut self, value: T) -> bool
+    pub fn store_slice<'a, T>(&mut self, value: T) -> Result<(), Error>
     where
         T: Borrow<CellSlice<'a, C>>,
         C: 'a,
@@ -757,26 +803,27 @@ impl<C: CellFamily> CellBuilder<C> {
         fn store_slice_impl<C: CellFamily>(
             builder: &mut CellBuilder<C>,
             value: &CellSlice<'_, C>,
-        ) -> bool {
+        ) -> Result<(), Error> {
             if builder.bit_len + value.remaining_bits() <= MAX_BIT_LEN
                 && builder.references.len() + value.remaining_refs() as usize <= MAX_REF_COUNT
-                && builder.store_slice_data(value)
             {
+                ok!(builder.store_slice_data(value));
                 for cell in value.references().cloned() {
-                    if !builder.store_reference(cell) {
-                        return false;
-                    }
+                    ok!(builder.store_reference(cell));
                 }
-                true
+                Ok(())
             } else {
-                false
+                Err(Error::CellOverflow)
             }
         }
         store_slice_impl(self, value.borrow())
     }
 
     /// Tries to build a new cell using the specified finalizer.
-    pub fn build_ext(mut self, finalizer: &mut dyn Finalizer<C>) -> Option<CellContainer<C>> {
+    pub fn build_ext(
+        mut self,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<CellContainer<C>, Error> {
         debug_assert!(self.bit_len <= MAX_BIT_LEN);
         debug_assert!(self.references.len() <= MAX_REF_COUNT);
 
@@ -847,8 +894,8 @@ where
     ///
     /// See [`default_finalizer`]
     ///
-    /// [`default_finalizer`]: fn@crate::cell::DefaultFinalizer::default_finalizer
-    pub fn build(self) -> Option<CellContainer<C>> {
+    /// [`default_finalizer`]: fn@DefaultFinalizer::default_finalizer
+    pub fn build(self) -> Result<CellContainer<C>, Error> {
         self.build_ext(&mut C::default_finalizer())
     }
 }
@@ -869,13 +916,13 @@ impl<C: CellFamily> Default for CellRefsBuilder<C> {
 impl<C: CellFamily> CellRefsBuilder<C> {
     /// Tries to store a child in the cell,
     /// returning `false` if there is not enough remaining capacity.
-    pub fn store_reference(&mut self, cell: CellContainer<C>) -> bool {
+    pub fn store_reference(&mut self, cell: CellContainer<C>) -> Result<(), Error> {
         if self.0.len() < MAX_REF_COUNT {
             // SAFETY: reference count is in the valid range
             unsafe { self.0.push(cell) }
-            true
+            Ok(())
         } else {
-            false
+            Err(Error::CellOverflow)
         }
     }
 
@@ -899,12 +946,12 @@ mod tests {
     #[test]
     fn clone_builder() {
         let mut builder = RcCellBuilder::new();
-        assert!(builder.store_u32(0xdeafbeaf));
+        builder.store_u32(0xdeafbeaf).unwrap();
         let cell1 = builder.clone().build().unwrap();
         let cell2 = builder.clone().build().unwrap();
         assert_eq!(cell1.as_ref(), cell2.as_ref());
 
-        builder.store_u32(0xb00b5);
+        builder.store_u32(0xb00b5).unwrap();
         let cell3 = builder.build().unwrap();
         assert_ne!(cell1.as_ref(), cell3.as_ref());
     }
@@ -916,8 +963,8 @@ mod tests {
         for offset in 0..8 {
             for bits in 0..=1016 {
                 let mut builder = RcCellBuilder::new();
-                assert!(builder.store_zeros(offset));
-                assert!(builder.store_raw(ONES, bits));
+                builder.store_zeros(offset).unwrap();
+                builder.store_raw(ONES, bits).unwrap();
                 builder.build().unwrap();
             }
         }
@@ -926,8 +973,8 @@ mod tests {
     #[test]
     fn prepend_raw() {
         let mut builder = RcCellBuilder::new();
-        assert!(builder.store_raw(&[0xde, 0xaf, 0xbe, 0xaf], 20));
-        assert!(builder.prepend_raw(&[0xaa, 0x55], 5));
+        builder.store_raw(&[0xde, 0xaf, 0xbe, 0xaf], 20).unwrap();
+        builder.prepend_raw(&[0xaa, 0x55], 5).unwrap();
         let cell = builder.build().unwrap();
         println!("{}", cell.display_tree());
     }
@@ -941,15 +988,15 @@ mod tests {
         ];
 
         let mut builder = RcCellBuilder::new();
-        assert!(builder.store_zeros(3));
-        assert!(builder.store_u256(SOME_HASH));
+        builder.store_zeros(3).unwrap();
+        builder.store_u256(SOME_HASH).unwrap();
         let cell = builder.build().unwrap();
         println!("{}", cell.display_tree());
 
         let mut builder = RcCellBuilder::new();
         let mut slice = cell.as_slice();
         assert!(slice.try_advance(3, 0));
-        assert!(builder.store_slice(slice));
+        builder.store_slice(slice).unwrap();
         let cell = builder.build().unwrap();
         println!("{}", cell.display_tree());
         assert_eq!(cell.data(), SOME_HASH);

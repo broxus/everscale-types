@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use crate::cell::*;
-use crate::error::ParseBlockIdError;
+use crate::error::{Error, ParseBlockIdError};
 use crate::util::*;
 
 /// Full block id.
@@ -374,28 +374,32 @@ impl ShardIdent {
 }
 
 impl<C: CellFamily> Store<C> for ShardIdent {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        _: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         let prefix_len = self.prefix_len() as u8;
         let prefix_without_tag = self.prefix - self.prefix_tag();
-        builder.store_u8(prefix_len)
-            && builder.store_u32(self.workchain as u32)
-            && builder.store_u64(prefix_without_tag)
+        ok!(builder.store_u8(prefix_len));
+        ok!(builder.store_u32(self.workchain as u32));
+        builder.store_u64(prefix_without_tag)
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for ShardIdent {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let prefix_len = slice.load_u8()?;
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let prefix_len = ok!(slice.load_u8());
         if prefix_len > Self::MAX_SPLIT_DEPTH {
-            return None;
+            return Err(Error::InvalidData);
         }
 
-        let workchain = slice.load_u32()? as i32;
-        let prefix_without_tag = slice.load_u64()?;
+        let workchain = ok!(slice.load_u32()) as i32;
+        let prefix_without_tag = ok!(slice.load_u64());
 
         let tag = 1u64 << (63 - prefix_len);
         let prefix = (prefix_without_tag & (!tag + 1)) | tag;
 
-        Some(Self { workchain, prefix })
+        Ok(Self { workchain, prefix })
     }
 }

@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use crate::cell::*;
-use crate::error::ParseAddrError;
+use crate::error::{Error, ParseAddrError};
 use crate::num::*;
 use crate::util::*;
 
@@ -50,7 +50,11 @@ impl std::fmt::Display for IntAddr {
 }
 
 impl<C: CellFamily> Store<C> for IntAddr {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         match self {
             Self::Std(addr) => addr.store_into(builder, finalizer),
             Self::Var(addr) => addr.store_into(builder, finalizer),
@@ -59,21 +63,21 @@ impl<C: CellFamily> Store<C> for IntAddr {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for IntAddr {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        if !slice.load_bit()? {
-            return None;
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        if !ok!(slice.load_bit()) {
+            return Err(Error::InvalidTag);
         }
 
-        Some(if unlikely(slice.load_bit()?) {
-            let anycast = Option::<Box<Anycast>>::load_from(slice)?;
-            let address_len = Uint9::load_from(slice)?;
-            let workchain = slice.load_u32()? as i32;
+        Ok(if unlikely(ok!(slice.load_bit())) {
+            let anycast = ok!(Option::<Box<Anycast>>::load_from(slice));
+            let address_len = ok!(Uint9::load_from(slice));
+            let workchain = ok!(slice.load_u32()) as i32;
             if !slice.has_remaining(address_len.into_inner(), 0) {
-                return None;
+                return Err(Error::CellUnderflow);
             }
 
             let mut address = vec![0; (address_len.into_inner() as usize + 7) / 8];
-            slice.load_raw(&mut address, address_len.into_inner())?;
+            ok!(slice.load_raw(&mut address, address_len.into_inner()));
 
             Self::Var(VarAddr {
                 anycast,
@@ -83,9 +87,9 @@ impl<'a, C: CellFamily> Load<'a, C> for IntAddr {
             })
         } else {
             Self::Std(StdAddr {
-                anycast: Option::<Box<Anycast>>::load_from(slice)?,
-                workchain: slice.load_u8()? as i8,
-                address: slice.load_u256()?,
+                anycast: ok!(Option::<Box<Anycast>>::load_from(slice)),
+                workchain: ok!(slice.load_u8()) as i8,
+                address: ok!(slice.load_u256()),
             })
         })
     }
@@ -192,25 +196,31 @@ impl FromStr for StdAddr {
 }
 
 impl<C: CellFamily> Store<C> for StdAddr {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        builder.has_capacity(self.bit_len(), 0)
-            && builder.store_small_uint(0b10, 2)
-            && self.anycast.store_into(builder, finalizer)
-            && builder.store_u8(self.workchain as u8)
-            && builder.store_u256(&self.address)
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
+        if !builder.has_capacity(self.bit_len(), 0) {
+            return Err(Error::CellOverflow);
+        }
+        ok!(builder.store_small_uint(0b10, 2));
+        ok!(self.anycast.store_into(builder, finalizer));
+        ok!(builder.store_u8(self.workchain as u8));
+        builder.store_u256(&self.address)
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for StdAddr {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        if !slice.load_bit()? || slice.load_bit()? {
-            return None;
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        if !ok!(slice.load_bit()) || ok!(slice.load_bit()) {
+            return Err(Error::InvalidTag);
         }
 
-        Some(Self {
-            anycast: Option::<Box<Anycast>>::load_from(slice)?,
-            workchain: slice.load_u8()? as i8,
-            address: slice.load_u256()?,
+        Ok(Self {
+            anycast: ok!(Option::<Box<Anycast>>::load_from(slice)),
+            workchain: ok!(slice.load_u8()) as i8,
+            address: ok!(slice.load_u256()),
         })
     }
 }
@@ -304,13 +314,19 @@ impl From<VarAddr> for IntAddr {
 }
 
 impl<C: CellFamily> Store<C> for VarAddr {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        builder.has_capacity(self.bit_len(), 0)
-            && builder.store_small_uint(0b11, 2)
-            && self.anycast.store_into(builder, finalizer)
-            && self.address_len.store_into(builder, finalizer)
-            && builder.store_u32(self.workchain as u32)
-            && builder.store_raw(&self.address, self.address_len.into_inner())
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
+        if !builder.has_capacity(self.bit_len(), 0) {
+            return Err(Error::CellOverflow);
+        }
+        ok!(builder.store_small_uint(0b11, 2));
+        ok!(self.anycast.store_into(builder, finalizer));
+        ok!(self.address_len.store_into(builder, finalizer));
+        ok!(builder.store_u32(self.workchain as u32));
+        builder.store_raw(&self.address, self.address_len.into_inner())
     }
 }
 
@@ -374,12 +390,12 @@ impl Anycast {
     pub const BITS_MAX: u16 = SplitDepth::BITS + Self::MAX_DEPTH as u16;
 
     /// Constructs anycast info from rewrite prefix.
-    pub fn from_slice<C: CellFamily>(rewrite_prefix: &CellSlice<'_, C>) -> Option<Self> {
-        let depth = SplitDepth::from_bit_len(rewrite_prefix.remaining_bits())?;
+    pub fn from_slice<C: CellFamily>(rewrite_prefix: &CellSlice<'_, C>) -> Result<Self, Error> {
+        let depth = ok!(SplitDepth::from_bit_len(rewrite_prefix.remaining_bits()));
         let mut data = Vec::with_capacity((depth.into_bit_len() as usize + 7) / 8);
-        rewrite_prefix.get_raw(0, &mut data, depth.into_bit_len())?;
+        ok!(rewrite_prefix.get_raw(0, &mut data, depth.into_bit_len()));
 
-        Some(Self {
+        Ok(Self {
             depth,
             rewrite_prefix: data,
         })
@@ -443,24 +459,30 @@ impl std::fmt::Display for Anycast {
 }
 
 impl<C: CellFamily> Store<C> for Anycast {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
-        builder.has_capacity(self.bit_len(), 0)
-            && self.depth.store_into(builder, finalizer)
-            && builder.store_raw(&self.rewrite_prefix, self.depth.into_bit_len())
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
+        if !builder.has_capacity(self.bit_len(), 0) {
+            return Err(Error::CellOverflow);
+        }
+        ok!(self.depth.store_into(builder, finalizer));
+        builder.store_raw(&self.rewrite_prefix, self.depth.into_bit_len())
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for Anycast {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let depth = SplitDepth::load_from(slice)?;
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let depth = ok!(SplitDepth::load_from(slice));
         if !slice.has_remaining(depth.into_bit_len(), 0) {
-            return None;
+            return Err(Error::CellUnderflow);
         }
 
         let mut rewrite_prefix = vec![0; (depth.into_bit_len() as usize + 7) / 8];
-        slice.load_raw(&mut rewrite_prefix, depth.into_bit_len())?;
+        ok!(slice.load_raw(&mut rewrite_prefix, depth.into_bit_len()));
 
-        Some(Self {
+        Ok(Self {
             depth,
             rewrite_prefix,
         })

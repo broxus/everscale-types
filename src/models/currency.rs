@@ -83,7 +83,7 @@ impl<C: CellFamily> ExtraCurrencyCollection<C> {
 impl<'a, C: CellFamily> AugDictSkipValue<'a, C> for ExtraCurrencyCollection<C> {
     #[inline]
     fn skip_value(slice: &mut CellSlice<'a, C>) -> bool {
-        if let Some(has_extra) = slice.load_bit() {
+        if let Ok(has_extra) = slice.load_bit() {
             !has_extra || slice.try_advance(0, 1)
         } else {
             false

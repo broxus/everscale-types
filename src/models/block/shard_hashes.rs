@@ -152,13 +152,10 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         Some(match self.inner.next()? {
-            Ok((shard_ident, mut value)) => {
-                if let Some(value) = ShardDescription::<C>::load_from(&mut value) {
-                    Ok((shard_ident, value))
-                } else {
-                    Err(self.inner.finish(Error::CellUnderflow))
-                }
-            }
+            Ok((shard_ident, mut value)) => match ShardDescription::<C>::load_from(&mut value) {
+                Ok(value) => Ok((shard_ident, value)),
+                Err(e) => Err(self.inner.finish(e)),
+            },
             Err(e) => Err(e),
         })
     }
@@ -232,8 +229,8 @@ where
 
                     // Shards tree is in the first reference in each value
                     let tree_root = match value.get_reference(0) {
-                        Some(cell) => cell,
-                        None => break Some(Err(self.finish(Error::CellUnderflow))),
+                        Ok(cell) => cell,
+                        Err(e) => break Some(Err(self.finish(e))),
                     };
 
                     // Create shards tree iterator
@@ -277,8 +274,8 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         Some(match self.inner.next()? {
             Ok((shard_ident, value)) => match parse_block_id(shard_ident, value) {
-                Some(value) => Ok(value),
-                None => Err(self.inner.finish(Error::CellUnderflow)),
+                Ok(value) => Ok(value),
+                Err(e) => Err(self.inner.finish(e)),
             },
             Err(e) => Err(e),
         })
@@ -310,13 +307,10 @@ impl<C: CellFamily> Iterator for WorkchainShardHashesIter<'_, C> {
 
     fn next(&mut self) -> Option<Self::Item> {
         Some(match self.inner.next()? {
-            Ok((shard_ident, mut value)) => {
-                if let Some(value) = ShardDescription::<C>::load_from(&mut value) {
-                    Ok((shard_ident, value))
-                } else {
-                    Err(self.inner.finish(Error::CellUnderflow))
-                }
-            }
+            Ok((shard_ident, mut value)) => match ShardDescription::<C>::load_from(&mut value) {
+                Ok(value) => Ok((shard_ident, value)),
+                Err(e) => Err(self.inner.finish(e)),
+            },
             Err(e) => Err(e),
         })
     }
@@ -347,8 +341,8 @@ impl<'a, C: CellFamily> WorkchainShardHashesRawIter<'a, C> {
             let mut slice = root.as_slice();
 
             let is_fork = match slice.load_bit() {
-                Some(bit) => bit,
-                None => break 'error IterStatus::Broken,
+                Ok(bit) => bit,
+                Err(_) => break 'error IterStatus::Broken,
             };
 
             let mut result = Self {
@@ -417,9 +411,9 @@ impl<'a, C: CellFamily> Iterator for WorkchainShardHashesRawIter<'a, C> {
 
                 match slice.load_bit() {
                     // Break on leaf
-                    Some(false) => break slice,
+                    Ok(false) => break slice,
                     // Add segment on fork
-                    Some(true) if self.segments.len() < ShardIdent::MAX_SPLIT_DEPTH as usize => {
+                    Ok(true) if self.segments.len() < ShardIdent::MAX_SPLIT_DEPTH as usize => {
                         self.segments.push(IterSegment {
                             data: slice.cell(),
                             is_right: false,
@@ -476,8 +470,8 @@ impl<C: CellFamily> Iterator for WorkchainLatestBlocksIter<'_, C> {
     fn next(&mut self) -> Option<Self::Item> {
         Some(match self.inner.next()? {
             Ok((shard_ident, value)) => match parse_block_id(shard_ident, value) {
-                Some(block_id) => Ok(block_id),
-                None => Err(self.inner.finish(Error::CellUnderflow)),
+                Ok(block_id) => Ok(block_id),
+                Err(e) => Err(self.inner.finish(e)),
             },
             Err(e) => Err(e),
         })
@@ -612,7 +606,11 @@ impl<C: CellFamily> ShardDescription<C> {
 }
 
 impl<C: CellFamily> Store<C> for ShardDescription<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         let tag = if self.proof_chain.is_some() {
             Self::TAG_V4
         } else if !self.copyleft_rewards.is_empty() {
@@ -627,51 +625,38 @@ impl<C: CellFamily> Store<C> for ShardDescription<C> {
             | ((self.want_merge as u8) << 4)
             | ((self.nx_cc_updated as u8) << 3);
 
-        if !(builder.store_small_uint(tag, Self::TAG_LEN)
-            && builder.store_u32(self.seqno)
-            && builder.store_u32(self.reg_mc_seqno)
-            && builder.store_u64(self.start_lt)
-            && builder.store_u64(self.end_lt)
-            && builder.store_u256(&self.root_hash)
-            && builder.store_u256(&self.file_hash)
-            && builder.store_u8(flags)
-            && builder.store_u32(self.next_catchain_seqno)
-            && builder.store_u64(self.next_validator_shard)
-            && builder.store_u32(self.min_ref_mc_seqno)
-            && builder.store_u32(self.gen_utime)
-            && self.split_merge_at.store_into(builder, finalizer))
-        {
-            return false;
-        }
+        ok!(builder.store_small_uint(tag, Self::TAG_LEN));
+        ok!(builder.store_u32(self.seqno));
+        ok!(builder.store_u32(self.reg_mc_seqno));
+        ok!(builder.store_u64(self.start_lt));
+        ok!(builder.store_u64(self.end_lt));
+        ok!(builder.store_u256(&self.root_hash));
+        ok!(builder.store_u256(&self.file_hash));
+        ok!(builder.store_u8(flags));
+        ok!(builder.store_u32(self.next_catchain_seqno));
+        ok!(builder.store_u64(self.next_validator_shard));
+        ok!(builder.store_u32(self.min_ref_mc_seqno));
+        ok!(builder.store_u32(self.gen_utime));
+        ok!(self.split_merge_at.store_into(builder, finalizer));
 
-        let cell = 'cell: {
+        let cell = {
             let mut builder = CellBuilder::<C>::new();
-            if !(self.fees_collected.store_into(&mut builder, finalizer)
-                && self.funds_created.store_into(&mut builder, finalizer))
-            {
-                return false;
-            }
+            ok!(self.fees_collected.store_into(&mut builder, finalizer));
+            ok!(self.funds_created.store_into(&mut builder, finalizer));
 
-            let stored = if let Some(proof_chain) = &self.proof_chain {
-                let stored = if self.copyleft_rewards.is_empty() {
+            if let Some(proof_chain) = &self.proof_chain {
+                ok!(if self.copyleft_rewards.is_empty() {
                     builder.store_bit_zero()
                 } else {
-                    builder.store_bit_one()
-                        && self.copyleft_rewards.store_into(&mut builder, finalizer)
-                };
-                stored && proof_chain.store_into(&mut builder, finalizer)
+                    ok!(builder.store_bit_one());
+                    self.copyleft_rewards.store_into(&mut builder, finalizer)
+                });
+                ok!(proof_chain.store_into(&mut builder, finalizer));
             } else if !self.copyleft_rewards.is_empty() {
-                self.copyleft_rewards.store_into(&mut builder, finalizer)
-            } else {
-                true
-            };
-
-            if stored {
-                if let Some(cell) = builder.build_ext(finalizer) {
-                    break 'cell cell;
-                }
+                ok!(self.copyleft_rewards.store_into(&mut builder, finalizer));
             }
-            return false;
+
+            ok!(builder.build_ext(finalizer))
         };
 
         builder.store_reference(cell)
@@ -679,36 +664,37 @@ impl<C: CellFamily> Store<C> for ShardDescription<C> {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for ShardDescription<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
         let (cont_in_cell, with_copyleft, with_proof_chain) =
-            match slice.load_small_uint(Self::TAG_LEN)? {
-                Self::TAG_V1 => (true, false, false),
-                Self::TAG_V2 => (false, false, false),
-                Self::TAG_V3 => (true, true, false),
-                Self::TAG_V4 => (true, true, true),
-                _ => return None,
+            match slice.load_small_uint(Self::TAG_LEN) {
+                Ok(Self::TAG_V1) => (true, false, false),
+                Ok(Self::TAG_V2) => (false, false, false),
+                Ok(Self::TAG_V3) => (true, true, false),
+                Ok(Self::TAG_V4) => (true, true, true),
+                Ok(_) => return Err(Error::InvalidTag),
+                Err(e) => return Err(e),
             };
 
-        let seqno = slice.load_u32()?;
-        let reg_mc_seqno = slice.load_u32()?;
-        let start_lt = slice.load_u64()?;
-        let end_lt = slice.load_u64()?;
-        let root_hash = slice.load_u256()?;
-        let file_hash = slice.load_u256()?;
+        let seqno = ok!(slice.load_u32());
+        let reg_mc_seqno = ok!(slice.load_u32());
+        let start_lt = ok!(slice.load_u64());
+        let end_lt = ok!(slice.load_u64());
+        let root_hash = ok!(slice.load_u256());
+        let file_hash = ok!(slice.load_u256());
 
-        let flags = slice.load_u8()?;
+        let flags = ok!(slice.load_u8());
         if flags & 0b111 != 0 {
-            return None;
+            return Err(Error::InvalidData);
         }
 
-        let next_catchain_seqno = slice.load_u32()?;
-        let next_validator_shard = slice.load_u64()?;
-        let min_ref_mc_seqno = slice.load_u32()?;
-        let gen_utime = slice.load_u32()?;
-        let split_merge_at = Option::<FutureSplitMerge>::load_from(slice)?;
+        let next_catchain_seqno = ok!(slice.load_u32());
+        let next_validator_shard = ok!(slice.load_u64());
+        let min_ref_mc_seqno = ok!(slice.load_u32());
+        let gen_utime = ok!(slice.load_u32());
+        let split_merge_at = ok!(Option::<FutureSplitMerge>::load_from(slice));
 
         let mut cont = if cont_in_cell {
-            Some(slice.load_reference()?.as_slice())
+            Some(ok!(slice.load_reference()).as_slice())
         } else {
             None
         };
@@ -718,20 +704,20 @@ impl<'a, C: CellFamily> Load<'a, C> for ShardDescription<C> {
             None => slice,
         };
 
-        let fees_collected = CurrencyCollection::load_from(slice)?;
-        let funds_created = CurrencyCollection::load_from(slice)?;
-        let copyleft_rewards = if with_copyleft && (!with_proof_chain || slice.load_bit()?) {
-            Dict::load_from(slice)?
+        let fees_collected = ok!(CurrencyCollection::load_from(slice));
+        let funds_created = ok!(CurrencyCollection::load_from(slice));
+        let copyleft_rewards = if with_copyleft && (!with_proof_chain || ok!(slice.load_bit())) {
+            ok!(Dict::load_from(slice))
         } else {
             Dict::new()
         };
         let proof_chain = if with_proof_chain {
-            Some(ProofChain::load_from(slice)?)
+            Some(ok!(ProofChain::load_from(slice)))
         } else {
             None
         };
 
-        Some(Self {
+        Ok(Self {
             seqno,
             reg_mc_seqno,
             start_lt,
@@ -756,22 +742,25 @@ impl<'a, C: CellFamily> Load<'a, C> for ShardDescription<C> {
     }
 }
 
-fn parse_block_id<C: CellFamily>(shard: ShardIdent, mut value: CellSlice<C>) -> Option<BlockId> {
+fn parse_block_id<C: CellFamily>(
+    shard: ShardIdent,
+    mut value: CellSlice<C>,
+) -> Result<BlockId, Error> {
     if !value.try_advance(ShardDescription::<C>::TAG_LEN, 0) {
-        return None;
+        return Err(Error::CellUnderflow);
     }
 
-    Some(BlockId {
+    Ok(BlockId {
         shard,
-        seqno: value.load_u32()?,
+        seqno: ok!(value.load_u32()),
         root_hash: {
             // Skip some fields (reg_mc_seqno: u32, start_lt: u64, end_lt: u64)
             if !value.try_advance(32 + 64 + 64, 0) {
-                return None;
+                return Err(Error::CellUnderflow);
             }
-            value.load_u256()?
+            ok!(value.load_u256())
         },
-        file_hash: value.load_u256()?,
+        file_hash: ok!(value.load_u256()),
     })
 }
 
@@ -795,34 +784,38 @@ pub enum FutureSplitMerge {
 }
 
 impl<C: CellFamily> Store<C> for FutureSplitMerge {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        _: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         match *self {
             Self::Split {
                 split_utime,
                 interval,
             } => {
-                builder.store_bit_zero()
-                    && builder.store_u32(split_utime)
-                    && builder.store_u32(interval)
+                ok!(builder.store_bit_zero());
+                ok!(builder.store_u32(split_utime));
+                builder.store_u32(interval)
             }
             Self::Merge {
                 merge_utime,
                 interval,
             } => {
-                builder.store_bit_one()
-                    && builder.store_u32(merge_utime)
-                    && builder.store_u32(interval)
+                ok!(builder.store_bit_one());
+                ok!(builder.store_u32(merge_utime));
+                builder.store_u32(interval)
             }
         }
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for FutureSplitMerge {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let bit = slice.load_bit()?;
-        let utime = slice.load_u32()?;
-        let interval = slice.load_u32()?;
-        Some(if bit {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let bit = ok!(slice.load_bit());
+        let utime = ok!(slice.load_u32());
+        let interval = ok!(slice.load_u32());
+        Ok(if bit {
             Self::Merge {
                 merge_utime: utime,
                 interval,
@@ -846,20 +839,25 @@ pub struct ProofChain<C: CellFamily> {
 }
 
 impl<C: CellFamily> Store<C> for ProofChain<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
-        builder.store_u8(self.len) && builder.store_reference(self.child.clone())
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        _: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
+        ok!(builder.store_u8(self.len));
+        builder.store_reference(self.child.clone())
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for ProofChain<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let len = slice.load_u8()?;
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let len = ok!(slice.load_u8());
         if !(1..=8).contains(&len) {
-            return None;
+            return Err(Error::InvalidData);
         }
-        Some(Self {
+        Ok(Self {
             len,
-            child: slice.load_reference_cloned()?,
+            child: ok!(slice.load_reference_cloned()),
         })
     }
 }

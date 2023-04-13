@@ -24,20 +24,25 @@ pub struct BlockchainConfig<C: CellFamily> {
 }
 
 impl<C: CellFamily> Store<C> for BlockchainConfig<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        _: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         let params_root = match self.params.root() {
             Some(root) => root.clone(),
-            None => return false,
+            None => return Err(Error::InvalidData),
         };
-        builder.store_u256(&self.address) && builder.store_reference(params_root)
+        ok!(builder.store_u256(&self.address));
+        builder.store_reference(params_root)
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for BlockchainConfig<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self {
-            address: slice.load_u256()?,
-            params: Dict::from(Some(slice.load_reference_cloned()?)),
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        Ok(Self {
+            address: ok!(slice.load_u256()),
+            params: Dict::from(Some(ok!(slice.load_reference_cloned()))),
         })
     }
 }
@@ -243,8 +248,8 @@ where
     pub fn get<'a, T: KnownConfigParam<'a, C>>(&'a self) -> Result<Option<T::Value>, Error> {
         let Some(mut slice) = ok!(self.get_raw(T::ID)) else { return Ok(None); };
         match <T::Wrapper as Load<'a, C>>::load_from(&mut slice) {
-            Some(wrapped) => Ok(Some(wrapped.into_inner())),
-            None => Err(Error::CellUnderflow),
+            Ok(wrapped) => Ok(Some(wrapped.into_inner())),
+            Err(e) => Err(e),
         }
     }
 
@@ -252,8 +257,8 @@ where
     pub fn get_raw(&self, id: u32) -> Result<Option<CellSlice<'_, C>>, Error> {
         match ok!(self.params.get_raw(id)) {
             Some(slice) => match slice.get_reference(0) {
-                Some(cell) => Ok(Some(cell.as_slice())),
-                None => Err(Error::CellUnderflow),
+                Ok(cell) => Ok(Some(cell.as_slice())),
+                Err(e) => Err(e),
             },
             None => Ok(None),
         }
@@ -291,8 +296,11 @@ impl<T> ConfigParamWrapper<T> for ParamIdentity<T> {
 
 impl<'a, C: CellFamily, T: Load<'a, C>> Load<'a, C> for ParamIdentity<T> {
     #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self(T::load_from(slice)?))
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        match T::load_from(slice) {
+            Ok(value) => Ok(Self(value)),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -312,11 +320,11 @@ where
     K: DictKey,
 {
     #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self(Dict::load_from_root_ext(
-            slice,
-            &mut C::default_finalizer(),
-        )?))
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        match Dict::load_from_root_ext(slice, &mut C::default_finalizer()) {
+            Ok(value) => Ok(Self(value)),
+            Err(e) => Err(e),
+        }
     }
 }
 

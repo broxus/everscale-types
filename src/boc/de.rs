@@ -370,8 +370,8 @@ impl<'a> BocHeader<'a> {
                     data,
                 };
                 let cell = match finalizer.finalize_cell(ctx) {
-                    Some(cell) => cell,
-                    None => return Err(Error::InvalidCell),
+                    Ok(cell) => cell,
+                    Err(_) => return Err(Error::InvalidCell),
                 };
                 res.push(cell);
             }

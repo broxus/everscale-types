@@ -2,6 +2,7 @@
 
 use crate::cell::*;
 use crate::dict::Dict;
+use crate::error::Error;
 use crate::merkle::MerkleUpdate;
 use crate::num::*;
 use crate::util::*;
@@ -42,88 +43,89 @@ impl<C: CellFamily> Block<C> {
     const TAG_V2: u32 = 0x11ef55bb;
 
     /// Tries to load block info.
-    pub fn load_info(&self) -> Option<BlockInfo<C>> {
+    pub fn load_info(&self) -> Result<BlockInfo<C>, Error> {
         self.info.load()
     }
 
     /// Tries to load tokens flow info.
-    pub fn load_value_flow(&self) -> Option<ValueFlow<C>> {
+    pub fn load_value_flow(&self) -> Result<ValueFlow<C>, Error> {
         self.value_flow.load()
     }
 
     /// Tries to load state update.
-    pub fn load_state_update(&self) -> Option<MerkleUpdate<C>> {
+    pub fn load_state_update(&self) -> Result<MerkleUpdate<C>, Error> {
         self.state_update.load()
     }
 
     /// Tries to load block content.
-    pub fn load_extra(&self) -> Option<BlockExtra<C>> {
+    pub fn load_extra(&self) -> Result<BlockExtra<C>, Error> {
         self.extra.load()
     }
 }
 
 impl<C: CellFamily> Store<C> for Block<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         let tag = if self.out_msg_queue_updates.is_none() {
             Self::TAG_V1
         } else {
             Self::TAG_V2
         };
 
-        if !(builder.store_u32(tag)
-            && builder.store_u32(self.global_id as u32)
-            && builder.store_reference(self.info.cell.clone())
-            && builder.store_reference(self.value_flow.cell.clone()))
-        {
-            return false;
-        }
+        ok!(builder.store_u32(tag));
+        ok!(builder.store_u32(self.global_id as u32));
+        ok!(builder.store_reference(self.info.cell.clone()));
+        ok!(builder.store_reference(self.value_flow.cell.clone()));
 
-        let part_stored = if let Some(out_msg_queue_updates) = &self.out_msg_queue_updates {
-            let cell = 'cell: {
-                let mut builder = CellBuilder::<C>::new();
-                if self.state_update.store_into(&mut builder, finalizer)
-                    && out_msg_queue_updates.store_into(&mut builder, finalizer)
-                {
-                    if let Some(cell) = builder.build_ext(finalizer) {
-                        break 'cell cell;
-                    }
-                }
-                return false;
-            };
-            builder.store_reference(cell)
-        } else {
-            self.state_update.store_into(builder, finalizer)
-        };
+        ok!(
+            if let Some(out_msg_queue_updates) = &self.out_msg_queue_updates {
+                let cell = {
+                    let mut builder = CellBuilder::<C>::new();
+                    ok!(self.state_update.store_into(&mut builder, finalizer));
+                    ok!(out_msg_queue_updates.store_into(&mut builder, finalizer));
+                    ok!(builder.build_ext(finalizer))
+                };
+                builder.store_reference(cell)
+            } else {
+                self.state_update.store_into(builder, finalizer)
+            }
+        );
 
-        part_stored && self.extra.store_into(builder, finalizer)
+        self.extra.store_into(builder, finalizer)
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for Block<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let with_out_msg_queue_updates = match slice.load_u32()? {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let with_out_msg_queue_updates = match ok!(slice.load_u32()) {
             Self::TAG_V1 => false,
             Self::TAG_V2 => true,
-            _ => return None,
+            _ => return Err(Error::InvalidTag),
         };
 
-        let global_id = slice.load_u32()? as i32;
-        let info = Lazy::load_from(slice)?;
-        let value_flow = Lazy::load_from(slice)?;
+        let global_id = ok!(slice.load_u32()) as i32;
+        let info = ok!(Lazy::load_from(slice));
+        let value_flow = ok!(Lazy::load_from(slice));
         let (state_update, out_msg_queue_updates) = if with_out_msg_queue_updates {
-            let slice = &mut slice.load_reference()?.as_slice();
-            (Lazy::load_from(slice)?, Some(Dict::load_from(slice)?))
+            let slice = &mut ok!(slice.load_reference()).as_slice();
+            (
+                ok!(Lazy::load_from(slice)),
+                Some(ok!(Dict::load_from(slice))),
+            )
         } else {
-            (Lazy::load_from(slice)?, None)
+            (ok!(Lazy::load_from(slice)), None)
         };
 
-        Some(Self {
+        Ok(Self {
             global_id,
             info,
             value_flow,
             state_update,
             out_msg_queue_updates,
-            extra: <_>::load_from(slice)?, // TODO
+            extra: ok!(<_>::load_from(slice)),
         })
     }
 }
@@ -187,20 +189,24 @@ impl<C: CellFamily> BlockInfo<C> {
     const FLAG_WITH_GEN_SOFTWARE: u8 = 0x1;
 
     /// Tries to load a reference to the previous block (or blocks).
-    pub fn load_prev_ref(&self) -> Option<PrevBlockRef> {
-        let mut slice = self.prev_ref.as_ref().as_slice();
-        Some(if unlikely(self.after_merge) {
-            let left = BlockRef::load_from(&mut slice.load_reference()?.as_slice())?;
-            let right = BlockRef::load_from(&mut slice.load_reference()?.as_slice())?;
+    pub fn load_prev_ref(&self) -> Result<PrevBlockRef, Error> {
+        let mut s = self.prev_ref.as_ref().as_slice();
+        Ok(if unlikely(self.after_merge) {
+            let left = ok!(BlockRef::load_from(&mut ok!(s.load_reference()).as_slice()));
+            let right = ok!(BlockRef::load_from(&mut ok!(s.load_reference()).as_slice()));
             PrevBlockRef::AfterMerge { left, right }
         } else {
-            PrevBlockRef::Single(BlockRef::load_from(&mut slice)?)
+            PrevBlockRef::Single(ok!(BlockRef::load_from(&mut s)))
         })
     }
 }
 
 impl<C: CellFamily> Store<C> for BlockInfo<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         let packed_flags = ((self.master_ref.is_some() as u8) << 7)
             | ((self.after_merge as u8) << 6)
             | ((self.before_split as u8) << 5)
@@ -210,98 +216,87 @@ impl<C: CellFamily> Store<C> for BlockInfo<C> {
             | ((self.key_block as u8) << 1)
             | (self.prev_vert_ref.is_some() as u8);
 
-        if !(builder.store_u32(Self::TAG)
-            && builder.store_u32(self.version)
-            && builder.store_u8(packed_flags)
-            && builder.store_u8(self.flags)
-            && builder.store_u32(self.seqno)
-            && builder.store_u32(self.vert_seqno)
-            && self.shard.store_into(builder, finalizer)
-            && builder.store_u32(self.gen_utime)
-            && builder.store_u64(self.start_lt)
-            && builder.store_u64(self.end_lt)
-            && builder.store_u32(self.gen_validator_list_hash_short)
-            && builder.store_u32(self.gen_catchain_seqno)
-            && builder.store_u32(self.min_ref_mc_seqno)
-            && builder.store_u32(self.prev_key_block_seqno))
-        {
-            return false;
-        }
+        ok!(builder.store_u32(Self::TAG));
+        ok!(builder.store_u32(self.version));
+        ok!(builder.store_u16(u16::from_be_bytes([packed_flags, self.flags])));
+        ok!(builder.store_u32(self.seqno));
+        ok!(builder.store_u32(self.vert_seqno));
+        ok!(self.shard.store_into(builder, finalizer));
+        ok!(builder.store_u32(self.gen_utime));
+        ok!(builder.store_u64(self.start_lt));
+        ok!(builder.store_u64(self.end_lt));
+        ok!(builder.store_u32(self.gen_validator_list_hash_short));
+        ok!(builder.store_u32(self.gen_catchain_seqno));
+        ok!(builder.store_u32(self.min_ref_mc_seqno));
+        ok!(builder.store_u32(self.prev_key_block_seqno));
 
-        if self.flags & Self::FLAG_WITH_GEN_SOFTWARE != 0
-            && !self.gen_software.store_into(builder, finalizer)
-        {
-            return false;
+        if self.flags & Self::FLAG_WITH_GEN_SOFTWARE != 0 {
+            ok!(self.gen_software.store_into(builder, finalizer));
         }
 
         if let Some(master_ref) = &self.master_ref {
-            if !builder.store_reference(master_ref.cell.clone()) {
-                return false;
-            }
+            ok!(builder.store_reference(master_ref.cell.clone()));
         }
 
-        if !builder.store_reference(self.prev_ref.clone()) {
-            return false;
-        }
+        ok!(builder.store_reference(self.prev_ref.clone()));
 
         if let Some(prev_vert_ref) = &self.prev_vert_ref {
-            if !builder.store_reference(prev_vert_ref.cell.clone()) {
-                return false;
-            }
+            builder.store_reference(prev_vert_ref.cell.clone())
+        } else {
+            Ok(())
         }
-
-        true
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for BlockInfo<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        if slice.load_u32()? != Self::TAG {
-            return None;
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        match slice.load_u32() {
+            Ok(Self::TAG) => {}
+            Ok(_) => return Err(Error::InvalidTag),
+            Err(e) => return Err(e),
         }
 
-        let version = slice.load_u32()?;
-        let packed_flags = slice.load_u8()?;
-        let flags = slice.load_u8()?;
-        let seqno = slice.load_u32()?;
+        let version = ok!(slice.load_u32());
+        let [packed_flags, flags] = ok!(slice.load_u16()).to_be_bytes();
+        let seqno = ok!(slice.load_u32());
         if seqno == 0 {
-            return None;
+            return Err(Error::InvalidData);
         }
-        let vert_seqno = slice.load_u32()?;
-        let shard = ShardIdent::load_from(slice)?;
-        let gen_utime = slice.load_u32()?;
-        let start_lt = slice.load_u64()?;
-        let end_lt = slice.load_u64()?;
-        let gen_validator_list_hash_short = slice.load_u32()?;
-        let gen_catchain_seqno = slice.load_u32()?;
-        let min_ref_mc_seqno = slice.load_u32()?;
-        let prev_key_block_seqno = slice.load_u32()?;
+        let vert_seqno = ok!(slice.load_u32());
+        let shard = ok!(ShardIdent::load_from(slice));
+        let gen_utime = ok!(slice.load_u32());
+        let start_lt = ok!(slice.load_u64());
+        let end_lt = ok!(slice.load_u64());
+        let gen_validator_list_hash_short = ok!(slice.load_u32());
+        let gen_catchain_seqno = ok!(slice.load_u32());
+        let min_ref_mc_seqno = ok!(slice.load_u32());
+        let prev_key_block_seqno = ok!(slice.load_u32());
 
         let gen_software = if flags & Self::FLAG_WITH_GEN_SOFTWARE != 0 {
-            GlobalVersion::load_from(slice)?
+            ok!(GlobalVersion::load_from(slice))
         } else {
             GlobalVersion::default()
         };
 
         let master_ref = if packed_flags & 0b10000000 != 0 {
-            Some(Lazy::<C, BlockRef>::load_from(slice)?)
+            Some(ok!(Lazy::<C, BlockRef>::load_from(slice)))
         } else {
             None
         };
 
-        let prev_ref = slice.load_reference_cloned()?;
+        let prev_ref = ok!(slice.load_reference_cloned());
 
         let prev_vert_ref = if packed_flags & 0b00000001 != 0 {
-            Some(Lazy::<C, BlockRef>::load_from(slice)?)
+            Some(ok!(Lazy::<C, BlockRef>::load_from(slice)))
         } else {
             None
         };
 
         if vert_seqno < prev_vert_ref.is_some() as u32 {
-            return None;
+            return Err(Error::InvalidData);
         }
 
-        Some(Self {
+        Ok(Self {
             version,
             after_merge: packed_flags & 0b01000000 != 0,
             before_split: packed_flags & 0b00100000 != 0,
@@ -398,90 +393,76 @@ impl<C: CellFamily> ValueFlow<C> {
 }
 
 impl<C: CellFamily> Store<C> for ValueFlow<C> {
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         let tag = if self.copyleft_rewards.is_empty() {
             Self::TAG_V1
         } else {
             Self::TAG_V2
         };
 
-        if !builder.store_u32(tag) {
-            return false;
-        }
-
-        let cell1 = 'cell1: {
+        let cell1 = {
             let mut builder = CellBuilder::<C>::new();
-            if self.from_prev_block.store_into(&mut builder, finalizer)
-                && self.to_next_block.store_into(&mut builder, finalizer)
-                && self.imported.store_into(&mut builder, finalizer)
-                && self.exported.store_into(&mut builder, finalizer)
-            {
-                if let Some(cell) = builder.build_ext(finalizer) {
-                    break 'cell1 cell;
-                }
-            }
-            return false;
+            ok!(self.from_prev_block.store_into(&mut builder, finalizer));
+            ok!(self.to_next_block.store_into(&mut builder, finalizer));
+            ok!(self.imported.store_into(&mut builder, finalizer));
+            ok!(self.exported.store_into(&mut builder, finalizer));
+            ok!(builder.build_ext(finalizer))
         };
 
-        if !builder.store_reference(cell1) || !self.fees_collected.store_into(builder, finalizer) {
-            return false;
-        }
+        ok!(builder.store_u32(tag));
+        ok!(builder.store_reference(cell1));
 
-        let cell2 = 'cell2: {
+        ok!(self.fees_collected.store_into(builder, finalizer));
+
+        let cell2 = {
             let mut builder = CellBuilder::<C>::new();
-            if self.fees_imported.store_into(&mut builder, finalizer)
-                && self.recovered.store_into(&mut builder, finalizer)
-                && self.created.store_into(&mut builder, finalizer)
-                && self.minted.store_into(&mut builder, finalizer)
-            {
-                if let Some(cell) = builder.build_ext(finalizer) {
-                    break 'cell2 cell;
-                }
-            }
-            return false;
+            ok!(self.fees_imported.store_into(&mut builder, finalizer));
+            ok!(self.recovered.store_into(&mut builder, finalizer));
+            ok!(self.created.store_into(&mut builder, finalizer));
+            ok!(self.minted.store_into(&mut builder, finalizer));
+            ok!(builder.build_ext(finalizer))
         };
+        ok!(builder.store_reference(cell2));
 
-        if !builder.store_reference(cell2) {
-            return false;
+        if !self.copyleft_rewards.is_empty() {
+            self.copyleft_rewards.store_into(builder, finalizer)
+        } else {
+            Ok(())
         }
-
-        if !self.copyleft_rewards.is_empty()
-            && !self.copyleft_rewards.store_into(builder, finalizer)
-        {
-            return false;
-        }
-
-        true
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for ValueFlow<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let with_copyleft_rewards = match slice.load_u32()? {
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let with_copyleft_rewards = match ok!(slice.load_u32()) {
             Self::TAG_V1 => false,
             Self::TAG_V2 => true,
-            _ => return None,
+            _ => return Err(Error::InvalidTag),
         };
 
-        let fees_collected = CurrencyCollection::load_from(slice)?;
-        let slice1 = &mut slice.load_reference()?.as_slice();
-        let slice2 = &mut slice.load_reference()?.as_slice();
+        let fees_collected = ok!(CurrencyCollection::load_from(slice));
+        let slice1 = &mut ok!(slice.load_reference()).as_slice();
+        let slice2 = &mut ok!(slice.load_reference()).as_slice();
         let copyleft_rewards = if with_copyleft_rewards {
-            Dict::load_from(slice)?
+            ok!(Dict::load_from(slice))
         } else {
             Dict::new()
         };
 
-        Some(Self {
-            from_prev_block: CurrencyCollection::load_from(slice1)?,
-            to_next_block: CurrencyCollection::load_from(slice1)?,
-            imported: CurrencyCollection::load_from(slice1)?,
-            exported: CurrencyCollection::load_from(slice1)?,
+        Ok(Self {
+            from_prev_block: ok!(CurrencyCollection::load_from(slice1)),
+            to_next_block: ok!(CurrencyCollection::load_from(slice1)),
+            imported: ok!(CurrencyCollection::load_from(slice1)),
+            exported: ok!(CurrencyCollection::load_from(slice1)),
             fees_collected,
-            fees_imported: CurrencyCollection::load_from(slice2)?,
-            recovered: CurrencyCollection::load_from(slice2)?,
-            created: CurrencyCollection::load_from(slice2)?,
-            minted: CurrencyCollection::load_from(slice2)?,
+            fees_imported: ok!(CurrencyCollection::load_from(slice2)),
+            recovered: ok!(CurrencyCollection::load_from(slice2)),
+            created: ok!(CurrencyCollection::load_from(slice2)),
+            minted: ok!(CurrencyCollection::load_from(slice2)),
             copyleft_rewards,
         })
     }
@@ -720,7 +701,9 @@ mod tests {
     fn shard_ident_store_load() {
         fn check_store_load(shard: ShardIdent) {
             let mut builder = RcCellBuilder::new();
-            assert!(shard.store_into(&mut builder, &mut RcCellFamily::default_finalizer()));
+            shard
+                .store_into(&mut builder, &mut RcCellFamily::default_finalizer())
+                .unwrap();
             let cell = builder.build().unwrap();
             assert_eq!(cell.bit_len(), ShardIdent::BITS);
 
@@ -738,17 +721,19 @@ mod tests {
         assert!(shard.split().is_none());
 
         // Try loading from invalid cells
-        fn check_invalid<F: FnOnce(&mut RcCellBuilder) -> bool>(f: F) {
+        fn check_invalid<F: FnOnce(&mut RcCellBuilder) -> Result<(), Error>>(f: F) {
             let mut builder = RcCellBuilder::new();
-            assert!(f(&mut builder));
+            f(&mut builder).unwrap();
             let cell = builder.build().unwrap();
-            assert!(cell.parse::<ShardIdent>().is_none())
+            assert!(cell.parse::<ShardIdent>().is_err())
         }
 
         check_invalid(|b| b.store_bit_one());
         check_invalid(|b| b.store_u8(0));
         check_invalid(|b| {
-            b.store_u8(ShardIdent::MAX_SPLIT_DEPTH + 1) && b.store_u32(0) && b.store_u64(0)
+            b.store_u8(ShardIdent::MAX_SPLIT_DEPTH + 1)?;
+            b.store_u32(0)?;
+            b.store_u64(0)
         });
     }
 

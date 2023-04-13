@@ -17,9 +17,9 @@ pub struct Dict<C: CellFamily, K, V> {
 
 impl<'a, C: CellFamily, K, V> Load<'a, C> for Dict<C, K, V> {
     #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Some(Self {
-            root: <_>::load_from(slice)?,
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        Ok(Self {
+            root: ok!(<_>::load_from(slice)),
             _key: PhantomData,
             _value: PhantomData,
         })
@@ -28,7 +28,11 @@ impl<'a, C: CellFamily, K, V> Load<'a, C> for Dict<C, K, V> {
 
 impl<C: CellFamily, K, V> Store<C> for Dict<C, K, V> {
     #[inline]
-    fn store_into(&self, builder: &mut CellBuilder<C>, finalizer: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         self.root.store_into(builder, finalizer)
     }
 }
@@ -110,12 +114,15 @@ where
     pub fn load_from_root_ext(
         slice: &mut CellSlice<'_, C>,
         finalizer: &mut dyn Finalizer<C>,
-    ) -> Option<Self> {
-        Some(Self {
-            root: Some(dict_load_from_root(slice, K::BITS, finalizer)?),
-            _key: PhantomData,
-            _value: PhantomData,
-        })
+    ) -> Result<Self, Error> {
+        match dict_load_from_root(slice, K::BITS, finalizer) {
+            Ok(root) => Ok(Self {
+                root: Some(root),
+                _key: PhantomData,
+                _value: PhantomData,
+            }),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -308,8 +315,8 @@ where
             };
 
             match V::load_from(&mut value) {
-                Some(value) => Ok(Some(value)),
-                None => Err(Error::CellUnderflow),
+                Ok(value) => Ok(Some(value)),
+                Err(e) => Err(e),
             }
         }
 
@@ -515,12 +522,15 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         Some(match self.inner.next()? {
             Ok((key, mut value)) => {
-                if let Some(key) = K::from_raw_data(key.raw_data()) {
-                    if let Some(value) = V::load_from(&mut value) {
-                        return Some(Ok((key, value)));
+                let err = if let Some(key) = K::from_raw_data(key.raw_data()) {
+                    match V::load_from(&mut value) {
+                        Ok(value) => return Some(Ok((key, value))),
+                        Err(e) => e,
                     }
-                }
-                Err(self.inner.finish(Error::CellUnderflow))
+                } else {
+                    Error::CellUnderflow
+                };
+                Err(self.inner.finish(err))
             }
             Err(e) => Err(e),
         })
@@ -617,8 +627,8 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         match self.inner.next()? {
             Ok(mut value) => match V::load_from(&mut value) {
-                Some(value) => Some(Ok(value)),
-                None => Some(Err(self.inner.finish(Error::CellUnderflow))),
+                Ok(value) => Some(Ok(value)),
+                Err(e) => Some(Err(self.inner.finish(e))),
             },
             Err(e) => Some(Err(e)),
         }

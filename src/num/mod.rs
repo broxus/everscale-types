@@ -3,7 +3,7 @@
 use std::num::NonZeroU8;
 
 use crate::cell::*;
-use crate::error::ParseIntError;
+use crate::error::{Error, ParseIntError};
 use crate::util::unlikely;
 
 macro_rules! impl_ops {
@@ -382,62 +382,86 @@ impl_var_uints! {
 }
 
 impl<C: CellFamily> Store<C> for VarUint24 {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        _: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         let bytes = (4 - self.0.leading_zeros() / 8) as u8;
         let bits = bytes as u16 * 8;
 
         if unlikely(bytes > 3 || !builder.has_capacity(Self::LEN_BITS + bits, 0)) {
-            return false;
+            return Err(Error::CellOverflow);
         }
 
-        builder.store_small_uint(bytes, Self::LEN_BITS) && builder.store_uint(self.0 as u64, bits)
+        ok!(builder.store_small_uint(bytes, Self::LEN_BITS));
+        builder.store_uint(self.0 as u64, bits)
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for VarUint24 {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let bytes = slice.load_small_uint(Self::LEN_BITS)?;
-        Some(Self(slice.load_uint(bytes as u16 * 8)? as u32))
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let bytes = ok!(slice.load_small_uint(Self::LEN_BITS));
+        match slice.load_uint(bytes as u16 * 8) {
+            Ok(value) => Ok(Self(value as u32)),
+            Err(e) => Err(e),
+        }
     }
 }
 
 impl<C: CellFamily> Store<C> for VarUint56 {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        _: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         let bytes = (8 - self.0.leading_zeros() / 8) as u8;
         let bits = bytes as u16 * 8;
 
         if unlikely(bytes > 7 || !builder.has_capacity(Self::LEN_BITS + bits, 0)) {
-            return false;
+            return Err(Error::CellOverflow);
         }
 
-        builder.store_small_uint(bytes, Self::LEN_BITS) && builder.store_uint(self.0, bits)
+        ok!(builder.store_small_uint(bytes, Self::LEN_BITS));
+        builder.store_uint(self.0, bits)
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for VarUint56 {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let bytes = slice.load_small_uint(Self::LEN_BITS)?;
-        Some(Self(slice.load_uint(bytes as u16 * 8)?))
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let bytes = ok!(slice.load_small_uint(Self::LEN_BITS));
+        match slice.load_uint(bytes as u16 * 8) {
+            Ok(value) => Ok(Self(value)),
+            Err(e) => Err(e),
+        }
     }
 }
 
 impl<C: CellFamily> Store<C> for Tokens {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        _: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         let bytes = (16 - self.0.leading_zeros() / 8) as u8;
         let bits = bytes as u16 * 8;
 
         if unlikely(bytes > 15 || !builder.has_capacity(Self::LEN_BITS + bits, 0)) {
-            return false;
+            return Err(Error::CellOverflow);
         }
 
-        builder.store_small_uint(bytes, Self::LEN_BITS) && store_u128(builder, self.0, bits)
+        ok!(builder.store_small_uint(bytes, Self::LEN_BITS));
+        store_u128(builder, self.0, bits)
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for Tokens {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let bytes = slice.load_small_uint(Self::LEN_BITS)?;
-        Some(Self(load_u128(slice, bytes)?))
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let bytes = ok!(slice.load_small_uint(Self::LEN_BITS));
+        match load_u128(slice, bytes) {
+            Ok(value) => Ok(Self(value)),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -544,19 +568,23 @@ impl PartialOrd for VarUint248 {
 }
 
 impl<C: CellFamily> Store<C> for VarUint248 {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        _: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         let bytes = (32 - self.leading_zeros() / 8) as u8;
         let mut bits = bytes as u16 * 8;
 
         if unlikely(bytes > 31 || !builder.has_capacity(Self::LEN_BITS + bits, 0)) {
-            return false;
+            return Err(Error::CellOverflow);
         }
 
-        builder.store_small_uint(bytes, Self::LEN_BITS);
+        ok!(builder.store_small_uint(bytes, Self::LEN_BITS));
 
         let (hi, lo) = self.into_words();
         if let Some(high_bits) = bits.checked_sub(128) {
-            store_u128(builder, hi, high_bits);
+            ok!(store_u128(builder, hi, high_bits));
             bits -= high_bits;
         }
         store_u128(builder, lo, bits)
@@ -564,19 +592,21 @@ impl<C: CellFamily> Store<C> for VarUint248 {
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for VarUint248 {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        let mut bytes = slice.load_small_uint(Self::LEN_BITS)?;
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        let mut bytes = ok!(slice.load_small_uint(Self::LEN_BITS));
 
         let mut hi: u128 = 0;
         if let Some(high_bytes) = bytes.checked_sub(16) {
             if high_bytes > 0 {
-                hi = load_u128(slice, high_bytes)?;
+                hi = ok!(load_u128(slice, high_bytes));
                 bytes -= high_bytes;
             }
         }
 
-        let lo = load_u128(slice, bytes)?;
-        Some(Self::from_words(hi, lo))
+        match load_u128(slice, bytes) {
+            Ok(lo) => Ok(Self::from_words(hi, lo)),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -672,14 +702,24 @@ macro_rules! impl_small_uints {
         }
 
         impl<C: CellFamily> Store<C> for $ident {
-            fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
-                self.is_valid() && builder.store_uint(self.0 as u64, Self::BITS)
+            fn store_into(
+                &self,
+                builder: &mut CellBuilder<C>,
+                _: &mut dyn Finalizer<C>
+            ) -> Result<(), Error> {
+                if !self.is_valid() {
+                    return Err(Error::InvalidData);
+                }
+                builder.store_uint(self.0 as u64, Self::BITS)
             }
         }
 
         impl<'a, C: CellFamily> Load<'a, C> for $ident {
-            fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-                Some(Self(slice.load_uint(Self::BITS)? as u16))
+            fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+                match slice.load_uint(Self::BITS) {
+                    Ok(value) => Ok(Self(value as u16)),
+                    Err(e) => Err(e),
+                }
             }
         }
 
@@ -730,20 +770,20 @@ impl SplitDepth {
 
     /// Creates a new integer value from a primitive integer.
     #[inline]
-    pub const fn new(value: u8) -> Option<Self> {
+    pub const fn new(value: u8) -> Result<Self, Error> {
         match NonZeroU8::new(value) {
-            Some(value) => Some(Self(value)),
-            None => None,
+            Some(value) => Ok(Self(value)),
+            None => Err(Error::InvalidData),
         }
     }
 
     /// Creates a new integer value from bit len.
     #[inline]
-    pub const fn from_bit_len(bit_len: u16) -> Option<Self> {
+    pub const fn from_bit_len(bit_len: u16) -> Result<Self, Error> {
         if bit_len < u8::MAX as u16 {
             Self::new(bit_len as u8)
         } else {
-            None
+            Err(Error::InvalidData)
         }
     }
 
@@ -755,37 +795,49 @@ impl SplitDepth {
 }
 
 impl<C: CellFamily> Store<C> for SplitDepth {
-    fn store_into(&self, builder: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder<C>,
+        _: &mut dyn Finalizer<C>,
+    ) -> Result<(), Error> {
         builder.store_small_uint(self.0.get(), Self::BITS)
     }
 }
 
 impl<'a, C: CellFamily> Load<'a, C> for SplitDepth {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Option<Self> {
-        Self::new(slice.load_small_uint(Self::BITS)?)
+    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        match slice.load_small_uint(Self::BITS) {
+            Ok(value) => Self::new(value),
+            Err(e) => Err(e),
+        }
     }
 }
 
-fn store_u128<C: CellFamily>(builder: &mut CellBuilder<C>, value: u128, mut bits: u16) -> bool {
+fn store_u128<C: CellFamily>(
+    builder: &mut CellBuilder<C>,
+    value: u128,
+    mut bits: u16,
+) -> Result<(), Error> {
     if let Some(high_bits) = bits.checked_sub(64) {
-        if !builder.store_uint((value >> 64) as u64, high_bits) {
-            return false;
-        }
+        ok!(builder.store_uint((value >> 64) as u64, high_bits));
         bits -= high_bits;
     }
     builder.store_uint(value as u64, bits)
 }
 
-fn load_u128<C: CellFamily>(slice: &mut CellSlice<'_, C>, mut bytes: u8) -> Option<u128> {
+fn load_u128<C: CellFamily>(slice: &mut CellSlice<'_, C>, mut bytes: u8) -> Result<u128, Error> {
     let mut result: u128 = 0;
     if let Some(high_bytes) = bytes.checked_sub(8) {
         if high_bytes > 0 {
-            result = (slice.load_uint(high_bytes as u16 * 8)? as u128) << 64;
+            result = (ok!(slice.load_uint(high_bytes as u16 * 8)) as u128) << 64;
             bytes -= high_bytes;
         }
     }
-    result |= slice.load_uint(bytes as u16 * 8)? as u128;
-    Some(result)
+
+    match slice.load_uint(bytes as u16 * 8) {
+        Ok(value) => Ok(result | value as u128),
+        Err(e) => Err(e),
+    }
 }
 
 #[cfg(test)]
@@ -877,11 +929,11 @@ mod tests {
                 let mut builder = RcCellBuilder::new();
 
                 if value <= $ident::MAX {
-                    assert!(value.store_into(&mut builder, finalizer));
+                    value.store_into(&mut builder, finalizer).unwrap();
                     let cell = builder.build().unwrap();
                     assert_eq!(value.bit_len().unwrap(), cell.bit_len());
                 } else {
-                    assert!(!value.store_into(&mut builder, finalizer));
+                    assert!(value.store_into(&mut builder, finalizer).is_err());
                 }
             }
         };
@@ -894,7 +946,7 @@ mod tests {
             let mut value = $ident::new($value);
             for _ in 0..=$max_bits {
                 let mut builder = RcCellBuilder::new();
-                assert!(value.store_into(&mut builder, finalizer));
+                value.store_into(&mut builder, finalizer).unwrap();
                 let cell = builder.build().unwrap();
 
                 let parsed_value = cell.parse::<$ident>().unwrap();
@@ -914,11 +966,11 @@ mod tests {
                 let mut builder = RcCellBuilder::new();
 
                 if value <= $ident::MAX {
-                    assert!(value.store_into(&mut builder, finalizer));
+                    value.store_into(&mut builder, finalizer).unwrap();
                     let cell = builder.build().unwrap();
                     assert_eq!($ident::BITS, cell.bit_len());
                 } else {
-                    assert!(!value.store_into(&mut builder, finalizer));
+                    assert!(value.store_into(&mut builder, finalizer).is_err());
                 }
             }
         };

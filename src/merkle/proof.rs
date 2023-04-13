@@ -3,6 +3,7 @@ use std::hash::BuildHasher;
 
 use super::{make_pruned_branch, FilterAction, MerkleFilter};
 use crate::cell::*;
+use crate::error::Error;
 use crate::util::*;
 
 /// Parsed Merkle proof representation.
@@ -40,44 +41,44 @@ impl<C: CellFamily> Default for MerkleProof<C> {
 }
 
 impl<C: CellFamily> Load<'_, C> for MerkleProof<C> {
-    fn load_from(s: &mut CellSlice<C>) -> Option<Self> {
+    fn load_from(s: &mut CellSlice<C>) -> Result<Self, Error> {
         if !s.has_remaining(Self::BITS, Self::REFS) {
-            return None;
+            return Err(Error::CellUnderflow);
         }
 
-        if s.get_u8(0)? != CellType::MerkleProof.to_byte() {
-            return None;
+        if ok!(s.get_u8(0)) != CellType::MerkleProof.to_byte() {
+            return Err(Error::InvalidCell);
         }
 
         let res = Self {
-            hash: s.get_u256(8)?,
-            depth: s.get_u16(8 + 256)?,
-            cell: s.get_reference_cloned(0)?,
+            hash: ok!(s.get_u256(8)),
+            depth: ok!(s.get_u16(8 + 256)),
+            cell: ok!(s.get_reference_cloned(0)),
         };
         if res.cell.as_ref().hash(0) == &res.hash
             && res.cell.as_ref().depth(0) == res.depth
             && s.try_advance(Self::BITS, Self::REFS)
         {
-            Some(res)
+            Ok(res)
         } else {
-            None
+            Err(Error::InvalidCell)
         }
     }
 }
 
 impl<C: CellFamily> Store<C> for MerkleProof<C> {
-    fn store_into(&self, b: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> bool {
+    fn store_into(&self, b: &mut CellBuilder<C>, _: &mut dyn Finalizer<C>) -> Result<(), Error> {
         if !b.has_capacity(Self::BITS, Self::REFS) {
-            return false;
+            return Err(Error::CellOverflow);
         }
 
         let level_mask = self.cell.as_ref().level_mask();
         b.set_level_mask(level_mask.virtualize(1));
         b.set_exotic(true);
-        b.store_u8(CellType::MerkleProof.to_byte())
-            && b.store_u256(&self.hash)
-            && b.store_u16(self.depth)
-            && b.store_reference(self.cell.clone())
+        ok!(b.store_u8(CellType::MerkleProof.to_byte()));
+        ok!(b.store_u256(&self.hash));
+        ok!(b.store_u16(self.depth));
+        b.store_reference(self.cell.clone())
     }
 }
 
@@ -167,10 +168,10 @@ where
     }
 
     /// Builds a Merkle proof using the specified finalizer.
-    pub fn build_ext(self, finalizer: &mut dyn Finalizer<C>) -> Option<MerkleProof<C>> {
+    pub fn build_ext(self, finalizer: &mut dyn Finalizer<C>) -> Result<MerkleProof<C>, Error> {
         let root = self.root;
-        let cell = self.build_raw_ext(finalizer)?;
-        Some(MerkleProof {
+        let cell = ok!(self.build_raw_ext(finalizer));
+        Ok(MerkleProof {
             hash: *root.repr_hash(),
             depth: root.repr_depth(),
             cell,
@@ -178,7 +179,10 @@ where
     }
 
     /// Builds a Merkle proof child cell using the specified finalizer.
-    pub fn build_raw_ext(self, finalizer: &mut dyn Finalizer<C>) -> Option<CellContainer<C>> {
+    pub fn build_raw_ext(
+        self,
+        finalizer: &mut dyn Finalizer<C>,
+    ) -> Result<CellContainer<C>, Error> {
         BuilderImpl::<C> {
             root: self.root,
             filter: &self.filter,
@@ -195,7 +199,7 @@ where
     F: MerkleFilter,
 {
     /// Builds a Merkle proof using the default finalizer.
-    pub fn build(self) -> Option<MerkleProof<C>> {
+    pub fn build(self) -> Result<MerkleProof<C>, Error> {
         self.build_ext(&mut C::default_finalizer())
     }
 }
@@ -214,17 +218,17 @@ where
     pub fn build_raw_ext(
         self,
         finalizer: &mut dyn Finalizer<C>,
-    ) -> Option<(CellContainer<C>, ahash::HashMap<&'a CellHash, bool>)> {
+    ) -> Result<(CellContainer<C>, ahash::HashMap<&'a CellHash, bool>), Error> {
+        let mut pruned_branches = Default::default();
         let mut builder = BuilderImpl {
             root: self.root,
             filter: &self.filter,
             cells: Default::default(),
-            pruned_branches: Some(Default::default()),
+            pruned_branches: Some(&mut pruned_branches),
             finalizer,
         };
-        let cell = builder.build()?;
-        let pruned_branches = builder.pruned_branches?;
-        Some((cell, pruned_branches))
+        let cell = ok!(builder.build());
+        Ok((cell, pruned_branches))
     }
 }
 
@@ -232,7 +236,7 @@ struct BuilderImpl<'a, 'b, C: CellFamily, S = ahash::RandomState> {
     root: &'a dyn Cell<C>,
     filter: &'b dyn MerkleFilter,
     cells: HashMap<&'a CellHash, CellContainer<C>, S>,
-    pruned_branches: Option<HashMap<&'a CellHash, bool, S>>,
+    pruned_branches: Option<&'b mut HashMap<&'a CellHash, bool, S>>,
     finalizer: &'b mut dyn Finalizer<C>,
 }
 
@@ -240,7 +244,7 @@ impl<'a, 'b, C: CellFamily, S> BuilderImpl<'a, 'b, C, S>
 where
     S: BuildHasher + Default,
 {
-    fn build(&mut self) -> Option<CellContainer<C>> {
+    fn build(&mut self) -> Result<CellContainer<C>, Error> {
         struct Node<'a, C: CellFamily> {
             references: RefsIter<'a, C>,
             descriptor: CellDescriptor,
@@ -249,7 +253,7 @@ where
         }
 
         if self.filter.check(self.root.repr_hash()) == FilterAction::Skip {
-            return None;
+            return Err(Error::EmptyProof);
         }
 
         let mut stack = Vec::with_capacity(self.root.repr_depth() as usize);
@@ -278,12 +282,17 @@ where
                     // Check if child is in a tree
                     match self.filter.check(child_repr_hash) {
                         // Included subtrees are used as is
-                        FilterAction::IncludeSubtree => last.references.peek_prev_cloned()?,
+                        FilterAction::IncludeSubtree => {
+                            last.references.peek_prev_cloned().expect("mut not fail")
+                        }
                         // Replace all skipped subtrees with pruned branch cells
                         FilterAction::Skip if descriptor.reference_count() > 0 => {
                             // Create pruned branch
-                            let child =
-                                make_pruned_branch_cold(child, last.merkle_depth, self.finalizer)?;
+                            let child = ok!(make_pruned_branch_cold(
+                                child,
+                                last.merkle_depth,
+                                self.finalizer
+                            ));
 
                             // Insert pruned branch for the current cell
                             if let Some(pruned_branch) = &mut self.pruned_branches {
@@ -311,7 +320,7 @@ where
                 };
 
                 // Add child to the references builder
-                last.children.store_reference(child);
+                _ = last.children.store_reference(child);
             } else if let Some(last) = stack.pop() {
                 // Build a new cell if there are no child nodes left to process
 
@@ -326,9 +335,9 @@ where
                 let mut builder = CellBuilder::<C>::new();
                 builder.set_exotic(last.descriptor.is_exotic());
                 builder.set_level_mask(children_mask.virtualize(merkle_offset));
-                builder.store_cell_data(cell);
+                _ = builder.store_cell_data(cell);
                 builder.set_references(last.children);
-                let proof_cell = builder.build_ext(self.finalizer)?;
+                let proof_cell = ok!(builder.build_ext(self.finalizer));
 
                 // Save this cell as processed cell
                 self.cells.insert(cell.repr_hash(), proof_cell.clone());
@@ -336,16 +345,16 @@ where
                 match stack.last_mut() {
                     // Append this cell to the ancestor
                     Some(last) => {
-                        last.children.store_reference(proof_cell);
+                        _ = last.children.store_reference(proof_cell);
                     }
                     // Or return it as a result (for the root node)
-                    None => return Some(proof_cell),
+                    None => return Ok(proof_cell),
                 }
             }
         }
 
         // Something is wrong if we are here
-        None
+        Err(Error::EmptyProof)
     }
 }
 
@@ -354,7 +363,7 @@ fn make_pruned_branch_cold<C: CellFamily>(
     cell: &dyn Cell<C>,
     merkle_depth: u8,
     finalizer: &mut dyn Finalizer<C>,
-) -> Option<CellContainer<C>> {
+) -> Result<CellContainer<C>, Error> {
     make_pruned_branch(cell, merkle_depth, finalizer)
 }
 
@@ -417,8 +426,8 @@ mod tests {
             let mut cell = C::empty_cell();
             for i in 0..65000 {
                 let mut builder = CellBuilder::<C>::new();
-                builder.store_u32(i);
-                builder.store_reference(cell);
+                builder.store_u32(i).unwrap();
+                builder.store_reference(cell).unwrap();
                 cell = builder.build().unwrap();
             }
 
@@ -500,17 +509,17 @@ mod tests {
 
             let some_other_cell = {
                 let mut builder = CellBuilder::<C>::new();
-                assert!(builder.store_u128(123123));
-                assert!(builder.store_reference(C::empty_cell()));
-                assert!(builder.store_reference(C::empty_cell()));
+                builder.store_u128(123123).unwrap();
+                builder.store_reference(C::empty_cell()).unwrap();
+                builder.store_reference(C::empty_cell()).unwrap();
                 builder.build().unwrap()
             };
 
             let root_cell = {
                 let mut builder = CellBuilder::<C>::new();
-                assert!(builder.store_u128(321321));
-                assert!(builder.store_reference(some_other_cell));
-                assert!(builder.store_reference(dict.clone()));
+                builder.store_u128(321321).unwrap();
+                builder.store_reference(some_other_cell).unwrap();
+                builder.store_reference(dict.clone()).unwrap();
                 builder.build().unwrap()
             };
 
@@ -529,7 +538,7 @@ mod tests {
                 .unwrap();
             let mut virtual_cell = proof.cell.as_ref().virtualize().as_slice();
 
-            assert_eq!(virtual_cell.load_u128(), Some(321321));
+            assert_eq!(virtual_cell.load_u128(), Ok(321321));
 
             let first_ref = virtual_cell.load_reference().unwrap();
             assert_eq!(first_ref.cell_type(), CellType::PrunedBranch);
