@@ -1,7 +1,7 @@
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 
-use everscale_types::{ArcCellFamily, Boc};
+use everscale_types::prelude::{ArcCellFamily, Boc};
 
 fuzz_target!(|data: &[u8]| {
     if let Ok(cell) = Boc::<ArcCellFamily>::decode(data) {

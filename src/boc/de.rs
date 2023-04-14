@@ -155,7 +155,6 @@ impl<'a> BocHeader<'a> {
         // `root_count` <= `cell_count` so this expression doesn't overflow
         let min_total_cell_size = (cell_count as u64) * (MIN_CELL_SIZE + ref_size as u64)
             - (root_count * ref_size) as u64;
-        #[cfg(not(fuzzing))]
         if unlikely(total_cells_size < min_total_cell_size) {
             return Err(Error::InvalidTotalSize);
         }
@@ -167,7 +166,6 @@ impl<'a> BocHeader<'a> {
         // 128 - max data length
         // 4*{ref_size} - max references
         let max_cell_size = 2 + 4 * (2 + 32) + 128 + (MAX_REF_COUNT as u64) * ref_size as u64; // ~282 bytes
-        #[cfg(not(fuzzing))]
         if unlikely(total_cells_size > (cell_count as u64) * max_cell_size) {
             return Err(Error::InvalidTotalSize);
         }
@@ -194,7 +192,6 @@ impl<'a> BocHeader<'a> {
 
         // NOTE: `cell_count` is in range ..=u32::MAX, `offset_size` is in range 1..=8
         let index_size = has_index as u64 * cell_count as u64 * offset_size as u64;
-        #[cfg(not(fuzzing))]
         if unlikely(!reader.require((index_size + total_cells_size + has_crc as u64 * 4) as usize))
         {
             return Err(Error::UnexpectedEof);
