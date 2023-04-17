@@ -22,6 +22,18 @@ pub mod message;
 pub mod shard;
 pub mod transaction;
 
+#[cfg(feature = "sync")]
+#[doc(hidden)]
+mod __checks {
+    use super::*;
+
+    assert_impl_all!(Lazy<Message>: Send);
+    assert_impl_all!(Account: Send);
+    assert_impl_all!(Block: Send);
+    assert_impl_all!(Message: Send);
+    assert_impl_all!(Transaction: Send);
+}
+
 /// Lazy-loaded model.
 pub struct Lazy<T> {
     cell: Cell,

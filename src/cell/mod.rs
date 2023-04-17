@@ -17,9 +17,6 @@ pub use self::cell_impl::rc::Cell;
 #[cfg(feature = "sync")]
 pub use self::cell_impl::sync::Cell;
 
-#[cfg(feature = "sync")]
-assert_impl_all!(Cell: Send);
-
 pub use everscale_types_proc::{Load, Store};
 
 /// Generic cell implementation.
@@ -35,6 +32,16 @@ mod slice;
 mod builder;
 
 mod usage_tree;
+
+#[cfg(feature = "sync")]
+#[doc(hidden)]
+mod __checks {
+    use super::*;
+
+    assert_impl_all!(Cell: Send);
+    assert_impl_all!(CellSlice: Send);
+    assert_impl_all!(CellBuilder: Send);
+}
 
 /// Cell implementation family.
 pub trait CellFamily: Sized {

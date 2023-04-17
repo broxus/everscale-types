@@ -1,10 +1,10 @@
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 
-use everscale_types::prelude::{ArcCellFamily, Boc};
+use everscale_types::prelude::Boc;
 
 fuzz_target!(|data: &[u8]| {
-    if let Ok(cell) = Boc::<ArcCellFamily>::decode(data) {
+    if let Ok(cell) = Boc::decode(data) {
         let mut slice = cell.as_slice();
         _ = slice.get_u8(0);
         _ = slice.get_u16(0);

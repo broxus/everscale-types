@@ -13,6 +13,15 @@ mod proof;
 mod pruned_branch;
 mod update;
 
+#[cfg(feature = "sync")]
+#[doc(hidden)]
+mod __checks {
+    use super::*;
+
+    assert_impl_all!(MerkleProof: Send);
+    assert_impl_all!(MerkleUpdate: Send);
+}
+
 /// A cell tree filter that controls which cells will be included
 /// in the Merkle proof or update.
 pub trait MerkleFilter {
