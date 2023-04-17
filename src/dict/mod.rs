@@ -452,7 +452,6 @@ fn serialize_entry<T: Store>(entry: &T, finalizer: &mut dyn Finalizer) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prelude::*;
 
     fn build_cell<F: FnOnce(&mut CellBuilder) -> Result<(), Error>>(f: F) -> Cell {
         let mut builder = CellBuilder::new();

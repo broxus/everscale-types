@@ -268,7 +268,7 @@ pub struct WorkchainShardHashesIter<'a> {
 
 impl<'a> WorkchainShardHashesIter<'a> {
     /// Creates an iterator over the entries of a [`WorkchainShardHashes`].
-    pub fn new(workchain: i32, root: &'a dyn CellImpl) -> Self {
+    pub fn new(workchain: i32, root: &'a DynCell) -> Self {
         Self {
             inner: WorkchainShardHashesRawIter::new(workchain, root),
         }
@@ -305,7 +305,7 @@ pub struct WorkchainShardHashesRawIter<'a> {
 
 impl<'a> WorkchainShardHashesRawIter<'a> {
     /// Creates an iterator over the raw entries of a [`WorkchainShardHashes`].
-    pub fn new(workchain: i32, root: &'a dyn CellImpl) -> Self {
+    pub fn new(workchain: i32, root: &'a DynCell) -> Self {
         let status = 'error: {
             if root.descriptor().is_pruned_branch() {
                 break 'error IterStatus::Pruned;
@@ -430,7 +430,7 @@ pub struct WorkchainLatestBlocksIter<'a> {
 
 impl<'a> WorkchainLatestBlocksIter<'a> {
     /// Creates an iterator over the latest blocks of a [`WorkchainShardHashes`].
-    pub fn new(workchain: i32, root: &'a dyn CellImpl) -> Self {
+    pub fn new(workchain: i32, root: &'a DynCell) -> Self {
         Self {
             inner: WorkchainShardHashesRawIter::new(workchain, root),
         }
@@ -464,7 +464,7 @@ pub struct WorkchainShardHashesKeysIter<'a> {
 
 impl<'a> WorkchainShardHashesKeysIter<'a> {
     /// Creates an iterator over the keys of a [`WorkchainShardHashes`].
-    pub fn new(workchain: i32, root: &'a dyn CellImpl) -> Self {
+    pub fn new(workchain: i32, root: &'a DynCell) -> Self {
         Self {
             inner: WorkchainShardHashesRawIter::new(workchain, root),
         }
@@ -495,7 +495,7 @@ pub struct WorkchainShardHashesRawValuesIter<'a> {
 
 impl<'a> WorkchainShardHashesRawValuesIter<'a> {
     /// Creates an iterator over the raw values of a [`WorkchainShardHashes`].
-    pub fn new(workchain: i32, root: &'a dyn CellImpl) -> Self {
+    pub fn new(workchain: i32, root: &'a DynCell) -> Self {
         Self {
             inner: WorkchainShardHashesRawIter::new(workchain, root),
         }
@@ -515,7 +515,7 @@ impl<'a> Iterator for WorkchainShardHashesRawValuesIter<'a> {
 
 #[derive(CustomClone)]
 struct IterSegment<'a> {
-    data: &'a dyn CellImpl,
+    data: &'a DynCell,
     is_right: bool,
 }
 

@@ -1,5 +1,5 @@
 use super::cell_impl::VirtualCellWrapper;
-use super::{Cell, CellDescriptor, CellHash, CellImpl};
+use super::{Cell, CellDescriptor, CellHash, CellImpl, DynCell};
 use crate::util::TryAsMut;
 
 #[cfg(feature = "stats")]
@@ -77,7 +77,7 @@ impl UsageTreeWithSubtrees {
 
     /// Adds a subtree to the usage tree.
     /// Returns whether the value was newly inserted.
-    pub fn add_subtree(&mut self, root: &dyn CellImpl) -> bool {
+    pub fn add_subtree(&mut self, root: &DynCell) -> bool {
         self.subtrees.insert(*root.repr_hash())
     }
 }
@@ -109,17 +109,25 @@ impl CellImpl for UsageCell {
         self.cell.bit_len()
     }
 
-    fn reference(&self, index: u8) -> Option<&dyn CellImpl> {
+    fn reference(&self, index: u8) -> Option<&DynCell> {
         Some(self.load_reference(index)?.as_ref())
     }
 
     fn reference_cloned(&self, index: u8) -> Option<Cell> {
-        Some(Cell::from(
-            self.load_reference(index)?.clone() as std::sync::Arc<dyn CellImpl>
-        ))
+        let cell = self.load_reference(index)?.clone();
+
+        #[cfg(not(feature = "sync"))]
+        {
+            Some(Cell::from(cell as std::rc::Rc<DynCell>))
+        }
+
+        #[cfg(feature = "sync")]
+        {
+            Some(Cell::from(cell as std::sync::Arc<DynCell>))
+        }
     }
 
-    fn virtualize(&self) -> &dyn CellImpl {
+    fn virtualize(&self) -> &DynCell {
         VirtualCellWrapper::wrap(self)
     }
 
@@ -157,7 +165,7 @@ mod rc {
     use std::rc::Rc;
 
     use super::{UsageTreeMode, VisitedCell};
-    use crate::cell::{Cell, CellHash, CellImpl};
+    use crate::cell::{Cell, CellHash, DynCell};
 
     pub type SharedState = Rc<UsageTreeState>;
 
@@ -177,11 +185,11 @@ mod rc {
         }
 
         pub fn wrap(self: &SharedState, cell: Cell) -> Cell {
-            Rc::new(UsageCell {
+            Cell::from(Rc::new(UsageCell {
                 cell,
                 usage_tree: Rc::downgrade(self),
                 children: Default::default(),
-            })
+            }) as Rc<DynCell>)
         }
 
         #[inline]
@@ -233,7 +241,7 @@ mod rc {
                         }
 
                         slot.insert(Rc::new(UsageCell {
-                            cell: child.clone(),
+                            cell: child,
                             usage_tree: self.usage_tree.clone(),
                             children: Default::default(),
                         }))
@@ -251,7 +259,7 @@ mod sync {
     use std::sync::{Arc, Mutex};
 
     use super::{UsageTreeMode, VisitedCell};
-    use crate::cell::{Cell, CellHash, CellImpl};
+    use crate::cell::{Cell, CellHash, DynCell};
 
     pub type SharedState = Arc<UsageTreeState>;
 
@@ -275,7 +283,7 @@ mod sync {
                 cell,
                 usage_tree: Arc::downgrade(self),
                 children: [(); 4].map(|_| Default::default()),
-            }) as Arc<dyn CellImpl>)
+            }) as Arc<DynCell>)
         }
 
         #[inline]

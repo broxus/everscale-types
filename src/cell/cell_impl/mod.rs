@@ -2,7 +2,9 @@ use std::mem::MaybeUninit;
 
 #[cfg(feature = "stats")]
 use super::CellTreeStats;
-use super::{Cell, CellDescriptor, CellFamily, CellHash, CellImpl, EMPTY_CELL_HASH, MAX_REF_COUNT};
+use super::{
+    Cell, CellDescriptor, CellFamily, CellHash, CellImpl, DynCell, EMPTY_CELL_HASH, MAX_REF_COUNT,
+};
 use crate::util::TryAsMut;
 
 macro_rules! define_gen_vtable_ptr {
@@ -61,7 +63,7 @@ impl CellImpl for EmptyOrdinaryCell {
         0
     }
 
-    fn reference(&self, _: u8) -> Option<&dyn CellImpl> {
+    fn reference(&self, _: u8) -> Option<&DynCell> {
         None
     }
 
@@ -69,7 +71,7 @@ impl CellImpl for EmptyOrdinaryCell {
         None
     }
 
-    fn virtualize(&self) -> &dyn CellImpl {
+    fn virtualize(&self) -> &DynCell {
         self
     }
 
@@ -143,7 +145,7 @@ impl CellImpl for StaticCell {
         self.bit_len
     }
 
-    fn reference(&self, _: u8) -> Option<&dyn CellImpl> {
+    fn reference(&self, _: u8) -> Option<&DynCell> {
         None
     }
 
@@ -151,7 +153,7 @@ impl CellImpl for StaticCell {
         None
     }
 
-    fn virtualize(&self) -> &dyn CellImpl {
+    fn virtualize(&self) -> &DynCell {
         self
     }
 
@@ -403,7 +405,7 @@ impl<const N: usize> CellImpl for OrdinaryCell<N> {
         self.header.bit_len
     }
 
-    fn reference(&self, index: u8) -> Option<&dyn CellImpl> {
+    fn reference(&self, index: u8) -> Option<&DynCell> {
         Some(self.header.reference(index)?.as_ref())
     }
 
@@ -411,7 +413,7 @@ impl<const N: usize> CellImpl for OrdinaryCell<N> {
         Some(self.header.reference(index)?.clone())
     }
 
-    fn virtualize(&self) -> &dyn CellImpl {
+    fn virtualize(&self) -> &DynCell {
         if self.header.descriptor.level_mask().is_empty() {
             self
         } else {
@@ -468,7 +470,7 @@ impl CellImpl for LibraryReference {
         LibraryReference::BIT_LEN
     }
 
-    fn reference(&self, _: u8) -> Option<&dyn CellImpl> {
+    fn reference(&self, _: u8) -> Option<&DynCell> {
         None
     }
 
@@ -476,7 +478,7 @@ impl CellImpl for LibraryReference {
         None
     }
 
-    fn virtualize(&self) -> &dyn CellImpl {
+    fn virtualize(&self) -> &DynCell {
         self
     }
 
@@ -540,7 +542,7 @@ impl<const N: usize> CellImpl for PrunedBranch<N> {
         8 + 8 + (self.header.level as u16) * (256 + 16)
     }
 
-    fn reference(&self, _: u8) -> Option<&dyn CellImpl> {
+    fn reference(&self, _: u8) -> Option<&DynCell> {
         None
     }
 
@@ -548,7 +550,7 @@ impl<const N: usize> CellImpl for PrunedBranch<N> {
         None
     }
 
-    fn virtualize(&self) -> &dyn CellImpl {
+    fn virtualize(&self) -> &DynCell {
         VirtualCellWrapper::wrap(self)
     }
 
@@ -603,9 +605,10 @@ impl<const N: usize> CellImpl for PrunedBranch<N> {
 #[repr(transparent)]
 pub struct VirtualCell<T>(T);
 
-impl<T> CellImpl for VirtualCell<T>
+impl<#[cfg(not(feature = "sync"))] T, #[cfg(feature = "sync")] T: Send + Sync> CellImpl
+    for VirtualCell<T>
 where
-    T: AsRef<dyn CellImpl> + TryAsMut<dyn CellImpl>,
+    T: AsRef<DynCell> + TryAsMut<DynCell> + 'static,
 {
     fn descriptor(&self) -> CellDescriptor {
         self.0.as_ref().descriptor()
@@ -619,7 +622,7 @@ where
         self.0.as_ref().bit_len()
     }
 
-    fn reference(&self, index: u8) -> Option<&dyn CellImpl> {
+    fn reference(&self, index: u8) -> Option<&DynCell> {
         Some(self.0.as_ref().reference(index)?.virtualize())
     }
 
@@ -627,7 +630,7 @@ where
         Some(Cell::virtualize(self.0.as_ref().reference_cloned(index)?))
     }
 
-    fn virtualize(&self) -> &dyn CellImpl {
+    fn virtualize(&self) -> &DynCell {
         self
     }
 
@@ -672,7 +675,11 @@ impl<T> VirtualCellWrapper<T> {
     }
 }
 
-impl<T: CellImpl> CellImpl for VirtualCellWrapper<T> {
+impl<#[cfg(not(feature = "sync"))] T, #[cfg(feature = "sync")] T: Send + Sync> CellImpl
+    for VirtualCellWrapper<T>
+where
+    T: CellImpl + 'static,
+{
     fn descriptor(&self) -> CellDescriptor {
         self.0.descriptor()
     }
@@ -685,7 +692,7 @@ impl<T: CellImpl> CellImpl for VirtualCellWrapper<T> {
         self.0.bit_len()
     }
 
-    fn reference(&self, index: u8) -> Option<&dyn CellImpl> {
+    fn reference(&self, index: u8) -> Option<&DynCell> {
         Some(self.0.reference(index)?.virtualize())
     }
 
@@ -693,7 +700,7 @@ impl<T: CellImpl> CellImpl for VirtualCellWrapper<T> {
         Some(Cell::virtualize(self.0.reference_cloned(index)?))
     }
 
-    fn virtualize(&self) -> &dyn CellImpl {
+    fn virtualize(&self) -> &DynCell {
         self
     }
 

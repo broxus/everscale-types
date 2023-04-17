@@ -1,6 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use everscale_types::boc::Boc;
-use everscale_types::cell::*;
 
 fn decode_base64(data: &str) -> Vec<u8> {
     use base64::Engine as _;
@@ -31,30 +30,28 @@ fn serialize_boc(id: BenchmarkId, boc: &str, c: &mut Criterion) {
     });
 }
 
-fn boc_group(cf: &str, c: &mut Criterion) {
+fn boc_group(c: &mut Criterion) {
     macro_rules! decl_boc_benches {
-        ($cf:ident, $($name:literal => $boc:literal),*$(,)?) => {
+        ($($name:literal => $boc:literal),*$(,)?) => {
             $({
                 let id = BenchmarkId::new(
                     "deserialize_boc",
-                    format!("family={}; name={}", cf, $name)
+                    format!("name={}", $name)
                 );
-                deserialize_boc::<$cf>(id, $boc, c);
+                deserialize_boc(id, $boc, c);
             });*
 
             $({
                 let id = BenchmarkId::new(
                     "serialize_boc",
-                    format!("family={}; name={}", cf, $name)
+                    format!("name={}", $name)
                 );
-                serialize_boc::<$cf>(id, $boc, c);
+                serialize_boc(id, $boc, c);
             });*
         };
     }
 
     decl_boc_benches![
-        C,
-
         "external_message" => "te6ccgEBAwEA7gABRYgBGRoZkBXGlyf8MT+9+Aps6LyB9WVSLzZvhJSDPgmbHEIMAQHh8Nu9eCxecUj/vM96Y20RjiKgx6WoTw2DovvS/s9dA8fluaPCOfF9jDxVICPgt0F7bK5DLXQwAabrqb7Wnd+hgnWJpZrz4u8JX/jyyB6RENwoAPPEnVzvkFpHxK5gcHDrgAAAYW7VQB2Y8V2LAAAABGACAKMAAAAAAAAAAAAAAACy0F4AgBBMK6mc15szE1BZJlPsqtMkXmhvBh1UIAaIln9JSMkh+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARnFb2fy+DAM",
         "internal_message_empty" => "te6ccgEBAQEAWwAAsUgBUkKKaORs1v/d2CpkdS1rueLjL5EbgaivG/SlIBcUZ5cAKkhRTRyNmt/7uwVMjqWtdzxcZfIjcDUV436UpALijPLQ7msoAAYUWGAAAD6o4PtmhMeK8nJA",
         "internal_message_with_body" => "te6ccgEBBAEA7AABsWgBBMK6mc15szE1BZJlPsqtMkXmhvBh1UIAaIln9JSMkh8AKcyu6HDSN2uCXClQSdunN5ORKwsVegHnQNPiLAwT3wIQF0ZQIAYwZroAAD6ov3v2DMeK7AjAAQFLAAAADMAF47ShSRBdLiDscbrZ36xyWwI6GHiM/l4Mroth4ygz7HgCAaOABHg99SYML+GkoEJQXFyIG56xbLXbw9MCLDl9Vfnxmy7AAAAAAAAAAAAAAAAAAABD4AAAAAAAAAAAAAAAABMS0AAAAAAAAAAAAAACxOw48AAQAwAgAAAAAAAAAAAAAAAAAAAAAA==",
@@ -70,14 +67,5 @@ fn boc_group(cf: &str, c: &mut Criterion) {
     ];
 }
 
-fn rc_boc_group(c: &mut Criterion) {
-    boc_group::<rc::RcCellFamily>("RcCellFamily", c);
-}
-
-fn sync_boc_group(c: &mut Criterion) {
-    boc_group::<sync::ArcCellFamily>("ArcCellFamily", c);
-}
-
-criterion_group!(boc_rc, rc_boc_group);
-criterion_group!(boc_sync, sync_boc_group);
-criterion_main!(boc_rc, boc_sync);
+criterion_group!(boc, boc_group);
+criterion_main!(boc);

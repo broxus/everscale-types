@@ -8,17 +8,17 @@ use super::{
     PrunedBranch, PrunedBranchHeader, VirtualCell, ALL_ONES_CELL, ALL_ZEROS_CELL,
 };
 use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
-use crate::cell::{CellFamily, CellHash, CellImpl, CellType};
+use crate::cell::{CellFamily, CellHash, CellImpl, CellType, DynCell};
 use crate::error::Error;
 use crate::util::TryAsMut;
 
 /// Thread-safe cell.
 #[derive(Clone, Eq)]
 #[repr(transparent)]
-pub struct Cell(Arc<dyn CellImpl>);
+pub struct Cell(Arc<DynCell>);
 
 impl std::ops::Deref for Cell {
-    type Target = dyn CellImpl;
+    type Target = DynCell;
 
     #[inline]
     fn deref(&self) -> &Self::Target {
@@ -26,16 +26,16 @@ impl std::ops::Deref for Cell {
     }
 }
 
-impl<'a> AsRef<dyn CellImpl + 'a> for Cell {
+impl AsRef<DynCell> for Cell {
     #[inline]
-    fn as_ref(&self) -> &(dyn CellImpl + 'a) {
+    fn as_ref(&self) -> &DynCell {
         self.0.as_ref()
     }
 }
 
-impl<'a> Borrow<dyn CellImpl + 'a> for Cell {
+impl Borrow<DynCell> for Cell {
     #[inline]
-    fn borrow(&self) -> &(dyn CellImpl + 'a) {
+    fn borrow(&self) -> &DynCell {
         self.0.borrow()
     }
 }
@@ -53,16 +53,16 @@ impl PartialEq for Cell {
     }
 }
 
-impl From<Cell> for Arc<dyn CellImpl> {
+impl From<Cell> for Arc<DynCell> {
     #[inline]
     fn from(value: Cell) -> Self {
         value.0
     }
 }
 
-impl From<Arc<dyn CellImpl>> for Cell {
+impl From<Arc<DynCell>> for Cell {
     #[inline]
-    fn from(value: Arc<dyn CellImpl>) -> Self {
+    fn from(value: Arc<DynCell>) -> Self {
         Self(value)
     }
 }
@@ -72,15 +72,15 @@ impl CellFamily for Cell {
         Cell(Arc::new(EmptyOrdinaryCell))
     }
 
-    fn empty_cell_ref() -> &'static dyn CellImpl {
+    fn empty_cell_ref() -> &'static DynCell {
         &EmptyOrdinaryCell
     }
 
-    fn all_zeros_ref() -> &'static dyn CellImpl {
+    fn all_zeros_ref() -> &'static DynCell {
         &ALL_ZEROS_CELL
     }
 
-    fn all_ones_ref() -> &'static dyn CellImpl {
+    fn all_ones_ref() -> &'static DynCell {
         &ALL_ONES_CELL
     }
 
@@ -109,9 +109,9 @@ impl<T: ?Sized> TryAsMut<T> for Arc<T> {
     }
 }
 
-impl TryAsMut<dyn CellImpl + 'static> for Cell {
+impl TryAsMut<DynCell> for Cell {
     #[inline]
-    fn try_as_mut(&mut self) -> Option<&mut (dyn CellImpl + 'static)> {
+    fn try_as_mut(&mut self) -> Option<&mut DynCell> {
         Arc::get_mut(&mut self.0)
     }
 }
@@ -314,7 +314,7 @@ where
 
     // Construct fat pointer with vtable info
     let data = std::ptr::addr_of!((*ptr).obj) as *const ();
-    let ptr: *const dyn CellImpl = std::mem::transmute([data, vtable]);
+    let ptr: *const DynCell = std::mem::transmute([data, vtable]);
 
     // Construct Arc
     Cell(Arc::from_raw(ptr))

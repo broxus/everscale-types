@@ -1,4 +1,5 @@
 use std::alloc::Layout;
+use std::borrow::Borrow;
 use std::rc::Rc;
 
 use super::{
@@ -6,28 +7,79 @@ use super::{
     PrunedBranch, PrunedBranchHeader, VirtualCell, ALL_ONES_CELL, ALL_ZEROS_CELL,
 };
 use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
-use crate::cell::{CellFamily, CellHash, CellImpl, CellImplBounds, CellType};
+use crate::cell::{CellFamily, CellHash, CellImpl, CellType, DynCell};
 use crate::error::Error;
 use crate::util::TryAsMut;
 
 /// Single-threaded cell.
-pub type Cell = Rc<dyn CellImpl>;
+#[derive(Clone, Eq)]
+#[repr(transparent)]
+pub struct Cell(Rc<DynCell>);
 
-impl CellImplBounds for Cell {}
+impl std::ops::Deref for Cell {
+    type Target = DynCell;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        self.0.as_ref()
+    }
+}
+
+impl AsRef<DynCell> for Cell {
+    #[inline]
+    fn as_ref(&self) -> &DynCell {
+        self.0.as_ref()
+    }
+}
+
+impl Borrow<DynCell> for Cell {
+    #[inline]
+    fn borrow(&self) -> &DynCell {
+        self.0.borrow()
+    }
+}
+
+impl std::fmt::Debug for Cell {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(self.0.as_ref(), f)
+    }
+}
+
+impl PartialEq for Cell {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.as_ref() == other.0.as_ref()
+    }
+}
+
+impl From<Cell> for Rc<DynCell> {
+    #[inline]
+    fn from(value: Cell) -> Self {
+        value.0
+    }
+}
+
+impl From<Rc<DynCell>> for Cell {
+    #[inline]
+    fn from(value: Rc<DynCell>) -> Self {
+        Self(value)
+    }
+}
+
 impl CellFamily for Cell {
     fn empty_cell() -> Cell {
-        Rc::new(EmptyOrdinaryCell)
+        Cell(Rc::new(EmptyOrdinaryCell))
     }
 
-    fn empty_cell_ref() -> &'static dyn CellImpl {
+    fn empty_cell_ref() -> &'static DynCell {
         &EmptyOrdinaryCell
     }
 
-    fn all_zeros_ref() -> &'static dyn CellImpl {
+    fn all_zeros_ref() -> &'static DynCell {
         &ALL_ZEROS_CELL
     }
 
-    fn all_ones_ref() -> &'static dyn CellImpl {
+    fn all_ones_ref() -> &'static DynCell {
         &ALL_ONES_CELL
     }
 
@@ -36,7 +88,7 @@ impl CellFamily for Cell {
         if descriptor.level_mask().is_empty() {
             cell
         } else {
-            Rc::new(VirtualCell(cell))
+            Cell(Rc::new(VirtualCell(cell)))
         }
     }
 }
@@ -53,6 +105,13 @@ impl<T: ?Sized> TryAsMut<T> for Rc<T> {
     #[inline]
     fn try_as_mut(&mut self) -> Option<&mut T> {
         Rc::get_mut(self)
+    }
+}
+
+impl TryAsMut<DynCell> for Cell {
+    #[inline]
+    fn try_as_mut(&mut self) -> Option<&mut DynCell> {
+        Rc::get_mut(&mut self.0)
     }
 }
 
@@ -90,14 +149,14 @@ unsafe fn make_cell(ctx: CellParts, hashes: Vec<(CellHash, u16)>) -> Cell {
             debug_assert!(ctx.descriptor.byte_len() == 33);
             debug_assert!(ctx.data.len() == 33);
 
-            Rc::new(LibraryReference {
+            Cell(Rc::new(LibraryReference {
                 repr_hash: repr.0,
                 descriptor: ctx.descriptor,
                 data: *(ctx.data.as_ptr() as *const [u8; 33]),
-            })
+            }))
         }
         CellType::Ordinary if ctx.descriptor.d1 == 0 && ctx.descriptor.d2 == 0 => {
-            Rc::new(EmptyOrdinaryCell)
+            Cell(Rc::new(EmptyOrdinaryCell))
         }
         _ => make_ordinary_cell(
             OrdinaryCellHeader {
@@ -257,10 +316,10 @@ where
 
     // Construct fat pointer with vtable info
     let data = std::ptr::addr_of!((*ptr).obj) as *const ();
-    let ptr: *const dyn CellImpl = std::mem::transmute([data, vtable]);
+    let ptr: *const DynCell = std::mem::transmute([data, vtable]);
 
     // Construct Rc
-    Rc::from_raw(ptr)
+    Cell(Rc::from_raw(ptr))
 }
 
 /// Internal Rc representation.

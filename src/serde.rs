@@ -5,7 +5,7 @@ use ::serde::{Deserializer, Serialize, Serializer};
 use crate::boc::*;
 use crate::cell::*;
 
-impl Serialize for dyn CellImpl + '_ {
+impl Serialize for DynCell {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let boc = Boc::encode(self);
         if serializer.is_human_readable() {
@@ -21,7 +21,7 @@ impl Boc {
     pub fn serialize<S: Serializer, T>(cell: &T, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
-        T: AsRef<dyn CellImpl>,
+        T: AsRef<DynCell>,
     {
         cell.as_ref().serialize(serializer)
     }
@@ -164,26 +164,25 @@ where
 mod tests {
     use crate::boc::*;
     use crate::cell::*;
-    use crate::prelude::{RcBoc, RcCellFamily};
 
     #[derive(::serde::Serialize)]
     struct SerdeWithCellRef<'a> {
-        cell: &'a dyn CellImpl,
+        cell: &'a DynCell,
     }
 
     #[derive(::serde::Serialize, ::serde::Deserialize)]
     struct SerdeWithCellContainer {
-        #[serde(with = "Boc::")]
+        #[serde(with = "Boc")]
         some_cell: Cell,
     }
 
     #[derive(::serde::Serialize, ::serde::Deserialize)]
     struct SerdeWithRepr {
-        #[serde(with = "BocRepr::")]
+        #[serde(with = "BocRepr")]
         dict: crate::dict::RawDict<32>,
-        #[serde(with = "BocRepr::")]
+        #[serde(with = "BocRepr")]
         merkle_proof: crate::merkle::MerkleProof,
-        #[serde(with = "BocRepr::")]
+        #[serde(with = "BocRepr")]
         merkle_update: crate::merkle::MerkleUpdate,
     }
 
@@ -194,7 +193,7 @@ mod tests {
         let test = format!(r#"{{"some_cell":"{boc}"}}"#);
         let SerdeWithCellContainer { some_cell } = serde_json::from_str(&test).unwrap();
 
-        let original = RcBoc::decode_base64(boc).unwrap();
+        let original = Boc::decode_base64(boc).unwrap();
         assert_eq!(some_cell.as_ref(), original.as_ref());
     }
 
@@ -211,22 +210,22 @@ mod tests {
         let test = format!(
             r#"{{"dict":"{boc_dict_escaped}","merkle_proof":"{boc_merkle_proof}","merkle_update":"{boc_merkle_update}"}}"#
         );
-        let SerdeWithRepr::<RcCellFamily> {
+        let SerdeWithRepr {
             dict,
             merkle_proof,
             merkle_update,
         } = serde_json::from_str(&test).unwrap();
 
-        let boc = RcBoc::decode_base64(boc_dict).unwrap();
-        let orig_dict = boc.parse::<crate::dict::RawDict<_, 32>>().unwrap();
+        let boc = Boc::decode_base64(boc_dict).unwrap();
+        let orig_dict = boc.parse::<crate::dict::RawDict<32>>().unwrap();
         assert_eq!(dict, orig_dict);
 
-        let boc = RcBoc::decode_base64(boc_merkle_proof).unwrap();
-        let orig_merkle_proof = boc.parse::<crate::merkle::MerkleProof<_>>().unwrap();
+        let boc = Boc::decode_base64(boc_merkle_proof).unwrap();
+        let orig_merkle_proof = boc.parse::<crate::merkle::MerkleProof>().unwrap();
         assert_eq!(merkle_proof, orig_merkle_proof);
 
-        let boc = RcBoc::decode_base64(boc_merkle_update).unwrap();
-        let orig_merkle_update = boc.parse::<crate::merkle::MerkleUpdate<_>>().unwrap();
+        let boc = Boc::decode_base64(boc_merkle_update).unwrap();
+        let orig_merkle_update = boc.parse::<crate::merkle::MerkleUpdate>().unwrap();
         assert_eq!(merkle_update, orig_merkle_update);
     }
 }

@@ -90,7 +90,7 @@ impl MerkleProof {
 
     /// Starts building a Merkle proof for the specified root,
     /// using cells determined by filter.
-    pub fn create<'a, F>(root: &'a dyn CellImpl, f: F) -> MerkleProofBuilder<'a, F>
+    pub fn create<'a, F>(root: &'a DynCell, f: F) -> MerkleProofBuilder<'a, F>
     where
         F: MerkleFilter + 'a,
     {
@@ -104,7 +104,7 @@ impl MerkleProof {
     ///
     /// Proof creation will fail if the specified child is not found.
     pub fn create_for_cell<'a>(
-        root: &'a dyn CellImpl,
+        root: &'a DynCell,
         child_hash: &'a CellHash,
     ) -> MerkleProofBuilder<'a, impl MerkleFilter + 'a> {
         struct RootOrChild<'a> {
@@ -144,7 +144,7 @@ impl MerkleProof {
 
 /// Helper struct to build a Merkle proof.
 pub struct MerkleProofBuilder<'a, F> {
-    root: &'a dyn CellImpl,
+    root: &'a DynCell,
     filter: F,
 }
 
@@ -154,7 +154,7 @@ where
 {
     /// Creates a new Merkle proof builder for the tree with the specified root,
     /// using cells determined by filter.
-    pub fn new(root: &'a dyn CellImpl, f: F) -> Self {
+    pub fn new(root: &'a DynCell, f: F) -> Self {
         Self { root, filter: f }
     }
 
@@ -203,7 +203,7 @@ where
 
 /// Helper struct to build a Merkle proof and keep track of all pruned cells.
 pub struct MerkleProofExtBuilder<'a, F> {
-    root: &'a dyn CellImpl,
+    root: &'a DynCell,
     filter: F,
 }
 
@@ -230,7 +230,7 @@ where
 }
 
 struct BuilderImpl<'a, 'b, S = ahash::RandomState> {
-    root: &'a dyn CellImpl,
+    root: &'a DynCell,
     filter: &'b dyn MerkleFilter,
     cells: HashMap<&'a CellHash, Cell, S>,
     pruned_branches: Option<&'b mut HashMap<&'a CellHash, bool, S>>,
@@ -357,7 +357,7 @@ where
 
 #[cold]
 fn make_pruned_branch_cold(
-    cell: &dyn CellImpl,
+    cell: &DynCell,
     merkle_depth: u8,
     finalizer: &mut dyn Finalizer,
 ) -> Result<Cell, Error> {
@@ -368,7 +368,7 @@ fn make_pruned_branch_cold(
 mod tests {
     use super::*;
     use crate::error::Error;
-    use crate::prelude::{ArcCellFamily, Boc, BocRepr, Dict, RcCellFamily};
+    use crate::prelude::*;
 
     #[test]
     fn correct_store_load() {
@@ -376,6 +376,7 @@ mod tests {
         let cell = CellBuilder::build_from(&proof).unwrap();
 
         let parsed = cell.as_ref().parse::<MerkleProof>().unwrap();
+        assert_eq!(parsed, proof);
     }
 
     #[test]

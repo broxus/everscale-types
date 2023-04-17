@@ -17,8 +17,8 @@ pub use self::cell_impl::rc::Cell;
 #[cfg(feature = "sync")]
 pub use self::cell_impl::sync::Cell;
 
-// #[cfg(feature = "sync")]
-// assert_impl_all!(Cell: Send);
+#[cfg(feature = "sync")]
+assert_impl_all!(Cell: Send);
 
 pub use everscale_types_proc::{Load, Store};
 
@@ -44,23 +44,25 @@ pub trait CellFamily: Sized {
     fn empty_cell() -> Cell;
 
     /// Returns a static reference to the empty cell
-    fn empty_cell_ref() -> &'static dyn CellImpl;
+    fn empty_cell_ref() -> &'static DynCell;
 
     /// Returns a static reference to the cell with all zeros.
-    fn all_zeros_ref() -> &'static dyn CellImpl;
+    fn all_zeros_ref() -> &'static DynCell;
 
     /// Returns a static reference to the cell with all ones.
-    fn all_ones_ref() -> &'static dyn CellImpl;
+    fn all_ones_ref() -> &'static DynCell;
 
     /// Creates a virtualized cell from the specified cell.
     fn virtualize(cell: Cell) -> Cell;
 }
 
+/// Dyn trait type alias.
 #[cfg(not(feature = "sync"))]
-type DynCell = dyn CellImpl;
+pub type DynCell = dyn CellImpl;
 
+/// Dyn trait type alias.
 #[cfg(feature = "sync")]
-type DynCell = dyn CellImpl + Send + Sync;
+pub type DynCell = dyn CellImpl + Send + Sync;
 
 /// Represents the interface of a well-formed cell.
 ///
@@ -88,14 +90,14 @@ pub trait CellImpl {
     fn bit_len(&self) -> u16;
 
     /// Returns a reference to the Nth child cell.
-    fn reference(&self, index: u8) -> Option<&dyn CellImpl>;
+    fn reference(&self, index: u8) -> Option<&DynCell>;
 
     /// Returns the Nth child cell.
     fn reference_cloned(&self, index: u8) -> Option<Cell>;
 
     /// Returns this cell as a virtualized cell, so that all hashes
     /// and depths will have an offset.
-    fn virtualize(&self) -> &dyn CellImpl;
+    fn virtualize(&self) -> &DynCell;
 
     /// Returns cell hash for the specified level.
     ///
@@ -124,7 +126,7 @@ pub trait CellImpl {
     fn stats(&self) -> CellTreeStats;
 }
 
-impl dyn CellImpl + '_ {
+impl DynCell {
     /// Computes cell type from descriptor bytes.
     #[inline]
     pub fn cell_type(&self) -> CellType {
@@ -245,7 +247,7 @@ impl dyn CellImpl + '_ {
     }
 }
 
-impl std::fmt::Debug for dyn CellImpl + '_ {
+impl std::fmt::Debug for DynCell {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         crate::util::debug_struct_field2_finish(
             f,
@@ -258,11 +260,11 @@ impl std::fmt::Debug for dyn CellImpl + '_ {
     }
 }
 
-impl Eq for dyn CellImpl + '_ {}
+impl Eq for DynCell {}
 
-impl PartialEq<dyn CellImpl + '_> for dyn CellImpl + '_ {
+impl PartialEq<DynCell> for DynCell {
     #[inline]
-    fn eq(&self, other: &dyn CellImpl) -> bool {
+    fn eq(&self, other: &DynCell) -> bool {
         self.repr_hash() == other.repr_hash()
     }
 }
@@ -270,7 +272,7 @@ impl PartialEq<dyn CellImpl + '_> for dyn CellImpl + '_ {
 /// An iterator through child nodes.
 #[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct RefsIter<'a> {
-    cell: &'a dyn CellImpl,
+    cell: &'a DynCell,
     max: u8,
     index: u8,
 }
@@ -278,13 +280,13 @@ pub struct RefsIter<'a> {
 impl<'a> RefsIter<'a> {
     /// Returns a cell by children of which we are iterating.
     #[inline]
-    pub fn cell(&self) -> &'a dyn CellImpl {
+    pub fn cell(&self) -> &'a DynCell {
         self.cell
     }
 
     /// Returns a reference to the next() value without advancing the iterator.
     #[inline]
-    pub fn peek(&self) -> Option<&'a dyn CellImpl> {
+    pub fn peek(&self) -> Option<&'a DynCell> {
         if self.index >= self.max {
             None
         } else {
@@ -304,7 +306,7 @@ impl<'a> RefsIter<'a> {
 
     /// Returns a reference to the next_back() value without advancing the iterator.
     #[inline]
-    pub fn peek_prev(&self) -> Option<&'a dyn CellImpl> {
+    pub fn peek_prev(&self) -> Option<&'a DynCell> {
         if self.index > 0 {
             self.cell.reference(self.index - 1)
         } else {
@@ -341,7 +343,7 @@ impl Clone for RefsIter<'_> {
 }
 
 impl<'a> Iterator for RefsIter<'a> {
-    type Item = &'a dyn CellImpl;
+    type Item = &'a DynCell;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -389,7 +391,7 @@ pub struct ClonedRefsIter<'a> {
 impl<'a> ClonedRefsIter<'a> {
     /// Returns a cell by children of which we are iterating.
     #[inline]
-    pub fn cell(&self) -> &'a dyn CellImpl {
+    pub fn cell(&self) -> &'a DynCell {
         self.inner.cell
     }
 
@@ -792,7 +794,7 @@ impl std::ops::AddAssign for CellTreeStats {
 
 /// Helper struct to debug print the root cell.
 #[derive(Clone, Copy)]
-pub struct DebugCell<'a>(&'a dyn CellImpl);
+pub struct DebugCell<'a>(&'a DynCell);
 
 impl std::fmt::Debug for DebugCell<'_> {
     #[inline]
@@ -804,7 +806,7 @@ impl std::fmt::Debug for DebugCell<'_> {
 /// Helper struct to print only the root cell in the cell tree.
 #[derive(Clone, Copy)]
 pub struct DisplayCellRoot<'a> {
-    cell: &'a dyn CellImpl,
+    cell: &'a DynCell,
     level: usize,
 }
 
@@ -837,7 +839,7 @@ impl std::fmt::Display for DisplayCellRoot<'_> {
 
 /// Helper struct to print all cells in the cell tree.
 #[derive(Clone, Copy)]
-pub struct DisplayCellTree<'a>(&'a dyn CellImpl);
+pub struct DisplayCellTree<'a>(&'a DynCell);
 
 impl std::fmt::Display for DisplayCellTree<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

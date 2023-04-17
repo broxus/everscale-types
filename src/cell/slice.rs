@@ -2,7 +2,7 @@ use std::num::{NonZeroU16, NonZeroU32, NonZeroU8};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::cell::{Cell, CellHash, CellImpl, CellType, LevelMask, RefsIter};
+use crate::cell::{Cell, CellHash, CellType, DynCell, LevelMask, RefsIter};
 use crate::error::Error;
 use crate::util::{unlikely, CustomDebug};
 
@@ -144,7 +144,7 @@ impl_primitive_loads! {
     CellHash => |s| s.load_u256(),
 }
 
-impl<'a> Load<'a> for &'a dyn CellImpl {
+impl<'a> Load<'a> for &'a DynCell {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         slice.load_reference()
     }
@@ -159,7 +159,7 @@ impl<'a> Load<'a> for Cell {
 /// A read-only view for a subrange of a cell
 #[derive(CustomDebug)]
 pub struct CellSlice<'a> {
-    cell: &'a dyn CellImpl,
+    cell: &'a DynCell,
     bits_window_start: u16,
     bits_window_end: u16,
     refs_window_start: u8,
@@ -183,7 +183,7 @@ impl<'a> Copy for CellSlice<'a> {}
 
 impl<'a> CellSlice<'a> {
     /// Constructs a new cell slice from the specified cell.
-    pub fn new(cell: &'a dyn CellImpl) -> Self {
+    pub fn new(cell: &'a DynCell) -> Self {
         Self {
             bits_window_start: 0,
             bits_window_end: cell.bit_len(),
@@ -195,7 +195,7 @@ impl<'a> CellSlice<'a> {
 
     /// Returns a reference to the underlying cell.
     #[inline]
-    pub const fn cell(&self) -> &'a dyn CellImpl {
+    pub const fn cell(&self) -> &'a DynCell {
         self.cell
     }
 
@@ -222,18 +222,20 @@ impl<'a> CellSlice<'a> {
     /// # Examples
     ///
     /// ```
-    /// # use everscale_types::prelude::{CellFamily, RcCellBuilder, RcCellFamily};
+    /// # use everscale_types::prelude::{Cell, CellFamily, CellBuilder};
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// // Cell with empty data
-    /// let empty_cell = RcCellFamily::empty_cell();
+    /// let empty_cell = Cell::empty_cell();
     /// assert!(empty_cell.as_slice().is_data_empty());
     ///
     /// // Cell with some bits in data
     /// let not_empty_cell = {
-    ///     let mut builder = RcCellBuilder::new();
-    ///     builder.store_bit_zero();
-    ///     builder.build().unwrap()
+    ///     let mut builder = CellBuilder::new();
+    ///     builder.store_bit_zero()?;
+    ///     builder.build()?
     /// };
     /// assert!(!not_empty_cell.as_slice().is_data_empty());
+    /// # Ok(()) }
     /// ```
     pub const fn is_data_empty(&self) -> bool {
         self.bits_window_start >= self.bits_window_end
@@ -244,18 +246,20 @@ impl<'a> CellSlice<'a> {
     /// # Examples
     ///
     /// ```
-    /// # use everscale_types::prelude::{CellFamily, RcCellBuilder, RcCellFamily};
+    /// # use everscale_types::prelude::{Cell, CellFamily, CellBuilder};
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// // Cell without references
-    /// let empty_cell = RcCellFamily::empty_cell();
+    /// let empty_cell = Cell::empty_cell();
     /// assert!(empty_cell.as_slice().is_refs_empty());
     ///
     /// // Cell with some references
     /// let not_empty_cell = {
-    ///     let mut builder = RcCellBuilder::new();
-    ///     builder.store_reference(empty_cell);
-    ///     builder.build().unwrap()
+    ///     let mut builder = CellBuilder::new();
+    ///     builder.store_reference(empty_cell)?;
+    ///     builder.build()?
     /// };
     /// assert!(!not_empty_cell.as_slice().is_refs_empty());
+    /// # Ok(()) }
     /// ```
     pub const fn is_refs_empty(&self) -> bool {
         self.refs_window_start >= self.refs_window_end
@@ -284,16 +288,17 @@ impl<'a> CellSlice<'a> {
     /// # Examples
     ///
     /// ```
-    /// # use everscale_types::prelude::RcCellBuilder;
+    /// # use everscale_types::prelude::CellBuilder;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let cell = {
-    ///     let mut builder = RcCellBuilder::new();
-    ///     builder.store_zeros(100);
-    ///     builder.build().unwrap()
+    ///     let mut builder = CellBuilder::new();
+    ///     builder.store_zeros(100)?;
+    ///     builder.build()?
     /// };
     /// let mut slice = cell.as_slice();
-    ///
-    /// _ = slice.load_u8();
+    /// slice.load_u8()?;
     /// assert_eq!(slice.bits_offset(), 8);
+    /// # Ok(()) }
     /// ```
     #[inline]
     pub fn bits_offset(&self) -> u16 {
@@ -305,16 +310,18 @@ impl<'a> CellSlice<'a> {
     /// # Examples
     ///
     /// ```
-    /// # use everscale_types::prelude::{CellFamily, RcCellBuilder, RcCellFamily};
+    /// # use everscale_types::prelude::{Cell, CellFamily, CellBuilder};
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let cell = {
-    ///     let mut builder = RcCellBuilder::new();
-    ///     builder.store_reference(RcCellFamily::empty_cell());
-    ///     builder.build().unwrap()
+    ///     let mut builder = CellBuilder::new();
+    ///     builder.store_reference(Cell::empty_cell())?;
+    ///     builder.build()?
     /// };
     /// let mut slice = cell.as_slice();
     ///
-    /// _ = slice.load_reference();
+    /// slice.load_reference()?;
     /// assert_eq!(slice.refs_offset(), 1);
+    /// # Ok(()) }
     /// ```
     #[inline]
     pub const fn refs_offset(&self) -> u8 {
@@ -326,19 +333,21 @@ impl<'a> CellSlice<'a> {
     /// # Examples
     ///
     /// ```
-    /// # use everscale_types::prelude::{CellFamily, RcCellBuilder, RcCellFamily};
+    /// # use everscale_types::prelude::{Cell, CellBuilder, CellFamily};
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let cell = {
-    ///     let mut builder = RcCellBuilder::new();
-    ///     builder.store_zeros(100);
-    ///     builder.store_reference(RcCellFamily::empty_cell());
-    ///     builder.store_reference(RcCellFamily::empty_cell());
-    ///     builder.build().unwrap()
+    ///     let mut builder = CellBuilder::new();
+    ///     builder.store_zeros(100)?;
+    ///     builder.store_reference(Cell::empty_cell())?;
+    ///     builder.store_reference(Cell::empty_cell())?;
+    ///     builder.build()?
     /// };
     /// let mut slice = cell.as_slice();
     ///
     /// assert!(slice.has_remaining(10, 2));
     /// assert!(!slice.has_remaining(500, 2)); // too many bits
     /// assert!(!slice.has_remaining(0, 4)); // too many refs
+    /// # Ok(()) }
     /// ```
     #[inline]
     pub const fn has_remaining(&self, bits: u16, refs: u8) -> bool {
@@ -382,22 +391,24 @@ impl<'a> CellSlice<'a> {
     /// # Examples
     ///
     /// ```
-    /// # use everscale_types::prelude::RcCellBuilder;
+    /// # use everscale_types::prelude::CellBuilder;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let cell = {
-    ///     let mut builder = RcCellBuilder::new();
-    ///     builder.store_u32(0xdeadbeaf);
-    ///     builder.build().unwrap()
+    ///     let mut builder = CellBuilder::new();
+    ///     builder.store_u32(0xdeadbeaf)?;
+    ///     builder.build()?
     /// };
     /// let slice = cell.as_slice();
     ///
     /// let prefix = {
-    ///     let mut builder = RcCellBuilder::new();
-    ///     builder.store_u16(0xdead);
-    ///     builder.build().unwrap()
+    ///     let mut builder = CellBuilder::new();
+    ///     builder.store_u16(0xdead)?;
+    ///     builder.build()?
     /// };
     ///
     /// let without_prefix = slice.strip_data_prefix(&prefix.as_slice()).unwrap();
-    /// assert_eq!(without_prefix.get_u16(0), Ok(0xbeaf));
+    /// assert_eq!(without_prefix.get_u16(0)?, 0xbeaf);
+    /// # Ok(()) }
     /// ```
     pub fn strip_data_prefix(&self, prefix: &CellSlice<'a>) -> Option<CellSlice<'a>> {
         let prefix_len = prefix.remaining_bits();
@@ -423,23 +434,25 @@ impl<'a> CellSlice<'a> {
     /// # Examples
     ///
     /// ```
-    /// # use everscale_types::prelude::RcCellBuilder;
+    /// # use everscale_types::prelude::CellBuilder;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let cell = {
-    ///     let mut builder = RcCellBuilder::new();
-    ///     builder.store_u32(0xdeadbeaf);
-    ///     builder.build().unwrap()
+    ///     let mut builder = CellBuilder::new();
+    ///     builder.store_u32(0xdeadbeaf)?;
+    ///     builder.build()?
     /// };
     /// let slice = cell.as_slice();
     ///
     /// let prefix = {
-    ///     let mut builder = RcCellBuilder::new();
-    ///     builder.store_u16(0xdead);
-    ///     builder.build().unwrap()
+    ///     let mut builder = CellBuilder::new();
+    ///     builder.store_u16(0xdead)?;
+    ///     builder.build()?
     /// };
     ///
     /// let lcp = slice.longest_common_data_prefix(&prefix.as_slice());
-    /// assert_eq!(lcp.get_u16(0), Ok(0xdead));
+    /// assert_eq!(lcp.get_u16(0)?, 0xdead);
     /// assert_eq!(lcp.remaining_bits(), 16);
+    /// # Ok(()) }
     /// ```
     pub fn longest_common_data_prefix(&self, other: &Self) -> Self {
         let prefix_len = self.longest_common_data_prefix_impl(other, u16::MAX);
@@ -536,27 +549,29 @@ impl<'a> CellSlice<'a> {
     /// # Examples
     ///
     /// ```
-    /// # use everscale_types::prelude::{CellFamily, RcCellBuilder, RcCellFamily};
+    /// # use everscale_types::prelude::{Cell, CellFamily, CellBuilder};
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// // Uniform cell consisting of only 0s
     /// let uniform_cell = {
-    ///     let mut builder = RcCellBuilder::new();
-    ///     builder.store_zeros(10);
-    ///     builder.build().unwrap()
+    ///     let mut builder = CellBuilder::new();
+    ///     builder.store_zeros(10)?;
+    ///     builder.build()?
     /// };
     /// assert_eq!(uniform_cell.as_slice().test_uniform(), Some(false));
     ///
     /// // Non-uniform cell consisting of 0s and 1s
     /// let non_uniform_cell = {
-    ///     let mut builder = RcCellBuilder::new();
-    ///     builder.store_zeros(9);
-    ///     builder.store_bit_one();
-    ///     builder.build().unwrap()
+    ///     let mut builder = CellBuilder::new();
+    ///     builder.store_zeros(9)?;
+    ///     builder.store_bit_one()?;
+    ///     builder.build()?
     /// };
     /// assert_eq!(non_uniform_cell.as_slice().test_uniform(), None);
     ///
     /// // Empty cell is non-uniform
-    /// let non_uniform_cell = RcCellFamily::empty_cell();
+    /// let non_uniform_cell = Cell::empty_cell();
     /// assert_eq!(non_uniform_cell.as_slice().test_uniform(), None);
+    /// # Ok(()) }
     /// ```
     pub fn test_uniform(&self) -> Option<bool> {
         if self.bits_window_start >= self.bits_window_end {
@@ -1100,7 +1115,7 @@ impl<'a> CellSlice<'a> {
     }
 
     /// Returns a reference to the Nth child cell (relative to this slice's refs window).
-    pub fn get_reference(&self, index: u8) -> Result<&'a dyn CellImpl, Error> {
+    pub fn get_reference(&self, index: u8) -> Result<&'a DynCell, Error> {
         if self.refs_window_start + index < self.refs_window_end {
             if let Some(cell) = self.cell.reference(self.refs_window_start + index) {
                 return Ok(cell);
@@ -1162,7 +1177,7 @@ impl<'a> CellSlice<'a> {
 
     /// Returns a reference to the next child cell (relative to this slice's refs window),
     /// incrementing the refs window start.
-    pub fn load_reference(&mut self) -> Result<&'a dyn CellImpl, Error> {
+    pub fn load_reference(&mut self) -> Result<&'a DynCell, Error> {
         if self.refs_window_start < self.refs_window_end {
             let res = match self.cell.reference(self.refs_window_start) {
                 Some(cell) => Ok(cell),
@@ -1216,15 +1231,15 @@ impl<'a> CellSlice<'a> {
 #[cfg(test)]
 mod tests {
     use crate::error::Error;
-    use crate::prelude::{RcCell, RcCellBuilder, RcCellSlice};
+    use crate::prelude::*;
 
-    fn build_cell<F: FnOnce(&mut RcCellBuilder) -> Result<(), Error>>(f: F) -> RcCell {
-        let mut builder = RcCellBuilder::new();
+    fn build_cell<F: FnOnce(&mut CellBuilder) -> Result<(), Error>>(f: F) -> Cell {
+        let mut builder = CellBuilder::new();
         f(&mut builder).unwrap();
         builder.build().unwrap()
     }
 
-    fn print_slice(name: &str, slice: RcCellSlice) {
+    fn print_slice(name: &str, slice: CellSlice) {
         println!(
             "{name}: {}",
             build_cell(|b| b.store_slice(slice)).display_tree()
@@ -1234,8 +1249,8 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)] // takes too long to execute on miri
     fn get_raw() {
-        let cell = RcCellBuilder::from_raw_data(&[0xff; 128], 200)
-            .and_then(RcCellBuilder::build)
+        let cell = CellBuilder::from_raw_data(&[0xff; 128], 200)
+            .and_then(CellBuilder::build)
             .unwrap();
         let slice = cell.as_slice();
 
@@ -1245,8 +1260,8 @@ mod tests {
         let mut data = [0; 64];
         assert!(slice.get_raw(0, &mut data, 500).is_err());
 
-        let cell = RcCellBuilder::from_raw_data(&[0xff; 128], 1023)
-            .and_then(RcCellBuilder::build)
+        let cell = CellBuilder::from_raw_data(&[0xff; 128], 1023)
+            .and_then(CellBuilder::build)
             .unwrap();
         let slice = cell.as_slice();
 

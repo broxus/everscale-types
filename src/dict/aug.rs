@@ -116,6 +116,7 @@ impl<K, A: Default, V> AugDict<K, A, V> {
 }
 
 impl<K: DictKey, A, V> AugDict<K, A, V> {
+    #[allow(unused)]
     pub(crate) fn load_from_root<'a>(
         slice: &mut CellSlice<'a>,
         finalizer: &mut dyn Finalizer,
@@ -561,7 +562,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prelude::RcBoc;
+    use crate::prelude::Boc;
 
     // #[test]
     // fn dict_set() {
@@ -606,8 +607,8 @@ mod tests {
 
     #[test]
     fn dict_iter() {
-        let boc = RcBoc::decode_base64("te6ccgEBFAEApAABCYAAAABAAQIDzkAFAgIB1AQDABEAAAACQAAAACAAEQAAAAIAAAAAYAIBIA0GAgEgCgcCASAJCAARAAAAAcAAAACgABEAAAABgAAAAOACASAMCwARAAAAAUAAAAEgABEAAAABAAAAAWACASARDgIBIBAPABEAAAAAwAAAAaAAEQAAAACAAAAB4AIBIBMSABEAAAAAQAAAAiAAEQAAAAAAAAACYA==").unwrap();
-        let dict = boc.parse::<AugDict<_, u32, u32, u32>>().unwrap();
+        let boc = Boc::decode_base64("te6ccgEBFAEApAABCYAAAABAAQIDzkAFAgIB1AQDABEAAAACQAAAACAAEQAAAAIAAAAAYAIBIA0GAgEgCgcCASAJCAARAAAAAcAAAACgABEAAAABgAAAAOACASAMCwARAAAAAUAAAAEgABEAAAABAAAAAWACASARDgIBIBAPABEAAAAAwAAAAaAAEQAAAACAAAAB4AIBIBMSABEAAAAAQAAAAiAAEQAAAAAAAAACYA==").unwrap();
+        let dict = boc.parse::<AugDict<u32, u32, u32>>().unwrap();
 
         assert_eq!(*dict.root_extra(), 0);
 

@@ -2,7 +2,7 @@
 
 use std::borrow::Borrow;
 
-use crate::cell::{Cell, CellBuilder, CellImpl, DefaultFinalizer, Finalizer, Load, Store};
+use crate::cell::{Cell, CellBuilder, DefaultFinalizer, DynCell, Finalizer, Load, Store};
 
 /// BOC decoder implementation.
 pub mod de;
@@ -53,19 +53,19 @@ impl Boc {
     /// Encodes the specified cell tree as BOC and
     /// returns the `base64` encoded bytes as a string.
     #[cfg(any(feature = "base64", test))]
-    pub fn encode_base64<'a, T>(cell: T) -> String
+    pub fn encode_base64<T>(cell: T) -> String
     where
-        T: Borrow<dyn CellImpl + 'a>,
+        T: Borrow<DynCell>,
     {
         crate::util::encode_base64(Self::encode(cell))
     }
 
     /// Encodes the specified cell tree as BOC.
-    pub fn encode<'a, T>(cell: T) -> Vec<u8>
+    pub fn encode<T>(cell: T) -> Vec<u8>
     where
-        T: Borrow<dyn CellImpl + 'a>,
+        T: Borrow<DynCell>,
     {
-        fn encode_impl(cell: &dyn CellImpl) -> Vec<u8> {
+        fn encode_impl(cell: &DynCell) -> Vec<u8> {
             let mut result = Vec::new();
             ser::BocHeader::<ahash::RandomState>::new(cell).encode(&mut result);
             result
@@ -74,12 +74,12 @@ impl Boc {
     }
 
     /// Encodes a pair of cell trees as BOC.
-    pub fn encode_pair<'a, T1, T2>((cell1, cell2): (T1, T2)) -> Vec<u8>
+    pub fn encode_pair<T1, T2>((cell1, cell2): (T1, T2)) -> Vec<u8>
     where
-        T1: Borrow<dyn CellImpl + 'a>,
-        T2: Borrow<dyn CellImpl + 'a>,
+        T1: Borrow<DynCell>,
+        T2: Borrow<DynCell>,
     {
-        fn encode_pair_impl(cell1: &dyn CellImpl, cell2: &dyn CellImpl) -> Vec<u8> {
+        fn encode_pair_impl(cell1: &DynCell, cell2: &DynCell) -> Vec<u8> {
             let mut result = Vec::new();
             let mut encoder = ser::BocHeader::<ahash::RandomState>::new(cell1);
             encoder.add_root(cell2);
@@ -288,7 +288,6 @@ pub enum BocReprError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cell::rc::RcCellFamily;
     use crate::util::decode_base64;
 
     #[test]

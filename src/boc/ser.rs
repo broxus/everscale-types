@@ -2,13 +2,13 @@ use std::collections::HashMap;
 use std::hash::BuildHasher;
 
 use super::BocTag;
-use crate::cell::{CellDescriptor, CellHash, CellImpl};
+use crate::cell::{CellDescriptor, CellHash, DynCell};
 
 /// Intermediate BOC serializer state.
 pub struct BocHeader<'a, S = ahash::RandomState> {
     root_rev_indices: Vec<u32>,
     rev_indices: HashMap<&'a CellHash, u32, S>,
-    rev_cells: Vec<&'a dyn CellImpl>,
+    rev_cells: Vec<&'a DynCell>,
     total_data_size: u64,
     reference_count: u64,
     cell_count: u32,
@@ -21,7 +21,7 @@ where
     S: BuildHasher + Default,
 {
     /// Creates an intermediate BOC serializer state with a single root.
-    pub fn new(root: &'a dyn CellImpl) -> Self {
+    pub fn new(root: &'a DynCell) -> Self {
         let mut res = Self {
             root_rev_indices: Default::default(),
             rev_indices: Default::default(),
@@ -42,7 +42,7 @@ where
     S: BuildHasher,
 {
     /// Adds an additional root to the state.
-    pub fn add_root(&mut self, root: &'a dyn CellImpl) {
+    pub fn add_root(&mut self, root: &'a DynCell) {
         let root_rev_index = self.fill(root);
         self.root_rev_indices.push(root_rev_index);
     }
@@ -150,7 +150,7 @@ where
         debug_assert_eq!(target.len() as u64, target_len_before as u64 + total_size);
     }
 
-    fn fill(&mut self, root: &'a dyn CellImpl) -> u32 {
+    fn fill(&mut self, root: &'a DynCell) -> u32 {
         const SAFE_DEPTH: u16 = 128;
 
         if let Some(index) = self.rev_indices.get(root.repr_hash()) {
@@ -168,7 +168,7 @@ where
         self.cell_count - 1
     }
 
-    fn fill_recursive(&mut self, cell: &'a dyn CellImpl) {
+    fn fill_recursive(&mut self, cell: &'a DynCell) {
         for child in cell.references() {
             if !self.rev_indices.contains_key(child.repr_hash()) {
                 self.fill_recursive(child);
@@ -185,7 +185,7 @@ where
     }
 
     #[cold]
-    fn fill_deep(&mut self, root: &'a dyn CellImpl, repr_depth: u16) {
+    fn fill_deep(&mut self, root: &'a DynCell, repr_depth: u16) {
         const MAX_DEFAULT_CAPACITY: u16 = 256;
 
         let mut stack = Vec::with_capacity(repr_depth.min(MAX_DEFAULT_CAPACITY) as usize);

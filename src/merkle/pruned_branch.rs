@@ -3,7 +3,7 @@ use crate::error::Error;
 
 /// Creates a pruned branch cell with the specified merkle depth.
 pub fn make_pruned_branch(
-    cell: &dyn CellImpl,
+    cell: &DynCell,
     merkle_depth: u8,
     finalizer: &mut dyn Finalizer,
 ) -> Result<Cell, Error> {
@@ -35,19 +35,18 @@ pub fn make_pruned_branch(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::prelude::{RcCellBuilder, RcCellFamily};
 
     #[test]
     fn correct_pruned_branch() {
         let cell = {
-            let mut builder = RcCellBuilder::new();
+            let mut builder = CellBuilder::new();
             builder.store_u128(0xdeafbeaf123123).unwrap();
-            builder.store_reference(RcCellFamily::empty_cell()).unwrap();
+            builder.store_reference(Cell::empty_cell()).unwrap();
             builder.build().unwrap()
         };
 
         let pruned_branch =
-            make_pruned_branch(cell.as_ref(), 0, &mut RcCellFamily::default_finalizer()).unwrap();
+            make_pruned_branch(cell.as_ref(), 0, &mut Cell::default_finalizer()).unwrap();
         assert_eq!(cell.repr_hash(), pruned_branch.hash(0));
         assert_eq!(cell.depth(0), pruned_branch.depth(0));
 
@@ -56,7 +55,7 @@ mod test {
         assert_eq!(cell.depth(3), virtual_cell.depth(3));
 
         let virtual_pruned_branch =
-            make_pruned_branch(virtual_cell, 0, &mut RcCellFamily::default_finalizer()).unwrap();
+            make_pruned_branch(virtual_cell, 0, &mut Cell::default_finalizer()).unwrap();
         assert_eq!(pruned_branch.as_ref(), virtual_pruned_branch.as_ref());
     }
 }

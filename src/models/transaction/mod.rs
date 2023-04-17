@@ -407,11 +407,11 @@ pub struct HashUpdate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prelude::{CellBuilder, RcBoc, RcCell};
+    use crate::prelude::{Boc, Cell, CellBuilder};
 
-    fn check_tx(boc: &str) -> RcCell {
-        let boc = RcBoc::decode_base64(boc).unwrap();
-        let tx = boc.parse::<Transaction<_>>().unwrap();
+    fn check_tx(boc: &str) -> Cell {
+        let boc = Boc::decode_base64(boc).unwrap();
+        let tx = boc.parse::<Transaction>().unwrap();
         println!("tx: {tx:#?}");
 
         let in_msg = tx.load_in_msg().unwrap();
@@ -419,7 +419,7 @@ mod tests {
 
         for (i, entry) in tx.out_msgs.iter().enumerate() {
             let (number, cell) = entry.unwrap();
-            let message = cell.parse::<Message<_>>().unwrap();
+            let message = cell.parse::<Message>().unwrap();
             assert_eq!(number, i as u16);
             println!("Out message: {i}, message: {message:?}");
         }

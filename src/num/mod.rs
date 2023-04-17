@@ -819,7 +819,7 @@ fn load_u128(slice: &mut CellSlice<'_>, mut bytes: u8) -> Result<u128, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prelude::{RcCellBuilder, RcCellFamily};
+    use crate::prelude::CellBuilder;
 
     macro_rules! impl_operation_tests {
         ($ident:ident$(, $check_max_div:ident)?) => {
@@ -902,7 +902,7 @@ mod tests {
 
             for i in 0..$max_bits {
                 let value = $ident::ONE << i;
-                let mut builder = RcCellBuilder::new();
+                let mut builder = CellBuilder::new();
 
                 if value <= $ident::MAX {
                     value.store_into(&mut builder, finalizer).unwrap();
@@ -921,7 +921,7 @@ mod tests {
 
             let mut value = $ident::new($value);
             for _ in 0..=$max_bits {
-                let mut builder = RcCellBuilder::new();
+                let mut builder = CellBuilder::new();
                 value.store_into(&mut builder, finalizer).unwrap();
                 let cell = builder.build().unwrap();
 
@@ -939,7 +939,7 @@ mod tests {
 
             for i in 0..$max_bits {
                 let value = $ident::ONE << i;
-                let mut builder = RcCellBuilder::new();
+                let mut builder = CellBuilder::new();
 
                 if value <= $ident::MAX {
                     value.store_into(&mut builder, finalizer).unwrap();
@@ -1024,7 +1024,7 @@ mod tests {
             let lo = 1u128 << i;
 
             let value = VarUint248::new(lo);
-            let cell = RcCellBuilder::build_from(value).unwrap();
+            let cell = CellBuilder::build_from(value).unwrap();
             assert_eq!(value.bit_len().unwrap(), cell.bit_len());
         }
     }
@@ -1035,7 +1035,7 @@ mod tests {
         for _ in 0..=128 {
             let value = VarUint248::new(lo);
 
-            let cell = RcCellBuilder::build_from(value).unwrap();
+            let cell = CellBuilder::build_from(value).unwrap();
 
             let parsed_value = cell.parse::<VarUint248>().unwrap();
             assert_eq!(parsed_value, value);

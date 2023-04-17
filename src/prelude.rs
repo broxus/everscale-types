@@ -4,7 +4,7 @@
 
 pub use crate::boc::{Boc, BocRepr};
 pub use crate::cell::{
-    CellBuilder, CellDescriptor, CellFamily, CellHash, CellImpl, CellSlice, CellType, Load, Store,
-    UsageTree, UsageTreeMode, UsageTreeWithSubtrees,
+    Cell, CellBuilder, CellFamily, CellHash, CellImpl, CellSlice, CellType, DynCell, Load, Store,
+    UsageTree, UsageTreeMode,
 };
 pub use crate::dict::{Dict, RawDict};

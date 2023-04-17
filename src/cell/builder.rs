@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 use crate::cell::{
-    Cell, CellDescriptor, CellHash, CellImpl, CellSlice, LevelMask, MAX_BIT_LEN, MAX_REF_COUNT,
+    Cell, CellDescriptor, CellHash, CellSlice, DynCell, LevelMask, MAX_BIT_LEN, MAX_REF_COUNT,
 };
 use crate::error::Error;
 use crate::util::ArrayVec;
@@ -570,14 +570,11 @@ impl CellBuilder {
     /// Tries to store all data bits of the specified cell in the current cell,
     /// returning `false` if there is not enough remaining capacity.
     #[inline]
-    pub fn store_cell_data<'a, T>(&mut self, value: T) -> Result<(), Error>
+    pub fn store_cell_data<T>(&mut self, value: T) -> Result<(), Error>
     where
-        T: Borrow<dyn CellImpl + 'a>,
+        T: Borrow<DynCell>,
     {
-        fn store_cell_data_impl(
-            builder: &mut CellBuilder,
-            value: &dyn CellImpl,
-        ) -> Result<(), Error> {
+        fn store_cell_data_impl(builder: &mut CellBuilder, value: &DynCell) -> Result<(), Error> {
             store_raw(
                 &mut builder.data,
                 &mut builder.bit_len,

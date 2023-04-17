@@ -110,11 +110,7 @@ impl MerkleUpdate {
 
     /// Starts building a Merkle update between the specified cells,
     /// using old cells determined by filter.
-    pub fn create<'a, F>(
-        old: &'a dyn CellImpl,
-        new: &'a dyn CellImpl,
-        f: F,
-    ) -> MerkleUpdateBuilder<'a, F>
+    pub fn create<'a, F>(old: &'a DynCell, new: &'a DynCell, f: F) -> MerkleUpdateBuilder<'a, F>
     where
         F: MerkleFilter + 'a,
     {
@@ -145,7 +141,7 @@ impl MerkleUpdate {
         }
 
         impl Applier<'_> {
-            fn run(&mut self, cell: &dyn CellImpl, merkle_depth: u8) -> Result<Cell, Error> {
+            fn run(&mut self, cell: &DynCell, merkle_depth: u8) -> Result<Cell, Error> {
                 let descriptor = cell.descriptor();
                 let merkle_offset = descriptor.cell_type().is_merkle() as u8;
                 let child_merkle_depth = merkle_depth + merkle_offset;
@@ -302,8 +298,8 @@ impl MerkleUpdate {
 
 /// Helper struct to build a Merkle update.
 pub struct MerkleUpdateBuilder<'a, F> {
-    old: &'a dyn CellImpl,
-    new: &'a dyn CellImpl,
+    old: &'a DynCell,
+    new: &'a DynCell,
     filter: F,
 }
 
@@ -313,7 +309,7 @@ where
 {
     /// Creates a new Merkle update between the specified cells,
     /// using old cells determined by filter.
-    pub fn new(old: &'a dyn CellImpl, new: &'a dyn CellImpl, f: F) -> Self {
+    pub fn new(old: &'a DynCell, new: &'a DynCell, f: F) -> Self {
         Self {
             old,
             new,
@@ -344,8 +340,8 @@ where
 }
 
 struct BuilderImpl<'a, 'b> {
-    old: &'a dyn CellImpl,
-    new: &'a dyn CellImpl,
+    old: &'a DynCell,
+    new: &'a DynCell,
     filter: &'b dyn MerkleFilter,
     finalizer: &'b mut dyn Finalizer,
 }
@@ -363,7 +359,7 @@ impl<'a: 'b, 'b> BuilderImpl<'a, 'b> {
         where
             S: BuildHasher,
         {
-            fn fill(&mut self, cell: &'a dyn CellImpl, mut skip_filter: bool) -> bool {
+            fn fill(&mut self, cell: &'a DynCell, mut skip_filter: bool) -> bool {
                 let repr_hash = cell.repr_hash();
 
                 // Skip visited cells
@@ -504,7 +500,7 @@ mod tests {
 
     #[test]
     fn dict_merkle_update() {
-        fn visit_all_cells(cell: &RcCell) -> ahash::HashSet<&CellHash> {
+        fn visit_all_cells(cell: &Cell) -> ahash::HashSet<&CellHash> {
             let mut result = ahash::HashSet::default();
 
             let mut stack = vec![cell.as_ref()];

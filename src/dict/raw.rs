@@ -407,7 +407,7 @@ impl<'a> Iterator for RawIter<'a> {
 
 #[derive(Clone)]
 struct IterSegment<'a> {
-    data: &'a dyn CellImpl,
+    data: &'a DynCell,
     remaining_bit_len: u16,
     key: CellBuilder,
 }
@@ -569,7 +569,7 @@ impl<'a> Iterator for RawValues<'a> {
 
 #[derive(Copy, Clone)]
 struct ValuesSegment<'a> {
-    data: &'a dyn CellImpl,
+    data: &'a DynCell,
     remaining_bit_len: u16,
 }
 

@@ -4,7 +4,7 @@ use everscale_types::dict::*;
 use rand::distributions::{Distribution, Standard};
 use rand::{Rng, SeedableRng};
 
-fn build_dict<K, V>(id: BenchmarkId, num_elements: usize, c: &mut Criterion)
+fn build_dict_impl<K, V>(id: BenchmarkId, num_elements: usize, c: &mut Criterion)
 where
     Standard: Distribution<K> + Distribution<V>,
     K: Store + DictKey,
@@ -27,25 +27,23 @@ where
     });
 }
 
-fn build_dict_group(cf: &str, c: &mut Criterion) {
+fn build_dict_group(c: &mut Criterion) {
     macro_rules! decl_dict_benches {
-        ($cf:ident, $({ $n:literal, $k:ty, $v:ident }),*$(,)?) => {
+        ($({ $n:literal, $k:ty, $v:ident }),*$(,)?) => {
             $({
                 let id = BenchmarkId::new(
                     "build_dict",
                     format!(
-                        "family={}; size={}; key={}; value={}",
-                        cf, $n, stringify!($k), stringify!($v)
+                        "size={}; key={}; value={}",
+                        $n, stringify!($k), stringify!($v)
                     )
                 );
-                build_dict::<$cf, $k, $v>(id, $n, c);
+                build_dict_impl::<$k, $v>(id, $n, c);
             });*
         };
     }
 
     decl_dict_benches![
-        C,
-
         { 10, u8, u64 },
         { 256, u8, u64 },
 
@@ -66,14 +64,5 @@ fn build_dict_group(cf: &str, c: &mut Criterion) {
     ];
 }
 
-fn rc_build_dict_group(c: &mut Criterion) {
-    build_dict_group::<rc::RcCellFamily>("RcCellFamily", c);
-}
-
-fn sync_build_dict_group(c: &mut Criterion) {
-    build_dict_group::<sync::ArcCellFamily>("ArcCellFamily", c);
-}
-
-criterion_group!(build_dict_rc, rc_build_dict_group);
-criterion_group!(build_dict_sync, sync_build_dict_group);
-criterion_main!(build_dict_rc, build_dict_sync);
+criterion_group!(build_dict, build_dict_group);
+criterion_main!(build_dict);
