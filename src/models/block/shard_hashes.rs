@@ -10,27 +10,24 @@ use crate::models::currency::CurrencyCollection;
 /// A tree of the most recent descriptions for all currently existing shards
 /// for all workchains except the masterchain.
 #[derive(CustomDebug, CustomClone, CustomEq, Store, Load)]
-pub struct ShardHashes<C: CellFamily>(Dict<C, i32, CellContainer<C>>);
+pub struct ShardHashes(Dict<i32, Cell>);
 
-impl<C> ShardHashes<C>
-where
-    for<'c> C: CellFamily + 'c,
-{
+impl ShardHashes {
     /// Gets an iterator over the entries of the shard description trees, sorted by
-    /// shard ident. The iterator element is `Result<(ShardIdent, ShardDescription<C>)>`.
+    /// shard ident. The iterator element is `Result<(ShardIdent, ShardDescription)>`.
     ///
     /// If the dict or tree is invalid, finishes after the first invalid element.
     /// returning an error.
-    pub fn iter(&self) -> ShardHashesIter<'_, C> {
+    pub fn iter(&self) -> ShardHashesIter<'_> {
         ShardHashesIter::new(self.0.root())
     }
 
     /// Gets an iterator over the raw entries of the shard description trees, sorted by
-    /// shard ident. The iterator element is `Result<(ShardIdent, CellSlice<C>)>`.
+    /// shard ident. The iterator element is `Result<(ShardIdent, CellSlice)>`.
     ///
     /// If the dict or tree is invalid, finishes after the first invalid element,
     /// returning an error.
-    pub fn raw_iter(&self) -> ShardHashesRawIter<'_, C> {
+    pub fn raw_iter(&self) -> ShardHashesRawIter<'_> {
         ShardHashesRawIter::new(self.0.root())
     }
 
@@ -39,7 +36,7 @@ where
     ///
     /// If the dict or tree is invalid, finishes after the first invalid element,
     /// returning an error.
-    pub fn latest_blocks(&self) -> LatestBlocksIter<'_, C> {
+    pub fn latest_blocks(&self) -> LatestBlocksIter<'_> {
         LatestBlocksIter::new(self.0.root())
     }
 
@@ -47,10 +44,7 @@ where
     pub fn get_workchain_shards(
         &self,
         workchain: i32,
-    ) -> Result<Option<WorkchainShardHashes<C>>, Error>
-    where
-        C: DefaultFinalizer,
-    {
+    ) -> Result<Option<WorkchainShardHashes>, Error> {
         match self.0.get(workchain) {
             Ok(Some(root)) => Ok(Some(WorkchainShardHashes { workchain, root })),
             Ok(None) => Ok(None),
@@ -59,10 +53,7 @@ where
     }
 
     /// Returns `true` if the dictionary contains a workchain for the specified id.
-    pub fn contains_workchain<Q>(&self, workchain: i32) -> Result<bool, Error>
-    where
-        C: DefaultFinalizer,
-    {
+    pub fn contains_workchain<Q>(&self, workchain: i32) -> Result<bool, Error> {
         self.0.contains_key(workchain)
     }
 }
@@ -70,27 +61,27 @@ where
 /// A tree of the most recent descriptions for all currently existing shards
 /// for a single workchain.
 #[derive(CustomDebug, CustomClone, CustomEq)]
-pub struct WorkchainShardHashes<C: CellFamily> {
+pub struct WorkchainShardHashes {
     workchain: i32,
-    root: CellContainer<C>,
+    root: Cell,
 }
 
-impl<C: CellFamily> WorkchainShardHashes<C> {
+impl WorkchainShardHashes {
     /// Gets an iterator over the keys of the shard descriptions tree, sorted by key.
-    /// The iterator element type is `Result<CellSlice<C>>`.
+    /// The iterator element type is `Result<CellSlice>`.
     ///
     /// If the tree is invalid, finishes after the first invalid element,
     /// returning an error.
-    pub fn keys(&self) -> WorkchainShardHashesKeysIter<'_, C> {
+    pub fn keys(&self) -> WorkchainShardHashesKeysIter<'_> {
         WorkchainShardHashesKeysIter::new(self.workchain, self.root.as_ref())
     }
 
     /// Gets an iterator over the entries of the shard descriptions tree, sorted by key.
-    /// The iterator element type is `Result<(ShardIdent, ShardDescription<C>)>`.
+    /// The iterator element type is `Result<(ShardIdent, ShardDescription)>`.
     ///
     /// If the tree is invalid, finishes after the first invalid element,
     /// returning an error.
-    pub fn iter(&self) -> WorkchainShardHashesIter<'_, C> {
+    pub fn iter(&self) -> WorkchainShardHashesIter<'_> {
         WorkchainShardHashesIter::new(self.workchain, self.root.as_ref())
     }
 
@@ -99,25 +90,25 @@ impl<C: CellFamily> WorkchainShardHashes<C> {
     ///
     /// If the tree is invalid, finishes after the first invalid element,
     /// returning an error.
-    pub fn latest_blocks(&self) -> WorkchainLatestBlocksIter<'_, C> {
+    pub fn latest_blocks(&self) -> WorkchainLatestBlocksIter<'_> {
         WorkchainLatestBlocksIter::new(self.workchain, self.root.as_ref())
     }
 
     /// Gets an iterator over the raw entries of the shard descriptions tree, sorted by key.
-    /// The iterator element type is `Result<(ShardIdent, CellSlice<C>)>`.
+    /// The iterator element type is `Result<(ShardIdent, CellSlice)>`.
     ///
     /// If the tree is invalid, finishes after the first invalid element,
     /// returning an error.
-    pub fn raw_iter(&self) -> WorkchainShardHashesRawIter<'_, C> {
+    pub fn raw_iter(&self) -> WorkchainShardHashesRawIter<'_> {
         WorkchainShardHashesRawIter::new(self.workchain, self.root.as_ref())
     }
 
     /// Gets an iterator over the raw values of the shard descriptions tree, sorted by key.
-    /// The iterator element type is `Result<CellSlice<C>>`.
+    /// The iterator element type is `Result<CellSlice>`.
     ///
     /// If the tree is invalid, finishes after the first invalid element,
     /// returning an error.
-    pub fn raw_values(&self) -> WorkchainShardHashesRawValuesIter<'_, C> {
+    pub fn raw_values(&self) -> WorkchainShardHashesRawValuesIter<'_> {
         WorkchainShardHashesRawValuesIter::new(self.workchain, self.root.as_ref())
     }
 }
@@ -129,30 +120,24 @@ impl<C: CellFamily> WorkchainShardHashes<C> {
 ///
 /// [`iter`]: ShardHashes::iter
 #[derive(CustomClone)]
-pub struct ShardHashesIter<'a, C: CellFamily> {
-    inner: ShardHashesRawIter<'a, C>,
+pub struct ShardHashesIter<'a> {
+    inner: ShardHashesRawIter<'a>,
 }
 
-impl<'a, C> ShardHashesIter<'a, C>
-where
-    for<'c> C: CellFamily + 'c,
-{
-    fn new(dict: &'a Option<CellContainer<C>>) -> Self {
+impl<'a> ShardHashesIter<'a> {
+    fn new(dict: &'a Option<Cell>) -> Self {
         Self {
             inner: ShardHashesRawIter::new(dict),
         }
     }
 }
 
-impl<C> Iterator for ShardHashesIter<'_, C>
-where
-    for<'c> C: CellFamily + 'c,
-{
-    type Item = Result<(ShardIdent, ShardDescription<C>), Error>;
+impl Iterator for ShardHashesIter<'_> {
+    type Item = Result<(ShardIdent, ShardDescription), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         Some(match self.inner.next()? {
-            Ok((shard_ident, mut value)) => match ShardDescription::<C>::load_from(&mut value) {
+            Ok((shard_ident, mut value)) => match ShardDescription::load_from(&mut value) {
                 Ok(value) => Ok((shard_ident, value)),
                 Err(e) => Err(self.inner.finish(e)),
             },
@@ -168,17 +153,14 @@ where
 ///
 /// [`raw_iter`]: ShardHashes::raw_iter
 #[derive(CustomClone)]
-pub struct ShardHashesRawIter<'a, C: CellFamily> {
-    dict_iter: dict::RawIter<'a, C>,
-    shard_hashes_iter: Option<WorkchainShardHashesRawIter<'a, C>>,
+pub struct ShardHashesRawIter<'a> {
+    dict_iter: dict::RawIter<'a>,
+    shard_hashes_iter: Option<WorkchainShardHashesRawIter<'a>>,
     status: IterStatus,
 }
 
-impl<'a, C> ShardHashesRawIter<'a, C>
-where
-    for<'c> C: CellFamily + 'c,
-{
-    fn new(dict: &'a Option<CellContainer<C>>) -> Self {
+impl<'a> ShardHashesRawIter<'a> {
+    fn new(dict: &'a Option<Cell>) -> Self {
         Self {
             dict_iter: dict::RawIter::new(dict, 32),
             shard_hashes_iter: None,
@@ -193,11 +175,8 @@ where
     }
 }
 
-impl<'a, C> Iterator for ShardHashesRawIter<'a, C>
-where
-    for<'c> C: CellFamily + 'c,
-{
-    type Item = Result<(ShardIdent, CellSlice<'a, C>), Error>;
+impl<'a> Iterator for ShardHashesRawIter<'a> {
+    type Item = Result<(ShardIdent, CellSlice<'a>), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if unlikely(!self.status.is_valid()) {
@@ -249,26 +228,20 @@ where
 ///
 /// [`latest_blocks`]: ShardHashes::latest_blocks
 #[derive(CustomClone)]
-pub struct LatestBlocksIter<'a, C: CellFamily> {
-    inner: ShardHashesRawIter<'a, C>,
+pub struct LatestBlocksIter<'a> {
+    inner: ShardHashesRawIter<'a>,
 }
 
-impl<'a, C> LatestBlocksIter<'a, C>
-where
-    for<'c> C: CellFamily + 'c,
-{
+impl<'a> LatestBlocksIter<'a> {
     /// Creates an iterator over the latest blocks of a [`ShardHashes`].
-    pub fn new(dict: &'a Option<CellContainer<C>>) -> Self {
+    pub fn new(dict: &'a Option<Cell>) -> Self {
         Self {
             inner: ShardHashesRawIter::new(dict),
         }
     }
 }
 
-impl<C> Iterator for LatestBlocksIter<'_, C>
-where
-    for<'c> C: CellFamily + 'c,
-{
+impl Iterator for LatestBlocksIter<'_> {
     type Item = Result<BlockId, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -289,25 +262,25 @@ where
 ///
 /// [`iter`]: WorkchainShardHashes::iter
 #[derive(CustomClone)]
-pub struct WorkchainShardHashesIter<'a, C: CellFamily> {
-    inner: WorkchainShardHashesRawIter<'a, C>,
+pub struct WorkchainShardHashesIter<'a> {
+    inner: WorkchainShardHashesRawIter<'a>,
 }
 
-impl<'a, C: CellFamily> WorkchainShardHashesIter<'a, C> {
+impl<'a> WorkchainShardHashesIter<'a> {
     /// Creates an iterator over the entries of a [`WorkchainShardHashes`].
-    pub fn new(workchain: i32, root: &'a dyn Cell<C>) -> Self {
+    pub fn new(workchain: i32, root: &'a dyn CellImpl) -> Self {
         Self {
             inner: WorkchainShardHashesRawIter::new(workchain, root),
         }
     }
 }
 
-impl<C: CellFamily> Iterator for WorkchainShardHashesIter<'_, C> {
-    type Item = Result<(ShardIdent, ShardDescription<C>), Error>;
+impl Iterator for WorkchainShardHashesIter<'_> {
+    type Item = Result<(ShardIdent, ShardDescription), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         Some(match self.inner.next()? {
-            Ok((shard_ident, mut value)) => match ShardDescription::<C>::load_from(&mut value) {
+            Ok((shard_ident, mut value)) => match ShardDescription::load_from(&mut value) {
                 Ok(value) => Ok((shard_ident, value)),
                 Err(e) => Err(self.inner.finish(e)),
             },
@@ -323,16 +296,16 @@ impl<C: CellFamily> Iterator for WorkchainShardHashesIter<'_, C> {
 ///
 /// [`raw_iter`]: WorkchainShardHashes::raw_iter
 #[derive(CustomClone)]
-pub struct WorkchainShardHashesRawIter<'a, C: CellFamily> {
+pub struct WorkchainShardHashesRawIter<'a> {
     workchain: i32,
-    leaf: Option<CellSlice<'a, C>>,
-    segments: Vec<IterSegment<'a, C>>,
+    leaf: Option<CellSlice<'a>>,
+    segments: Vec<IterSegment<'a>>,
     status: IterStatus,
 }
 
-impl<'a, C: CellFamily> WorkchainShardHashesRawIter<'a, C> {
+impl<'a> WorkchainShardHashesRawIter<'a> {
     /// Creates an iterator over the raw entries of a [`WorkchainShardHashes`].
-    pub fn new(workchain: i32, root: &'a dyn Cell<C>) -> Self {
+    pub fn new(workchain: i32, root: &'a dyn CellImpl) -> Self {
         let status = 'error: {
             if root.descriptor().is_pruned_branch() {
                 break 'error IterStatus::Pruned;
@@ -379,11 +352,11 @@ impl<'a, C: CellFamily> WorkchainShardHashesRawIter<'a, C> {
     }
 }
 
-impl<'a, C: CellFamily> Iterator for WorkchainShardHashesRawIter<'a, C> {
-    type Item = Result<(ShardIdent, CellSlice<'a, C>), Error>;
+impl<'a> Iterator for WorkchainShardHashesRawIter<'a> {
+    type Item = Result<(ShardIdent, CellSlice<'a>), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        fn build_shard_prefix<C: CellFamily>(segments: &[IterSegment<'_, C>]) -> u64 {
+        fn build_shard_prefix(segments: &[IterSegment<'_>]) -> u64 {
             let mut result = ShardIdent::PREFIX_FULL;
             for segment in segments {
                 result = (ShardIdent::PREFIX_FULL * segment.is_right as u64) | result >> 1;
@@ -427,7 +400,7 @@ impl<'a, C: CellFamily> Iterator for WorkchainShardHashesRawIter<'a, C> {
         // Build shard prefix from segments
         // SAFETY: segments lengths is guaranteed to be in range 1..=ShardIdent::MAX_SPLIT_DEPTH
         let shard_prefix = unsafe {
-            ShardIdent::new_unchecked(self.workchain, build_shard_prefix::<C>(&self.segments))
+            ShardIdent::new_unchecked(self.workchain, build_shard_prefix(&self.segments))
         };
 
         // Remove all finished segments from the top of the stack
@@ -451,20 +424,20 @@ impl<'a, C: CellFamily> Iterator for WorkchainShardHashesRawIter<'a, C> {
 ///
 /// [`latest_blocks`]: WorkchainShardHashes::latest_blocks
 #[derive(CustomClone)]
-pub struct WorkchainLatestBlocksIter<'a, C: CellFamily> {
-    inner: WorkchainShardHashesRawIter<'a, C>,
+pub struct WorkchainLatestBlocksIter<'a> {
+    inner: WorkchainShardHashesRawIter<'a>,
 }
 
-impl<'a, C: CellFamily> WorkchainLatestBlocksIter<'a, C> {
+impl<'a> WorkchainLatestBlocksIter<'a> {
     /// Creates an iterator over the latest blocks of a [`WorkchainShardHashes`].
-    pub fn new(workchain: i32, root: &'a dyn Cell<C>) -> Self {
+    pub fn new(workchain: i32, root: &'a dyn CellImpl) -> Self {
         Self {
             inner: WorkchainShardHashesRawIter::new(workchain, root),
         }
     }
 }
 
-impl<C: CellFamily> Iterator for WorkchainLatestBlocksIter<'_, C> {
+impl Iterator for WorkchainLatestBlocksIter<'_> {
     type Item = Result<BlockId, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -485,20 +458,20 @@ impl<C: CellFamily> Iterator for WorkchainLatestBlocksIter<'_, C> {
 ///
 /// [`keys`]: WorkchainShardHashes::keys
 #[derive(CustomClone)]
-pub struct WorkchainShardHashesKeysIter<'a, C: CellFamily> {
-    inner: WorkchainShardHashesRawIter<'a, C>,
+pub struct WorkchainShardHashesKeysIter<'a> {
+    inner: WorkchainShardHashesRawIter<'a>,
 }
 
-impl<'a, C: CellFamily> WorkchainShardHashesKeysIter<'a, C> {
+impl<'a> WorkchainShardHashesKeysIter<'a> {
     /// Creates an iterator over the keys of a [`WorkchainShardHashes`].
-    pub fn new(workchain: i32, root: &'a dyn Cell<C>) -> Self {
+    pub fn new(workchain: i32, root: &'a dyn CellImpl) -> Self {
         Self {
             inner: WorkchainShardHashesRawIter::new(workchain, root),
         }
     }
 }
 
-impl<'a, C: CellFamily> Iterator for WorkchainShardHashesKeysIter<'a, C> {
+impl<'a> Iterator for WorkchainShardHashesKeysIter<'a> {
     type Item = Result<ShardIdent, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -516,21 +489,21 @@ impl<'a, C: CellFamily> Iterator for WorkchainShardHashesKeysIter<'a, C> {
 ///
 /// [`raw_values`]: WorkchainShardHashes::raw_values
 #[derive(CustomClone)]
-pub struct WorkchainShardHashesRawValuesIter<'a, C: CellFamily> {
-    inner: WorkchainShardHashesRawIter<'a, C>,
+pub struct WorkchainShardHashesRawValuesIter<'a> {
+    inner: WorkchainShardHashesRawIter<'a>,
 }
 
-impl<'a, C: CellFamily> WorkchainShardHashesRawValuesIter<'a, C> {
+impl<'a> WorkchainShardHashesRawValuesIter<'a> {
     /// Creates an iterator over the raw values of a [`WorkchainShardHashes`].
-    pub fn new(workchain: i32, root: &'a dyn Cell<C>) -> Self {
+    pub fn new(workchain: i32, root: &'a dyn CellImpl) -> Self {
         Self {
             inner: WorkchainShardHashesRawIter::new(workchain, root),
         }
     }
 }
 
-impl<'a, C: CellFamily> Iterator for WorkchainShardHashesRawValuesIter<'a, C> {
-    type Item = Result<CellSlice<'a, C>, Error>;
+impl<'a> Iterator for WorkchainShardHashesRawValuesIter<'a> {
+    type Item = Result<CellSlice<'a>, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.inner.next()? {
@@ -541,16 +514,16 @@ impl<'a, C: CellFamily> Iterator for WorkchainShardHashesRawValuesIter<'a, C> {
 }
 
 #[derive(CustomClone)]
-struct IterSegment<'a, C: CellFamily> {
-    data: &'a dyn Cell<C>,
+struct IterSegment<'a> {
+    data: &'a dyn CellImpl,
     is_right: bool,
 }
 
-impl<C: CellFamily> Copy for IterSegment<'_, C> {}
+impl Copy for IterSegment<'_> {}
 
 /// Description of the most recent state of the shard.
 #[derive(CustomDebug, CustomClone, CustomEq)]
-pub struct ShardDescription<C: CellFamily> {
+pub struct ShardDescription {
     /// Sequence number of the latest block in the shard.
     pub seqno: u32,
     /// The latest known masterchain block at the time of shard generation.
@@ -587,16 +560,16 @@ pub struct ShardDescription<C: CellFamily> {
     /// Planned split/merge time window if present.
     pub split_merge_at: Option<FutureSplitMerge>,
     /// Amount of fees collected in this shard since the last masterchain block.
-    pub fees_collected: CurrencyCollection<C>,
+    pub fees_collected: CurrencyCollection,
     /// Amount of funds created in this shard since the last masterchain block.
-    pub funds_created: CurrencyCollection<C>,
+    pub funds_created: CurrencyCollection,
     /// Copyleft rewards if present.
-    pub copyleft_rewards: Dict<C, CellHash, Tokens>,
+    pub copyleft_rewards: Dict<CellHash, Tokens>,
     /// Proofs from other workchains.
-    pub proof_chain: Option<ProofChain<C>>,
+    pub proof_chain: Option<ProofChain>,
 }
 
-impl<C: CellFamily> ShardDescription<C> {
+impl ShardDescription {
     const TAG_LEN: u16 = 4;
 
     const TAG_V1: u8 = 0xa;
@@ -605,11 +578,11 @@ impl<C: CellFamily> ShardDescription<C> {
     const TAG_V4: u8 = 0xd;
 }
 
-impl<C: CellFamily> Store<C> for ShardDescription<C> {
+impl Store for ShardDescription {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         let tag = if self.proof_chain.is_some() {
             Self::TAG_V4
@@ -640,7 +613,7 @@ impl<C: CellFamily> Store<C> for ShardDescription<C> {
         ok!(self.split_merge_at.store_into(builder, finalizer));
 
         let cell = {
-            let mut builder = CellBuilder::<C>::new();
+            let mut builder = CellBuilder::new();
             ok!(self.fees_collected.store_into(&mut builder, finalizer));
             ok!(self.funds_created.store_into(&mut builder, finalizer));
 
@@ -663,8 +636,8 @@ impl<C: CellFamily> Store<C> for ShardDescription<C> {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for ShardDescription<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for ShardDescription {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let (cont_in_cell, with_copyleft, with_proof_chain) =
             match slice.load_small_uint(Self::TAG_LEN) {
                 Ok(Self::TAG_V1) => (true, false, false),
@@ -742,11 +715,8 @@ impl<'a, C: CellFamily> Load<'a, C> for ShardDescription<C> {
     }
 }
 
-fn parse_block_id<C: CellFamily>(
-    shard: ShardIdent,
-    mut value: CellSlice<C>,
-) -> Result<BlockId, Error> {
-    if !value.try_advance(ShardDescription::<C>::TAG_LEN, 0) {
+fn parse_block_id(shard: ShardIdent, mut value: CellSlice) -> Result<BlockId, Error> {
+    if !value.try_advance(ShardDescription::TAG_LEN, 0) {
         return Err(Error::CellUnderflow);
     }
 
@@ -783,12 +753,8 @@ pub enum FutureSplitMerge {
     },
 }
 
-impl<C: CellFamily> Store<C> for FutureSplitMerge {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder<C>,
-        _: &mut dyn Finalizer<C>,
-    ) -> Result<(), Error> {
+impl Store for FutureSplitMerge {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
         match *self {
             Self::Split {
                 split_utime,
@@ -810,8 +776,8 @@ impl<C: CellFamily> Store<C> for FutureSplitMerge {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for FutureSplitMerge {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for FutureSplitMerge {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let bit = ok!(slice.load_bit());
         let utime = ok!(slice.load_u32());
         let interval = ok!(slice.load_u32());
@@ -831,26 +797,22 @@ impl<'a, C: CellFamily> Load<'a, C> for FutureSplitMerge {
 
 /// Proofs from other workchains.
 #[derive(CustomDebug, CustomClone, CustomEq)]
-pub struct ProofChain<C: CellFamily> {
+pub struct ProofChain {
     /// Amount of proofs (`1..=8`)
     len: u8,
     /// Start cell for proofs.
-    child: CellContainer<C>,
+    child: Cell,
 }
 
-impl<C: CellFamily> Store<C> for ProofChain<C> {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder<C>,
-        _: &mut dyn Finalizer<C>,
-    ) -> Result<(), Error> {
+impl Store for ProofChain {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
         ok!(builder.store_u8(self.len));
         builder.store_reference(self.child.clone())
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for ProofChain<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for ProofChain {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let len = ok!(slice.load_u8());
         if !(1..=8).contains(&len) {
             return Err(Error::InvalidData);

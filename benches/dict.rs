@@ -4,12 +4,11 @@ use everscale_types::dict::*;
 use rand::distributions::{Distribution, Standard};
 use rand::{Rng, SeedableRng};
 
-fn build_dict<C, K, V>(id: BenchmarkId, num_elements: usize, c: &mut Criterion)
+fn build_dict<K, V>(id: BenchmarkId, num_elements: usize, c: &mut Criterion)
 where
-    for<'c> C: DefaultFinalizer + 'c,
     Standard: Distribution<K> + Distribution<V>,
-    K: Store<C> + DictKey,
-    V: Store<C>,
+    K: Store + DictKey,
+    V: Store,
 {
     let mut rng = rand_xorshift::XorShiftRng::from_seed([0u8; 16]);
 
@@ -19,7 +18,7 @@ where
 
     c.bench_with_input(id, &values, |b, values| {
         b.iter(|| {
-            let mut result = Dict::<C, K, V>::new();
+            let mut result = Dict::<K, V>::new();
             for (key, value) in values {
                 result.set(key, value).unwrap();
             }
@@ -28,10 +27,7 @@ where
     });
 }
 
-fn build_dict_group<C>(cf: &str, c: &mut Criterion)
-where
-    for<'c> C: DefaultFinalizer + 'c,
-{
+fn build_dict_group(cf: &str, c: &mut Criterion) {
     macro_rules! decl_dict_benches {
         ($cf:ident, $({ $n:literal, $k:ty, $v:ident }),*$(,)?) => {
             $({

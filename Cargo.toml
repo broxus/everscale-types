@@ -43,7 +43,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [features]
-default = ["base64", "serde", "models"]
+default = ["base64", "serde", "models", "sync"]
+sync = []
 stats = []
 serde = ["dep:serde", "base64"]
 models = []

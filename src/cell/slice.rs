@@ -2,57 +2,57 @@ use std::num::{NonZeroU16, NonZeroU32, NonZeroU8};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::cell::{Cell, CellContainer, CellFamily, CellHash, CellType, LevelMask, RefsIter};
+use crate::cell::{Cell, CellHash, CellImpl, CellType, LevelMask, RefsIter};
 use crate::error::Error;
 use crate::util::{unlikely, CustomDebug};
 
 /// A data structure that can be deserialized from cells.
-pub trait Load<'a, C: CellFamily>: Sized {
+pub trait Load<'a>: Sized {
     /// Tries to load itself from a cell slice.
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error>;
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error>;
 }
 
-impl<'a, C: CellFamily, T: Load<'a, C>> Load<'a, C> for Box<T> {
+impl<'a, T: Load<'a>> Load<'a> for Box<T> {
     #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
-        match <T as Load<C>>::load_from(slice) {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
+        match <T as Load>::load_from(slice) {
             Ok(value) => Ok(Box::new(value)),
             Err(e) => Err(e),
         }
     }
 }
 
-impl<'a, C: CellFamily, T: Load<'a, C>> Load<'a, C> for Arc<T> {
+impl<'a, T: Load<'a>> Load<'a> for Arc<T> {
     #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
-        match <T as Load<C>>::load_from(slice) {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
+        match <T as Load>::load_from(slice) {
             Ok(value) => Ok(Arc::new(value)),
             Err(e) => Err(e),
         }
     }
 }
 
-impl<'a, C: CellFamily, T: Load<'a, C>> Load<'a, C> for Rc<T> {
+impl<'a, T: Load<'a>> Load<'a> for Rc<T> {
     #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
-        match <T as Load<C>>::load_from(slice) {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
+        match <T as Load>::load_from(slice) {
             Ok(value) => Ok(Rc::new(value)),
             Err(e) => Err(e),
         }
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for () {
+impl<'a> Load<'a> for () {
     #[inline]
-    fn load_from(_: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+    fn load_from(_: &mut CellSlice<'a>) -> Result<Self, Error> {
         Ok(())
     }
 }
 
 macro_rules! impl_load_for_tuples {
     ($( ($($t:ident),+) ),*$(,)?) => {$(
-        impl<'a, C: CellFamily, $($t: Load<'a, C>),+> Load<'a, C> for ($($t),*) {
-            fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        impl<'a, $($t: Load<'a>),+> Load<'a> for ($($t),*) {
+            fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
                 Ok(($(ok!(<$t>::load_from(slice))),+))
             }
         }
@@ -67,9 +67,9 @@ impl_load_for_tuples! {
     (T1, T2, T3, T4, T5, T6),
 }
 
-impl<'a, C: CellFamily, T: Load<'a, C>> Load<'a, C> for Option<T> {
+impl<'a, T: Load<'a>> Load<'a> for Option<T> {
     #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         if ok!(slice.load_bit()) {
             match T::load_from(slice) {
                 Ok(value) => Ok(Some(value)),
@@ -81,9 +81,9 @@ impl<'a, C: CellFamily, T: Load<'a, C>> Load<'a, C> for Option<T> {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for CellSlice<'a, C> {
+impl<'a> Load<'a> for CellSlice<'a> {
     #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         Ok(slice.load_remaining())
     }
 }
@@ -99,9 +99,9 @@ macro_rules! ok_map {
 
 macro_rules! impl_primitive_loads {
     ($($type:ty => |$s:ident| $expr:expr),*$(,)?) => {
-        $(impl<C: CellFamily> Load<'_, C> for $type {
+        $(impl Load<'_> for $type {
             #[inline]
-            fn load_from($s: &mut CellSlice<C>) -> Result<Self, Error> {
+            fn load_from($s: &mut CellSlice) -> Result<Self, Error> {
                 $expr
             }
         })*
@@ -144,23 +144,29 @@ impl_primitive_loads! {
     CellHash => |s| s.load_u256(),
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for &'a dyn Cell<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for &'a dyn CellImpl {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         slice.load_reference()
+    }
+}
+
+impl<'a> Load<'a> for Cell {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
+        slice.load_reference_cloned()
     }
 }
 
 /// A read-only view for a subrange of a cell
 #[derive(CustomDebug)]
-pub struct CellSlice<'a, C: CellFamily> {
-    cell: &'a dyn Cell<C>,
+pub struct CellSlice<'a> {
+    cell: &'a dyn CellImpl,
     bits_window_start: u16,
     bits_window_end: u16,
     refs_window_start: u8,
     refs_window_end: u8,
 }
 
-impl<'a, C: CellFamily> Clone for CellSlice<'a, C> {
+impl<'a> Clone for CellSlice<'a> {
     #[inline]
     fn clone(&self) -> Self {
         Self {
@@ -173,11 +179,11 @@ impl<'a, C: CellFamily> Clone for CellSlice<'a, C> {
     }
 }
 
-impl<'a, C: CellFamily> Copy for CellSlice<'a, C> {}
+impl<'a> Copy for CellSlice<'a> {}
 
-impl<'a, C: CellFamily> CellSlice<'a, C> {
+impl<'a> CellSlice<'a> {
     /// Constructs a new cell slice from the specified cell.
-    pub fn new(cell: &'a dyn Cell<C>) -> Self {
+    pub fn new(cell: &'a dyn CellImpl) -> Self {
         Self {
             bits_window_start: 0,
             bits_window_end: cell.bit_len(),
@@ -189,7 +195,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
     /// Returns a reference to the underlying cell.
     #[inline]
-    pub const fn cell(&self) -> &'a dyn Cell<C> {
+    pub const fn cell(&self) -> &'a dyn CellImpl {
         self.cell
     }
 
@@ -393,7 +399,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     /// let without_prefix = slice.strip_data_prefix(&prefix.as_slice()).unwrap();
     /// assert_eq!(without_prefix.get_u16(0), Ok(0xbeaf));
     /// ```
-    pub fn strip_data_prefix(&self, prefix: &CellSlice<'a, C>) -> Option<CellSlice<'a, C>> {
+    pub fn strip_data_prefix(&self, prefix: &CellSlice<'a>) -> Option<CellSlice<'a>> {
         let prefix_len = prefix.remaining_bits();
         if prefix_len == 0 {
             Some(*self)
@@ -1086,7 +1092,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     }
 
     /// Reads all remaining bits and refs into the new slice.
-    pub fn load_remaining(&mut self) -> CellSlice<'a, C> {
+    pub fn load_remaining(&mut self) -> CellSlice<'a> {
         let result = *self;
         self.bits_window_start = self.bits_window_end;
         self.refs_window_start = self.refs_window_end;
@@ -1094,7 +1100,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     }
 
     /// Returns a reference to the Nth child cell (relative to this slice's refs window).
-    pub fn get_reference(&self, index: u8) -> Result<&'a dyn Cell<C>, Error> {
+    pub fn get_reference(&self, index: u8) -> Result<&'a dyn CellImpl, Error> {
         if self.refs_window_start + index < self.refs_window_end {
             if let Some(cell) = self.cell.reference(self.refs_window_start + index) {
                 return Ok(cell);
@@ -1104,7 +1110,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     }
 
     /// Returns the Nth child cell (relative to this slice's refs window).
-    pub fn get_reference_cloned(&self, index: u8) -> Result<CellContainer<C>, Error> {
+    pub fn get_reference_cloned(&self, index: u8) -> Result<Cell, Error> {
         if self.refs_window_start + index < self.refs_window_end {
             if let Some(cell) = self.cell.reference_cloned(self.refs_window_start + index) {
                 return Ok(cell);
@@ -1115,7 +1121,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
     /// Tries to load the specified child cell as slice.
     /// Returns an error if the loaded cell is absent or is pruned.
-    pub fn get_reference_as_slice(&self, index: u8) -> Result<CellSlice<'a, C>, Error> {
+    pub fn get_reference_as_slice(&self, index: u8) -> Result<CellSlice<'a>, Error> {
         if self.refs_window_start + index < self.refs_window_end {
             let Some(cell) = self.cell.reference(self.refs_window_start + index) else {
                 return Err(Error::CellUnderflow);
@@ -1133,7 +1139,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     }
 
     /// Creates an iterator through child nodes.
-    pub fn references(&self) -> RefsIter<'a, C> {
+    pub fn references(&self) -> RefsIter<'a> {
         RefsIter {
             cell: self.cell,
             max: self.refs_window_end,
@@ -1143,7 +1149,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
     /// Converts this slice into an iterator through child nodes.
     #[inline]
-    pub fn into_references(self) -> RefsIter<'a, C> {
+    pub fn into_references(self) -> RefsIter<'a> {
         self.references()
     }
 
@@ -1156,7 +1162,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
     /// Returns a reference to the next child cell (relative to this slice's refs window),
     /// incrementing the refs window start.
-    pub fn load_reference(&mut self) -> Result<&'a dyn Cell<C>, Error> {
+    pub fn load_reference(&mut self) -> Result<&'a dyn CellImpl, Error> {
         if self.refs_window_start < self.refs_window_end {
             let res = match self.cell.reference(self.refs_window_start) {
                 Some(cell) => Ok(cell),
@@ -1171,7 +1177,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
 
     /// Returns the next child cell (relative to this slice's refs window),
     /// incrementing the refs window start.
-    pub fn load_reference_cloned(&mut self) -> Result<CellContainer<C>, Error> {
+    pub fn load_reference_cloned(&mut self) -> Result<Cell, Error> {
         if self.refs_window_start < self.refs_window_end {
             let res = match self.cell.reference_cloned(self.refs_window_start) {
                 Some(cell) => Ok(cell),
@@ -1188,7 +1194,7 @@ impl<'a, C: CellFamily> CellSlice<'a, C> {
     /// Returns an error if the loaded cell is absent or is pruned.
     ///
     /// NOTE: In case of pruned cell access the current slice remains unchanged.
-    pub fn load_reference_as_slice(&mut self) -> Result<CellSlice<'a, C>, Error> {
+    pub fn load_reference_as_slice(&mut self) -> Result<CellSlice<'a>, Error> {
         if self.refs_window_start < self.refs_window_end {
             let Some(cell) = self.cell.reference(self.refs_window_start) else {
                 return Err(Error::CellUnderflow);

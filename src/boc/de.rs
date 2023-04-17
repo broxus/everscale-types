@@ -3,9 +3,7 @@ use std::ops::Deref;
 use smallvec::SmallVec;
 
 use super::BocTag;
-use crate::cell::{
-    CellContainer, CellDescriptor, CellFamily, CellParts, Finalizer, LevelMask, MAX_REF_COUNT,
-};
+use crate::cell::{Cell, CellDescriptor, CellParts, Finalizer, LevelMask, MAX_REF_COUNT};
 use crate::util::{unlikely, ArrayVec};
 
 #[cfg(feature = "stats")]
@@ -285,15 +283,12 @@ impl<'a> BocHeader<'a> {
     }
 
     /// Assembles cell tree from slices using the specified finalizer.
-    pub fn finalize<C>(&self, finalizer: &mut dyn Finalizer<C>) -> Result<ProcessedCells<C>, Error>
-    where
-        C: CellFamily,
-    {
+    pub fn finalize(&self, finalizer: &mut dyn Finalizer) -> Result<ProcessedCells, Error> {
         let ref_size = self.ref_size;
         let cell_count = self.cells.len() as u32;
 
         // TODO: somehow reuse `cells` vec
-        let mut res = SmallVec::<[CellContainer<C>; CELLS_ON_STACK]>::new();
+        let mut res = SmallVec::<[Cell; CELLS_ON_STACK]>::new();
         if res.try_reserve_exact(cell_count as usize).is_err() {
             return Err(Error::InvalidTotalSize);
         }
@@ -324,7 +319,7 @@ impl<'a> BocHeader<'a> {
                     0
                 };
 
-                let mut references = ArrayVec::<CellContainer<C>, MAX_REF_COUNT>::default();
+                let mut references = ArrayVec::<Cell, MAX_REF_COUNT>::default();
                 let mut children_mask = LevelMask::EMPTY;
 
                 #[cfg(feature = "stats")]
@@ -394,11 +389,11 @@ impl<'a> BocHeader<'a> {
 }
 
 /// Array of processed cells.
-pub struct ProcessedCells<C: CellFamily>(SmallVec<[CellContainer<C>; CELLS_ON_STACK]>);
+pub struct ProcessedCells(SmallVec<[Cell; CELLS_ON_STACK]>);
 
-impl<C: CellFamily> ProcessedCells<C> {
+impl ProcessedCells {
     /// Returns a processed cell by index.
-    pub fn get(&self, index: u32) -> Option<CellContainer<C>> {
+    pub fn get(&self, index: u32) -> Option<Cell> {
         self.0.get(self.0.len() - index as usize - 1).cloned()
     }
 }

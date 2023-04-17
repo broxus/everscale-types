@@ -1,11 +1,5 @@
-use std::marker::PhantomData;
-use std::rc::{self, Rc};
-use std::sync::{self, Arc, Mutex};
-
 use super::cell_impl::VirtualCellWrapper;
-use super::rc::{RcCell, RcCellFamily};
-use super::sync::{ArcCell, ArcCellFamily};
-use super::{Cell, CellContainer, CellDescriptor, CellFamily, CellHash};
+use super::{Cell, CellDescriptor, CellHash, CellImpl};
 use crate::util::TryAsMut;
 
 #[cfg(feature = "stats")]
@@ -21,33 +15,33 @@ pub enum UsageTreeMode {
 }
 
 /// Usage tree for a family of cells.
-pub struct UsageTree<C: CellFamily + Trackable> {
-    state: C::SharedState,
+pub struct UsageTree {
+    state: SharedState,
 }
 
-impl<C: CellFamily + Trackable> UsageTree<C> {
+impl UsageTree {
     /// Creates a usage tree with the specified tracking mode.
     pub fn new(mode: UsageTreeMode) -> Self {
         Self {
-            state: C::new_usage_tree_state(mode),
+            state: UsageTreeState::new(mode),
         }
     }
 
     /// Wraps the specified cell in a usage cell to keep track
     /// of the data or links being accessed.
-    pub fn track(&self, cell: &CellContainer<C>) -> CellContainer<C> {
-        self.state.as_ref().insert(cell, UsageTreeMode::OnLoad);
-        <C as UsageTreeImpl>::wrap_cell(&self.state, cell.clone())
+    pub fn track(&self, cell: &Cell) -> Cell {
+        self.state.insert(cell, UsageTreeMode::OnLoad);
+        self.state.wrap(cell.clone())
     }
 
     /// Returns `true` if the cell with the specified representation hash
     /// is present in this usage tree.
     pub fn contains(&self, repr_hash: &CellHash) -> bool {
-        self.state.as_ref().contains(repr_hash)
+        self.state.contains(repr_hash)
     }
 
     /// Extends the usage tree with subtree tracker.
-    pub fn with_subtrees(self) -> UsageTreeWithSubtrees<C> {
+    pub fn with_subtrees(self) -> UsageTreeWithSubtrees {
         UsageTreeWithSubtrees {
             state: self.state,
             subtrees: Default::default(),
@@ -56,17 +50,17 @@ impl<C: CellFamily + Trackable> UsageTree<C> {
 }
 
 /// Usage tree for a family of cells with subtrees.
-pub struct UsageTreeWithSubtrees<C: CellFamily + Trackable> {
-    state: C::SharedState,
+pub struct UsageTreeWithSubtrees {
+    state: SharedState,
     subtrees: ahash::HashSet<CellHash>,
 }
 
-impl<C: CellFamily + Trackable> UsageTreeWithSubtrees<C> {
+impl UsageTreeWithSubtrees {
     /// Wraps the specified cell in a usage cell to keep track
     /// of the data or links being accessed.
-    pub fn track(&self, cell: &CellContainer<C>) -> CellContainer<C> {
+    pub fn track(&self, cell: &Cell) -> Cell {
         self.state.as_ref().insert(cell, UsageTreeMode::OnLoad);
-        <C as UsageTreeImpl>::wrap_cell(&self.state, cell.clone())
+        self.state.wrap(cell.clone())
     }
 
     /// Returns `true` if the cell with the specified representation hash
@@ -83,327 +77,264 @@ impl<C: CellFamily + Trackable> UsageTreeWithSubtrees<C> {
 
     /// Adds a subtree to the usage tree.
     /// Returns whether the value was newly inserted.
-    pub fn add_subtree(&mut self, root: &dyn Cell<C>) -> bool {
+    pub fn add_subtree(&mut self, root: &dyn CellImpl) -> bool {
         self.subtrees.insert(*root.repr_hash())
     }
 }
 
-/// Cell family which can be used with [`UsageTree`].
-pub trait Trackable: CellFamily + UsageTreeImpl {}
-
-pub struct VisitedCell<C: CellFamily> {
+struct VisitedCell {
     include: bool,
-    _cell: CellContainer<C>,
+    _cell: Cell,
 }
 
-pub struct UsageTreeState<C: UsageTreeImpl> {
-    mode: UsageTreeMode,
-    visited: C::VisitedCells,
-    _cell_type: PhantomData<C>,
-}
+#[cfg(not(feature = "sync"))]
+use self::rc::{SharedState, UsageCell, UsageTreeState};
 
-impl<C: UsageTreeImpl> UsageTreeState<C> {
-    #[inline]
-    fn insert(&self, cell: &CellContainer<C>, ctx: UsageTreeMode) {
-        <C as UsageTreeImpl>::insert(&self.visited, cell, self.mode == ctx);
-    }
+#[cfg(feature = "sync")]
+use self::sync::{SharedState, UsageCell, UsageTreeState};
 
-    #[inline]
-    fn contains(&self, repr_hash: &CellHash) -> bool {
-        <C as UsageTreeImpl>::contains(&self.visited, repr_hash)
-    }
-}
-
-pub trait UsageTreeImpl: CellFamily {
-    type SharedState: AsRef<UsageTreeState<Self>> + Clone;
-    type VisitedCells;
-
-    fn new_usage_tree_state(mode: UsageTreeMode) -> Self::SharedState;
-
-    fn wrap_cell(state: &Self::SharedState, cell: CellContainer<Self>) -> CellContainer<Self>;
-
-    fn insert(visited: &Self::VisitedCells, cell: &CellContainer<Self>, include: bool);
-
-    fn contains(visited: &Self::VisitedCells, repr_hash: &CellHash) -> bool;
-}
-
-impl Trackable for ArcCellFamily {}
-impl UsageTreeImpl for ArcCellFamily {
-    type SharedState = Arc<UsageTreeState<Self>>;
-    type VisitedCells = Mutex<ahash::HashMap<CellHash, VisitedCell<Self>>>;
-
-    fn new_usage_tree_state(mode: UsageTreeMode) -> Self::SharedState {
-        Arc::new(UsageTreeState {
-            mode,
-            visited: Default::default(),
-            _cell_type: PhantomData,
-        })
-    }
-
-    fn wrap_cell(state: &Self::SharedState, cell: CellContainer<Self>) -> CellContainer<Self> {
-        Arc::new(ArcUsageCell {
-            cell,
-            usage_tree: Arc::downgrade(state),
-            children: [(); 4].map(|_| Default::default()),
-        })
-    }
-
-    fn insert(visited: &Self::VisitedCells, cell: &CellContainer<Self>, include: bool) {
-        let repr_hash = cell.repr_hash();
-
-        let mut visited = visited.lock().expect("lock failed");
-
-        if let Some(visited) = visited.get_mut(repr_hash) {
-            visited.include |= include;
-        } else {
-            visited.insert(
-                *repr_hash,
-                VisitedCell {
-                    include,
-                    _cell: cell.clone(),
-                },
-            );
-        }
-    }
-
-    fn contains(visited: &Self::VisitedCells, repr_hash: &CellHash) -> bool {
-        let visited = visited.lock().expect("lock failed");
-        if let Some(cell) = visited.get(repr_hash) {
-            cell.include
-        } else {
-            false
-        }
-    }
-}
-
-impl Trackable for RcCellFamily {}
-impl UsageTreeImpl for RcCellFamily {
-    type SharedState = Rc<UsageTreeState<Self>>;
-    type VisitedCells = std::cell::RefCell<ahash::HashMap<CellHash, VisitedCell<Self>>>;
-
-    fn new_usage_tree_state(mode: UsageTreeMode) -> Self::SharedState {
-        Rc::new(UsageTreeState {
-            mode,
-            visited: Default::default(),
-            _cell_type: PhantomData,
-        })
-    }
-
-    fn wrap_cell(state: &Self::SharedState, cell: CellContainer<Self>) -> CellContainer<Self> {
-        Rc::new(RcUsageCell {
-            cell,
-            usage_tree: Rc::downgrade(state),
-            children: Default::default(),
-        })
-    }
-
-    fn insert(visited: &Self::VisitedCells, cell: &CellContainer<Self>, include: bool) {
-        let repr_hash = cell.repr_hash();
-        let mut visited = visited.borrow_mut();
-
-        if let Some(visited) = visited.get_mut(repr_hash) {
-            visited.include |= include;
-        } else {
-            visited.insert(
-                *repr_hash,
-                VisitedCell {
-                    include,
-                    _cell: cell.clone(),
-                },
-            );
-        }
-    }
-
-    fn contains(visited: &Self::VisitedCells, repr_hash: &CellHash) -> bool {
-        if let Some(cell) = visited.borrow().get(repr_hash) {
-            cell.include
-        } else {
-            false
-        }
-    }
-}
-
-struct ArcUsageCell {
-    cell: ArcCell,
-    usage_tree: sync::Weak<UsageTreeState<ArcCellFamily>>,
-    children: [once_cell::sync::OnceCell<Option<Arc<Self>>>; 4],
-}
-
-impl ArcUsageCell {
-    fn load_reference(&self, index: u8) -> Option<&Arc<Self>> {
-        if index < 4 {
-            self.children[index as usize]
-                .get_or_init(|| {
-                    let child = self.cell.as_ref().reference_cloned(index)?;
-                    if let Some(usage_tree) = self.usage_tree.upgrade() {
-                        usage_tree.insert(&child, UsageTreeMode::OnLoad);
-                    }
-
-                    Some(Arc::new(ArcUsageCell {
-                        cell: child.clone(),
-                        usage_tree: self.usage_tree.clone(),
-                        children: Default::default(),
-                    }))
-                })
-                .as_ref()
-        } else {
-            None
-        }
-    }
-}
-
-impl Cell<ArcCellFamily> for ArcUsageCell {
+impl CellImpl for UsageCell {
     fn descriptor(&self) -> CellDescriptor {
-        self.cell.as_ref().descriptor()
+        self.cell.descriptor()
     }
 
     fn data(&self) -> &[u8] {
         if let Some(usage_tree) = self.usage_tree.upgrade() {
             usage_tree.insert(&self.cell, UsageTreeMode::OnDataAccess);
         }
-        self.cell.as_ref().data()
+        self.cell.data()
     }
 
     fn bit_len(&self) -> u16 {
-        self.cell.as_ref().bit_len()
+        self.cell.bit_len()
     }
 
-    fn reference(&self, index: u8) -> Option<&dyn Cell<ArcCellFamily>> {
+    fn reference(&self, index: u8) -> Option<&dyn CellImpl> {
         Some(self.load_reference(index)?.as_ref())
     }
 
-    fn reference_cloned(&self, index: u8) -> Option<ArcCell> {
-        Some(self.load_reference(index)?.clone())
+    fn reference_cloned(&self, index: u8) -> Option<Cell> {
+        Some(Cell::from(
+            self.load_reference(index)?.clone() as std::sync::Arc<dyn CellImpl>
+        ))
     }
 
-    fn virtualize(&self) -> &dyn Cell<ArcCellFamily> {
+    fn virtualize(&self) -> &dyn CellImpl {
         VirtualCellWrapper::wrap(self)
     }
 
     fn hash(&self, level: u8) -> &CellHash {
-        self.cell.as_ref().hash(level)
+        self.cell.hash(level)
     }
 
     fn depth(&self, level: u8) -> u16 {
-        self.cell.as_ref().depth(level)
+        self.cell.depth(level)
     }
 
-    fn take_first_child(&mut self) -> Option<ArcCell> {
+    fn take_first_child(&mut self) -> Option<Cell> {
         self.cell.try_as_mut()?.take_first_child()
     }
 
-    fn replace_first_child(&mut self, parent: ArcCell) -> Result<ArcCell, ArcCell> {
+    fn replace_first_child(&mut self, parent: Cell) -> Result<Cell, Cell> {
         match self.cell.try_as_mut() {
             Some(cell) => cell.replace_first_child(parent),
             None => Err(parent),
         }
     }
 
-    fn take_next_child(&mut self) -> Option<ArcCell> {
+    fn take_next_child(&mut self) -> Option<Cell> {
         self.cell.try_as_mut()?.take_next_child()
     }
 
     #[cfg(feature = "stats")]
     fn stats(&self) -> CellTreeStats {
-        self.cell.as_ref().stats()
+        self.cell.stats()
     }
 }
 
-struct RcUsageCell {
-    cell: RcCell,
-    usage_tree: rc::Weak<UsageTreeState<RcCellFamily>>,
-    children: std::cell::UnsafeCell<[Option<Rc<Self>>; 4]>,
-}
+#[cfg(not(feature = "sync"))]
+mod rc {
+    use std::rc::Rc;
 
-impl RcUsageCell {
-    fn load_reference(&self, index: u8) -> Option<&Rc<Self>> {
-        if index < 4 {
-            let children = unsafe { &mut *self.children.get() };
-            Some(match &mut children[index as usize] {
-                Some(value) => value,
-                slot @ None => {
-                    let child = self.cell.as_ref().reference_cloned(index)?;
-                    if let Some(usage_tree) = self.usage_tree.upgrade() {
-                        usage_tree.insert(&child, UsageTreeMode::OnLoad);
-                    }
+    use super::{UsageTreeMode, VisitedCell};
+    use crate::cell::{Cell, CellHash, CellImpl};
 
-                    slot.insert(Rc::new(RcUsageCell {
-                        cell: child.clone(),
-                        usage_tree: self.usage_tree.clone(),
-                        children: Default::default(),
-                    }))
-                }
+    pub type SharedState = Rc<UsageTreeState>;
+
+    type VisitedCells = std::cell::RefCell<ahash::HashMap<CellHash, VisitedCell>>;
+
+    pub struct UsageTreeState {
+        mode: UsageTreeMode,
+        visited: VisitedCells,
+    }
+
+    impl UsageTreeState {
+        pub fn new(mode: UsageTreeMode) -> SharedState {
+            Rc::new(Self {
+                mode,
+                visited: Default::default(),
             })
-        } else {
-            None
+        }
+
+        pub fn wrap(self: &SharedState, cell: Cell) -> Cell {
+            Rc::new(UsageCell {
+                cell,
+                usage_tree: Rc::downgrade(self),
+                children: Default::default(),
+            })
+        }
+
+        #[inline]
+        pub fn insert(&self, cell: &Cell, ctx: UsageTreeMode) {
+            let repr_hash = cell.repr_hash();
+            let include = self.mode == ctx;
+
+            let mut visited = self.visited.borrow_mut();
+
+            if let Some(visited) = visited.get_mut(repr_hash) {
+                visited.include |= include;
+            } else {
+                visited.insert(
+                    *repr_hash,
+                    VisitedCell {
+                        include,
+                        _cell: cell.clone(),
+                    },
+                );
+            }
+        }
+
+        #[inline]
+        pub fn contains(&self, repr_hash: &CellHash) -> bool {
+            if let Some(cell) = self.visited.borrow().get(repr_hash) {
+                cell.include
+            } else {
+                false
+            }
+        }
+    }
+
+    pub struct UsageCell {
+        pub cell: Cell,
+        pub usage_tree: std::rc::Weak<UsageTreeState>,
+        pub children: std::cell::UnsafeCell<[Option<Rc<Self>>; 4]>,
+    }
+
+    impl UsageCell {
+        pub fn load_reference(&self, index: u8) -> Option<&Rc<Self>> {
+            if index < 4 {
+                let children = unsafe { &mut *self.children.get() };
+                Some(match &mut children[index as usize] {
+                    Some(value) => value,
+                    slot @ None => {
+                        let child = self.cell.as_ref().reference_cloned(index)?;
+                        if let Some(usage_tree) = self.usage_tree.upgrade() {
+                            usage_tree.insert(&child, UsageTreeMode::OnLoad);
+                        }
+
+                        slot.insert(Rc::new(UsageCell {
+                            cell: child.clone(),
+                            usage_tree: self.usage_tree.clone(),
+                            children: Default::default(),
+                        }))
+                    }
+                })
+            } else {
+                None
+            }
         }
     }
 }
 
-impl Cell<RcCellFamily> for RcUsageCell {
-    fn descriptor(&self) -> CellDescriptor {
-        self.cell.as_ref().descriptor()
+#[cfg(feature = "sync")]
+mod sync {
+    use std::sync::{Arc, Mutex};
+
+    use super::{UsageTreeMode, VisitedCell};
+    use crate::cell::{Cell, CellHash, CellImpl};
+
+    pub type SharedState = Arc<UsageTreeState>;
+
+    type VisitedCells = Mutex<ahash::HashMap<CellHash, VisitedCell>>;
+
+    pub struct UsageTreeState {
+        mode: UsageTreeMode,
+        visited: VisitedCells,
     }
 
-    fn data(&self) -> &[u8] {
-        if let Some(usage_tree) = self.usage_tree.upgrade() {
-            usage_tree.insert(&self.cell, UsageTreeMode::OnDataAccess);
+    impl UsageTreeState {
+        pub fn new(mode: UsageTreeMode) -> SharedState {
+            Arc::new(Self {
+                mode,
+                visited: Default::default(),
+            })
         }
-        self.cell.as_ref().data()
-    }
 
-    fn bit_len(&self) -> u16 {
-        self.cell.as_ref().bit_len()
-    }
+        pub fn wrap(self: &SharedState, cell: Cell) -> Cell {
+            Cell::from(Arc::new(UsageCell {
+                cell,
+                usage_tree: Arc::downgrade(self),
+                children: [(); 4].map(|_| Default::default()),
+            }) as Arc<dyn CellImpl>)
+        }
 
-    fn reference(&self, index: u8) -> Option<&dyn Cell<RcCellFamily>> {
-        Some(self.load_reference(index)?.as_ref())
-    }
+        #[inline]
+        pub fn insert(&self, cell: &Cell, ctx: UsageTreeMode) {
+            let repr_hash = cell.repr_hash();
+            let include = self.mode == ctx;
 
-    fn reference_cloned(&self, index: u8) -> Option<RcCell> {
-        Some(self.load_reference(index)?.clone())
-    }
+            let mut visited = self.visited.lock().expect("lock failed");
 
-    fn virtualize(&self) -> &dyn Cell<RcCellFamily> {
-        VirtualCellWrapper::wrap(self)
-    }
+            if let Some(visited) = visited.get_mut(repr_hash) {
+                visited.include |= include;
+            } else {
+                visited.insert(
+                    *repr_hash,
+                    VisitedCell {
+                        include,
+                        _cell: cell.clone(),
+                    },
+                );
+            }
+        }
 
-    fn hash(&self, level: u8) -> &CellHash {
-        self.cell.as_ref().hash(level)
-    }
-
-    fn depth(&self, level: u8) -> u16 {
-        self.cell.as_ref().depth(level)
-    }
-
-    fn take_first_child(&mut self) -> Option<RcCell> {
-        self.cell.try_as_mut()?.take_first_child()
-    }
-
-    fn replace_first_child(&mut self, parent: RcCell) -> Result<RcCell, RcCell> {
-        match self.cell.try_as_mut() {
-            Some(cell) => cell.replace_first_child(parent),
-            None => Err(parent),
+        #[inline]
+        pub fn contains(&self, repr_hash: &CellHash) -> bool {
+            let visited = self.visited.lock().expect("lock failed");
+            if let Some(cell) = visited.get(repr_hash) {
+                cell.include
+            } else {
+                false
+            }
         }
     }
 
-    fn take_next_child(&mut self) -> Option<RcCell> {
-        self.cell.try_as_mut()?.take_next_child()
+    pub struct UsageCell {
+        pub cell: Cell,
+        pub usage_tree: std::sync::Weak<UsageTreeState>,
+        pub children: [once_cell::sync::OnceCell<Option<Arc<Self>>>; 4],
     }
 
-    #[cfg(feature = "stats")]
-    fn stats(&self) -> CellTreeStats {
-        self.cell.as_ref().stats()
-    }
-}
+    impl UsageCell {
+        pub fn load_reference(&self, index: u8) -> Option<&Arc<Self>> {
+            if index < 4 {
+                self.children[index as usize]
+                    .get_or_init(|| {
+                        let child = self.cell.as_ref().reference_cloned(index)?;
+                        if let Some(usage_tree) = self.usage_tree.upgrade() {
+                            usage_tree.insert(&child, UsageTreeMode::OnLoad);
+                        }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test() {
-        println!("SIZE RC: {}", std::mem::size_of::<RcUsageCell>());
-        println!("SIZE ARC: {}", std::mem::size_of::<ArcUsageCell>());
+                        Some(Arc::new(UsageCell {
+                            cell: child,
+                            usage_tree: self.usage_tree.clone(),
+                            children: Default::default(),
+                        }))
+                    })
+                    .as_ref()
+            } else {
+                None
+            }
+        }
     }
 }

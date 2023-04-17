@@ -14,22 +14,22 @@ mod address;
 
 /// Blockchain message.
 #[derive(CustomDebug, CustomClone)]
-pub struct Message<'a, C: CellFamily> {
+pub struct Message<'a> {
     /// Message info.
-    pub info: MsgInfo<C>,
+    pub info: MsgInfo,
     /// Optional state init.
-    pub init: Option<StateInit<C>>,
+    pub init: Option<StateInit>,
     /// Optional payload.
-    pub body: Option<CellSlice<'a, C>>,
+    pub body: Option<CellSlice<'a>>,
     /// Optional message layout.
     pub layout: Option<MessageLayout>,
 }
 
-impl<'a, C: CellFamily> Store<C> for Message<'a, C> {
+impl<'a> Store for Message<'a> {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         let (layout, bits, refs) = match self.layout {
             Some(layout) => {
@@ -72,11 +72,11 @@ impl<'a, C: CellFamily> Store<C> for Message<'a, C> {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for Message<'a, C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
-        let info = ok!(MsgInfo::<C>::load_from(slice));
-        let init = ok!(Option::<SliceOrCell<StateInit<C>>>::load_from(slice));
-        let body = ok!(SliceOrCell::<CellSlice<'a, C>>::load_from(slice));
+impl<'a> Load<'a> for Message<'a> {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
+        let info = ok!(MsgInfo::load_from(slice));
+        let init = ok!(Option::<SliceOrCell<StateInit>>::load_from(slice));
+        let body = ok!(SliceOrCell::<CellSlice<'a>>::load_from(slice));
 
         let (init, init_to_cell) = match init {
             Some(SliceOrCell { to_cell, value }) => (Some(value), to_cell),
@@ -108,15 +108,15 @@ struct SliceOrCell<T> {
     value: T,
 }
 
-impl<C: CellFamily, T: Store<C>> Store<C> for SliceOrCell<T> {
+impl<T: Store> Store for SliceOrCell<T> {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         if self.to_cell {
             let cell = {
-                let mut builder = CellBuilder::<C>::new();
+                let mut builder = CellBuilder::new();
                 ok!(self.value.store_into(&mut builder, finalizer));
                 ok!(builder.build_ext(finalizer))
             };
@@ -132,8 +132,8 @@ impl<C: CellFamily, T: Store<C>> Store<C> for SliceOrCell<T> {
     }
 }
 
-impl<'a, C: CellFamily, T: Load<'a, C>> Load<'a, C> for SliceOrCell<T> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a, T: Load<'a>> Load<'a> for SliceOrCell<T> {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let to_cell = ok!(slice.load_bit());
 
         let mut child_cell = if to_cell {
@@ -174,11 +174,11 @@ impl MessageLayout {
     }
 
     /// Computes the number of bits and refs for this layout for the root cell.
-    pub const fn compute_full_len<C: CellFamily>(
+    pub const fn compute_full_len(
         &self,
-        info: &MsgInfo<C>,
-        init: &Option<StateInit<C>>,
-        body: &Option<CellSlice<'_, C>>,
+        info: &MsgInfo,
+        init: &Option<StateInit>,
+        body: &Option<CellSlice<'_>>,
     ) -> (u16, u8) {
         let l = DetailedMessageLayout::compute(info, init, body);
 
@@ -206,10 +206,10 @@ impl MessageLayout {
 
     /// Computes the most optimal layout of the message parts.
     /// Also returns the number of bits and refs for the root cell.
-    pub const fn compute<C: CellFamily>(
-        info: &MsgInfo<C>,
-        init: &Option<StateInit<C>>,
-        body: &Option<CellSlice<'_, C>>,
+    pub const fn compute(
+        info: &MsgInfo,
+        init: &Option<StateInit>,
+        body: &Option<CellSlice<'_>>,
     ) -> (Self, u16, u8) {
         let l = DetailedMessageLayout::compute(info, init, body);
 
@@ -265,10 +265,10 @@ struct DetailedMessageLayout {
 }
 
 impl DetailedMessageLayout {
-    const fn compute<C: CellFamily>(
-        info: &MsgInfo<C>,
-        init: &Option<StateInit<C>>,
-        body: &Option<CellSlice<'_, C>>,
+    const fn compute(
+        info: &MsgInfo,
+        init: &Option<StateInit>,
+        body: &Option<CellSlice<'_>>,
     ) -> Self {
         let mut info_bits = info.bit_len() + 2; // (Maybe X) (1bit) + (Either X) (1bit)
         let info_refs = info.has_references() as u8;
@@ -299,16 +299,16 @@ impl DetailedMessageLayout {
 
 /// Message info.
 #[derive(CustomDebug, CustomClone, CustomEq)]
-pub enum MsgInfo<C: CellFamily> {
+pub enum MsgInfo {
     /// Internal message info,
-    Int(IntMsgInfo<C>),
+    Int(IntMsgInfo),
     /// External incoming message info.
     ExtIn(ExtInMsgInfo),
     /// External outgoing message info,
     ExtOut(ExtOutMsgInfo),
 }
 
-impl<C: CellFamily> MsgInfo<C> {
+impl MsgInfo {
     /// Returns the number of data bits that this struct occupies.
     pub const fn bit_len(&self) -> u16 {
         match self {
@@ -326,11 +326,11 @@ impl<C: CellFamily> MsgInfo<C> {
     }
 }
 
-impl<C: CellFamily> Store<C> for MsgInfo<C> {
+impl Store for MsgInfo {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         match self {
             Self::Int(info) => {
@@ -349,10 +349,10 @@ impl<C: CellFamily> Store<C> for MsgInfo<C> {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for MsgInfo<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for MsgInfo {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         Ok(if !ok!(slice.load_bit()) {
-            match IntMsgInfo::<C>::load_from(slice) {
+            match IntMsgInfo::load_from(slice) {
                 Ok(info) => Self::Int(info),
                 Err(e) => return Err(e),
             }
@@ -372,7 +372,7 @@ impl<'a, C: CellFamily> Load<'a, C> for MsgInfo<C> {
 
 /// Internal message info.
 #[derive(CustomDebug, CustomClone, CustomEq)]
-pub struct IntMsgInfo<C: CellFamily> {
+pub struct IntMsgInfo {
     /// Whether IHR is disabled for the message.
     pub ihr_disabled: bool,
     /// Whether to bounce this message back if the destination transaction fails.
@@ -384,7 +384,7 @@ pub struct IntMsgInfo<C: CellFamily> {
     /// Internal destination address.
     pub dst: IntAddr,
     /// Attached amounts.
-    pub value: CurrencyCollection<C>,
+    pub value: CurrencyCollection,
     /// IHR fee.
     ///
     /// NOTE: currently unused, but can be used to split attached amount.
@@ -397,7 +397,7 @@ pub struct IntMsgInfo<C: CellFamily> {
     pub created_at: u32,
 }
 
-impl<C: CellFamily> Default for IntMsgInfo<C> {
+impl Default for IntMsgInfo {
     fn default() -> Self {
         Self {
             ihr_disabled: true,
@@ -414,7 +414,7 @@ impl<C: CellFamily> Default for IntMsgInfo<C> {
     }
 }
 
-impl<C: CellFamily> IntMsgInfo<C> {
+impl IntMsgInfo {
     /// Returns the number of data bits that this struct occupies.
     pub const fn bit_len(&self) -> u16 {
         3 + self.src.bit_len()
@@ -427,11 +427,11 @@ impl<C: CellFamily> IntMsgInfo<C> {
     }
 }
 
-impl<C: CellFamily> Store<C> for IntMsgInfo<C> {
+impl Store for IntMsgInfo {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         let flags =
             ((self.ihr_disabled as u8) << 2) | ((self.bounce as u8) << 1) | self.bounced as u8;
@@ -446,8 +446,8 @@ impl<C: CellFamily> Store<C> for IntMsgInfo<C> {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for IntMsgInfo<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for IntMsgInfo {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let flags = ok!(slice.load_small_uint(3));
         Ok(Self {
             ihr_disabled: flags & 0b100 != 0,
@@ -486,11 +486,11 @@ impl ExtInMsgInfo {
     }
 }
 
-impl<C: CellFamily> Store<C> for ExtInMsgInfo {
+impl Store for ExtInMsgInfo {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         if !self.import_fee.is_valid() {
             return Err(Error::InvalidData);
@@ -504,8 +504,8 @@ impl<C: CellFamily> Store<C> for ExtInMsgInfo {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for ExtInMsgInfo {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for ExtInMsgInfo {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         Ok(Self {
             src: ok!(load_ext_addr(slice)),
             dst: ok!(IntAddr::load_from(slice)),
@@ -534,11 +534,11 @@ impl ExtOutMsgInfo {
     }
 }
 
-impl<C: CellFamily> Store<C> for ExtOutMsgInfo {
+impl Store for ExtOutMsgInfo {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         if !builder.has_capacity(self.bit_len(), 0) {
             return Err(Error::CellOverflow);
@@ -551,8 +551,8 @@ impl<C: CellFamily> Store<C> for ExtOutMsgInfo {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for ExtOutMsgInfo {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for ExtOutMsgInfo {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         Ok(Self {
             src: ok!(IntAddr::load_from(slice)),
             dst: ok!(load_ext_addr(slice)),
@@ -570,9 +570,9 @@ const fn compute_ext_addr_bit_len(addr: &Option<ExtAddr>) -> u16 {
 }
 
 #[inline]
-fn store_ext_addr<C: CellFamily>(
-    builder: &mut CellBuilder<C>,
-    finalizer: &mut dyn Finalizer<C>,
+fn store_ext_addr(
+    builder: &mut CellBuilder,
+    finalizer: &mut dyn Finalizer,
     addr: &Option<ExtAddr>,
 ) -> Result<(), Error> {
     match addr {
@@ -590,7 +590,7 @@ fn store_ext_addr<C: CellFamily>(
 }
 
 #[inline]
-fn load_ext_addr<C: CellFamily>(slice: &mut CellSlice<'_, C>) -> Result<Option<ExtAddr>, Error> {
+fn load_ext_addr(slice: &mut CellSlice<'_>) -> Result<Option<ExtAddr>, Error> {
     if ok!(slice.load_bit()) {
         return Err(Error::InvalidTag);
     }

@@ -381,12 +381,8 @@ impl_var_uints! {
     pub struct Tokens(u128[..15]);
 }
 
-impl<C: CellFamily> Store<C> for VarUint24 {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder<C>,
-        _: &mut dyn Finalizer<C>,
-    ) -> Result<(), Error> {
+impl Store for VarUint24 {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
         let bytes = (4 - self.0.leading_zeros() / 8) as u8;
         let bits = bytes as u16 * 8;
 
@@ -399,8 +395,8 @@ impl<C: CellFamily> Store<C> for VarUint24 {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for VarUint24 {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for VarUint24 {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let bytes = ok!(slice.load_small_uint(Self::LEN_BITS));
         match slice.load_uint(bytes as u16 * 8) {
             Ok(value) => Ok(Self(value as u32)),
@@ -409,12 +405,8 @@ impl<'a, C: CellFamily> Load<'a, C> for VarUint24 {
     }
 }
 
-impl<C: CellFamily> Store<C> for VarUint56 {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder<C>,
-        _: &mut dyn Finalizer<C>,
-    ) -> Result<(), Error> {
+impl Store for VarUint56 {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
         let bytes = (8 - self.0.leading_zeros() / 8) as u8;
         let bits = bytes as u16 * 8;
 
@@ -427,8 +419,8 @@ impl<C: CellFamily> Store<C> for VarUint56 {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for VarUint56 {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for VarUint56 {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let bytes = ok!(slice.load_small_uint(Self::LEN_BITS));
         match slice.load_uint(bytes as u16 * 8) {
             Ok(value) => Ok(Self(value)),
@@ -437,12 +429,8 @@ impl<'a, C: CellFamily> Load<'a, C> for VarUint56 {
     }
 }
 
-impl<C: CellFamily> Store<C> for Tokens {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder<C>,
-        _: &mut dyn Finalizer<C>,
-    ) -> Result<(), Error> {
+impl Store for Tokens {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
         let bytes = (16 - self.0.leading_zeros() / 8) as u8;
         let bits = bytes as u16 * 8;
 
@@ -455,8 +443,8 @@ impl<C: CellFamily> Store<C> for Tokens {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for Tokens {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for Tokens {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let bytes = ok!(slice.load_small_uint(Self::LEN_BITS));
         match load_u128(slice, bytes) {
             Ok(value) => Ok(Self(value)),
@@ -567,12 +555,8 @@ impl PartialOrd for VarUint248 {
     }
 }
 
-impl<C: CellFamily> Store<C> for VarUint248 {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder<C>,
-        _: &mut dyn Finalizer<C>,
-    ) -> Result<(), Error> {
+impl Store for VarUint248 {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
         let bytes = (32 - self.leading_zeros() / 8) as u8;
         let mut bits = bytes as u16 * 8;
 
@@ -591,8 +575,8 @@ impl<C: CellFamily> Store<C> for VarUint248 {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for VarUint248 {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for VarUint248 {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let mut bytes = ok!(slice.load_small_uint(Self::LEN_BITS));
 
         let mut hi: u128 = 0;
@@ -701,11 +685,11 @@ macro_rules! impl_small_uints {
             }
         }
 
-        impl<C: CellFamily> Store<C> for $ident {
+        impl Store for $ident {
             fn store_into(
                 &self,
-                builder: &mut CellBuilder<C>,
-                _: &mut dyn Finalizer<C>
+                builder: &mut CellBuilder,
+                _: &mut dyn Finalizer
             ) -> Result<(), Error> {
                 if !self.is_valid() {
                     return Err(Error::InvalidData);
@@ -714,8 +698,8 @@ macro_rules! impl_small_uints {
             }
         }
 
-        impl<'a, C: CellFamily> Load<'a, C> for $ident {
-            fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+        impl<'a> Load<'a> for $ident {
+            fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
                 match slice.load_uint(Self::BITS) {
                     Ok(value) => Ok(Self(value as u16)),
                     Err(e) => Err(e),
@@ -794,18 +778,14 @@ impl SplitDepth {
     }
 }
 
-impl<C: CellFamily> Store<C> for SplitDepth {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder<C>,
-        _: &mut dyn Finalizer<C>,
-    ) -> Result<(), Error> {
+impl Store for SplitDepth {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
         builder.store_small_uint(self.0.get(), Self::BITS)
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for SplitDepth {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for SplitDepth {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         match slice.load_small_uint(Self::BITS) {
             Ok(value) => Self::new(value),
             Err(e) => Err(e),
@@ -813,11 +793,7 @@ impl<'a, C: CellFamily> Load<'a, C> for SplitDepth {
     }
 }
 
-fn store_u128<C: CellFamily>(
-    builder: &mut CellBuilder<C>,
-    value: u128,
-    mut bits: u16,
-) -> Result<(), Error> {
+fn store_u128(builder: &mut CellBuilder, value: u128, mut bits: u16) -> Result<(), Error> {
     if let Some(high_bits) = bits.checked_sub(64) {
         ok!(builder.store_uint((value >> 64) as u64, high_bits));
         bits -= high_bits;
@@ -825,7 +801,7 @@ fn store_u128<C: CellFamily>(
     builder.store_uint(value as u64, bits)
 }
 
-fn load_u128<C: CellFamily>(slice: &mut CellSlice<'_, C>, mut bytes: u8) -> Result<u128, Error> {
+fn load_u128(slice: &mut CellSlice<'_>, mut bytes: u8) -> Result<u128, Error> {
     let mut result: u128 = 0;
     if let Some(high_bytes) = bytes.checked_sub(8) {
         if high_bytes > 0 {
@@ -922,7 +898,7 @@ mod tests {
 
     macro_rules! impl_serialization_tests {
         ($ident:ident, $max_bits:literal) => {
-            let finalizer = &mut RcCellFamily::default_finalizer();
+            let finalizer = &mut Cell::default_finalizer();
 
             for i in 0..$max_bits {
                 let value = $ident::ONE << i;
@@ -941,7 +917,7 @@ mod tests {
 
     macro_rules! impl_deserialization_tests {
         ($ident:ident, $max_bits:literal, $value:literal) => {
-            let finalizer = &mut RcCellFamily::default_finalizer();
+            let finalizer = &mut Cell::default_finalizer();
 
             let mut value = $ident::new($value);
             for _ in 0..=$max_bits {
@@ -959,7 +935,7 @@ mod tests {
 
     macro_rules! impl_fixed_len_serialization_tests {
         ($ident:ident, $max_bits:literal) => {
-            let finalizer = &mut RcCellFamily::default_finalizer();
+            let finalizer = &mut Cell::default_finalizer();
 
             for i in 0..$max_bits {
                 let value = $ident::ONE << i;

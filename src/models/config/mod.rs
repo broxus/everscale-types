@@ -15,20 +15,16 @@ mod params;
 
 /// Blockchain config.
 #[derive(CustomDebug, CustomClone, CustomEq)]
-pub struct BlockchainConfig<C: CellFamily> {
+pub struct BlockchainConfig {
     /// Configuration contract address.
     #[debug(with = "DisplayHash")]
     pub address: CellHash,
     /// Configuration parameters.
-    pub params: Dict<C, u32, CellContainer<C>>,
+    pub params: Dict<u32, Cell>,
 }
 
-impl<C: CellFamily> Store<C> for BlockchainConfig<C> {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder<C>,
-        _: &mut dyn Finalizer<C>,
-    ) -> Result<(), Error> {
+impl Store for BlockchainConfig {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
         let params_root = match self.params.root() {
             Some(root) => root.clone(),
             None => return Err(Error::InvalidData),
@@ -38,8 +34,8 @@ impl<C: CellFamily> Store<C> for BlockchainConfig<C> {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for BlockchainConfig<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for BlockchainConfig {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         Ok(Self {
             address: ok!(slice.load_u256()),
             params: Dict::from(Some(ok!(slice.load_reference_cloned()))),
@@ -47,10 +43,7 @@ impl<'a, C: CellFamily> Load<'a, C> for BlockchainConfig<C> {
     }
 }
 
-impl<C> BlockchainConfig<C>
-where
-    for<'c> C: DefaultFinalizer + 'c,
-{
+impl BlockchainConfig {
     /// Returns the elector account address (in masterchain).
     ///
     /// Uses [`ConfigParam1`].
@@ -88,21 +81,21 @@ where
     /// Returns a list of params that must be present in config.
     ///
     /// Uses [`ConfigParam9`].
-    pub fn get_mandatory_params(&self) -> Result<Dict<C, u32, ()>, Error> {
+    pub fn get_mandatory_params(&self) -> Result<Dict<u32, ()>, Error> {
         ok!(self.get::<ConfigParam9>()).ok_or(Error::CellUnderflow)
     }
 
     /// Returns a list of params that have a different set of update requirements.
     ///
     /// Uses [`ConfigParam10`].
-    pub fn get_critical_params(&self) -> Result<Dict<C, u32, ()>, Error> {
+    pub fn get_critical_params(&self) -> Result<Dict<u32, ()>, Error> {
         ok!(self.get::<ConfigParam10>()).ok_or(Error::CellUnderflow)
     }
 
     /// Returns a dictionary with workchain descriptions.
     ///
     /// Uses [`ConfigParam12`].
-    pub fn get_workchains(&self) -> Result<Dict<C, i32, WorkchainDescription>, Error> {
+    pub fn get_workchains(&self) -> Result<Dict<i32, WorkchainDescription>, Error> {
         ok!(self.get::<ConfigParam12>()).ok_or(Error::CellUnderflow)
     }
 
@@ -149,7 +142,7 @@ where
     /// Returns a list with a history of all storage prices.
     ///
     /// Uses [`ConfigParam18`].
-    pub fn get_storage_prices(&self) -> Result<Dict<C, u32, StoragePrices>, Error> {
+    pub fn get_storage_prices(&self) -> Result<Dict<u32, StoragePrices>, Error> {
         ok!(self.get::<ConfigParam18>()).ok_or(Error::CellUnderflow)
     }
 
@@ -206,7 +199,7 @@ where
     /// Returns a list of fundamental account addresses (in masterchain).
     ///
     /// Uses [`ConfigParam31`].
-    pub fn get_fundamental_addresses(&self) -> Result<Dict<C, CellHash, ()>, Error> {
+    pub fn get_fundamental_addresses(&self) -> Result<Dict<CellHash, ()>, Error> {
         ok!(self.get::<ConfigParam31>()).ok_or(Error::CellUnderflow)
     }
 
@@ -235,7 +228,7 @@ where
     }
 
     /// Returns `true` if the config contains a param for the specified id.
-    pub fn contains<'a, T: KnownConfigParam<'a, C>>(&'a self) -> Result<bool, Error> {
+    pub fn contains<'a, T: KnownConfigParam<'a>>(&'a self) -> Result<bool, Error> {
         self.params.contains_key(T::ID)
     }
 
@@ -245,16 +238,16 @@ where
     }
 
     /// Tries to get a parameter from the blockchain config.
-    pub fn get<'a, T: KnownConfigParam<'a, C>>(&'a self) -> Result<Option<T::Value>, Error> {
+    pub fn get<'a, T: KnownConfigParam<'a>>(&'a self) -> Result<Option<T::Value>, Error> {
         let Some(mut slice) = ok!(self.get_raw(T::ID)) else { return Ok(None); };
-        match <T::Wrapper as Load<'a, C>>::load_from(&mut slice) {
+        match <T::Wrapper as Load<'a>>::load_from(&mut slice) {
             Ok(wrapped) => Ok(Some(wrapped.into_inner())),
             Err(e) => Err(e),
         }
     }
 
     /// Tries to get a raw parameter from the blockchain config.
-    pub fn get_raw(&self, id: u32) -> Result<Option<CellSlice<'_, C>>, Error> {
+    pub fn get_raw(&self, id: u32) -> Result<Option<CellSlice<'_>>, Error> {
         match ok!(self.params.get_raw(id)) {
             Some(slice) => match slice.get_reference(0) {
                 Ok(cell) => Ok(Some(cell.as_slice())),
@@ -266,7 +259,7 @@ where
 }
 
 /// Marker trait which is implemented for known config params.
-pub trait KnownConfigParam<'a, C: CellFamily> {
+pub trait KnownConfigParam<'a> {
     /// Parameter index in a configuration dictionary.
     const ID: u32;
 
@@ -274,7 +267,7 @@ pub trait KnownConfigParam<'a, C: CellFamily> {
     type Value;
 
     /// Value wrapper.
-    type Wrapper: ConfigParamWrapper<Self::Value> + Load<'a, C>;
+    type Wrapper: ConfigParamWrapper<Self::Value> + Load<'a>;
 }
 
 /// Trait to customize config param representation.
@@ -294,9 +287,9 @@ impl<T> ConfigParamWrapper<T> for ParamIdentity<T> {
     }
 }
 
-impl<'a, C: CellFamily, T: Load<'a, C>> Load<'a, C> for ParamIdentity<T> {
+impl<'a, T: Load<'a>> Load<'a> for ParamIdentity<T> {
     #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         match T::load_from(slice) {
             Ok(value) => Ok(Self(value)),
             Err(e) => Err(e),
@@ -314,14 +307,13 @@ impl<T> ConfigParamWrapper<T> for NonEmptyDict<T> {
     }
 }
 
-impl<'a, C, K, V> Load<'a, C> for NonEmptyDict<Dict<C, K, V>>
+impl<'a, K, V> Load<'a> for NonEmptyDict<Dict<K, V>>
 where
-    for<'c> C: DefaultFinalizer + 'c,
     K: DictKey,
 {
     #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
-        match Dict::load_from_root_ext(slice, &mut C::default_finalizer()) {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
+        match Dict::load_from_root_ext(slice, &mut Cell::default_finalizer()) {
             Ok(value) => Ok(Self(value)),
             Err(e) => Err(e),
         }
@@ -333,10 +325,7 @@ macro_rules! define_config_params {
         $(#[doc = $doc])*
         pub struct $ident;
 
-        impl<'a, C> KnownConfigParam<'a, C> for $ident
-        where
-            for<'c> C: DefaultFinalizer + 'c
-        {
+        impl<'a> KnownConfigParam<'a> for $ident {
             const ID: u32 = $id;
 
             define_config_params!(@wrapper $($ty)*);
@@ -366,10 +355,10 @@ define_config_params! {
     4 => ConfigParam4(CellHash),
 
     /// Mint new price and mint add price (unused).
-    6 => ConfigParam6(CellSlice<'a, C>),
+    6 => ConfigParam6(CellSlice<'a>),
 
     /// Target amount of minted extra currencies.
-    7 => ConfigParam7(ExtraCurrencyCollection<C>),
+    7 => ConfigParam7(ExtraCurrencyCollection),
 
     /// The lowest supported block version and required capabilities.
     ///
@@ -377,22 +366,22 @@ define_config_params! {
     8 => ConfigParam8(GlobalVersion),
 
     /// Params that must be present in config.
-    9 => ConfigParam9(NonEmptyDict => Dict<C, u32, ()>),
+    9 => ConfigParam9(NonEmptyDict => Dict<u32, ()>),
     /// Params that have a different set of update requirements.
-    10 => ConfigParam10(NonEmptyDict => Dict<C, u32, ()>),
+    10 => ConfigParam10(NonEmptyDict => Dict<u32, ()>),
 
     /// Config voting setup params.
     ///
     /// Contains a [`ConfigVotingSetup`].
-    11 => ConfigParam11(ConfigVotingSetup<C>),
+    11 => ConfigParam11(ConfigVotingSetup),
 
     /// Known workchain descriptions.
     ///
     /// Contains a dictionary with workchain id as key and [`WorkchainDescription`] as value.
-    12 => ConfigParam12(Dict<C, i32, WorkchainDescription>),
+    12 => ConfigParam12(Dict<i32, WorkchainDescription>),
 
     /// Complaint pricing.
-    13 => ConfigParam13(CellSlice<'a, C>),
+    13 => ConfigParam13(CellSlice<'a>),
 
     /// Block creation reward for masterchain and basechain.
     ///
@@ -413,7 +402,7 @@ define_config_params! {
     /// Storage prices for different intervals of time.
     ///
     /// Contains a dictionary with a history of all [`StoragePrices`].
-    18 => ConfigParam18(NonEmptyDict => Dict<C, u32, StoragePrices>),
+    18 => ConfigParam18(NonEmptyDict => Dict<u32, StoragePrices>),
 
     /// Masterchain gas limits and prices.
     ///
@@ -451,11 +440,11 @@ define_config_params! {
     /// Contains a [`ConsensusConfig`].
     29 => ConfigParam29(ConsensusConfig),
     /// Delector configuration params.
-    30 => ConfigParam30(CellSlice<'a, C>),
+    30 => ConfigParam30(CellSlice<'a>),
     /// Fundamental smartcontract addresses.
     ///
     /// Contains a dictionary with addresses (in masterchain) of fundamental contracts as keys.
-    31 => ConfigParam31(Dict<C, CellHash, ()>),
+    31 => ConfigParam31(Dict<CellHash, ()>),
 
     /// Previous validator set.
     ///

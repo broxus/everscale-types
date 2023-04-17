@@ -80,39 +80,36 @@ impl SetMode {
 
 /// Inserts the value associated with key in dictionary
 /// in accordance with the logic of the specified [`SetMode`].
-pub fn dict_insert<C>(
-    root: &Option<CellContainer<C>>,
-    key: &mut CellSlice<C>,
+pub fn dict_insert(
+    root: &Option<Cell>,
+    key: &mut CellSlice,
     key_bit_len: u16,
-    value: &CellSlice<C>,
+    value: &CellSlice,
     mode: SetMode,
-    finalizer: &mut dyn Finalizer<C>,
-) -> Result<Option<CellContainer<C>>, Error>
-where
-    for<'c> C: CellFamily + 'c,
-{
+    finalizer: &mut dyn Finalizer,
+) -> Result<Option<Cell>, Error> {
     // Creates a leaf node
-    fn make_leaf<C: CellFamily>(
-        key: &CellSlice<C>,
+    fn make_leaf(
+        key: &CellSlice,
         key_bit_len: u16,
-        value: &CellSlice<C>,
-        finalizer: &mut dyn Finalizer<C>,
-    ) -> Result<CellContainer<C>, Error> {
-        let mut builder = CellBuilder::<C>::new();
+        value: &CellSlice,
+        finalizer: &mut dyn Finalizer,
+    ) -> Result<Cell, Error> {
+        let mut builder = CellBuilder::new();
         ok!(write_label(key, key_bit_len, &mut builder));
         ok!(builder.store_slice(value));
         builder.build_ext(finalizer)
     }
 
     // Splits an edge or leaf
-    fn split<C: CellFamily>(
-        data: &CellSlice<C>,
-        prefix: &mut CellSlice<C>,
-        lcp: &CellSlice<C>,
-        key: &mut CellSlice<C>,
-        value: &CellSlice<C>,
-        finalizer: &mut dyn Finalizer<C>,
-    ) -> Result<CellContainer<C>, Error> {
+    fn split(
+        data: &CellSlice,
+        prefix: &mut CellSlice,
+        lcp: &CellSlice,
+        key: &mut CellSlice,
+        value: &CellSlice,
+        finalizer: &mut dyn Finalizer,
+    ) -> Result<Cell, Error> {
         // Advance the key
         let prev_key_bit_len = key.remaining_bits();
         if !key.try_advance(lcp.remaining_bits() + 1, 0) {
@@ -134,7 +131,7 @@ where
         }
 
         // Create fork
-        let mut builder = CellBuilder::<C>::new();
+        let mut builder = CellBuilder::new();
         ok!(write_label(lcp, prev_key_bit_len, &mut builder));
         ok!(builder.store_reference(left));
         ok!(builder.store_reference(right));
@@ -150,8 +147,8 @@ where
     }
 
     #[derive(Clone, Copy)]
-    struct Segment<'a, C: CellFamily> {
-        data: CellSlice<'a, C>,
+    struct Segment<'a> {
+        data: CellSlice<'a>,
         next_branch: Branch,
     }
 
@@ -173,7 +170,7 @@ where
     }
     let mut data = data.as_slice();
 
-    let mut stack = Vec::<Segment<C>>::new();
+    let mut stack = Vec::<Segment>::new();
 
     let mut leaf = loop {
         let mut remaining_data = data;
@@ -246,7 +243,7 @@ where
             },
         };
 
-        let mut builder = CellBuilder::<C>::new();
+        let mut builder = CellBuilder::new();
         ok!(builder.store_slice_data(last.data));
         ok!(builder.store_reference(left));
         ok!(builder.store_reference(right));
@@ -257,14 +254,11 @@ where
 }
 
 /// Returns a `CellSlice` of the value corresponding to the key.
-pub fn dict_get<'a: 'b, 'b, C>(
-    root: &'a Option<CellContainer<C>>,
+pub fn dict_get<'a: 'b, 'b>(
+    root: &'a Option<Cell>,
     key_bit_len: u16,
-    mut key: CellSlice<'b, C>,
-) -> Result<Option<CellSlice<'a, C>>, Error>
-where
-    for<'c> C: CellFamily + 'c,
-{
+    mut key: CellSlice<'b>,
+) -> Result<Option<CellSlice<'a>>, Error> {
     if key.remaining_bits() != key_bit_len {
         return Err(Error::CellUnderflow);
     }
@@ -310,14 +304,11 @@ where
 }
 
 /// Loads a non-empty dictionary from the root cell.
-pub fn dict_load_from_root<C>(
-    slice: &mut CellSlice<'_, C>,
+pub fn dict_load_from_root(
+    slice: &mut CellSlice<'_>,
     key_bit_len: u16,
-    finalizer: &mut dyn Finalizer<C>,
-) -> Result<CellContainer<C>, Error>
-where
-    for<'c> C: CellFamily + 'c,
-{
+    finalizer: &mut dyn Finalizer,
+) -> Result<Cell, Error> {
     let mut root = *slice;
 
     let label = ok!(read_label(slice, key_bit_len));
@@ -332,16 +323,12 @@ where
         slice.load_remaining();
     }
 
-    let mut builder = CellBuilder::<C>::new();
+    let mut builder = CellBuilder::new();
     ok!(builder.store_slice(root));
     builder.build_ext(finalizer)
 }
 
-fn write_label<C: CellFamily>(
-    key: &CellSlice<C>,
-    key_bit_len: u16,
-    label: &mut CellBuilder<C>,
-) -> Result<(), Error> {
+fn write_label(key: &CellSlice, key_bit_len: u16, label: &mut CellBuilder) -> Result<(), Error> {
     if key_bit_len == 0 || key.is_data_empty() {
         return write_hml_empty(label);
     }
@@ -369,13 +356,7 @@ fn write_label<C: CellFamily>(
     }
 }
 
-fn read_label<'a, C>(
-    label: &mut CellSlice<'a, C>,
-    key_bit_len: u16,
-) -> Result<CellSlice<'a, C>, Error>
-where
-    for<'c> C: CellFamily + 'c,
-{
+fn read_label<'a>(label: &mut CellSlice<'a>, key_bit_len: u16) -> Result<CellSlice<'a>, Error> {
     let bits_for_len = (16 - key_bit_len.leading_zeros()) as u16;
 
     if label.is_data_empty() && bits_for_len == 0 {
@@ -389,14 +370,11 @@ where
     }
 }
 
-fn write_hml_empty<C: CellFamily>(label: &mut CellBuilder<C>) -> Result<(), Error> {
+fn write_hml_empty(label: &mut CellBuilder) -> Result<(), Error> {
     label.store_zeros(2)
 }
 
-fn write_hml_short<C: CellFamily>(
-    key: &CellSlice<C>,
-    label: &mut CellBuilder<C>,
-) -> Result<(), Error> {
+fn write_hml_short(key: &CellSlice, label: &mut CellBuilder) -> Result<(), Error> {
     ok!(label.store_bit_zero());
 
     let len = key.remaining_bits();
@@ -412,9 +390,7 @@ fn write_hml_short<C: CellFamily>(
     label.store_slice_data(key)
 }
 
-fn read_hml_short<'a, C: CellFamily>(
-    label: &mut CellSlice<'a, C>,
-) -> Result<CellSlice<'a, C>, Error> {
+fn read_hml_short<'a>(label: &mut CellSlice<'a>) -> Result<CellSlice<'a>, Error> {
     let mut len = 0;
     while ok!(label.load_bit()) {
         len += 1;
@@ -427,10 +403,10 @@ fn read_hml_short<'a, C: CellFamily>(
     }
 }
 
-fn write_hml_long<C: CellFamily>(
-    key: &CellSlice<C>,
+fn write_hml_long(
+    key: &CellSlice,
     bits_for_len: u16,
-    label: &mut CellBuilder<C>,
+    label: &mut CellBuilder,
 ) -> Result<(), Error> {
     ok!(label.store_bit_one());
     ok!(label.store_bit_zero());
@@ -438,10 +414,7 @@ fn write_hml_long<C: CellFamily>(
     label.store_slice_data(key)
 }
 
-fn read_hml_long<'a, C: CellFamily>(
-    label: &mut CellSlice<'a, C>,
-    bits_for_len: u16,
-) -> Result<CellSlice<'a, C>, Error> {
+fn read_hml_long<'a>(label: &mut CellSlice<'a>, bits_for_len: u16) -> Result<CellSlice<'a>, Error> {
     let len = ok!(label.load_uint(bits_for_len)) as u16;
     let result = *label;
     if label.try_advance(len, 0) {
@@ -451,36 +424,27 @@ fn read_hml_long<'a, C: CellFamily>(
     }
 }
 
-fn write_hml_same<C: CellFamily>(
+fn write_hml_same(
     bit: bool,
     len: u16,
     bits_for_len: u16,
-    label: &mut CellBuilder<C>,
+    label: &mut CellBuilder,
 ) -> Result<(), Error> {
     ok!(label.store_small_uint(0b110 | bit as u8, 3));
     label.store_uint(len as u64, bits_for_len)
 }
 
-fn read_hml_same<'a, C>(
-    label: &mut CellSlice<'a, C>,
-    bits_for_len: u16,
-) -> Result<CellSlice<'a, C>, Error>
-where
-    for<'c> C: CellFamily + 'c,
-{
+fn read_hml_same<'a>(label: &mut CellSlice<'a>, bits_for_len: u16) -> Result<CellSlice<'a>, Error> {
     let cell = match ok!(label.load_bit()) {
-        false => C::all_zeros_ref(),
-        true => C::all_ones_ref(),
+        false => Cell::all_zeros_ref(),
+        true => Cell::all_ones_ref(),
     };
     let len = ok!(label.load_uint(bits_for_len)) as u16;
     Ok(cell.as_slice().get_prefix(len, 0))
 }
 
-fn serialize_entry<C: CellFamily, T: Store<C>>(
-    entry: &T,
-    finalizer: &mut dyn Finalizer<C>,
-) -> Result<CellContainer<C>, Error> {
-    let mut builder = CellBuilder::<C>::new();
+fn serialize_entry<T: Store>(entry: &T, finalizer: &mut dyn Finalizer) -> Result<Cell, Error> {
+    let mut builder = CellBuilder::new();
     ok!(entry.store_into(&mut builder, finalizer));
     builder.build_ext(finalizer)
 }
@@ -488,10 +452,10 @@ fn serialize_entry<C: CellFamily, T: Store<C>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prelude::{RcCell, RcCellBuilder};
+    use crate::prelude::*;
 
-    fn build_cell<F: FnOnce(&mut RcCellBuilder) -> Result<(), Error>>(f: F) -> RcCell {
-        let mut builder = RcCellBuilder::new();
+    fn build_cell<F: FnOnce(&mut CellBuilder) -> Result<(), Error>>(f: F) -> Cell {
+        let mut builder = CellBuilder::new();
         f(&mut builder).unwrap();
         builder.build().unwrap()
     }
@@ -502,7 +466,7 @@ mod tests {
 
         // Build key
         let key = {
-            let mut builder = RcCellBuilder::new();
+            let mut builder = CellBuilder::new();
             builder.store_zeros(5).unwrap();
             builder.store_bit_one().unwrap();
             builder.build().unwrap()
@@ -510,7 +474,7 @@ mod tests {
 
         // Build label
         let label = {
-            let mut builder = RcCellBuilder::new();
+            let mut builder = CellBuilder::new();
             write_label(&key.as_slice(), key_bit_len, &mut builder).unwrap();
             builder.build().unwrap()
         };
@@ -518,7 +482,7 @@ mod tests {
         // Parse label
         let parsed_key = read_label(&mut label.as_slice(), key_bit_len).unwrap();
         let parsed_key = {
-            let mut builder = RcCellBuilder::new();
+            let mut builder = CellBuilder::new();
             builder.store_slice(parsed_key).unwrap();
             builder.build().unwrap()
         };
@@ -526,7 +490,7 @@ mod tests {
         // Parsed key should be equal to the original
         assert_eq!(key.as_ref(), parsed_key.as_ref());
 
-        let label = RcCellBuilder::from_raw_data(&[0xcc, 0x40], 9)
+        let label = CellBuilder::from_raw_data(&[0xcc, 0x40], 9)
             .unwrap()
             .build()
             .unwrap();

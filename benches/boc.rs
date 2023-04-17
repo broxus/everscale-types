@@ -9,38 +9,29 @@ fn decode_base64(data: &str) -> Vec<u8> {
         .unwrap()
 }
 
-fn deserialize_boc<C>(id: BenchmarkId, boc: &str, c: &mut Criterion)
-where
-    for<'c> C: DefaultFinalizer + 'c,
-{
+fn deserialize_boc(id: BenchmarkId, boc: &str, c: &mut Criterion) {
     let boc = decode_base64(boc);
 
     c.bench_with_input(id, &boc, |b, boc| {
         b.iter(|| {
-            let result = Boc::<C>::decode(boc);
+            let result = Boc::decode(boc);
             _ = black_box(result);
         });
     });
 }
 
-fn serialize_boc<C>(id: BenchmarkId, boc: &str, c: &mut Criterion)
-where
-    for<'c> C: DefaultFinalizer + 'c,
-{
-    let cell = Boc::<C>::decode_base64(boc).unwrap();
+fn serialize_boc(id: BenchmarkId, boc: &str, c: &mut Criterion) {
+    let cell = Boc::decode_base64(boc).unwrap();
 
     c.bench_with_input(id, &cell, |b, cell| {
         b.iter(|| {
-            let result = Boc::<C>::encode(cell.as_ref());
+            let result = Boc::encode(cell.as_ref());
             _ = black_box(result);
         });
     });
 }
 
-fn boc_group<C>(cf: &str, c: &mut Criterion)
-where
-    for<'c> C: DefaultFinalizer + 'c,
-{
+fn boc_group(cf: &str, c: &mut Criterion) {
     macro_rules! decl_boc_benches {
         ($cf:ident, $($name:literal => $boc:literal),*$(,)?) => {
             $({

@@ -106,7 +106,7 @@
 //! version is 1.65. The current crate version is not guaranteed to build on
 //! Rust versions earlier than the minimum supported version.
 //!
-//! [`Cell`]: cell::Cell
+//! [`Cell`]: cell::CellImpl
 //! [`CellFamily`]: cell::CellFamily
 //! [`RcCellFamily`]: cell::rc::RcCellFamily
 //! [`ArcCellFamily`]: cell::sync::ArcCellFamily
@@ -116,7 +116,7 @@
 //! [`ArcCell`]: prelude::ArcCell
 //! [`CellSlice`]: cell::CellSlice
 //! [`CellBuilder`]: cell::CellBuilder
-//! [`Cell::as_slice`]: cell::Cell::as_slice
+//! [`Cell::as_slice`]: cell::CellImpl::as_slice
 //! [`CellBuilder::build_ext`]: cell::CellBuilder::build_ext
 //! [`Finalizer`]: cell::Finalizer
 //! [`DefaultFinalizer`]: cell::DefaultFinalizer
@@ -144,6 +144,16 @@ macro_rules! ok {
     };
 }
 
+macro_rules! assert_impl_all {
+    ($type:ty: $($trait:path),+ $(,)?) => {
+        const _: fn() = || {
+            // Only callable when `$type` implements all traits in `$($trait)+`.
+            fn assert_impl_all<T: ?Sized $(+ $trait)+>() {}
+            assert_impl_all::<$type>();
+        };
+    };
+}
+
 extern crate self as everscale_types;
 
 pub mod boc;
@@ -161,42 +171,6 @@ pub mod models;
 mod serde;
 
 pub mod error;
-
-impl cell::Store<cell::rc::RcCellFamily> for cell::rc::RcCell {
-    fn store_into(
-        &self,
-        builder: &mut cell::CellBuilder<cell::rc::RcCellFamily>,
-        _: &mut dyn cell::Finalizer<cell::rc::RcCellFamily>,
-    ) -> Result<(), error::Error> {
-        builder.store_reference(self.clone())
-    }
-}
-
-impl cell::Store<cell::sync::ArcCellFamily> for cell::sync::ArcCell {
-    fn store_into(
-        &self,
-        builder: &mut cell::CellBuilder<cell::sync::ArcCellFamily>,
-        _: &mut dyn cell::Finalizer<cell::sync::ArcCellFamily>,
-    ) -> Result<(), error::Error> {
-        builder.store_reference(self.clone())
-    }
-}
-
-impl<'a> cell::Load<'a, cell::rc::RcCellFamily> for cell::rc::RcCell {
-    fn load_from(
-        slice: &mut cell::CellSlice<'a, cell::rc::RcCellFamily>,
-    ) -> Result<Self, error::Error> {
-        slice.load_reference_cloned()
-    }
-}
-
-impl<'a> cell::Load<'a, cell::sync::ArcCellFamily> for cell::sync::ArcCell {
-    fn load_from(
-        slice: &mut cell::CellSlice<'a, cell::sync::ArcCellFamily>,
-    ) -> Result<Self, error::Error> {
-        slice.load_reference_cloned()
-    }
-}
 
 #[cfg(test)]
 mod tests {

@@ -9,15 +9,15 @@ use super::raw::*;
 use super::{dict_get, dict_insert, dict_load_from_root, serialize_entry, DictKey, SetMode};
 
 /// Typed dictionary with fixed length keys.
-pub struct Dict<C: CellFamily, K, V> {
-    pub(crate) root: Option<CellContainer<C>>,
+pub struct Dict<K, V> {
+    pub(crate) root: Option<Cell>,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }
 
-impl<'a, C: CellFamily, K, V> Load<'a, C> for Dict<C, K, V> {
+impl<'a, K, V> Load<'a> for Dict<K, V> {
     #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         Ok(Self {
             root: ok!(<_>::load_from(slice)),
             _key: PhantomData,
@@ -26,25 +26,25 @@ impl<'a, C: CellFamily, K, V> Load<'a, C> for Dict<C, K, V> {
     }
 }
 
-impl<C: CellFamily, K, V> Store<C> for Dict<C, K, V> {
+impl<K, V> Store for Dict<K, V> {
     #[inline]
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         self.root.store_into(builder, finalizer)
     }
 }
 
-impl<C: CellFamily, K, V> Default for Dict<C, K, V> {
+impl<K, V> Default for Dict<K, V> {
     #[inline]
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<C: CellFamily, K, V> Clone for Dict<C, K, V> {
+impl<K, V> Clone for Dict<K, V> {
     fn clone(&self) -> Self {
         Self {
             root: self.root.clone(),
@@ -54,9 +54,9 @@ impl<C: CellFamily, K, V> Clone for Dict<C, K, V> {
     }
 }
 
-impl<C: CellFamily, K, V> Eq for Dict<C, K, V> {}
+impl<K, V> Eq for Dict<K, V> {}
 
-impl<C: CellFamily, K, V> PartialEq for Dict<C, K, V> {
+impl<K, V> PartialEq for Dict<K, V> {
     fn eq(&self, other: &Self) -> bool {
         match (&self.root, &other.root) {
             (Some(this), Some(other)) => this.eq(other),
@@ -66,9 +66,9 @@ impl<C: CellFamily, K, V> PartialEq for Dict<C, K, V> {
     }
 }
 
-impl<C: CellFamily, K, V> From<Option<CellContainer<C>>> for Dict<C, K, V> {
+impl<K, V> From<Option<Cell>> for Dict<K, V> {
     #[inline]
-    fn from(dict: Option<CellContainer<C>>) -> Self {
+    fn from(dict: Option<Cell>) -> Self {
         Self {
             root: dict,
             _key: PhantomData,
@@ -77,13 +77,13 @@ impl<C: CellFamily, K, V> From<Option<CellContainer<C>>> for Dict<C, K, V> {
     }
 }
 
-impl<C: CellFamily, K, V> std::fmt::Debug for Dict<C, K, V> {
+impl<K, V> std::fmt::Debug for Dict<K, V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         debug_struct_field1_finish(f, "Dict", "root", &self.root)
     }
 }
 
-impl<C: CellFamily, K, V> Dict<C, K, V> {
+impl<K, V> Dict<K, V> {
     /// Creates an empty dictionary
     pub const fn new() -> Self {
         Self {
@@ -100,20 +100,16 @@ impl<C: CellFamily, K, V> Dict<C, K, V> {
 
     /// Returns the underlying root cell of the dictionary.
     #[inline]
-    pub const fn root(&self) -> &Option<CellContainer<C>> {
+    pub const fn root(&self) -> &Option<Cell> {
         &self.root
     }
 }
 
-impl<C, K, V> Dict<C, K, V>
-where
-    for<'c> C: CellFamily + 'c,
-    K: DictKey,
-{
+impl<K: DictKey, V> Dict<K, V> {
     /// Loads a non-empty dictionary from a root cell.
     pub fn load_from_root_ext(
-        slice: &mut CellSlice<'_, C>,
-        finalizer: &mut dyn Finalizer<C>,
+        slice: &mut CellSlice<'_>,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<Self, Error> {
         match dict_load_from_root(slice, K::BITS, finalizer) {
             Ok(root) => Ok(Self {
@@ -126,32 +122,29 @@ where
     }
 }
 
-impl<C, K, V> Dict<C, K, V>
+impl<K, V> Dict<K, V>
 where
-    for<'c> C: DefaultFinalizer + 'c,
-    K: Store<C> + DictKey,
+    K: Store + DictKey,
 {
     /// Returns `true` if the dictionary contains a value for the specified key.
     pub fn contains_key<Q>(&self, key: Q) -> Result<bool, Error>
     where
         Q: Borrow<K>,
     {
-        fn contains_key_impl<C, K>(root: &Option<CellContainer<C>>, key: &K) -> Result<bool, Error>
+        fn contains_key_impl<K>(root: &Option<Cell>, key: &K) -> Result<bool, Error>
         where
-            for<'c> C: DefaultFinalizer + 'c,
-            K: Store<C> + DictKey,
+            K: Store + DictKey,
         {
-            let key = ok!(serialize_entry(key, &mut C::default_finalizer()));
+            let key = ok!(serialize_entry(key, &mut Cell::default_finalizer()));
             Ok(ok!(dict_get(root, K::BITS, key.as_ref().as_slice())).is_some())
         }
         contains_key_impl(&self.root, key.borrow())
     }
 }
 
-impl<C, K, V> Dict<C, K, V>
+impl<K, V> Dict<K, V>
 where
-    for<'c> C: DefaultFinalizer + 'c,
-    K: Store<C> + DictKey,
+    K: Store + DictKey,
 {
     /// Returns the value corresponding to the key.
     ///
@@ -159,27 +152,26 @@ where
     pub fn get<'a: 'b, 'b, Q>(&'a self, key: Q) -> Result<Option<V>, Error>
     where
         Q: Borrow<K> + 'b,
-        V: Load<'a, C>,
+        V: Load<'a>,
     {
-        self.get_ext(key, &mut C::default_finalizer())
+        self.get_ext(key, &mut Cell::default_finalizer())
     }
 
     /// Returns the raw value corresponding to the key.
     ///
     /// Key is serialized using the default finalizer.
-    pub fn get_raw<'a: 'b, 'b, Q>(&'a self, key: Q) -> Result<Option<CellSlice<'a, C>>, Error>
+    pub fn get_raw<'a: 'b, 'b, Q>(&'a self, key: Q) -> Result<Option<CellSlice<'a>>, Error>
     where
         Q: Borrow<K> + 'b,
     {
-        self.get_raw_ext(key, &mut C::default_finalizer())
+        self.get_raw_ext(key, &mut Cell::default_finalizer())
     }
 }
 
-impl<C, K, V> Dict<C, K, V>
+impl<K, V> Dict<K, V>
 where
-    for<'c> C: DefaultFinalizer + 'c,
-    K: Store<C> + DictKey,
-    V: Store<C>,
+    K: Store + DictKey,
+    V: Store,
 {
     /// Sets the value associated with the key in the dictionary.
     ///
@@ -191,7 +183,7 @@ where
         Q: Borrow<K>,
         T: Borrow<V>,
     {
-        self.set_ext(key, value, &mut C::default_finalizer())
+        self.set_ext(key, value, &mut Cell::default_finalizer())
     }
 
     /// Sets the value associated with the key in the dictionary
@@ -205,7 +197,7 @@ where
         Q: Borrow<K>,
         T: Borrow<V>,
     {
-        self.replace_ext(key, value, &mut C::default_finalizer())
+        self.replace_ext(key, value, &mut Cell::default_finalizer())
     }
 
     /// Sets the value associated with key in dictionary,
@@ -219,13 +211,13 @@ where
         Q: Borrow<K>,
         T: Borrow<V>,
     {
-        self.add_ext(key, value, &mut C::default_finalizer())
+        self.add_ext(key, value, &mut Cell::default_finalizer())
     }
 }
 
-impl<C: CellFamily, K, V> Dict<C, K, V>
+impl<K, V> Dict<K, V>
 where
-    K: Store<C> + DictKey,
+    K: Store + DictKey,
 {
     /// Gets an iterator over the entries of the dictionary, sorted by key.
     /// The iterator element type is `Result<(K, V)>`.
@@ -240,9 +232,9 @@ where
     ///
     /// [`values`]: Dict::values
     /// [`raw_values`]: Dict::raw_values
-    pub fn iter<'a>(&'a self) -> Iter<'_, C, K, V>
+    pub fn iter<'a>(&'a self) -> Iter<'_, K, V>
     where
-        V: Load<'a, C>,
+        V: Load<'a>,
     {
         Iter::new(&self.root)
     }
@@ -259,14 +251,13 @@ where
     /// for each element. Use [`values`] if you don't need keys from an iterator.
     ///
     /// [`values`]: Dict::values
-    pub fn keys(&'_ self) -> Keys<'_, C, K> {
+    pub fn keys(&'_ self) -> Keys<'_, K> {
         Keys::new(&self.root)
     }
 }
 
-impl<C, K, V> Dict<C, K, V>
+impl<K, V> Dict<K, V>
 where
-    for<'c> C: DefaultFinalizer + 'c,
     K: DictKey,
 {
     /// Gets an iterator over the values of the dictionary, in order by key.
@@ -274,18 +265,17 @@ where
     ///
     /// If the dictionary is invalid, finishes after the first invalid element,
     /// returning an error.
-    pub fn values<'a>(&'a self) -> Values<'a, C, V>
+    pub fn values<'a>(&'a self) -> Values<'a, V>
     where
-        V: Load<'a, C>,
+        V: Load<'a>,
     {
         Values::new(&self.root, K::BITS)
     }
 }
 
-impl<C, K, V> Dict<C, K, V>
+impl<K, V> Dict<K, V>
 where
-    for<'c> C: CellFamily + 'c,
-    K: Store<C> + DictKey,
+    K: Store + DictKey,
 {
     /// Returns the value corresponding to the key.
     ///
@@ -293,21 +283,20 @@ where
     pub fn get_ext<'a: 'b, 'b, Q>(
         &'a self,
         key: Q,
-        finalizer: &mut dyn Finalizer<C>,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<Option<V>, Error>
     where
         Q: Borrow<K> + 'b,
-        V: Load<'a, C>,
+        V: Load<'a>,
     {
-        pub fn get_ext_impl<'a: 'b, 'b, C, K, V>(
-            root: &'a Option<CellContainer<C>>,
+        pub fn get_ext_impl<'a: 'b, 'b, K, V>(
+            root: &'a Option<Cell>,
             key: &'b K,
-            finalizer: &mut dyn Finalizer<C>,
+            finalizer: &mut dyn Finalizer,
         ) -> Result<Option<V>, Error>
         where
-            for<'c> C: CellFamily + 'c,
-            K: Store<C> + DictKey,
-            V: Load<'a, C>,
+            K: Store + DictKey,
+            V: Load<'a>,
         {
             let key = ok!(serialize_entry(key, finalizer));
             let Some(mut value) = ok!(dict_get(root, K::BITS, key.as_ref().as_slice())) else {
@@ -329,19 +318,18 @@ where
     pub fn get_raw_ext<'a: 'b, 'b, Q>(
         &'a self,
         key: Q,
-        finalizer: &mut dyn Finalizer<C>,
-    ) -> Result<Option<CellSlice<'a, C>>, Error>
+        finalizer: &mut dyn Finalizer,
+    ) -> Result<Option<CellSlice<'a>>, Error>
     where
         Q: Borrow<K> + 'b,
     {
-        pub fn get_raw_ext_impl<'a: 'b, 'b, C, K>(
-            root: &'a Option<CellContainer<C>>,
+        pub fn get_raw_ext_impl<'a: 'b, 'b, K>(
+            root: &'a Option<Cell>,
             key: &'b K,
-            finalizer: &mut dyn Finalizer<C>,
-        ) -> Result<Option<CellSlice<'a, C>>, Error>
+            finalizer: &mut dyn Finalizer,
+        ) -> Result<Option<CellSlice<'a>>, Error>
         where
-            for<'c> C: CellFamily + 'c,
-            K: Store<C> + DictKey,
+            K: Store + DictKey,
         {
             let key = ok!(serialize_entry(key, finalizer));
             dict_get(root, K::BITS, key.as_ref().as_slice())
@@ -351,7 +339,7 @@ where
     }
 
     /// Gets an iterator over the raw entries of the dictionary, sorted by key.
-    /// The iterator element type is `Result<(CellBuilder<C>, CellSlice<C>)>`.
+    /// The iterator element type is `Result<(CellBuilder, CellSlice)>`.
     ///
     /// If the dictionary is invalid, finishes after the first invalid element,
     /// returning an error.
@@ -363,12 +351,12 @@ where
     ///
     /// [`values`]: Dict::values
     /// [`raw_values`]: Dict::raw_values
-    pub fn raw_iter(&'_ self) -> RawIter<'_, C> {
+    pub fn raw_iter(&'_ self) -> RawIter<'_> {
         RawIter::new(&self.root, K::BITS)
     }
 
     /// Gets an iterator over the raw keys of the dictionary, in sorted order.
-    /// The iterator element type is `Result<CellBuilder<C>>`.
+    /// The iterator element type is `Result<CellBuilder>`.
     ///
     /// If the dictionary is invalid, finishes after the first invalid element,
     /// returning an error.
@@ -380,38 +368,36 @@ where
     ///
     /// [`values`]: Dict::values
     /// [`raw_values`]: Dict::raw_values
-    pub fn raw_keys(&'_ self) -> RawKeys<'_, C> {
+    pub fn raw_keys(&'_ self) -> RawKeys<'_> {
         RawKeys::new(&self.root, K::BITS)
     }
 }
 
-impl<C, K, V> Dict<C, K, V>
+impl<K, V> Dict<K, V>
 where
-    for<'c> C: CellFamily + 'c,
     K: DictKey,
 {
     /// Gets an iterator over the raw values of the dictionary, in order by key.
-    /// The iterator element type is `Result<CellSlice<C>>`.
+    /// The iterator element type is `Result<CellSlice>`.
     ///
     /// If the dictionary is invalid, finishes after the first invalid element,
     /// returning an error.
-    pub fn raw_values(&'_ self) -> RawValues<'_, C> {
+    pub fn raw_values(&'_ self) -> RawValues<'_> {
         RawValues::new(&self.root, K::BITS)
     }
 }
 
-impl<C, K, V> Dict<C, K, V>
+impl<K, V> Dict<K, V>
 where
-    for<'c> C: CellFamily + 'c,
-    K: Store<C> + DictKey,
-    V: Store<C>,
+    K: Store + DictKey,
+    V: Store,
 {
     /// Sets the value associated with the key in the dictionary.
     pub fn set_ext<Q, T>(
         &mut self,
         key: Q,
         value: T,
-        finalizer: &mut dyn Finalizer<C>,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error>
     where
         Q: Borrow<K>,
@@ -426,7 +412,7 @@ where
         &mut self,
         key: Q,
         value: T,
-        finalizer: &mut dyn Finalizer<C>,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error>
     where
         Q: Borrow<K>,
@@ -441,7 +427,7 @@ where
         &mut self,
         key: Q,
         value: T,
-        finalizer: &mut dyn Finalizer<C>,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error>
     where
         Q: Borrow<K>,
@@ -455,12 +441,11 @@ where
         key: &K,
         value: &V,
         mode: SetMode,
-        finalizer: &mut dyn Finalizer<C>,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error>
     where
-        for<'c> C: CellFamily + 'c,
-        K: Store<C> + DictKey,
-        V: Store<C>,
+        K: Store + DictKey,
+        V: Store,
     {
         let key = ok!(serialize_entry(key, finalizer));
         let value = ok!(serialize_entry(value, finalizer));
@@ -481,13 +466,13 @@ where
 /// This struct is created by the [`iter`] method on [`Dict`]. See its documentation for more.
 ///
 /// [`iter`]: Dict::iter
-pub struct Iter<'a, C: CellFamily, K, V> {
-    inner: RawIter<'a, C>,
+pub struct Iter<'a, K, V> {
+    inner: RawIter<'a>,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }
 
-impl<C: CellFamily, K, V> Clone for Iter<'_, C, K, V> {
+impl<K, V> Clone for Iter<'_, K, V> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -497,12 +482,12 @@ impl<C: CellFamily, K, V> Clone for Iter<'_, C, K, V> {
     }
 }
 
-impl<'a, C: CellFamily, K, V> Iter<'a, C, K, V>
+impl<'a, K, V> Iter<'a, K, V>
 where
     K: DictKey,
 {
     /// Creates an iterator over the entries of a dictionary.
-    pub fn new(root: &'a Option<CellContainer<C>>) -> Self {
+    pub fn new(root: &'a Option<Cell>) -> Self {
         Self {
             inner: RawIter::new(root, K::BITS),
             _key: PhantomData,
@@ -511,11 +496,10 @@ where
     }
 }
 
-impl<'a, C, K, V> Iterator for Iter<'a, C, K, V>
+impl<'a, K, V> Iterator for Iter<'a, K, V>
 where
-    for<'c> C: DefaultFinalizer + 'c,
     K: DictKey,
-    V: Load<'a, C>,
+    V: Load<'a>,
 {
     type Item = Result<(K, V), Error>;
 
@@ -543,12 +527,12 @@ where
 /// documentation for more.
 ///
 /// [`keys`]: Dict::keys
-pub struct Keys<'a, C: CellFamily, K> {
-    inner: RawIter<'a, C>,
+pub struct Keys<'a, K> {
+    inner: RawIter<'a>,
     _key: PhantomData<K>,
 }
 
-impl<'a, C: CellFamily, K> Clone for Keys<'a, C, K> {
+impl<'a, K> Clone for Keys<'a, K> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -557,12 +541,12 @@ impl<'a, C: CellFamily, K> Clone for Keys<'a, C, K> {
     }
 }
 
-impl<'a, C: CellFamily, K> Keys<'a, C, K>
+impl<'a, K> Keys<'a, K>
 where
     K: DictKey,
 {
     /// Creates an iterator over the keys of a dictionary.
-    pub fn new(root: &'a Option<CellContainer<C>>) -> Self {
+    pub fn new(root: &'a Option<Cell>) -> Self {
         Self {
             inner: RawIter::new(root, K::BITS),
             _key: PhantomData,
@@ -570,9 +554,8 @@ where
     }
 }
 
-impl<'a, C, K> Iterator for Keys<'a, C, K>
+impl<'a, K> Iterator for Keys<'a, K>
 where
-    for<'c> C: DefaultFinalizer + 'c,
     K: DictKey,
 {
     type Item = Result<K, Error>;
@@ -593,12 +576,12 @@ where
 /// This struct is created by the [`values`] method on [`Dict`]. See its documentation for more.
 ///
 /// [`values`]: Dict::values
-pub struct Values<'a, C: CellFamily, V> {
-    inner: RawValues<'a, C>,
+pub struct Values<'a, V> {
+    inner: RawValues<'a>,
     _value: PhantomData<V>,
 }
 
-impl<C: CellFamily, V> Clone for Values<'_, C, V> {
+impl<V> Clone for Values<'_, V> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -607,9 +590,9 @@ impl<C: CellFamily, V> Clone for Values<'_, C, V> {
     }
 }
 
-impl<'a, C: CellFamily, V> Values<'a, C, V> {
+impl<'a, V> Values<'a, V> {
     /// Creates an iterator over the values of a dictionary.
-    pub fn new(root: &'a Option<CellContainer<C>>, bit_len: u16) -> Self {
+    pub fn new(root: &'a Option<Cell>, bit_len: u16) -> Self {
         Self {
             inner: RawValues::new(root, bit_len),
             _value: PhantomData,
@@ -617,10 +600,9 @@ impl<'a, C: CellFamily, V> Values<'a, C, V> {
     }
 }
 
-impl<'a, C, V> Iterator for Values<'a, C, V>
+impl<'a, V> Iterator for Values<'a, V>
 where
-    for<'c> C: CellFamily + 'c,
-    V: Load<'a, C>,
+    V: Load<'a>,
 {
     type Item = Result<V, Error>;
 
@@ -638,11 +620,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prelude::{RcBoc, RcCellFamily};
+    use crate::prelude::*;
 
     #[test]
     fn dict_set() {
-        let mut dict = Dict::<RcCellFamily, u32, u16>::new();
+        let mut dict = Dict::<u32, u16>::new();
         dict.set(123, 0xffff).unwrap();
         assert_eq!(dict.get(123).unwrap(), Some(0xffff));
 
@@ -653,7 +635,7 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)] // takes too long to execute on miri
     fn dict_set_complex() {
-        let mut dict = Dict::<RcCellFamily, u32, bool>::new();
+        let mut dict = Dict::<u32, bool>::new();
         for i in 0..520 {
             dict.set(i, true).unwrap();
         }
@@ -661,7 +643,7 @@ mod tests {
 
     #[test]
     fn dict_replace() {
-        let mut dict = Dict::<RcCellFamily, u32, bool>::new();
+        let mut dict = Dict::<u32, bool>::new();
         dict.replace(123, false).unwrap();
         assert!(!dict.contains_key(123).unwrap());
 
@@ -673,7 +655,7 @@ mod tests {
 
     #[test]
     fn dict_add() {
-        let mut dict = Dict::<RcCellFamily, u32, bool>::new();
+        let mut dict = Dict::<u32, bool>::new();
 
         dict.add(123, false).unwrap();
         assert_eq!(dict.get(123).unwrap(), Some(false));
@@ -684,8 +666,8 @@ mod tests {
 
     #[test]
     fn dict_iter() {
-        let boc = RcBoc::decode_base64("te6ccgEBFAEAeAABAcABAgPOQAUCAgHUBAMACQAAAI3gAAkAAACjoAIBIA0GAgEgCgcCASAJCAAJAAAAciAACQAAAIfgAgEgDAsACQAAAFZgAAkAAABsIAIBIBEOAgEgEA8ACQAAADqgAAkAAABQYAIBIBMSAAkAAAAe4AAJAAAAv2A=").unwrap();
-        let dict = boc.parse::<Dict<_, u32, u32>>().unwrap();
+        let boc = Boc::decode_base64("te6ccgEBFAEAeAABAcABAgPOQAUCAgHUBAMACQAAAI3gAAkAAACjoAIBIA0GAgEgCgcCASAJCAAJAAAAciAACQAAAIfgAgEgDAsACQAAAFZgAAkAAABsIAIBIBEOAgEgEA8ACQAAADqgAAkAAABQYAIBIBMSAAkAAAAe4AAJAAAAv2A=").unwrap();
+        let dict = boc.parse::<Dict<u32, u32>>().unwrap();
 
         let size = dict.values().count();
         assert_eq!(size, 10);
@@ -709,8 +691,8 @@ mod tests {
 
         // Wrap builder into a new function for the flamegraph
         #[inline(never)]
-        fn test_big_dict(values: &[(u32, u64)]) -> Dict<RcCellFamily, u32, u64> {
-            let mut result = Dict::<RcCellFamily, u32, u64>::new();
+        fn test_big_dict(values: &[(u32, u64)]) -> Dict<u32, u64> {
+            let mut result = Dict::<u32, u64>::new();
             for (key, value) in values {
                 result.set(key, value).unwrap();
             }

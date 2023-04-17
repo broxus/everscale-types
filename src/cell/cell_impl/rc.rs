@@ -6,34 +6,32 @@ use super::{
     PrunedBranch, PrunedBranchHeader, VirtualCell, ALL_ONES_CELL, ALL_ZEROS_CELL,
 };
 use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
-use crate::cell::{Cell, CellContainer, CellFamily, CellHash, CellType};
+use crate::cell::{CellFamily, CellHash, CellImpl, CellImplBounds, CellType};
 use crate::error::Error;
 use crate::util::TryAsMut;
 
-/// Single-threaded cell family.
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
-pub struct RcCellFamily;
+/// Single-threaded cell.
+pub type Cell = Rc<dyn CellImpl>;
 
-impl CellFamily for RcCellFamily {
-    type Container = Rc<dyn Cell<Self>>;
-
-    fn empty_cell() -> CellContainer<Self> {
+impl CellImplBounds for Cell {}
+impl CellFamily for Cell {
+    fn empty_cell() -> Cell {
         Rc::new(EmptyOrdinaryCell)
     }
 
-    fn empty_cell_ref() -> &'static dyn Cell<Self> {
+    fn empty_cell_ref() -> &'static dyn CellImpl {
         &EmptyOrdinaryCell
     }
 
-    fn all_zeros_ref() -> &'static dyn Cell<Self> {
+    fn all_zeros_ref() -> &'static dyn CellImpl {
         &ALL_ZEROS_CELL
     }
 
-    fn all_ones_ref() -> &'static dyn Cell<Self> {
+    fn all_ones_ref() -> &'static dyn CellImpl {
         &ALL_ONES_CELL
     }
 
-    fn virtualize(cell: CellContainer<Self>) -> CellContainer<Self> {
+    fn virtualize(cell: Cell) -> Cell {
         let descriptor = cell.as_ref().descriptor();
         if descriptor.level_mask().is_empty() {
             cell
@@ -43,16 +41,13 @@ impl CellFamily for RcCellFamily {
     }
 }
 
-impl DefaultFinalizer for RcCellFamily {
+impl DefaultFinalizer for Cell {
     type Finalizer = RcCellFinalizer;
 
     fn default_finalizer() -> Self::Finalizer {
         RcCellFinalizer
     }
 }
-
-/// Single-threaded cell.
-pub type RcCell = Rc<dyn Cell<RcCellFamily>>;
 
 impl<T: ?Sized> TryAsMut<T> for Rc<T> {
     #[inline]
@@ -65,15 +60,15 @@ impl<T: ?Sized> TryAsMut<T> for Rc<T> {
 #[derive(Default, Clone, Copy)]
 pub struct RcCellFinalizer;
 
-impl Finalizer<RcCellFamily> for RcCellFinalizer {
-    fn finalize_cell(&mut self, ctx: CellParts<RcCellFamily>) -> Result<RcCell, Error> {
+impl Finalizer for RcCellFinalizer {
+    fn finalize_cell(&mut self, ctx: CellParts) -> Result<Cell, Error> {
         let hashes = ok!(ctx.compute_hashes());
         // SAFETY: ctx now represents a well-formed cell
         Ok(unsafe { make_cell(ctx, hashes) })
     }
 }
 
-unsafe fn make_cell(ctx: CellParts<RcCellFamily>, hashes: Vec<(CellHash, u16)>) -> RcCell {
+unsafe fn make_cell(ctx: CellParts, hashes: Vec<(CellHash, u16)>) -> Cell {
     match ctx.descriptor.cell_type() {
         CellType::PrunedBranch => {
             debug_assert!(hashes.len() == 1);
@@ -126,8 +121,8 @@ unsafe fn make_cell(ctx: CellParts<RcCellFamily>, hashes: Vec<(CellHash, u16)>) 
 /// The following must be true:
 /// - Header references array must be consistent with the descriptor.
 /// - Data length in bytes must be in range 0..=128.
-unsafe fn make_ordinary_cell(header: OrdinaryCellHeader<RcCellFamily>, data: &[u8]) -> RcCell {
-    define_gen_vtable_ptr!((RcCellFamily, const N: usize) => OrdinaryCell<RcCellFamily, N>);
+unsafe fn make_ordinary_cell(header: OrdinaryCellHeader, data: &[u8]) -> Cell {
+    define_gen_vtable_ptr!((const N: usize) => OrdinaryCell<N>);
 
     const VTABLES: [*const (); 9] = [
         gen_vtable_ptr::<0>(),
@@ -141,7 +136,7 @@ unsafe fn make_ordinary_cell(header: OrdinaryCellHeader<RcCellFamily>, data: &[u
         gen_vtable_ptr::<128>(),
     ];
 
-    type EmptyCell = OrdinaryCell<RcCellFamily, 0>;
+    type EmptyCell = OrdinaryCell<0>;
 
     // Clamp data to 0..=128 bytes range
     let raw_data_len = data.len();
@@ -158,8 +153,7 @@ unsafe fn make_ordinary_cell(header: OrdinaryCellHeader<RcCellFamily>, data: &[u
     debug_assert!(raw_data_len <= target_data_len);
 
     // Compute object layout
-    type InnerOrdinaryCell<const N: usize> =
-        RcBox<std::cell::Cell<usize>, OrdinaryCell<RcCellFamily, N>>;
+    type InnerOrdinaryCell<const N: usize> = RcBox<std::cell::Cell<usize>, OrdinaryCell<N>>;
 
     const ALIGN: usize = std::mem::align_of::<InnerOrdinaryCell<0>>();
     const _: () = assert!(
@@ -177,17 +171,11 @@ unsafe fn make_ordinary_cell(header: OrdinaryCellHeader<RcCellFamily>, data: &[u
     let layout = Layout::from_size_align_unchecked(size, ALIGN).pad_to_align();
 
     // Make RcCell
-    make_rc_cell::<OrdinaryCellHeader<RcCellFamily>, 0>(
-        layout,
-        header,
-        data.as_ptr(),
-        raw_data_len,
-        vtable,
-    )
+    make_rc_cell::<OrdinaryCellHeader, 0>(layout, header, data.as_ptr(), raw_data_len, vtable)
 }
 
-unsafe fn make_pruned_branch(header: PrunedBranchHeader, data: &[u8]) -> RcCell {
-    define_gen_vtable_ptr!((RcCellFamily, const N: usize) => PrunedBranch<N>);
+unsafe fn make_pruned_branch(header: PrunedBranchHeader, data: &[u8]) -> Cell {
+    define_gen_vtable_ptr!((const N: usize) => PrunedBranch<N>);
 
     const LENGTHS: [usize; 3] = [
         PrunedBranchHeader::cell_data_len(1),
@@ -238,14 +226,14 @@ unsafe fn make_pruned_branch(header: PrunedBranchHeader, data: &[u8]) -> RcCell 
 
 #[inline]
 unsafe fn make_rc_cell<H, const N: usize>(
-    layout: std::alloc::Layout,
+    layout: Layout,
     header: H,
     data_ptr: *const u8,
     data_len: usize,
     vtable: *const (),
-) -> RcCell
+) -> Cell
 where
-    HeaderWithData<H, N>: Cell<RcCellFamily>,
+    HeaderWithData<H, N>: CellImpl,
 {
     // Allocate memory for the object
     let buffer = std::alloc::alloc(layout);
@@ -269,7 +257,7 @@ where
 
     // Construct fat pointer with vtable info
     let data = std::ptr::addr_of!((*ptr).obj) as *const ();
-    let ptr: *const dyn Cell<RcCellFamily> = std::mem::transmute([data, vtable]);
+    let ptr: *const dyn CellImpl = std::mem::transmute([data, vtable]);
 
     // Construct Rc
     Rc::from_raw(ptr)

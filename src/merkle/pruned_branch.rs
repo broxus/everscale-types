@@ -2,11 +2,11 @@ use crate::cell::*;
 use crate::error::Error;
 
 /// Creates a pruned branch cell with the specified merkle depth.
-pub fn make_pruned_branch<C: CellFamily>(
-    cell: &dyn Cell<C>,
+pub fn make_pruned_branch(
+    cell: &dyn CellImpl,
     merkle_depth: u8,
-    finalizer: &mut dyn Finalizer<C>,
-) -> Result<CellContainer<C>, Error> {
+    finalizer: &mut dyn Finalizer,
+) -> Result<Cell, Error> {
     let descriptor = cell.descriptor();
 
     let mut builder = CellBuilder::new();

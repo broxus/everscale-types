@@ -373,12 +373,8 @@ impl ShardIdent {
     }
 }
 
-impl<C: CellFamily> Store<C> for ShardIdent {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder<C>,
-        _: &mut dyn Finalizer<C>,
-    ) -> Result<(), Error> {
+impl Store for ShardIdent {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
         let prefix_len = self.prefix_len() as u8;
         let prefix_without_tag = self.prefix - self.prefix_tag();
         ok!(builder.store_u8(prefix_len));
@@ -387,8 +383,8 @@ impl<C: CellFamily> Store<C> for ShardIdent {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for ShardIdent {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for ShardIdent {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let prefix_len = ok!(slice.load_u8());
         if prefix_len > Self::MAX_SPLIT_DEPTH {
             return Err(Error::InvalidData);

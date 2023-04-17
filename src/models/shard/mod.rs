@@ -16,19 +16,20 @@ mod shard_accounts;
 mod shard_extra;
 
 /// Applied shard state.
+#[allow(clippy::large_enum_variant)]
 #[derive(CustomDebug, CustomClone, CustomEq)]
-pub enum ShardState<C: CellFamily> {
+pub enum ShardState {
     /// The next indivisible state in the shard.
-    Unsplit(ShardStateUnsplit<C>),
+    Unsplit(ShardStateUnsplit),
     /// Next indivisible states after shard split.
-    Split(ShardStateSplit<C>),
+    Split(ShardStateSplit),
 }
 
-impl<C: CellFamily> Store<C> for ShardState<C> {
+impl Store for ShardState {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         match self {
             Self::Unsplit(state) => state.store_into(builder, finalizer),
@@ -37,8 +38,8 @@ impl<C: CellFamily> Store<C> for ShardState<C> {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for ShardState<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for ShardState {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         Ok(if ok!(slice.get_bit(0)) {
             match ShardStateUnsplit::load_from(slice) {
                 Ok(state) => Self::Unsplit(state),
@@ -55,7 +56,7 @@ impl<'a, C: CellFamily> Load<'a, C> for ShardState<C> {
 
 /// State of the single shard.
 #[derive(CustomDebug, CustomClone, CustomEq)]
-pub struct ShardStateUnsplit<C: CellFamily> {
+pub struct ShardStateUnsplit {
     /// Global network id.
     pub global_id: i32,
     /// Id of the shard.
@@ -71,37 +72,37 @@ pub struct ShardStateUnsplit<C: CellFamily> {
     /// Minimal referenced seqno of the masterchain block.
     pub min_ref_mc_seqno: u32,
     /// Output messages queue info.
-    pub out_msg_queue_info: CellContainer<C>,
+    pub out_msg_queue_info: Cell,
     /// Whether this state was produced before the shards split.
     pub before_split: bool,
     /// Reference to the dictionary with shard accounts.
-    pub accounts: Lazy<C, ShardAccounts<C>>,
+    pub accounts: Lazy<ShardAccounts>,
     /// Mask for the overloaded blocks.
     pub overload_history: u64,
     /// Mask for the underloaded blocks.
     pub underload_history: u64,
     /// Total balance for all currencies.
-    pub total_balance: CurrencyCollection<C>,
+    pub total_balance: CurrencyCollection,
     /// Total pending validator fees.
-    pub total_validator_fees: CurrencyCollection<C>,
+    pub total_validator_fees: CurrencyCollection,
     /// Dictionary with all libraries and its providers.
-    pub libraries: RawDict<C, 256>,
+    pub libraries: RawDict<256>,
     /// Optional reference to the masterchain block.
     pub master_ref: Option<BlockRef>,
     /// Shard state additional info.
-    pub custom: Option<Lazy<C, McStateExtra<C>>>,
+    pub custom: Option<Lazy<McStateExtra>>,
 }
 
-impl<C: CellFamily> ShardStateUnsplit<C> {
+impl ShardStateUnsplit {
     const TAG: u32 = 0x9023afe2;
 
     /// Tries to load shard accounts dictionary.
-    pub fn load_accounts(&self) -> Result<ShardAccounts<C>, Error> {
+    pub fn load_accounts(&self) -> Result<ShardAccounts, Error> {
         self.accounts.load()
     }
 
     /// Tries to load additional masterchain data.
-    pub fn load_custom(&self) -> Result<Option<McStateExtra<C>>, Error> {
+    pub fn load_custom(&self) -> Result<Option<McStateExtra>, Error> {
         match &self.custom {
             Some(custom) => match custom.load() {
                 Ok(custom) => Ok(Some(custom)),
@@ -112,14 +113,14 @@ impl<C: CellFamily> ShardStateUnsplit<C> {
     }
 }
 
-impl<C: CellFamily> Store<C> for ShardStateUnsplit<C> {
+impl Store for ShardStateUnsplit {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         let child_cell = {
-            let mut builder = CellBuilder::<C>::new();
+            let mut builder = CellBuilder::new();
             ok!(builder.store_u64(self.overload_history));
             ok!(builder.store_u64(self.underload_history));
             ok!(self.total_balance.store_into(&mut builder, finalizer));
@@ -147,8 +148,8 @@ impl<C: CellFamily> Store<C> for ShardStateUnsplit<C> {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for ShardStateUnsplit<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for ShardStateUnsplit {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         match slice.load_u32() {
             Ok(Self::TAG) => {}
             Ok(_) => return Err(Error::InvalidTag),
@@ -177,7 +178,7 @@ impl<'a, C: CellFamily> Load<'a, C> for ShardStateUnsplit<C> {
             total_validator_fees: ok!(CurrencyCollection::load_from(child_slice)),
             libraries: ok!(RawDict::load_from(child_slice)),
             master_ref: ok!(Option::<BlockRef>::load_from(child_slice)),
-            custom: ok!(Option::<Lazy<C, McStateExtra<C>>>::load_from(slice)),
+            custom: ok!(Option::<Lazy<McStateExtra>>::load_from(slice)),
         })
     }
 }
@@ -185,11 +186,11 @@ impl<'a, C: CellFamily> Load<'a, C> for ShardStateUnsplit<C> {
 /// Next indivisible states after shard split.
 #[derive(CustomDebug, CustomClone, CustomEq, Store, Load)]
 #[tlb(tag = "#5f327da5")]
-pub struct ShardStateSplit<C: CellFamily> {
+pub struct ShardStateSplit {
     /// Reference to the state of the left shard.
-    pub left: Lazy<C, ShardStateUnsplit<C>>,
+    pub left: Lazy<ShardStateUnsplit>,
     /// Reference to the state of the right shard.
-    pub right: Lazy<C, ShardStateUnsplit<C>>,
+    pub right: Lazy<ShardStateUnsplit>,
 }
 
 #[cfg(test)]

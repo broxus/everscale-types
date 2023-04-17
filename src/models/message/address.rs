@@ -49,11 +49,11 @@ impl std::fmt::Display for IntAddr {
     }
 }
 
-impl<C: CellFamily> Store<C> for IntAddr {
+impl Store for IntAddr {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         match self {
             Self::Std(addr) => addr.store_into(builder, finalizer),
@@ -62,8 +62,8 @@ impl<C: CellFamily> Store<C> for IntAddr {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for IntAddr {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for IntAddr {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         if !ok!(slice.load_bit()) {
             return Err(Error::InvalidTag);
         }
@@ -195,11 +195,11 @@ impl FromStr for StdAddr {
     }
 }
 
-impl<C: CellFamily> Store<C> for StdAddr {
+impl Store for StdAddr {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         if !builder.has_capacity(self.bit_len(), 0) {
             return Err(Error::CellOverflow);
@@ -211,8 +211,8 @@ impl<C: CellFamily> Store<C> for StdAddr {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for StdAddr {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for StdAddr {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         if !ok!(slice.load_bit()) || ok!(slice.load_bit()) {
             return Err(Error::InvalidTag);
         }
@@ -313,11 +313,11 @@ impl From<VarAddr> for IntAddr {
     }
 }
 
-impl<C: CellFamily> Store<C> for VarAddr {
+impl Store for VarAddr {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         if !builder.has_capacity(self.bit_len(), 0) {
             return Err(Error::CellOverflow);
@@ -390,7 +390,7 @@ impl Anycast {
     pub const BITS_MAX: u16 = SplitDepth::BITS + Self::MAX_DEPTH as u16;
 
     /// Constructs anycast info from rewrite prefix.
-    pub fn from_slice<C: CellFamily>(rewrite_prefix: &CellSlice<'_, C>) -> Result<Self, Error> {
+    pub fn from_slice(rewrite_prefix: &CellSlice<'_>) -> Result<Self, Error> {
         let depth = ok!(SplitDepth::from_bit_len(rewrite_prefix.remaining_bits()));
         let mut data = Vec::with_capacity((depth.into_bit_len() as usize + 7) / 8);
         ok!(rewrite_prefix.get_raw(0, &mut data, depth.into_bit_len()));
@@ -458,11 +458,11 @@ impl std::fmt::Display for Anycast {
     }
 }
 
-impl<C: CellFamily> Store<C> for Anycast {
+impl Store for Anycast {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         if !builder.has_capacity(self.bit_len(), 0) {
             return Err(Error::CellOverflow);
@@ -472,8 +472,8 @@ impl<C: CellFamily> Store<C> for Anycast {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for Anycast {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for Anycast {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let depth = ok!(SplitDepth::load_from(slice));
         if !slice.has_remaining(depth.into_bit_len(), 0) {
             return Err(Error::CellUnderflow);

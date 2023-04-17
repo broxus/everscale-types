@@ -12,44 +12,27 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Erro
     };
     cx.check()?;
 
-    let cell_family: syn::Ident = quote::format_ident!("C");
-    let cell_family_ty: syn::TypeParam =
-        syn::parse_quote!(#cell_family: ::everscale_types::cell::CellFamily);
-
     let ident = &container.ident;
     let generics = bound::without_default(container.generics);
-    let (_, ty_generics, where_clause) = generics.split_for_impl();
-
-    let mut alt_generics = generics.clone();
-
-    if !alt_generics.params.iter().any(|param| match param {
-        syn::GenericParam::Type(ty) => ty.ident == cell_family_ty.ident,
-        _ => false,
-    }) {
-        alt_generics
-            .params
-            .push(syn::GenericParam::Type(cell_family_ty));
-    }
-    let (impl_generics, _, _) = alt_generics.split_for_impl();
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     let (inline, body) = match &container.data {
         ast::Data::Enum(variants) => (variants.len() < 2, build_enum(variants)),
-        ast::Data::Struct(style, fields) => (
-            fields.len() < 2,
-            build_struct(&container, &cell_family, *style, fields),
-        ),
+        ast::Data::Struct(style, fields) => {
+            (fields.len() < 2, build_struct(&container, *style, fields))
+        }
     };
 
     let inline = if inline { quote!(#[inline]) } else { quote!() };
 
     let result = quote! {
         #[automatically_derived]
-        impl #impl_generics ::everscale_types::cell::Store<#cell_family> for #ident #ty_generics #where_clause {
+        impl #impl_generics ::everscale_types::cell::Store for #ident #ty_generics #where_clause {
             #inline
             fn store_into(
                 &self,
-                __builder: &mut ::everscale_types::cell::CellBuilder<#cell_family>,
-                __finalizer: &mut dyn ::everscale_types::cell::Finalizer<#cell_family>
+                __builder: &mut ::everscale_types::cell::CellBuilder,
+                __finalizer: &mut dyn ::everscale_types::cell::Finalizer
             ) -> ::core::result::Result<(), ::everscale_types::error::Error> {
                 #body
             }
@@ -65,7 +48,6 @@ fn build_enum(_: &[ast::Variant<'_>]) -> TokenStream {
 
 fn build_struct(
     container: &ast::Container<'_>,
-    cell_family: &syn::Ident,
     style: ast::Style,
     fields: &[ast::Field<'_>],
 ) -> TokenStream {
@@ -75,7 +57,7 @@ fn build_struct(
     let members = fields.iter().enumerate().map(|(i, field)| {
         let ident = &field.member;
         let field_ident = quote!(self.#ident);
-        let op = store_op(cell_family, &field_ident, field.ty);
+        let op = store_op(&field_ident, field.ty);
         if i + 1 == fields_len {
             op
         } else {
@@ -135,7 +117,7 @@ fn store_tag_op(tag: attr::TlbTag) -> Option<TokenStream> {
     Some(quote!(__builder.#op))
 }
 
-fn store_op(cell_family: &syn::Ident, field_ident: &TokenStream, ty: &syn::Type) -> TokenStream {
+fn store_op(field_ident: &TokenStream, ty: &syn::Type) -> TokenStream {
     #[allow(clippy::unnecessary_operation)]
     'fallback: {
         match ty {
@@ -163,13 +145,13 @@ fn store_op(cell_family: &syn::Ident, field_ident: &TokenStream, ty: &syn::Type)
                 }
             }
             syn::Type::Reference(syn::TypeReference { elem, .. }) => {
-                return store_op(cell_family, field_ident, elem);
+                return store_op(field_ident, elem);
             }
             _ => break 'fallback,
         }
     };
 
-    quote! { <#ty as ::everscale_types::cell::Store<#cell_family>>::store_into(&#field_ident, __builder, __finalizer) }
+    quote! { <#ty as ::everscale_types::cell::Store>::store_into(&#field_ident, __builder, __finalizer) }
 }
 
 fn into_ok(tokens: TokenStream) -> TokenStream {

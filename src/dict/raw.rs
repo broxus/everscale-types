@@ -30,11 +30,11 @@ use super::{dict_get, dict_insert, dict_load_from_root, read_label, SetMode};
 ///
 /// bit$_ (## 1) = Bit;
 /// ```
-pub struct RawDict<C: CellFamily, const N: u16>(pub(crate) Option<CellContainer<C>>);
+pub struct RawDict<const N: u16>(pub(crate) Option<Cell>);
 
-impl<'a, C: CellFamily, const N: u16> Load<'a, C> for RawDict<C, N> {
+impl<'a, const N: u16> Load<'a> for RawDict<N> {
     #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         match <_>::load_from(slice) {
             Ok(dict) => Ok(Self(dict)),
             Err(e) => Err(e),
@@ -42,32 +42,32 @@ impl<'a, C: CellFamily, const N: u16> Load<'a, C> for RawDict<C, N> {
     }
 }
 
-impl<C: CellFamily, const N: u16> Store<C> for RawDict<C, N> {
+impl<const N: u16> Store for RawDict<N> {
     #[inline]
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         self.0.store_into(builder, finalizer)
     }
 }
 
-impl<C: CellFamily, const N: u16> Default for RawDict<C, N> {
+impl<const N: u16> Default for RawDict<N> {
     #[inline]
     fn default() -> Self {
         Self(None)
     }
 }
 
-impl<C: CellFamily, const N: u16> Clone for RawDict<C, N> {
+impl<const N: u16> Clone for RawDict<N> {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
 
-impl<C: CellFamily, const N: u16> Eq for RawDict<C, N> {}
-impl<C: CellFamily, const N: u16> PartialEq for RawDict<C, N> {
+impl<const N: u16> Eq for RawDict<N> {}
+impl<const N: u16> PartialEq for RawDict<N> {
     fn eq(&self, other: &Self) -> bool {
         match (&self.0, &other.0) {
             (Some(this), Some(other)) => this.as_ref() == other.as_ref(),
@@ -77,14 +77,14 @@ impl<C: CellFamily, const N: u16> PartialEq for RawDict<C, N> {
     }
 }
 
-impl<C: CellFamily, const N: u16> From<Option<CellContainer<C>>> for RawDict<C, N> {
+impl<const N: u16> From<Option<Cell>> for RawDict<N> {
     #[inline]
-    fn from(value: Option<CellContainer<C>>) -> Self {
+    fn from(value: Option<Cell>) -> Self {
         Self(value)
     }
 }
 
-impl<C: CellFamily, const N: u16> std::fmt::Debug for RawDict<C, N> {
+impl<const N: u16> std::fmt::Debug for RawDict<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RawDict")
             .field("key_bit_len", &N)
@@ -93,7 +93,7 @@ impl<C: CellFamily, const N: u16> std::fmt::Debug for RawDict<C, N> {
     }
 }
 
-impl<C: CellFamily, const N: u16> RawDict<C, N> {
+impl<const N: u16> RawDict<N> {
     const _ASSERT: () = assert!(N > 0, "Dict with 0-bit key is invalid");
 
     /// Creates an empty dictionary.
@@ -108,51 +108,38 @@ impl<C: CellFamily, const N: u16> RawDict<C, N> {
 
     /// Returns the underlying root cell of the dictionary.
     #[inline]
-    pub const fn root(&self) -> &Option<CellContainer<C>> {
+    pub const fn root(&self) -> &Option<Cell> {
         &self.0
     }
-}
 
-impl<C, const N: u16> RawDict<C, N>
-where
-    for<'c> C: CellFamily + 'c,
-{
     /// Loads a non-empty dictionary from a root cell.
     #[inline]
     pub fn load_from_root_ext(
-        slice: &mut CellSlice<'_, C>,
-        finalizer: &mut dyn Finalizer<C>,
+        slice: &mut CellSlice<'_>,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<Self, Error> {
         match dict_load_from_root(slice, N, finalizer) {
             Ok(root) => Ok(Self(Some(root))),
             Err(e) => Err(e),
         }
     }
-}
 
-impl<C, const N: u16> RawDict<C, N>
-where
-    for<'c> C: CellFamily + 'c,
-{
     /// Returns a `CellSlice` of the value corresponding to the key.
-    pub fn get<'a: 'b, 'b>(
-        &'a self,
-        key: CellSlice<'b, C>,
-    ) -> Result<Option<CellSlice<'a, C>>, Error> {
+    pub fn get<'a: 'b, 'b>(&'a self, key: CellSlice<'b>) -> Result<Option<CellSlice<'a>>, Error> {
         dict_get(&self.0, N, key)
     }
 
     /// Returns `true` if the dictionary contains a value for the specified key.
-    pub fn contains_key(&self, key: CellSlice<'_, C>) -> Result<bool, Error> {
+    pub fn contains_key(&self, key: CellSlice<'_>) -> Result<bool, Error> {
         Ok(ok!(dict_get(&self.0, N, key)).is_some())
     }
 
     /// Sets the value associated with the key in the dictionary.
     pub fn set_ext(
         &mut self,
-        mut key: CellSlice<'_, C>,
-        value: CellSlice<'_, C>,
-        finalizer: &mut dyn Finalizer<C>,
+        mut key: CellSlice<'_>,
+        value: CellSlice<'_>,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         self.0 = ok!(dict_insert(
             &self.0,
@@ -169,9 +156,9 @@ where
     /// only if the key was already present in it.
     pub fn replace_ext(
         &mut self,
-        mut key: CellSlice<'_, C>,
-        value: CellSlice<'_, C>,
-        finalizer: &mut dyn Finalizer<C>,
+        mut key: CellSlice<'_>,
+        value: CellSlice<'_>,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         self.0 = ok!(dict_insert(
             &self.0,
@@ -188,9 +175,9 @@ where
     /// but only if it is not already present.
     pub fn add_ext(
         &mut self,
-        mut key: CellSlice<'_, C>,
-        value: CellSlice<'_, C>,
-        finalizer: &mut dyn Finalizer<C>,
+        mut key: CellSlice<'_>,
+        value: CellSlice<'_>,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         self.0 = ok!(dict_insert(
             &self.0,
@@ -204,7 +191,7 @@ where
     }
 
     /// Gets an iterator over the entries of the dictionary, sorted by key.
-    /// The iterator element type is `Result<(CellBuilder<C>, CellSlice<C>)>`.
+    /// The iterator element type is `Result<(CellBuilder, CellSlice)>`.
     ///
     /// If the dictionary is invalid, finishes after the first invalid element,
     /// returning an error.
@@ -215,12 +202,12 @@ where
     /// for each element. Use [`values`] if you don't need keys from an iterator.
     ///
     /// [`values`]: RawDict::values
-    pub fn iter(&'_ self) -> RawIter<'_, C> {
+    pub fn iter(&'_ self) -> RawIter<'_> {
         RawIter::new(&self.0, N)
     }
 
     /// Gets an iterator over the keys of the dictionary, in sorted order.
-    /// The iterator element type is `Result<CellBuilder<C>>`.
+    /// The iterator element type is `Result<CellBuilder>`.
     ///
     /// If the dictionary is invalid, finishes after the first invalid element,
     /// returning an error.
@@ -231,31 +218,26 @@ where
     /// for each element. Use [`values`] if you don't need keys from an iterator.
     ///
     /// [`values`]: RawDict::values
-    pub fn keys(&'_ self) -> RawKeys<'_, C> {
+    pub fn keys(&'_ self) -> RawKeys<'_> {
         RawKeys::new(&self.0, N)
     }
 
     /// Gets an iterator over the values of the dictionary, in order by key.
-    /// The iterator element type is `Result<CellSlice<C>>`.
+    /// The iterator element type is `Result<CellSlice>`.
     ///
     /// If the dictionary is invalid, finishes after the first invalid element,
     /// returning an error.
-    pub fn values(&'_ self) -> RawValues<'_, C> {
+    pub fn values(&'_ self) -> RawValues<'_> {
         RawValues::new(&self.0, N)
     }
-}
 
-impl<C, const N: u16> RawDict<C, N>
-where
-    for<'c> C: DefaultFinalizer + 'c,
-{
     /// Sets the value associated with the key in the dictionary.
     ///
     /// Use [`set_ext`] if you need to use a custom finalizer.
     ///
     /// [`set_ext`]: RawDict::set_ext
-    pub fn set(&mut self, key: CellSlice<'_, C>, value: CellSlice<'_, C>) -> Result<(), Error> {
-        self.set_ext(key, value, &mut C::default_finalizer())
+    pub fn set(&mut self, key: CellSlice<'_>, value: CellSlice<'_>) -> Result<(), Error> {
+        self.set_ext(key, value, &mut Cell::default_finalizer())
     }
 
     /// Sets the value associated with the key in the dictionary
@@ -264,8 +246,8 @@ where
     /// Use [`replace_ext`] if you need to use a custom finalizer.
     ///
     /// [`replace_ext`]: RawDict::replace_ext
-    pub fn replace(&mut self, key: CellSlice<'_, C>, value: CellSlice<'_, C>) -> Result<(), Error> {
-        self.replace_ext(key, value, &mut C::default_finalizer())
+    pub fn replace(&mut self, key: CellSlice<'_>, value: CellSlice<'_>) -> Result<(), Error> {
+        self.replace_ext(key, value, &mut Cell::default_finalizer())
     }
 
     /// Sets the value associated with key in dictionary,
@@ -274,8 +256,8 @@ where
     /// Use [`add_ext`] if you need to use a custom finalizer.
     ///
     /// [`add_ext`]: RawDict::add_ext
-    pub fn add(&mut self, key: CellSlice<'_, C>, value: CellSlice<'_, C>) -> Result<(), Error> {
-        self.add_ext(key, value, &mut C::default_finalizer())
+    pub fn add(&mut self, key: CellSlice<'_>, value: CellSlice<'_>) -> Result<(), Error> {
+        self.add_ext(key, value, &mut Cell::default_finalizer())
     }
 }
 
@@ -287,24 +269,16 @@ where
 /// [`Dict`]: crate::dict::Dict
 /// [`iter`]: RawDict::iter
 /// [`raw_iter`]: crate::dict::Dict::raw_iter
-pub struct RawIter<'a, C: CellFamily> {
+#[derive(Clone)]
+pub struct RawIter<'a> {
     // TODO: replace `Vec` with on-stack stuff
-    segments: Vec<IterSegment<'a, C>>,
+    segments: Vec<IterSegment<'a>>,
     status: IterStatus,
 }
 
-impl<C: CellFamily> Clone for RawIter<'_, C> {
-    fn clone(&self) -> Self {
-        Self {
-            segments: self.segments.clone(),
-            status: self.status,
-        }
-    }
-}
-
-impl<'a, C: CellFamily> RawIter<'a, C> {
+impl<'a> RawIter<'a> {
     /// Creates an iterator over the entries of a dictionary.
-    pub fn new(root: &'a Option<CellContainer<C>>, bit_len: u16) -> Self {
+    pub fn new(root: &'a Option<Cell>, bit_len: u16) -> Self {
         let mut segments = Vec::new();
 
         // Push root segment if any
@@ -320,7 +294,7 @@ impl<'a, C: CellFamily> RawIter<'a, C> {
             segments.push(IterSegment {
                 data,
                 remaining_bit_len: bit_len,
-                key: CellBuilder::<C>::new(),
+                key: CellBuilder::new(),
             });
         }
 
@@ -337,11 +311,8 @@ impl<'a, C: CellFamily> RawIter<'a, C> {
     }
 }
 
-impl<'a, C> Iterator for RawIter<'a, C>
-where
-    for<'c> C: CellFamily + 'c,
-{
-    type Item = Result<(CellBuilder<C>, CellSlice<'a, C>), Error>;
+impl<'a> Iterator for RawIter<'a> {
+    type Item = Result<(CellBuilder, CellSlice<'a>), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if unlikely(!self.status.is_valid()) {
@@ -434,20 +405,11 @@ where
     }
 }
 
-struct IterSegment<'a, C: CellFamily> {
-    data: &'a dyn Cell<C>,
+#[derive(Clone)]
+struct IterSegment<'a> {
+    data: &'a dyn CellImpl,
     remaining_bit_len: u16,
-    key: CellBuilder<C>,
-}
-
-impl<C: CellFamily> Clone for IterSegment<'_, C> {
-    fn clone(&self) -> Self {
-        Self {
-            data: self.data,
-            remaining_bit_len: self.remaining_bit_len,
-            key: self.key.clone(),
-        }
-    }
+    key: CellBuilder,
 }
 
 /// An iterator over the keys of a [`RawDict`] or a [`Dict`].
@@ -458,32 +420,22 @@ impl<C: CellFamily> Clone for IterSegment<'_, C> {
 /// [`Dict`]: crate::dict::Dict
 /// [`keys`]: RawDict::keys
 /// [`raw_keys`]: crate::dict::Dict::raw_keys
-pub struct RawKeys<'a, C: CellFamily> {
-    inner: RawIter<'a, C>,
+#[derive(Clone)]
+pub struct RawKeys<'a> {
+    inner: RawIter<'a>,
 }
 
-impl<'a, C: CellFamily> RawKeys<'a, C> {
+impl<'a> RawKeys<'a> {
     /// Creates an iterator over the keys of a dictionary.
-    pub fn new(root: &'a Option<CellContainer<C>>, bit_len: u16) -> Self {
+    pub fn new(root: &'a Option<Cell>, bit_len: u16) -> Self {
         Self {
             inner: RawIter::new(root, bit_len),
         }
     }
 }
 
-impl<C: CellFamily> Clone for RawKeys<'_, C> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
-    }
-}
-
-impl<'a, C> Iterator for RawKeys<'a, C>
-where
-    for<'c> C: CellFamily + 'c,
-{
-    type Item = Result<CellBuilder<C>, Error>;
+impl<'a> Iterator for RawKeys<'a> {
+    type Item = Result<CellBuilder, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.inner.next()? {
@@ -501,24 +453,16 @@ where
 /// [`Dict`]: crate::dict::Dict
 /// [`values`]: RawDict::values
 /// [`raw_values`]: crate::dict::Dict::raw_values
-pub struct RawValues<'a, C: CellFamily> {
+#[derive(Clone)]
+pub struct RawValues<'a> {
     // TODO: replace `Vec` with on-stack stuff
-    segments: Vec<ValuesSegment<'a, C>>,
+    segments: Vec<ValuesSegment<'a>>,
     status: IterStatus,
 }
 
-impl<C: CellFamily> Clone for RawValues<'_, C> {
-    fn clone(&self) -> Self {
-        Self {
-            segments: self.segments.clone(),
-            status: self.status,
-        }
-    }
-}
-
-impl<'a, C: CellFamily> RawValues<'a, C> {
+impl<'a> RawValues<'a> {
     /// Creates an iterator over the values of a dictionary.
-    pub fn new(root: &'a Option<CellContainer<C>>, bit_len: u16) -> Self {
+    pub fn new(root: &'a Option<Cell>, bit_len: u16) -> Self {
         let mut segments = Vec::new();
         if let Some(root) = root {
             let data = root.as_ref();
@@ -547,11 +491,8 @@ impl<'a, C: CellFamily> RawValues<'a, C> {
     }
 }
 
-impl<'a, C> Iterator for RawValues<'a, C>
-where
-    for<'c> C: CellFamily + 'c,
-{
-    type Item = Result<CellSlice<'a, C>, Error>;
+impl<'a> Iterator for RawValues<'a> {
+    type Item = Result<CellSlice<'a>, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if unlikely(!self.status.is_valid()) {
@@ -626,40 +567,31 @@ where
     }
 }
 
-struct ValuesSegment<'a, C: CellFamily> {
-    data: &'a dyn Cell<C>,
+#[derive(Copy, Clone)]
+struct ValuesSegment<'a> {
+    data: &'a dyn CellImpl,
     remaining_bit_len: u16,
-}
-
-impl<C: CellFamily> Copy for ValuesSegment<'_, C> {}
-impl<C: CellFamily> Clone for ValuesSegment<'_, C> {
-    fn clone(&self) -> Self {
-        Self {
-            data: self.data,
-            remaining_bit_len: self.remaining_bit_len,
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prelude::{RcBoc, RcCell, RcCellBuilder, RcCellFamily};
+    use crate::prelude::*;
 
-    fn build_cell<F: FnOnce(&mut RcCellBuilder) -> Result<(), Error>>(f: F) -> RcCell {
-        let mut builder = RcCellBuilder::new();
+    fn build_cell<F: FnOnce(&mut CellBuilder) -> Result<(), Error>>(f: F) -> Cell {
+        let mut builder = CellBuilder::new();
         f(&mut builder).unwrap();
         builder.build().unwrap()
     }
 
     #[test]
     fn dict_set() {
-        let mut dict = RawDict::<RcCellFamily, 32>::new();
+        let mut dict = RawDict::<32>::new();
 
-        let key = RcCellBuilder::build_from(123u32).unwrap();
+        let key = CellBuilder::build_from(123u32).unwrap();
 
-        let empty_value = RcCellFamily::empty_cell();
-        let not_empty_value = RcCellBuilder::build_from(0xffffu16).unwrap();
+        let empty_value = Cell::empty_cell();
+        let not_empty_value = CellBuilder::build_from(0xffffu16).unwrap();
 
         dict.set(key.as_slice(), empty_value.as_slice()).unwrap();
         {
@@ -685,7 +617,7 @@ mod tests {
     fn dict_set_complex() {
         let value = build_cell(|b| b.store_bit_one());
 
-        let mut dict = RawDict::<RcCellFamily, 32>::new();
+        let mut dict = RawDict::<32>::new();
         for i in 0..520 {
             let key = build_cell(|b| b.store_u32(i));
             dict.set(key.as_slice(), value.as_slice()).unwrap();
@@ -706,7 +638,7 @@ mod tests {
 
     #[test]
     fn dict_replace() {
-        let mut dict = RawDict::<RcCellFamily, 32>::new();
+        let mut dict = RawDict::<32>::new();
 
         //
         dict.replace(
@@ -740,7 +672,7 @@ mod tests {
 
     #[test]
     fn dict_add() {
-        let mut dict = RawDict::<RcCellFamily, 32>::new();
+        let mut dict = RawDict::<32>::new();
 
         let key = build_cell(|b| b.store_u32(123));
 
@@ -765,15 +697,15 @@ mod tests {
     #[test]
     fn dict_get() {
         let boc =
-            RcBoc::decode_base64("te6ccgECOwEAASoAAQHAAQIBIBACAgEgAwMCASAEBAIBIAUFAgEgBgYCASAHBwIBIAgIAgEgCQkCASAoCgIBIAsZAgEgDBsCASArDQIBIA4fAgEgLQ8CASAuIQIBIBERAgEgEhICASATEwIBIBQUAgEgFRUCASAWFgIBIBcXAgEgKBgCASAaGQIBIBsbAgEgHRsCASAcHAIBIB8fAgEgKx4CASAiHwIBICAgAgEgISECASAlJQIBIC0jAgEgLiQCASAvJQIBIDMmAgFiNicCAUg4OAIBICkpAgEgKioCASArKwIBICwsAgEgLS0CASAuLgIBIC8vAgEgMzACAWI2MQIBIDcyAAnWAAAmbwIBIDQ0AgEgNTUCASA2NgIBIDc3AgEgODgCASA5OQIBIDo6AAnQAAAmbw==").unwrap();
+            Boc::decode_base64("te6ccgECOwEAASoAAQHAAQIBIBACAgEgAwMCASAEBAIBIAUFAgEgBgYCASAHBwIBIAgIAgEgCQkCASAoCgIBIAsZAgEgDBsCASArDQIBIA4fAgEgLQ8CASAuIQIBIBERAgEgEhICASATEwIBIBQUAgEgFRUCASAWFgIBIBcXAgEgKBgCASAaGQIBIBsbAgEgHRsCASAcHAIBIB8fAgEgKx4CASAiHwIBICAgAgEgISECASAlJQIBIC0jAgEgLiQCASAvJQIBIDMmAgFiNicCAUg4OAIBICkpAgEgKioCASArKwIBICwsAgEgLS0CASAuLgIBIC8vAgEgMzACAWI2MQIBIDcyAAnWAAAmbwIBIDQ0AgEgNTUCASA2NgIBIDc3AgEgODgCASA5OQIBIDo6AAnQAAAmbw==").unwrap();
 
-        let dict = boc.parse::<RawDict<_, 32>>().unwrap();
+        let dict = boc.parse::<RawDict<32>>().unwrap();
 
-        let key = RcCellBuilder::build_from(u32::from_be_bytes(123u32.to_le_bytes())).unwrap();
+        let key = CellBuilder::build_from(u32::from_be_bytes(123u32.to_le_bytes())).unwrap();
         let value = dict.get(key.as_slice()).unwrap().unwrap();
 
         let value = {
-            let mut builder = RcCellBuilder::new();
+            let mut builder = CellBuilder::new();
             builder.store_slice(value).unwrap();
             builder.build().unwrap()
         };
@@ -782,8 +714,8 @@ mod tests {
 
     #[test]
     fn dict_iter() {
-        let boc = RcBoc::decode_base64("te6ccgEBFAEAeAABAcABAgPOQAUCAgHUBAMACQAAAI3gAAkAAACjoAIBIA0GAgEgCgcCASAJCAAJAAAAciAACQAAAIfgAgEgDAsACQAAAFZgAAkAAABsIAIBIBEOAgEgEA8ACQAAADqgAAkAAABQYAIBIBMSAAkAAAAe4AAJAAAAv2A=").unwrap();
-        let dict = boc.parse::<RawDict<_, 32>>().unwrap();
+        let boc = Boc::decode_base64("te6ccgEBFAEAeAABAcABAgPOQAUCAgHUBAMACQAAAI3gAAkAAACjoAIBIA0GAgEgCgcCASAJCAAJAAAAciAACQAAAIfgAgEgDAsACQAAAFZgAAkAAABsIAIBIBEOAgEgEA8ACQAAADqgAAkAAABQYAIBIBMSAAkAAAAe4AAJAAAAv2A=").unwrap();
+        let dict = boc.parse::<RawDict<32>>().unwrap();
 
         let size = dict.values().count();
         assert_eq!(size, 10);

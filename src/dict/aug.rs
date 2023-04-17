@@ -9,13 +9,13 @@ use super::raw::*;
 use super::typed::*;
 use super::{read_label, DictKey};
 
-pub(crate) trait AugDictSkipValue<'a, C: CellFamily> {
-    fn skip_value(slice: &mut CellSlice<'a, C>) -> bool;
+pub(crate) trait AugDictSkipValue<'a> {
+    fn skip_value(slice: &mut CellSlice<'a>) -> bool;
 }
 
-impl<'a, C: CellFamily> AugDictSkipValue<'a, C> for crate::num::Tokens {
+impl<'a> AugDictSkipValue<'a> for crate::num::Tokens {
     #[inline]
-    fn skip_value(slice: &mut CellSlice<'a, C>) -> bool {
+    fn skip_value(slice: &mut CellSlice<'a>) -> bool {
         if let Ok(token_bytes) = slice.load_small_uint(4) {
             slice.try_advance(8 * token_bytes as u16, 0)
         } else {
@@ -40,16 +40,16 @@ impl<'a, C: CellFamily> AugDictSkipValue<'a, C> for crate::num::Tokens {
 /// ahme_empty$0 {n:#} {V:Type} {A:Type} extra:A = HashmapAugE n V A;
 /// ahme_root$1 {n:#} {V:Type} {A:Type} root:^(HashmapAug n V A) extra:A = HashmapAugE n V A;
 /// ```
-pub struct AugDict<C: CellFamily, K, A, V> {
-    dict: Dict<C, K, (A, V)>,
+pub struct AugDict<K, A, V> {
+    dict: Dict<K, (A, V)>,
     extra: A,
     _key: PhantomData<K>,
     _value: PhantomData<(A, V)>,
 }
 
-impl<'a, C: CellFamily, K, A: Load<'a, C>, V> Load<'a, C> for AugDict<C, K, A, V> {
+impl<'a, K, A: Load<'a>, V> Load<'a> for AugDict<K, A, V> {
     #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         Ok(Self {
             dict: ok!(Dict::load_from(slice)),
             extra: ok!(A::load_from(slice)),
@@ -59,26 +59,26 @@ impl<'a, C: CellFamily, K, A: Load<'a, C>, V> Load<'a, C> for AugDict<C, K, A, V
     }
 }
 
-impl<C: CellFamily, K, A: Store<C>, V> Store<C> for AugDict<C, K, A, V> {
+impl<K, A: Store, V> Store for AugDict<K, A, V> {
     #[inline]
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         ok!(self.dict.store_into(builder, finalizer));
         self.extra.store_into(builder, finalizer)
     }
 }
 
-impl<C: CellFamily, K, A: Default, V> Default for AugDict<C, K, A, V> {
+impl<K, A: Default, V> Default for AugDict<K, A, V> {
     #[inline]
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<C: CellFamily, K, A: Clone, V> Clone for AugDict<C, K, A, V> {
+impl<K, A: Clone, V> Clone for AugDict<K, A, V> {
     fn clone(&self) -> Self {
         Self {
             dict: self.dict.clone(),
@@ -89,21 +89,21 @@ impl<C: CellFamily, K, A: Clone, V> Clone for AugDict<C, K, A, V> {
     }
 }
 
-impl<C: CellFamily, K, A: Eq, V> Eq for AugDict<C, K, A, V> {}
+impl<K, A: Eq, V> Eq for AugDict<K, A, V> {}
 
-impl<C: CellFamily, K, A: PartialEq, V> PartialEq for AugDict<C, K, A, V> {
+impl<K, A: PartialEq, V> PartialEq for AugDict<K, A, V> {
     fn eq(&self, other: &Self) -> bool {
         self.dict.eq(&other.dict) && self.extra.eq(&other.extra)
     }
 }
 
-impl<C: CellFamily, K, A: std::fmt::Debug, V> std::fmt::Debug for AugDict<C, K, A, V> {
+impl<K, A: std::fmt::Debug, V> std::fmt::Debug for AugDict<K, A, V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         debug_struct_field2_finish(f, "AugDict", "dict", &self.dict, "extra", &self.extra)
     }
 }
 
-impl<C: CellFamily, K, A: Default, V> AugDict<C, K, A, V> {
+impl<K, A: Default, V> AugDict<K, A, V> {
     /// Creates an empty dictionary
     pub fn new() -> Self {
         Self {
@@ -115,19 +115,16 @@ impl<C: CellFamily, K, A: Default, V> AugDict<C, K, A, V> {
     }
 }
 
-impl<C, K: DictKey, A, V> AugDict<C, K, A, V>
-where
-    for<'c> C: CellFamily + 'c,
-{
+impl<K: DictKey, A, V> AugDict<K, A, V> {
     pub(crate) fn load_from_root<'a>(
-        slice: &mut CellSlice<'a, C>,
-        finalizer: &mut dyn Finalizer<C>,
+        slice: &mut CellSlice<'a>,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<Self, Error>
     where
-        A: Load<'a, C>,
-        V: AugDictSkipValue<'a, C>,
+        A: Load<'a>,
+        V: AugDictSkipValue<'a>,
     {
-        let (extra, root) = ok!(load_from_root::<C, A, V>(slice, K::BITS, finalizer));
+        let (extra, root) = ok!(load_from_root::<A, V>(slice, K::BITS, finalizer));
 
         Ok(Self {
             dict: Dict::from(Some(root)),
@@ -138,15 +135,14 @@ where
     }
 }
 
-fn load_from_root<'a, C, A, V>(
-    slice: &mut CellSlice<'a, C>,
+fn load_from_root<'a, A, V>(
+    slice: &mut CellSlice<'a>,
     key_bit_len: u16,
-    finalizer: &mut dyn Finalizer<C>,
-) -> Result<(A, CellContainer<C>), Error>
+    finalizer: &mut dyn Finalizer,
+) -> Result<(A, Cell), Error>
 where
-    for<'c> C: CellFamily + 'c,
-    A: Load<'a, C>,
-    V: AugDictSkipValue<'a, C>,
+    A: Load<'a>,
+    V: AugDictSkipValue<'a>,
 {
     let root = *slice;
 
@@ -167,7 +163,7 @@ where
     let root_bits = root.remaining_bits() - slice.remaining_bits();
     let root_refs = root.remaining_refs() - slice.remaining_refs();
 
-    let mut b = CellBuilder::<C>::new();
+    let mut b = CellBuilder::new();
     ok!(b.store_slice(root.get_prefix(root_bits, root_refs)));
     match b.build_ext(finalizer) {
         Ok(cell) => Ok((extra, cell)),
@@ -175,7 +171,7 @@ where
     }
 }
 
-impl<C: CellFamily, K, A, V> AugDict<C, K, A, V> {
+impl<K, A, V> AugDict<K, A, V> {
     /// Returns `true` if the dictionary contains no elements.
     pub const fn is_empty(&self) -> bool {
         self.dict.is_empty()
@@ -183,7 +179,7 @@ impl<C: CellFamily, K, A, V> AugDict<C, K, A, V> {
 
     /// Returns the underlying dictionary.
     #[inline]
-    pub const fn dict(&self) -> &Dict<C, K, (A, V)> {
+    pub const fn dict(&self) -> &Dict<K, (A, V)> {
         &self.dict
     }
 
@@ -194,10 +190,9 @@ impl<C: CellFamily, K, A, V> AugDict<C, K, A, V> {
     }
 }
 
-impl<C, K, A, V> AugDict<C, K, A, V>
+impl<K, A, V> AugDict<K, A, V>
 where
-    for<'c> C: DefaultFinalizer + 'c,
-    K: Store<C> + DictKey,
+    K: Store + DictKey,
 {
     /// Returns `true` if the dictionary contains a value for the specified key.
     pub fn contains_key<Q>(&self, key: Q) -> Result<bool, Error>
@@ -208,10 +203,9 @@ where
     }
 }
 
-impl<C, K, A, V> AugDict<C, K, A, V>
+impl<K, A, V> AugDict<K, A, V>
 where
-    for<'c> C: DefaultFinalizer + 'c,
-    K: Store<C> + DictKey,
+    K: Store + DictKey,
 {
     /// Returns the value corresponding to the key.
     ///
@@ -219,20 +213,19 @@ where
     pub fn get<'a: 'b, 'b, Q>(&'a self, key: Q) -> Result<Option<(A, V)>, Error>
     where
         Q: Borrow<K> + 'b,
-        (A, V): Load<'a, C>,
+        (A, V): Load<'a>,
     {
-        self.dict.get_ext(key, &mut C::default_finalizer())
+        self.dict.get_ext(key, &mut Cell::default_finalizer())
     }
 }
 
 // TODO: add support for `extra` in edges
 
-// impl<C, K, A, V> AugDict<C, K, A, V>
+// impl<K, A, V> AugDict<K, A, V>
 // where
-//     for<'c> C: DefaultFinalizer + 'c,
-//     K: Store<C> + DictKey,
-//     A: Store<C>,
-//     V: Store<C>,
+//     K: Store + DictKey,
+//     A: Store,
+//     V: Store,
 // {
 //     /// Sets the augmented value associated with the key in the dictionary.
 //     ///
@@ -245,7 +238,7 @@ where
 //         E: Borrow<A>,
 //         T: Borrow<V>,
 //     {
-//         self.set_ext(key, aug, value, &mut C::default_finalizer())
+//         self.set_ext(key, aug, value, &mut Cell::default_finalizer())
 //     }
 
 //     /// Sets the augmented value associated with the key in the dictionary
@@ -260,7 +253,7 @@ where
 //         E: Borrow<A>,
 //         T: Borrow<V>,
 //     {
-//         self.replace_ext(key, aug, value, &mut C::default_finalizer())
+//         self.replace_ext(key, aug, value, &mut Cell::default_finalizer())
 //     }
 
 //     /// Sets the value associated with key in dictionary,
@@ -275,13 +268,12 @@ where
 //         E: Borrow<A>,
 //         T: Borrow<V>,
 //     {
-//         self.add_ext(key, aug, value, &mut C::default_finalizer())
+//         self.add_ext(key, aug, value, &mut Cell::default_finalizer())
 //     }
 // }
 
-impl<C, K, A, V> AugDict<C, K, A, V>
+impl<K, A, V> AugDict<K, A, V>
 where
-    for<'c> C: DefaultFinalizer + 'c,
     K: DictKey,
 {
     /// Gets an iterator over the entries of the dictionary, sorted by key.
@@ -297,9 +289,9 @@ where
     ///
     /// [`values`]: Dict::values
     /// [`raw_values`]: Dict::raw_values
-    pub fn iter<'a>(&'a self) -> AugIter<'_, C, K, A, V>
+    pub fn iter<'a>(&'a self) -> AugIter<'_, K, A, V>
     where
-        V: Load<'a, C>,
+        V: Load<'a>,
     {
         AugIter::new(self.dict.root())
     }
@@ -316,14 +308,13 @@ where
     /// for each element. Use [`values`] if you don't need keys from an iterator.
     ///
     /// [`values`]: Dict::values
-    pub fn keys(&'_ self) -> Keys<'_, C, K> {
+    pub fn keys(&'_ self) -> Keys<'_, K> {
         Keys::new(self.dict.root())
     }
 }
 
-impl<C, K, A, V> AugDict<C, K, A, V>
+impl<K, A, V> AugDict<K, A, V>
 where
-    for<'c> C: DefaultFinalizer + 'c,
     K: DictKey,
 {
     /// Gets an iterator over the augmented values of the dictionary, in order by key.
@@ -331,18 +322,17 @@ where
     ///
     /// If the dictionary is invalid, finishes after the first invalid element,
     /// returning an error.
-    pub fn values<'a>(&'a self) -> Values<'a, C, (A, V)>
+    pub fn values<'a>(&'a self) -> Values<'a, (A, V)>
     where
-        V: Load<'a, C>,
+        V: Load<'a>,
     {
         Values::new(self.dict.root(), K::BITS)
     }
 }
 
-impl<C, K, A, V> AugDict<C, K, A, V>
+impl<K, A, V> AugDict<K, A, V>
 where
-    for<'c> C: CellFamily + 'c,
-    K: Store<C> + DictKey,
+    K: Store + DictKey,
 {
     /// Returns the augmented value corresponding to the key.
     ///
@@ -350,18 +340,18 @@ where
     pub fn get_ext<'a: 'b, 'b, Q>(
         &'a self,
         key: Q,
-        finalizer: &mut dyn Finalizer<C>,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<Option<(A, V)>, Error>
     where
         Q: Borrow<K> + 'b,
-        A: Load<'a, C>,
-        V: Load<'a, C>,
+        A: Load<'a>,
+        V: Load<'a>,
     {
         self.dict.get_ext(key, finalizer)
     }
 
     /// Gets an iterator over the raw entries of the dictionary, sorted by key.
-    /// The iterator element type is `Result<(CellBuilder<C>, CellSlice<C>)>`.
+    /// The iterator element type is `Result<(CellBuilder, CellSlice)>`.
     ///
     /// If the dictionary is invalid, finishes after the first invalid element,
     /// returning an error.
@@ -373,12 +363,12 @@ where
     ///
     /// [`values`]: AugDict::values
     /// [`raw_values`]: AugDict::raw_values
-    pub fn raw_iter(&'_ self) -> RawIter<'_, C> {
+    pub fn raw_iter(&'_ self) -> RawIter<'_> {
         RawIter::new(self.dict.root(), K::BITS)
     }
 
     /// Gets an iterator over the raw keys of the dictionary, in sorted order.
-    /// The iterator element type is `Result<CellBuilder<C>>`.
+    /// The iterator element type is `Result<CellBuilder>`.
     ///
     /// If the dictionary is invalid, finishes after the first invalid element,
     /// returning an error.
@@ -390,32 +380,30 @@ where
     ///
     /// [`values`]: AugDict::values
     /// [`raw_values`]: AugDict::raw_values
-    pub fn raw_keys(&'_ self) -> RawKeys<'_, C> {
+    pub fn raw_keys(&'_ self) -> RawKeys<'_> {
         RawKeys::new(self.dict.root(), K::BITS)
     }
 }
 
-impl<C, K, A, V> AugDict<C, K, A, V>
+impl<K, A, V> AugDict<K, A, V>
 where
-    for<'c> C: CellFamily + 'c,
     K: DictKey,
 {
     /// Gets an iterator over the raw values of the dictionary, in order by key.
-    /// The iterator element type is `Result<CellSlice<C>>`.
+    /// The iterator element type is `Result<CellSlice>`.
     ///
     /// If the dictionary is invalid, finishes after the first invalid element,
     /// returning an error.
-    pub fn raw_values(&'_ self) -> RawValues<'_, C> {
+    pub fn raw_values(&'_ self) -> RawValues<'_> {
         RawValues::new(self.dict.root(), K::BITS)
     }
 }
 
-// impl<C, K, A, V> AugDict<C, K, A, V>
+// impl<K, A, V> AugDict<K, A, V>
 // where
-//     for<'c> C: CellFamily + 'c,
-//     K: Store<C> + DictKey,
-//     A: Store<C>,
-//     V: Store<C>,
+//     K: Store + DictKey,
+//     A: Store,
+//     V: Store,
 // {
 //     /// Sets the value associated with the key in the dictionary.
 //     pub fn set_ext<Q, E, T>(
@@ -423,7 +411,7 @@ where
 //         key: Q,
 //         aug: E,
 //         value: T,
-//         finalizer: &mut dyn Finalizer<C>,
+//         finalizer: &mut dyn Finalizer,
 //     ) -> Result<(), Error>
 //     where
 //         Q: Borrow<K>,
@@ -446,7 +434,7 @@ where
 //         key: Q,
 //         aug: E,
 //         value: T,
-//         finalizer: &mut dyn Finalizer<C>,
+//         finalizer: &mut dyn Finalizer,
 //     ) -> Result<(), Error>
 //     where
 //         Q: Borrow<K>,
@@ -469,7 +457,7 @@ where
 //         key: Q,
 //         aug: E,
 //         value: T,
-//         finalizer: &mut dyn Finalizer<C>,
+//         finalizer: &mut dyn Finalizer,
 //     ) -> Result<(), Error>
 //     where
 //         Q: Borrow<K>,
@@ -491,13 +479,12 @@ where
 //         aug: &A,
 //         value: &V,
 //         mode: SetMode,
-//         finalizer: &mut dyn Finalizer<C>,
+//         finalizer: &mut dyn Finalizer,
 //     ) -> Result<(), Error>
 //     where
-//         for<'c> C: CellFamily + 'c,
-//         K: Store<C> + DictKey,
-//         A: Store<C>,
-//         V: Store<C>,
+//         K: Store + DictKey,
+//         A: Store,
+//         V: Store,
 //     {
 //         let key = ok!(serialize_entry(key, finalizer));
 //         let value = ok!(serialize_aug_entry(aug, value, finalizer));
@@ -518,11 +505,11 @@ where
 /// This struct is created by the [`iter`] method on [`AugDict`]. See its documentation for more.
 ///
 /// [`iter`]: AugDict::iter
-pub struct AugIter<'a, C: CellFamily, K, A, V> {
-    inner: Iter<'a, C, K, (A, V)>,
+pub struct AugIter<'a, K, A, V> {
+    inner: Iter<'a, K, (A, V)>,
 }
 
-impl<C: CellFamily, K, A, V> Clone for AugIter<'_, C, K, A, V> {
+impl<K, A, V> Clone for AugIter<'_, K, A, V> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -530,23 +517,22 @@ impl<C: CellFamily, K, A, V> Clone for AugIter<'_, C, K, A, V> {
     }
 }
 
-impl<'a, C: CellFamily, K, A, V> AugIter<'a, C, K, A, V>
+impl<'a, K, A, V> AugIter<'a, K, A, V>
 where
     K: DictKey,
 {
     /// Creates an iterator over the entries of a dictionary.
-    pub fn new(root: &'a Option<CellContainer<C>>) -> Self {
+    pub fn new(root: &'a Option<Cell>) -> Self {
         Self {
             inner: Iter::new(root),
         }
     }
 }
 
-impl<'a, C, K, A, V> Iterator for AugIter<'a, C, K, A, V>
+impl<'a, K, A, V> Iterator for AugIter<'a, K, A, V>
 where
-    for<'c> C: DefaultFinalizer + 'c,
     K: DictKey,
-    (A, V): Load<'a, C>,
+    (A, V): Load<'a>,
 {
     type Item = Result<(K, A, V), Error>;
 
@@ -558,12 +544,12 @@ where
     }
 }
 
-// fn serialize_aug_entry<C: CellFamily, A: Store<C>, V: Store<C>>(
+// fn serialize_aug_entry<A: Store, V: Store>(
 //     aug: &A,
 //     entry: &V,
-//     finalizer: &mut dyn Finalizer<C>,
-// ) -> Result<CellContainer<C>, Error> {
-//     let mut builder = CellBuilder::<C>::new();
+//     finalizer: &mut dyn Finalizer,
+// ) -> Result<CellContainer, Error> {
+//     let mut builder = CellBuilder::new();
 //     if aug.store_into(&mut builder, finalizer) && entry.store_into(&mut builder, finalizer) {
 //         if let Some(key) = builder.build_ext(finalizer) {
 //             return Ok(key);

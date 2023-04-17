@@ -76,20 +76,16 @@ impl AccountStatus {
     pub const BITS: u16 = 2;
 }
 
-impl<C: CellFamily> Store<C> for AccountStatus {
+impl Store for AccountStatus {
     #[inline]
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder<C>,
-        _: &mut dyn Finalizer<C>,
-    ) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
         builder.store_small_uint(*self as u8, 2)
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for AccountStatus {
+impl<'a> Load<'a> for AccountStatus {
     #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         match slice.load_small_uint(2) {
             Ok(ty) => Ok(match ty {
                 0b00 => Self::Uninit,
@@ -109,9 +105,9 @@ impl<'a, C: CellFamily> Load<'a, C> for AccountStatus {
 
 /// Shard accounts entry.
 #[derive(CustomDebug, CustomClone, CustomEq, Store, Load)]
-pub struct ShardAccount<C: CellFamily> {
+pub struct ShardAccount {
     /// Optional reference to account state.
-    pub account: Lazy<C, OptionalAccount<C>>,
+    pub account: Lazy<OptionalAccount>,
     /// The exact hash of the last transaction.
     #[debug(with = "DisplayHash")]
     pub last_trans_hash: CellHash,
@@ -119,35 +115,28 @@ pub struct ShardAccount<C: CellFamily> {
     pub last_trans_lt: u64,
 }
 
-impl<C: CellFamily> ShardAccount<C> {
+impl ShardAccount {
     /// Tries to load account data.
-    pub fn load_account(&self) -> Result<Option<Account<C>>, Error> {
+    pub fn load_account(&self) -> Result<Option<Account>, Error> {
         let OptionalAccount(account) = ok!(self.account.load());
         Ok(account)
     }
 }
 
 /// A wrapper for `Option<Account>` with customized representation.
-#[derive(CustomDebug, CustomClone, CustomEq)]
-pub struct OptionalAccount<C: CellFamily>(pub Option<Account<C>>);
+#[derive(Default, Debug, Clone, Eq, PartialEq)]
+pub struct OptionalAccount(pub Option<Account>);
 
-impl<C: CellFamily> Default for OptionalAccount<C> {
-    #[inline]
-    fn default() -> Self {
-        Self(None)
-    }
-}
-
-impl<C: CellFamily> OptionalAccount<C> {
+impl OptionalAccount {
     /// Non-existing account.
     pub const EMPTY: Self = Self(None);
 }
 
-impl<C: CellFamily> Store<C> for OptionalAccount<C> {
+impl Store for OptionalAccount {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         match &self.0 {
             None => builder.store_bit_zero(),
@@ -175,8 +164,8 @@ impl<C: CellFamily> Store<C> for OptionalAccount<C> {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for OptionalAccount<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for OptionalAccount {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let with_init_code_hash = if ok!(slice.load_bit()) {
             false // old version
         } else if slice.is_data_empty() {
@@ -207,7 +196,7 @@ impl<'a, C: CellFamily> Load<'a, C> for OptionalAccount<C> {
 
 /// Existing account data.
 #[derive(CustomDebug, CustomClone, CustomEq)]
-pub struct Account<C: CellFamily> {
+pub struct Account {
     /// Account address.
     pub address: IntAddr,
     /// Storage statistics.
@@ -215,9 +204,9 @@ pub struct Account<C: CellFamily> {
     /// Logical time after the last transaction execution.
     pub last_trans_lt: u64,
     /// Account balance for all currencies.
-    pub balance: CurrencyCollection<C>,
+    pub balance: CurrencyCollection,
     /// Account state.
-    pub state: AccountState<C>,
+    pub state: AccountState,
     /// Optional initial code hash.
     #[debug(with = "DisplayOptionalHash")]
     pub init_code_hash: Option<CellHash>,
@@ -225,20 +214,20 @@ pub struct Account<C: CellFamily> {
 
 /// State of an existing account.
 #[derive(CustomDebug, CustomClone, CustomEq)]
-pub enum AccountState<C: CellFamily> {
+pub enum AccountState {
     /// Account exists but has not yet been deployed.
     Uninit,
     /// Account exists and has been deployed.
-    Active(StateInit<C>),
+    Active(StateInit),
     /// Account exists but has been frozen. Contains a hash of the last known [`StateInit`].
     Frozen(CellHash),
 }
 
-impl<C: CellFamily> Store<C> for AccountState<C> {
+impl Store for AccountState {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         match self {
             Self::Uninit => builder.store_small_uint(0b00, 2),
@@ -254,10 +243,10 @@ impl<C: CellFamily> Store<C> for AccountState<C> {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for AccountState<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for AccountState {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         Ok(if ok!(slice.load_bit()) {
-            match StateInit::<C>::load_from(slice) {
+            match StateInit::load_from(slice) {
                 Ok(state) => Self::Active(state),
                 Err(e) => return Err(e),
             }
@@ -273,21 +262,21 @@ impl<'a, C: CellFamily> Load<'a, C> for AccountState<C> {
 }
 
 /// Deployed account state.
-#[derive(CustomDebug, CustomClone, CustomEq, Store, Load)]
-pub struct StateInit<C: CellFamily> {
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+pub struct StateInit {
     /// Optional split depth for large smart contracts.
     pub split_depth: Option<SplitDepth>,
     /// Optional special contract flags.
     pub special: Option<SpecialFlags>,
     /// Optional contract code.
-    pub code: Option<CellContainer<C>>,
+    pub code: Option<Cell>,
     /// Optional contract data.
-    pub data: Option<CellContainer<C>>,
+    pub data: Option<Cell>,
     /// Libraries used in smart-contract.
-    pub libraries: Dict<C, CellHash, SimpleLib<C>>,
+    pub libraries: Dict<CellHash, SimpleLib>,
 }
 
-impl<C: CellFamily> Default for StateInit<C> {
+impl Default for StateInit {
     fn default() -> Self {
         Self {
             split_depth: None,
@@ -299,7 +288,7 @@ impl<C: CellFamily> Default for StateInit<C> {
     }
 }
 
-impl<C: CellFamily> StateInit<C> {
+impl StateInit {
     /// Returns the number of data bits that this struct occupies.
     pub const fn bit_len(&self) -> u16 {
         (1 + self.split_depth.is_some() as u16 * SplitDepth::BITS)
@@ -327,18 +316,14 @@ impl SpecialFlags {
     pub const BITS: u16 = 2;
 }
 
-impl<C: CellFamily> Store<C> for SpecialFlags {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder<C>,
-        _: &mut dyn Finalizer<C>,
-    ) -> Result<(), Error> {
+impl Store for SpecialFlags {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
         builder.store_small_uint(((self.tick as u8) << 1) | self.tock as u8, 2)
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for SpecialFlags {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for SpecialFlags {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         match slice.load_small_uint(2) {
             Ok(data) => Ok(Self {
                 tick: data & 0b10 != 0,
@@ -350,10 +335,10 @@ impl<'a, C: CellFamily> Load<'a, C> for SpecialFlags {
 }
 
 /// Simple TVM library.
-#[derive(CustomDebug, CustomClone, CustomEq, Store, Load)]
-pub struct SimpleLib<C: CellFamily> {
+#[derive(CustomDebug, Clone, CustomEq, Store, Load)]
+pub struct SimpleLib {
     /// Whether this library is accessible from other accounts.
     pub public: bool,
     /// Reference to the library cell.
-    pub root: CellContainer<C>,
+    pub root: Cell,
 }
