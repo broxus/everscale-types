@@ -19,43 +19,31 @@ path = ".."
 members = ["."]
 
 [[bin]]
-name = "boc_arc_decode"
-path = "fuzz_targets/boc_arc_decode.rs"
+name = "boc_decode"
+path = "fuzz_targets/boc_decode.rs"
 test = false
 doc = false
 
 [[bin]]
-name = "boc_arc_decode_pair"
-path = "fuzz_targets/boc_arc_decode_pair.rs"
+name = "boc_decode_pair"
+path = "fuzz_targets/boc_decode_pair.rs"
 test = false
 doc = false
 
 [[bin]]
-name = "boc_rc_decode"
-path = "fuzz_targets/boc_rc_decode.rs"
+name = "boc_decode_encode"
+path = "fuzz_targets/boc_decode_encode.rs"
 test = false
 doc = false
 
 [[bin]]
-name = "boc_rc_decode_pair"
-path = "fuzz_targets/boc_rc_decode_pair.rs"
+name = "boc_dict"
+path = "fuzz_targets/boc_dict.rs"
 test = false
 doc = false
 
 [[bin]]
-name = "boc_rc_decode_encode"
-path = "fuzz_targets/boc_rc_decode_encode.rs"
-test = false
-doc = false
-
-[[bin]]
-name = "boc_rc_dict"
-path = "fuzz_targets/boc_rc_dict.rs"
-test = false
-doc = false
-
-[[bin]]
-name = "boc_rc_message"
-path = "fuzz_targets/boc_rc_message.rs"
+name = "boc_message"
+path = "fuzz_targets/boc_message.rs"
 test = false
 doc = false

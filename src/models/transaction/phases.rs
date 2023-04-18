@@ -23,13 +23,13 @@ pub struct StoragePhase {
 /// Credit phase info.
 ///
 /// At this phase message balance is added to the account balance.
-#[derive(CustomDebug, CustomClone, CustomEq, Store, Load)]
-pub struct CreditPhase<C: CellFamily> {
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+pub struct CreditPhase {
     /// Amount of tokens paid for the debt.
     pub due_fees_collected: Option<Tokens>,
     /// Amount of tokens added to the account balance from the remaining
     /// message balance.
-    pub credit: CurrencyCollection<C>,
+    pub credit: CurrencyCollection,
 }
 
 /// Compute phase info.
@@ -43,11 +43,11 @@ pub enum ComputePhase {
     Executed(ExecutedComputePhase),
 }
 
-impl<C: CellFamily> Store<C> for ComputePhase {
+impl Store for ComputePhase {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         match self {
             Self::Skipped(phase) => {
@@ -56,7 +56,7 @@ impl<C: CellFamily> Store<C> for ComputePhase {
             }
             Self::Executed(phase) => {
                 let cell = {
-                    let mut builder = CellBuilder::<C>::new();
+                    let mut builder = CellBuilder::new();
                     ok!(phase.gas_used.store_into(&mut builder, finalizer));
                     ok!(phase.gas_credit.store_into(&mut builder, finalizer));
                     ok!(builder.store_u8(phase.mode as u8));
@@ -80,8 +80,8 @@ impl<C: CellFamily> Store<C> for ComputePhase {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for ComputePhase {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for ComputePhase {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         if !ok!(slice.load_bit()) {
             return Ok(Self::Skipped(ok!(SkippedComputePhase::load_from(slice))));
         }
@@ -159,18 +159,14 @@ pub enum ComputePhaseSkipReason {
     NoGas = 0b10,
 }
 
-impl<C: CellFamily> Store<C> for ComputePhaseSkipReason {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder<C>,
-        _: &mut dyn Finalizer<C>,
-    ) -> Result<(), Error> {
+impl Store for ComputePhaseSkipReason {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
         builder.store_small_uint(*self as u8, 2)
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for ComputePhaseSkipReason {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for ComputePhaseSkipReason {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         match slice.load_small_uint(2) {
             Ok(0b00) => Ok(Self::NoState),
             Ok(0b01) => Ok(Self::BadState),
@@ -218,11 +214,11 @@ pub struct ActionPhase {
     pub total_message_size: StorageUsedShort,
 }
 
-impl<C: CellFamily> Store<C> for ActionPhase {
+impl Store for ActionPhase {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         let flags = ((self.success as u8) << 2) | ((self.valid as u8) << 1) | self.no_funds as u8;
         let counts = ((self.total_actions as u64) << 48)
@@ -242,8 +238,8 @@ impl<C: CellFamily> Store<C> for ActionPhase {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for ActionPhase {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for ActionPhase {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let flags = ok!(slice.load_small_uint(3));
 
         let status_change = ok!(AccountStatusChange::load_from(slice));
@@ -288,11 +284,11 @@ pub enum BouncePhase {
     Executed(ExecutedBouncePhase),
 }
 
-impl<C: CellFamily> Store<C> for BouncePhase {
+impl Store for BouncePhase {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         match self {
             Self::NegativeFunds => builder.store_small_uint(0b00, 2),
@@ -308,8 +304,8 @@ impl<C: CellFamily> Store<C> for BouncePhase {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for BouncePhase {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for BouncePhase {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         Ok(if ok!(slice.load_bit()) {
             match ExecutedBouncePhase::load_from(slice) {
                 Ok(phase) => Self::Executed(phase),
@@ -357,12 +353,8 @@ pub enum AccountStatusChange {
     Deleted = 0b11,
 }
 
-impl<C: CellFamily> Store<C> for AccountStatusChange {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder<C>,
-        _: &mut dyn Finalizer<C>,
-    ) -> Result<(), Error> {
+impl Store for AccountStatusChange {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
         if *self == Self::Unchanged {
             builder.store_bit_zero()
         } else {
@@ -371,8 +363,8 @@ impl<C: CellFamily> Store<C> for AccountStatusChange {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for AccountStatusChange {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for AccountStatusChange {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         Ok(if !ok!(slice.load_bit()) {
             Self::Unchanged
         } else if ok!(slice.load_bit()) {

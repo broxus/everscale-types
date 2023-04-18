@@ -4,12 +4,11 @@ use everscale_types::dict::*;
 use rand::distributions::{Distribution, Standard};
 use rand::{Rng, SeedableRng};
 
-fn build_dict<C, K, V>(id: BenchmarkId, num_elements: usize, c: &mut Criterion)
+fn build_dict_impl<K, V>(id: BenchmarkId, num_elements: usize, c: &mut Criterion)
 where
-    for<'c> C: DefaultFinalizer + 'c,
     Standard: Distribution<K> + Distribution<V>,
-    K: Store<C> + DictKey,
-    V: Store<C>,
+    K: Store + DictKey,
+    V: Store,
 {
     let mut rng = rand_xorshift::XorShiftRng::from_seed([0u8; 16]);
 
@@ -19,7 +18,7 @@ where
 
     c.bench_with_input(id, &values, |b, values| {
         b.iter(|| {
-            let mut result = Dict::<C, K, V>::new();
+            let mut result = Dict::<K, V>::new();
             for (key, value) in values {
                 result.set(key, value).unwrap();
             }
@@ -28,28 +27,23 @@ where
     });
 }
 
-fn build_dict_group<C>(cf: &str, c: &mut Criterion)
-where
-    for<'c> C: DefaultFinalizer + 'c,
-{
+fn build_dict_group(c: &mut Criterion) {
     macro_rules! decl_dict_benches {
-        ($cf:ident, $({ $n:literal, $k:ty, $v:ident }),*$(,)?) => {
+        ($({ $n:literal, $k:ty, $v:ident }),*$(,)?) => {
             $({
                 let id = BenchmarkId::new(
                     "build_dict",
                     format!(
-                        "family={}; size={}; key={}; value={}",
-                        cf, $n, stringify!($k), stringify!($v)
+                        "size={}; key={}; value={}",
+                        $n, stringify!($k), stringify!($v)
                     )
                 );
-                build_dict::<$cf, $k, $v>(id, $n, c);
+                build_dict_impl::<$k, $v>(id, $n, c);
             });*
         };
     }
 
     decl_dict_benches![
-        C,
-
         { 10, u8, u64 },
         { 256, u8, u64 },
 
@@ -70,14 +64,5 @@ where
     ];
 }
 
-fn rc_build_dict_group(c: &mut Criterion) {
-    build_dict_group::<rc::RcCellFamily>("RcCellFamily", c);
-}
-
-fn sync_build_dict_group(c: &mut Criterion) {
-    build_dict_group::<sync::ArcCellFamily>("ArcCellFamily", c);
-}
-
-criterion_group!(build_dict_rc, rc_build_dict_group);
-criterion_group!(build_dict_sync, sync_build_dict_group);
-criterion_main!(build_dict_rc, build_dict_sync);
+criterion_group!(build_dict, build_dict_group);
+criterion_main!(build_dict);

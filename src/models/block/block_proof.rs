@@ -1,35 +1,34 @@
 use crate::cell::*;
 use crate::dict::Dict;
 use crate::error::Error;
-use crate::util::*;
 
 use super::{BlockId, BlockSignature};
 use crate::models::shard::ValidatorBaseInfo;
 
 /// Typed block proof.
-#[derive(CustomClone, CustomDebug, CustomEq)]
-pub struct BlockProof<C: CellFamily> {
+#[derive(Clone, Debug)]
+pub struct BlockProof {
     /// Id of the related block.
     pub proof_for: BlockId,
     /// Merkle proof cell.
-    pub root: CellContainer<C>,
+    pub root: Cell,
     /// Optional references for the masterchain block.
-    pub signatures: Option<BlockSignatures<C>>,
+    pub signatures: Option<BlockSignatures>,
 }
 
-impl<C: CellFamily> BlockProof<C> {
+impl BlockProof {
     const TAG: u8 = 0xc3;
 }
 
-impl<C: CellFamily> Store<C> for BlockProof<C> {
+impl Store for BlockProof {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         let child_cell = match &self.signatures {
             Some(signatures) => {
-                let mut builder = CellBuilder::<C>::new();
+                let mut builder = CellBuilder::new();
                 ok!(signatures.store_into(&mut builder, finalizer));
                 Some(ok!(builder.build_ext(finalizer)))
             }
@@ -49,8 +48,8 @@ impl<C: CellFamily> Store<C> for BlockProof<C> {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for BlockProof<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for BlockProof {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         match slice.load_u8() {
             Ok(Self::TAG) => {}
             Ok(_) => return Err(Error::InvalidTag),
@@ -62,7 +61,7 @@ impl<'a, C: CellFamily> Load<'a, C> for BlockProof<C> {
             root: ok!(slice.load_reference_cloned()),
             signatures: if ok!(slice.load_bit()) {
                 match slice.load_reference() {
-                    Ok(cell) => Some(ok!(cell.parse::<BlockSignatures<C>>())),
+                    Ok(cell) => Some(ok!(cell.parse::<BlockSignatures>())),
                     Err(e) => return Err(e),
                 }
             } else {
@@ -73,9 +72,9 @@ impl<'a, C: CellFamily> Load<'a, C> for BlockProof<C> {
 }
 
 /// Masterchain block signatures.
-#[derive(CustomClone, CustomDebug, CustomEq, Store, Load)]
+#[derive(Debug, Clone, Store, Load)]
 #[tlb(tag = "#11")]
-pub struct BlockSignatures<C: CellFamily> {
+pub struct BlockSignatures {
     /// Brief validator basic info.
     pub validator_info: ValidatorBaseInfo,
     /// Total number of signatures.
@@ -83,5 +82,5 @@ pub struct BlockSignatures<C: CellFamily> {
     /// Total validators weight.
     pub total_weight: u64,
     /// Block signatures from all signers.
-    pub signatures: Dict<C, u16, BlockSignature>,
+    pub signatures: Dict<u16, BlockSignature>,
 }

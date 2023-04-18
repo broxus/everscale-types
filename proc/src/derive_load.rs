@@ -13,9 +13,6 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Erro
     cx.check()?;
 
     let tlb_lifetime: syn::LifetimeDef = syn::parse_quote!('tlb);
-    let cell_family: syn::Ident = quote::format_ident!("C");
-    let cell_family_ty: syn::TypeParam =
-        syn::parse_quote!(#cell_family: ::everscale_types::cell::CellFamily);
 
     let ident = &container.ident;
     let generics = bound::without_default(container.generics);
@@ -24,16 +21,9 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Erro
     let mut alt_generics = generics.clone();
 
     let mut has_tlb_lifetime = false;
-    let mut has_cell_family = false;
     for param in alt_generics.params.iter() {
-        match param {
-            syn::GenericParam::Lifetime(def) => {
-                has_tlb_lifetime |= def.lifetime == tlb_lifetime.lifetime;
-            }
-            syn::GenericParam::Type(ty) => {
-                has_cell_family |= ty.ident == cell_family_ty.ident;
-            }
-            _ => {}
+        if let syn::GenericParam::Lifetime(def) = param {
+            has_tlb_lifetime |= def.lifetime == tlb_lifetime.lifetime;
         }
     }
 
@@ -42,18 +32,13 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Erro
             .params
             .push(syn::GenericParam::Lifetime(tlb_lifetime.clone()));
     }
-    if !has_cell_family {
-        alt_generics
-            .params
-            .push(syn::GenericParam::Type(cell_family_ty));
-    }
     let (impl_generics, _, _) = alt_generics.split_for_impl();
 
     let (inline, body) = match &container.data {
         ast::Data::Enum(variants) => (variants.len() < 2, build_enum(variants)),
         ast::Data::Struct(style, fields) => {
             let inline = fields.len() < 2;
-            let body = build_struct(&container, &tlb_lifetime, &cell_family, *style, fields);
+            let body = build_struct(&container, &tlb_lifetime, *style, fields);
             (inline, body)
         }
     };
@@ -62,10 +47,10 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Erro
 
     let result = quote! {
         #[automatically_derived]
-        impl #impl_generics ::everscale_types::cell::Load<#tlb_lifetime, #cell_family> for #ident #ty_generics #where_clause {
+        impl #impl_generics ::everscale_types::cell::Load<#tlb_lifetime> for #ident #ty_generics #where_clause {
             #inline
             fn load_from(
-                __slice: &mut ::everscale_types::cell::CellSlice<#tlb_lifetime, #cell_family>
+                __slice: &mut ::everscale_types::cell::CellSlice<#tlb_lifetime>
             ) -> ::core::result::Result<Self, ::everscale_types::error::Error> {
                 #body
             }
@@ -82,7 +67,6 @@ fn build_enum(_: &[ast::Variant<'_>]) -> TokenStream {
 fn build_struct(
     container: &ast::Container<'_>,
     lifetime_def: &syn::LifetimeDef,
-    cell_family: &syn::Ident,
     style: ast::Style,
     fields: &[ast::Field<'_>],
 ) -> TokenStream {
@@ -90,7 +74,7 @@ fn build_struct(
 
     let members = fields.iter().map(|field| {
         let ident = &field.member;
-        let op = load_op(lifetime_def, cell_family, field.ty);
+        let op = load_op(lifetime_def, field.ty);
         quote! {
             #ident: #op
         }
@@ -163,11 +147,7 @@ fn load_tag_op(tag: attr::TlbTag) -> Option<TokenStream> {
     })
 }
 
-fn load_op(
-    lifetime_def: &syn::LifetimeDef,
-    cell_family: &syn::Ident,
-    ty: &syn::Type,
-) -> TokenStream {
+fn load_op(lifetime_def: &syn::LifetimeDef, ty: &syn::Type) -> TokenStream {
     #[allow(clippy::unnecessary_operation)]
     'fallback: {
         match ty {
@@ -184,8 +164,8 @@ fn load_op(
                         "i64" => (quote!(load_u64()), Some(quote!(as i64))),
                         "u64" => (quote!(load_u64()), None),
                         "CellHash" => (quote!(load_u256()), None),
-                        "Cell" => (quote!(load_reference()), None),
-                        "CellContainer" => (quote!(load_reference_cloned()), None),
+                        "CellImpl" => (quote!(load_reference()), None),
+                        "Cell" => (quote!(load_reference_cloned()), None),
                         _ => break 'fallback,
                     };
 
@@ -196,14 +176,14 @@ fn load_op(
                 }
             }
             syn::Type::Reference(syn::TypeReference { elem, .. }) => {
-                return load_op(lifetime_def, cell_family, elem);
+                return load_op(lifetime_def, elem);
             }
             _ => break 'fallback,
         }
     };
 
     quote! {
-        match <#ty as ::everscale_types::cell::Load<#lifetime_def, #cell_family>>::load_from(__slice) {
+        match <#ty as ::everscale_types::cell::Load<#lifetime_def>>::load_from(__slice) {
             ::core::result::Result::Ok(val) => val,
             ::core::result::Result::Err(err) => return ::core::result::Result::Err(err),
         }

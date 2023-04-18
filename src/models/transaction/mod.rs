@@ -16,8 +16,8 @@ pub use self::phases::*;
 mod phases;
 
 /// Blockchain transaction.
-#[derive(CustomDebug, CustomClone, CustomEq)]
-pub struct Transaction<C: CellFamily> {
+#[derive(CustomDebug, Clone, Eq, PartialEq)]
+pub struct Transaction {
     /// Account on which this transaction was produced.
     #[debug(with = "DisplayHash")]
     pub account: CellHash,
@@ -37,22 +37,22 @@ pub struct Transaction<C: CellFamily> {
     /// Account status after this transaction.
     pub end_status: AccountStatus,
     /// Optional incoming message.
-    pub in_msg: Option<CellContainer<C>>,
+    pub in_msg: Option<Cell>,
     /// Outgoing messages.
-    pub out_msgs: Dict<C, Uint15, CellContainer<C>>,
+    pub out_msgs: Dict<Uint15, Cell>,
     /// Total transaction fees (including extra fwd fees).
-    pub total_fees: CurrencyCollection<C>,
+    pub total_fees: CurrencyCollection,
     /// Account state hashes.
-    pub state_update: Lazy<C, HashUpdate>,
+    pub state_update: Lazy<HashUpdate>,
     /// Detailed transaction info.
-    pub info: Lazy<C, TxInfo<C>>,
+    pub info: Lazy<TxInfo>,
 }
 
-impl<C: CellFamily> Transaction<C> {
+impl Transaction {
     /// Tries to load the incoming message, if present.
-    pub fn load_in_msg(&self) -> Result<Option<Message<'_, C>>, Error> {
+    pub fn load_in_msg(&self) -> Result<Option<Message<'_>>, Error> {
         match &self.in_msg {
-            Some(in_msg) => match Message::<C>::load_from(&mut in_msg.as_ref().as_slice()) {
+            Some(in_msg) => match Message::load_from(&mut in_msg.as_ref().as_slice()) {
                 Ok(message) => Ok(Some(message)),
                 Err(e) => Err(e),
             },
@@ -61,21 +61,18 @@ impl<C: CellFamily> Transaction<C> {
     }
 
     /// Tries to load the detailed transaction info from the lazy cell.
-    pub fn load_info(&self) -> Result<TxInfo<C>, Error> {
+    pub fn load_info(&self) -> Result<TxInfo, Error> {
         self.info.load()
     }
 }
 
-impl<C> Transaction<C>
-where
-    for<'c> C: CellFamily + 'c,
-{
+impl Transaction {
     /// Gets an iterator over the output messages of this transaction, in order by lt.
-    /// The iterator element type is `Result<Message<'a, C>>`.
+    /// The iterator element type is `Result<Message<'a>>`.
     ///
     /// If the dictionary or message is invalid, finishes after the first invalid element,
     /// returning an error.
-    pub fn iter_out_msgs(&'_ self) -> TxOutMsgIter<'_, C> {
+    pub fn iter_out_msgs(&'_ self) -> TxOutMsgIter<'_> {
         TxOutMsgIter {
             inner: self.out_msgs.raw_values(),
         }
@@ -88,22 +85,19 @@ where
 /// See its documentation for more.
 ///
 /// [`iter_out_msgs`]: Transaction::iter_out_msgs
-#[derive(CustomClone)]
-pub struct TxOutMsgIter<'a, C: CellFamily> {
-    inner: dict::RawValues<'a, C>,
+#[derive(Clone)]
+pub struct TxOutMsgIter<'a> {
+    inner: dict::RawValues<'a>,
 }
 
-impl<'a, C: CellFamily + 'a> Iterator for TxOutMsgIter<'a, C>
-where
-    for<'c> C: CellFamily + 'c,
-{
-    type Item = Result<Message<'a, C>, Error>;
+impl<'a> Iterator for TxOutMsgIter<'a> {
+    type Item = Result<Message<'a>, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.inner.next()? {
             Ok(mut value) => {
                 let e = match value.load_reference() {
-                    Ok(value) => match Message::<'a, C>::load_from(&mut value.as_slice()) {
+                    Ok(value) => match Message::<'a>::load_from(&mut value.as_slice()) {
                         Ok(message) => return Some(Ok(message)),
                         Err(e) => e,
                     },
@@ -117,18 +111,18 @@ where
     }
 }
 
-impl<C: CellFamily> Transaction<C> {
+impl Transaction {
     const TAG: u8 = 0b0111;
 }
 
-impl<C: CellFamily> Store<C> for Transaction<C> {
+impl Store for Transaction {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         let messages = {
-            let mut builder = CellBuilder::<C>::new();
+            let mut builder = CellBuilder::new();
             ok!(self.in_msg.store_into(&mut builder, finalizer));
             ok!(self.out_msgs.store_into(&mut builder, finalizer));
             ok!(builder.build_ext(finalizer))
@@ -150,8 +144,8 @@ impl<C: CellFamily> Store<C> for Transaction<C> {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for Transaction<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for Transaction {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         match slice.load_small_uint(4) {
             Ok(Self::TAG) => {}
             Ok(_) => return Err(Error::InvalidTag),
@@ -160,7 +154,7 @@ impl<'a, C: CellFamily> Load<'a, C> for Transaction<C> {
 
         let (in_msg, out_msgs) = {
             let slice = &mut ok!(slice.load_reference()).as_slice();
-            let in_msg = ok!(Option::<CellContainer<C>>::load_from(slice));
+            let in_msg = ok!(Option::<Cell>::load_from(slice));
             let out_msgs = ok!(Dict::load_from(slice));
             (in_msg, out_msgs)
         };
@@ -176,27 +170,27 @@ impl<'a, C: CellFamily> Load<'a, C> for Transaction<C> {
             end_status: ok!(AccountStatus::load_from(slice)),
             in_msg,
             out_msgs,
-            total_fees: ok!(CurrencyCollection::<C>::load_from(slice)),
-            state_update: ok!(Lazy::<C, HashUpdate>::load_from(slice)),
-            info: ok!(Lazy::<C, TxInfo<C>>::load_from(slice)),
+            total_fees: ok!(CurrencyCollection::load_from(slice)),
+            state_update: ok!(Lazy::<HashUpdate>::load_from(slice)),
+            info: ok!(Lazy::<TxInfo>::load_from(slice)),
         })
     }
 }
 
 /// Detailed transaction info.
-#[derive(CustomDebug, CustomClone, CustomEq)]
-pub enum TxInfo<C: CellFamily> {
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum TxInfo {
     /// Ordinary transaction info.
-    Ordinary(OrdinaryTxInfo<C>),
+    Ordinary(OrdinaryTxInfo),
     /// Tick-tock transaction info.
     TickTock(TickTockTxInfo),
 }
 
-impl<C: CellFamily> Store<C> for TxInfo<C> {
+impl Store for TxInfo {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         match self {
             Self::Ordinary(info) => {
@@ -211,8 +205,8 @@ impl<C: CellFamily> Store<C> for TxInfo<C> {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for TxInfo<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for TxInfo {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let tag_part = ok!(slice.load_small_uint(3));
         Ok(if tag_part == 0b001 {
             match TickTockTxInfo::load_from(slice) {
@@ -220,7 +214,7 @@ impl<'a, C: CellFamily> Load<'a, C> for TxInfo<C> {
                 Err(e) => return Err(e),
             }
         } else if tag_part == 0b000 && !ok!(slice.load_bit()) {
-            match OrdinaryTxInfo::<C>::load_from(slice) {
+            match OrdinaryTxInfo::load_from(slice) {
                 Ok(info) => Self::Ordinary(info),
                 Err(e) => return Err(e),
             }
@@ -231,8 +225,8 @@ impl<'a, C: CellFamily> Load<'a, C> for TxInfo<C> {
 }
 
 /// Ordinary transaction info.
-#[derive(CustomDebug, CustomClone, CustomEq)]
-pub struct OrdinaryTxInfo<C: CellFamily> {
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct OrdinaryTxInfo {
     /// Whether the credit phase was executed first
     /// (usually set when incoming message has `bounce: false`).
     pub credit_first: bool,
@@ -243,7 +237,7 @@ pub struct OrdinaryTxInfo<C: CellFamily> {
     /// Credit phase info.
     ///
     /// Skipped if the incoming message is external.
-    pub credit_phase: Option<CreditPhase<C>>,
+    pub credit_phase: Option<CreditPhase>,
     /// Compute phase info.
     pub compute_phase: ComputePhase,
     /// Action phase info.
@@ -261,15 +255,15 @@ pub struct OrdinaryTxInfo<C: CellFamily> {
     pub destroyed: bool,
 }
 
-impl<C: CellFamily> Store<C> for OrdinaryTxInfo<C> {
+impl Store for OrdinaryTxInfo {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         let action_phase = match &self.action_phase {
             Some(action_phase) => {
-                let mut builder = CellBuilder::<C>::new();
+                let mut builder = CellBuilder::new();
                 ok!(action_phase.store_into(&mut builder, finalizer));
                 Some(ok!(builder.build_ext(finalizer)))
             }
@@ -287,14 +281,14 @@ impl<C: CellFamily> Store<C> for OrdinaryTxInfo<C> {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for OrdinaryTxInfo<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for OrdinaryTxInfo {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         Ok(Self {
             credit_first: ok!(slice.load_bit()),
             storage_phase: ok!(Option::<StoragePhase>::load_from(slice)),
-            credit_phase: ok!(Option::<CreditPhase<C>>::load_from(slice)),
+            credit_phase: ok!(Option::<CreditPhase>::load_from(slice)),
             compute_phase: ok!(ComputePhase::load_from(slice)),
-            action_phase: match ok!(Option::<CellContainer<C>>::load_from(slice)) {
+            action_phase: match ok!(Option::<Cell>::load_from(slice)) {
                 Some(cell) => Some(ok!(ActionPhase::load_from(&mut cell.as_ref().as_slice()))),
                 None => None,
             },
@@ -324,15 +318,15 @@ pub struct TickTockTxInfo {
     pub destroyed: bool,
 }
 
-impl<C: CellFamily> Store<C> for TickTockTxInfo {
+impl Store for TickTockTxInfo {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         let action_phase = match &self.action_phase {
             Some(action_phase) => {
-                let mut builder = CellBuilder::<C>::new();
+                let mut builder = CellBuilder::new();
                 ok!(action_phase.store_into(&mut builder, finalizer));
                 Some(ok!(builder.build_ext(finalizer)))
             }
@@ -349,12 +343,12 @@ impl<C: CellFamily> Store<C> for TickTockTxInfo {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for TickTockTxInfo {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for TickTockTxInfo {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let kind = ok!(TickTock::load_from(slice));
         let storage_phase = ok!(StoragePhase::load_from(slice));
         let compute_phase = ok!(ComputePhase::load_from(slice));
-        let action_phase = match ok!(Option::<CellContainer<C>>::load_from(slice)) {
+        let action_phase = match ok!(Option::<Cell>::load_from(slice)) {
             Some(cell) => Some(ok!(ActionPhase::load_from(&mut cell.as_ref().as_slice()))),
             None => None,
         };
@@ -380,20 +374,16 @@ pub enum TickTock {
     Tock = 1,
 }
 
-impl<C: CellFamily> Store<C> for TickTock {
+impl Store for TickTock {
     #[inline]
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder<C>,
-        _: &mut dyn Finalizer<C>,
-    ) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
         builder.store_bit(*self == Self::Tock)
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for TickTock {
+impl<'a> Load<'a> for TickTock {
     #[inline]
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         match slice.load_bit() {
             Ok(false) => Ok(Self::Tick),
             Ok(true) => Ok(Self::Tock),
@@ -417,11 +407,11 @@ pub struct HashUpdate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prelude::{CellBuilder, RcBoc, RcCell};
+    use crate::prelude::{Boc, Cell, CellBuilder};
 
-    fn check_tx(boc: &str) -> RcCell {
-        let boc = RcBoc::decode_base64(boc).unwrap();
-        let tx = boc.parse::<Transaction<_>>().unwrap();
+    fn check_tx(boc: &str) -> Cell {
+        let boc = Boc::decode_base64(boc).unwrap();
+        let tx = boc.parse::<Transaction>().unwrap();
         println!("tx: {tx:#?}");
 
         let in_msg = tx.load_in_msg().unwrap();
@@ -429,7 +419,7 @@ mod tests {
 
         for (i, entry) in tx.out_msgs.iter().enumerate() {
             let (number, cell) = entry.unwrap();
-            let message = cell.parse::<Message<_>>().unwrap();
+            let message = cell.parse::<Message>().unwrap();
             assert_eq!(number, i as u16);
             println!("Out message: {i}, message: {message:?}");
         }

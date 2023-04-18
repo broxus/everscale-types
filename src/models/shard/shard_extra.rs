@@ -2,52 +2,51 @@ use crate::cell::*;
 use crate::dict::{AugDict, Dict};
 use crate::error::Error;
 use crate::num::*;
-use crate::util::{CustomClone, CustomDebug};
 
 use crate::models::block::{BlockRef, ShardHashes};
 use crate::models::config::BlockchainConfig;
 use crate::models::currency::CurrencyCollection;
 
 /// Additional content for masterchain state.
-#[derive(CustomDebug, CustomClone)]
-pub struct McStateExtra<C: CellFamily> {
+#[derive(Debug, Clone)]
+pub struct McStateExtra {
     /// A tree of the most recent descriptions for all currently existing shards
     /// for all workchains except the masterchain.
-    pub shards: ShardHashes<C>,
+    pub shards: ShardHashes,
     /// The most recent blockchain config (if the block is a key block).
-    pub config: BlockchainConfig<C>,
+    pub config: BlockchainConfig,
     /// Brief validator info.
     pub validator_info: ValidatorInfo,
     /// A dictionary with previous masterchain blocks.
-    pub prev_blocks: OldMcBlocksInfo<C>,
+    pub prev_blocks: OldMcBlocksInfo,
     /// Whether this state was produced after the key block.
     pub after_key_block: bool,
     /// Optional reference to the latest known key block.
     pub last_key_block: Option<BlockRef>,
     /// Block creation stats for validators from the current set.
-    pub block_create_stats: Option<Dict<C, CellHash, CreatorStats>>,
+    pub block_create_stats: Option<Dict<CellHash, CreatorStats>>,
     /// Total balance of all accounts.
-    pub global_balance: CurrencyCollection<C>,
+    pub global_balance: CurrencyCollection,
     /// Optional copyleft rewards.
-    pub copyleft_rewards: Dict<C, CellHash, Tokens>,
+    pub copyleft_rewards: Dict<CellHash, Tokens>,
 }
 
-impl<C: CellFamily> McStateExtra<C> {
+impl McStateExtra {
     const TAG: u16 = 0xcc26;
     const BLOCK_STATS_TAG: u8 = 0x17;
 }
 
-impl<C: CellFamily> Store<C> for McStateExtra<C> {
+impl Store for McStateExtra {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         let flags = ((!self.copyleft_rewards.is_empty() as u16) << 1)
             | (self.block_create_stats.is_some() as u16);
 
         let cell = {
-            let mut builder = CellBuilder::<C>::new();
+            let mut builder = CellBuilder::new();
             ok!(builder.store_u16(flags));
             ok!(self.validator_info.store_into(&mut builder, finalizer));
             ok!(self.prev_blocks.store_into(&mut builder, finalizer));
@@ -74,16 +73,16 @@ impl<C: CellFamily> Store<C> for McStateExtra<C> {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for McStateExtra<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for McStateExtra {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         match slice.load_u16() {
             Ok(Self::TAG) => {}
             Ok(_) => return Err(Error::InvalidTag),
             Err(e) => return Err(e),
         }
 
-        let shards = ok!(ShardHashes::<C>::load_from(slice));
-        let config = ok!(BlockchainConfig::<C>::load_from(slice));
+        let shards = ok!(ShardHashes::load_from(slice));
+        let config = ok!(BlockchainConfig::load_from(slice));
 
         let child_slice = &mut ok!(slice.load_reference()).as_slice();
         let flags = ok!(child_slice.load_u16());
@@ -107,7 +106,7 @@ impl<'a, C: CellFamily> Load<'a, C> for McStateExtra<C> {
             } else {
                 None
             },
-            global_balance: ok!(CurrencyCollection::<C>::load_from(slice)),
+            global_balance: ok!(CurrencyCollection::load_from(slice)),
             copyleft_rewards: if flags & 0b10 != 0 {
                 ok!(Dict::load_from(child_slice))
             } else {
@@ -139,8 +138,8 @@ pub struct ValidatorBaseInfo {
 }
 
 /// A dictionary with old masterchain blocks by seqno.
-#[derive(CustomDebug, CustomClone, Store, Load)]
-pub struct OldMcBlocksInfo<C: CellFamily>(AugDict<C, u32, KeyMaxLt, KeyBlockRef>);
+#[derive(Debug, Clone, Store, Load)]
+pub struct OldMcBlocksInfo(AugDict<u32, KeyMaxLt, KeyBlockRef>);
 
 /// Entry value for the [`OldMcBlocksInfo`] dictionary.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]

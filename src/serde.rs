@@ -5,9 +5,9 @@ use ::serde::{Deserializer, Serialize, Serializer};
 use crate::boc::*;
 use crate::cell::*;
 
-impl<C: CellFamily> Serialize for dyn Cell<C> + '_ {
+impl Serialize for DynCell {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let boc = Boc::<C>::encode(self);
+        let boc = Boc::encode(self);
         if serializer.is_human_readable() {
             serializer.serialize_str(&crate::util::encode_base64(boc))
         } else {
@@ -16,20 +16,20 @@ impl<C: CellFamily> Serialize for dyn Cell<C> + '_ {
     }
 }
 
-impl<C: CellFamily> Boc<C> {
+impl Boc {
     /// Serializes cell into an encoded BOC (as base64 for human readable serializers).
     pub fn serialize<S: Serializer, T>(cell: &T, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
-        T: AsRef<dyn Cell<C>>,
+        T: AsRef<DynCell>,
     {
         cell.as_ref().serialize(serializer)
     }
 }
 
-impl<C: DefaultFinalizer> Boc<C> {
+impl Boc {
     /// Deserializes cell from an encoded BOC (from base64 for human readable deserializers).
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<CellContainer<C>, D::Error>
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Cell, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -47,26 +47,26 @@ impl<C: DefaultFinalizer> Boc<C> {
             }
         }
 
-        match Boc::<C>::decode(boc) {
+        match Boc::decode(boc) {
             Ok(cell) => Ok(cell),
             Err(e) => Err(Error::custom(e)),
         }
     }
 }
 
-impl<C: DefaultFinalizer> BocRepr<C> {
+impl BocRepr {
     /// Serializes type using default finalizer into an encoded BOC
     /// (as base64 for human readable serializers).
     pub fn serialize<S: Serializer, T>(data: &T, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
-        T: Store<C>,
+        T: Store,
     {
         use ::serde::ser::Error;
 
-        let mut finalizer = C::default_finalizer();
+        let mut finalizer = Cell::default_finalizer();
 
-        let mut builder = CellBuilder::<C>::new();
+        let mut builder = CellBuilder::new();
         if data.store_into(&mut builder, &mut finalizer).is_err() {
             return Err(Error::custom("cell overflow"));
         }
@@ -84,11 +84,11 @@ impl<C: DefaultFinalizer> BocRepr<C> {
     pub fn deserialize<'de, D, T>(deserializer: D) -> Result<T, D::Error>
     where
         D: Deserializer<'de>,
-        for<'a> T: Load<'a, C>,
+        for<'a> T: Load<'a>,
     {
         use ::serde::de::Error;
 
-        let cell = ok!(Boc::<C>::deserialize(deserializer));
+        let cell = ok!(Boc::deserialize(deserializer));
         match T::load_from(&mut cell.as_ref().as_slice()) {
             Ok(data) => Ok(data),
             Err(_) => Err(Error::custom("failed to decode object from cells")),
@@ -164,27 +164,26 @@ where
 mod tests {
     use crate::boc::*;
     use crate::cell::*;
-    use crate::prelude::{RcBoc, RcCellFamily};
 
     #[derive(::serde::Serialize)]
-    struct SerdeWithCellRef<'a, C: CellFamily> {
-        cell: &'a dyn Cell<C>,
+    struct SerdeWithCellRef<'a> {
+        cell: &'a DynCell,
     }
 
     #[derive(::serde::Serialize, ::serde::Deserialize)]
-    struct SerdeWithCellContainer<C: DefaultFinalizer> {
-        #[serde(with = "Boc::<C>")]
-        some_cell: CellContainer<C>,
+    struct SerdeWithCellContainer {
+        #[serde(with = "Boc")]
+        some_cell: Cell,
     }
 
     #[derive(::serde::Serialize, ::serde::Deserialize)]
-    struct SerdeWithRepr<C: DefaultFinalizer> {
-        #[serde(with = "BocRepr::<C>")]
-        dict: crate::dict::RawDict<C, 32>,
-        #[serde(with = "BocRepr::<C>")]
-        merkle_proof: crate::merkle::MerkleProof<C>,
-        #[serde(with = "BocRepr::<C>")]
-        merkle_update: crate::merkle::MerkleUpdate<C>,
+    struct SerdeWithRepr {
+        #[serde(with = "BocRepr")]
+        dict: crate::dict::RawDict<32>,
+        #[serde(with = "BocRepr")]
+        merkle_proof: crate::merkle::MerkleProof,
+        #[serde(with = "BocRepr")]
+        merkle_update: crate::merkle::MerkleUpdate,
     }
 
     #[test]
@@ -192,10 +191,9 @@ mod tests {
         let boc = "te6ccgEBAQEAWwAAsUgBUkKKaORs1v/d2CpkdS1rueLjL5EbgaivG/SlIBcUZ5cAKkhRTRyNmt/7uwVMjqWtdzxcZfIjcDUV436UpALijPLQ7msoAAYUWGAAAD6o4PtmhMeK8nJA";
 
         let test = format!(r#"{{"some_cell":"{boc}"}}"#);
-        let SerdeWithCellContainer::<RcCellFamily> { some_cell } =
-            serde_json::from_str(&test).unwrap();
+        let SerdeWithCellContainer { some_cell } = serde_json::from_str(&test).unwrap();
 
-        let original = RcBoc::decode_base64(boc).unwrap();
+        let original = Boc::decode_base64(boc).unwrap();
         assert_eq!(some_cell.as_ref(), original.as_ref());
     }
 
@@ -212,22 +210,22 @@ mod tests {
         let test = format!(
             r#"{{"dict":"{boc_dict_escaped}","merkle_proof":"{boc_merkle_proof}","merkle_update":"{boc_merkle_update}"}}"#
         );
-        let SerdeWithRepr::<RcCellFamily> {
+        let SerdeWithRepr {
             dict,
             merkle_proof,
             merkle_update,
         } = serde_json::from_str(&test).unwrap();
 
-        let boc = RcBoc::decode_base64(boc_dict).unwrap();
-        let orig_dict = boc.parse::<crate::dict::RawDict<_, 32>>().unwrap();
+        let boc = Boc::decode_base64(boc_dict).unwrap();
+        let orig_dict = boc.parse::<crate::dict::RawDict<32>>().unwrap();
         assert_eq!(dict, orig_dict);
 
-        let boc = RcBoc::decode_base64(boc_merkle_proof).unwrap();
-        let orig_merkle_proof = boc.parse::<crate::merkle::MerkleProof<_>>().unwrap();
+        let boc = Boc::decode_base64(boc_merkle_proof).unwrap();
+        let orig_merkle_proof = boc.parse::<crate::merkle::MerkleProof>().unwrap();
         assert_eq!(merkle_proof, orig_merkle_proof);
 
-        let boc = RcBoc::decode_base64(boc_merkle_update).unwrap();
-        let orig_merkle_update = boc.parse::<crate::merkle::MerkleUpdate<_>>().unwrap();
+        let boc = Boc::decode_base64(boc_merkle_update).unwrap();
+        let orig_merkle_update = boc.parse::<crate::merkle::MerkleUpdate>().unwrap();
         assert_eq!(merkle_update, orig_merkle_update);
     }
 }

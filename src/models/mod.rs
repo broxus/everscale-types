@@ -2,9 +2,7 @@
 
 use std::marker::PhantomData;
 
-use crate::cell::{
-    CellBuilder, CellContainer, CellFamily, CellSlice, DefaultFinalizer, Finalizer, Load, Store,
-};
+use crate::cell::{Cell, CellBuilder, CellSlice, DefaultFinalizer, Finalizer, Load, Store};
 use crate::error::Error;
 use crate::util::*;
 
@@ -24,27 +22,39 @@ pub mod message;
 pub mod shard;
 pub mod transaction;
 
+#[cfg(feature = "sync")]
+#[doc(hidden)]
+mod __checks {
+    use super::*;
+
+    assert_impl_all!(Lazy<Message>: Send);
+    assert_impl_all!(Account: Send);
+    assert_impl_all!(Block: Send);
+    assert_impl_all!(Message: Send);
+    assert_impl_all!(Transaction: Send);
+}
+
 /// Lazy-loaded model.
-pub struct Lazy<C: CellFamily, T> {
-    cell: CellContainer<C>,
+pub struct Lazy<T> {
+    cell: Cell,
     _marker: PhantomData<T>,
 }
 
-impl<C: CellFamily, T> std::fmt::Debug for Lazy<C, T> {
+impl<T> std::fmt::Debug for Lazy<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         debug_tuple_field1_finish(f, "Lazy", &self.cell)
     }
 }
 
-impl<C: CellFamily, T> Eq for Lazy<C, T> {}
-impl<C: CellFamily, T> PartialEq for Lazy<C, T> {
+impl<T> Eq for Lazy<T> {}
+impl<T> PartialEq for Lazy<T> {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.cell.as_ref().eq(other.cell.as_ref())
     }
 }
 
-impl<C: CellFamily, T> Clone for Lazy<C, T> {
+impl<T> Clone for Lazy<T> {
     #[inline]
     fn clone(&self) -> Self {
         Self {
@@ -54,10 +64,10 @@ impl<C: CellFamily, T> Clone for Lazy<C, T> {
     }
 }
 
-impl<C: CellFamily, T> Lazy<C, T> {
+impl<T> Lazy<T> {
     /// Wraps the cell in a typed wrapper.
     #[inline]
-    pub fn from_raw(cell: CellContainer<C>) -> Self {
+    pub fn from_raw(cell: Cell) -> Self {
         Self {
             cell,
             _marker: PhantomData,
@@ -66,46 +76,42 @@ impl<C: CellFamily, T> Lazy<C, T> {
 
     /// Converts into the underlying cell.
     #[inline]
-    pub fn into_inner(self) -> CellContainer<C> {
+    pub fn into_inner(self) -> Cell {
         self.cell
     }
 
     /// Returns the underlying cell.
     #[inline]
-    pub fn inner(&self) -> &CellContainer<C> {
+    pub fn inner(&self) -> &Cell {
         &self.cell
     }
 }
 
-impl<C: DefaultFinalizer, T: Store<C>> Lazy<C, T> {
+impl<T: Store> Lazy<T> {
     /// Serializes the provided data and returns the typed wrapper around it.
     pub fn new(data: &T) -> Result<Self, Error> {
-        let mut builder = CellBuilder::<C>::new();
-        let finalizer = &mut C::default_finalizer();
+        let mut builder = CellBuilder::new();
+        let finalizer = &mut Cell::default_finalizer();
         ok!(data.store_into(&mut builder, finalizer));
         Ok(Self::from_raw(ok!(builder.build_ext(finalizer))))
     }
 }
 
-impl<'a, C: CellFamily, T: Load<'a, C> + 'a> Lazy<C, T> {
+impl<'a, T: Load<'a> + 'a> Lazy<T> {
     /// Loads inner data from cell.
     pub fn load(&'a self) -> Result<T, Error> {
         T::load_from(&mut self.cell.as_ref().as_slice())
     }
 }
 
-impl<C: CellFamily, T> Store<C> for Lazy<C, T> {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder<C>,
-        _: &mut dyn Finalizer<C>,
-    ) -> Result<(), Error> {
+impl<T> Store for Lazy<T> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
         builder.store_reference(self.cell.clone())
     }
 }
 
-impl<'a, C: CellFamily, T> Load<'a, C> for Lazy<C, T> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a, T> Load<'a> for Lazy<T> {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         match slice.load_reference_cloned() {
             Ok(cell) => Ok(Self {
                 cell,

@@ -2,9 +2,7 @@ use proc_macro::TokenStream;
 use quote::quote;
 
 mod bound;
-mod derive_clone;
 mod derive_debug;
-mod derive_eq;
 mod derive_load;
 mod derive_store;
 mod internals;
@@ -14,15 +12,6 @@ enum Derive {
     Debug,
 }
 
-/// Implements [`Clone`] for the type.
-#[proc_macro_derive(CustomClone, attributes(bounds))]
-pub fn derive_clone(input: TokenStream) -> TokenStream {
-    let input = syn::parse_macro_input!(input as syn::DeriveInput);
-    derive_clone::impl_derive(input)
-        .unwrap_or_else(to_compile_errors)
-        .into()
-}
-
 /// Implements [`Debug`] for the type.
 ///
 /// [`Debug`]: core::fmt::Debug
@@ -30,15 +19,6 @@ pub fn derive_clone(input: TokenStream) -> TokenStream {
 pub fn derive_debug(input: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(input as syn::DeriveInput);
     derive_debug::impl_derive(input)
-        .unwrap_or_else(to_compile_errors)
-        .into()
-}
-
-/// Implements [`Eq`] and [`PartialEq`] for the type.
-#[proc_macro_derive(CustomEq, attributes(bounds))]
-pub fn derive_eq(input: TokenStream) -> TokenStream {
-    let input = syn::parse_macro_input!(input as syn::DeriveInput);
-    derive_eq::impl_derive(input)
         .unwrap_or_else(to_compile_errors)
         .into()
 }

@@ -2,7 +2,7 @@
 
 use std::mem::MaybeUninit;
 
-pub use everscale_types_proc::{CustomClone, CustomDebug, CustomEq};
+pub use everscale_types_proc::CustomDebug;
 
 /// Brings [unlikely](core::intrinsics::unlikely) to stable rust.
 #[inline(always)]

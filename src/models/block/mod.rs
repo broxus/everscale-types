@@ -22,52 +22,52 @@ mod block_proof;
 mod shard_hashes;
 
 /// Shard block.
-#[derive(CustomDebug, CustomClone, CustomEq)]
-pub struct Block<C: CellFamily> {
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct Block {
     /// Global network id.
     pub global_id: i32,
     /// Block info.
-    pub info: Lazy<C, BlockInfo<C>>,
+    pub info: Lazy<BlockInfo>,
     /// Tokens flow info.
-    pub value_flow: Lazy<C, ValueFlow<C>>,
+    pub value_flow: Lazy<ValueFlow>,
     /// Merkle update for the shard state.
-    pub state_update: Lazy<C, MerkleUpdate<C>>,
+    pub state_update: Lazy<MerkleUpdate>,
     /// Merkle updates for the outgoing messages queue.
-    pub out_msg_queue_updates: Option<Dict<C, u32, Lazy<C, MerkleUpdate<C>>>>,
+    pub out_msg_queue_updates: Option<Dict<u32, Lazy<MerkleUpdate>>>,
     /// Block content.
-    pub extra: Lazy<C, BlockExtra<C>>,
+    pub extra: Lazy<BlockExtra>,
 }
 
-impl<C: CellFamily> Block<C> {
+impl Block {
     const TAG_V1: u32 = 0x11ef55aa;
     const TAG_V2: u32 = 0x11ef55bb;
 
     /// Tries to load block info.
-    pub fn load_info(&self) -> Result<BlockInfo<C>, Error> {
+    pub fn load_info(&self) -> Result<BlockInfo, Error> {
         self.info.load()
     }
 
     /// Tries to load tokens flow info.
-    pub fn load_value_flow(&self) -> Result<ValueFlow<C>, Error> {
+    pub fn load_value_flow(&self) -> Result<ValueFlow, Error> {
         self.value_flow.load()
     }
 
     /// Tries to load state update.
-    pub fn load_state_update(&self) -> Result<MerkleUpdate<C>, Error> {
+    pub fn load_state_update(&self) -> Result<MerkleUpdate, Error> {
         self.state_update.load()
     }
 
     /// Tries to load block content.
-    pub fn load_extra(&self) -> Result<BlockExtra<C>, Error> {
+    pub fn load_extra(&self) -> Result<BlockExtra, Error> {
         self.extra.load()
     }
 }
 
-impl<C: CellFamily> Store<C> for Block<C> {
+impl Store for Block {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         let tag = if self.out_msg_queue_updates.is_none() {
             Self::TAG_V1
@@ -83,7 +83,7 @@ impl<C: CellFamily> Store<C> for Block<C> {
         ok!(
             if let Some(out_msg_queue_updates) = &self.out_msg_queue_updates {
                 let cell = {
-                    let mut builder = CellBuilder::<C>::new();
+                    let mut builder = CellBuilder::new();
                     ok!(self.state_update.store_into(&mut builder, finalizer));
                     ok!(out_msg_queue_updates.store_into(&mut builder, finalizer));
                     ok!(builder.build_ext(finalizer))
@@ -98,8 +98,8 @@ impl<C: CellFamily> Store<C> for Block<C> {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for Block<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for Block {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let with_out_msg_queue_updates = match ok!(slice.load_u32()) {
             Self::TAG_V1 => false,
             Self::TAG_V2 => true,
@@ -131,8 +131,8 @@ impl<'a, C: CellFamily> Load<'a, C> for Block<C> {
 }
 
 /// Block info.
-#[derive(CustomDebug, CustomClone, CustomEq)]
-pub struct BlockInfo<C: CellFamily> {
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct BlockInfo {
     /// Block model version.
     pub version: u32,
     /// Whether this block was produced after the shards were merged.
@@ -177,14 +177,14 @@ pub struct BlockInfo<C: CellFamily> {
     pub gen_software: GlobalVersion,
 
     /// Reference to the masterchain block which was used during the creation of this block.
-    pub master_ref: Option<Lazy<C, BlockRef>>,
+    pub master_ref: Option<Lazy<BlockRef>>,
     /// Reference to the previous block (or blocks).
-    pub prev_ref: CellContainer<C>,
+    pub prev_ref: Cell,
     /// Optional reference to the previous vertical block.
-    pub prev_vert_ref: Option<Lazy<C, BlockRef>>,
+    pub prev_vert_ref: Option<Lazy<BlockRef>>,
 }
 
-impl<C: CellFamily> BlockInfo<C> {
+impl BlockInfo {
     const TAG: u32 = 0x9bc7a987;
     const FLAG_WITH_GEN_SOFTWARE: u8 = 0x1;
 
@@ -201,11 +201,11 @@ impl<C: CellFamily> BlockInfo<C> {
     }
 }
 
-impl<C: CellFamily> Store<C> for BlockInfo<C> {
+impl Store for BlockInfo {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         let packed_flags = ((self.master_ref.is_some() as u8) << 7)
             | ((self.after_merge as u8) << 6)
@@ -248,8 +248,8 @@ impl<C: CellFamily> Store<C> for BlockInfo<C> {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for BlockInfo<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for BlockInfo {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         match slice.load_u32() {
             Ok(Self::TAG) => {}
             Ok(_) => return Err(Error::InvalidTag),
@@ -279,7 +279,7 @@ impl<'a, C: CellFamily> Load<'a, C> for BlockInfo<C> {
         };
 
         let master_ref = if packed_flags & 0b10000000 != 0 {
-            Some(ok!(Lazy::<C, BlockRef>::load_from(slice)))
+            Some(ok!(Lazy::<BlockRef>::load_from(slice)))
         } else {
             None
         };
@@ -287,7 +287,7 @@ impl<'a, C: CellFamily> Load<'a, C> for BlockInfo<C> {
         let prev_ref = ok!(slice.load_reference_cloned());
 
         let prev_vert_ref = if packed_flags & 0b00000001 != 0 {
-            Some(ok!(Lazy::<C, BlockRef>::load_from(slice)))
+            Some(ok!(Lazy::<BlockRef>::load_from(slice)))
         } else {
             None
         };
@@ -361,42 +361,42 @@ pub struct BlockRef {
 }
 
 /// Tokens flow info.
-#[derive(CustomDebug, CustomClone, CustomEq)]
-pub struct ValueFlow<C: CellFamily> {
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ValueFlow {
     /// Total amount transferred from the previous block.
-    pub from_prev_block: CurrencyCollection<C>,
+    pub from_prev_block: CurrencyCollection,
     /// Total amount transferred to the next block.
-    pub to_next_block: CurrencyCollection<C>,
+    pub to_next_block: CurrencyCollection,
     /// Sum of all imported amounts from messages.
-    pub imported: CurrencyCollection<C>,
+    pub imported: CurrencyCollection,
     /// Sum of all exported amounts of messages.
-    pub exported: CurrencyCollection<C>,
+    pub exported: CurrencyCollection,
 
     /// Total fees collected in this block.
-    pub fees_collected: CurrencyCollection<C>,
+    pub fees_collected: CurrencyCollection,
     /// Shard fees imported to this block.
-    pub fees_imported: CurrencyCollection<C>,
+    pub fees_imported: CurrencyCollection,
     /// Fee recovery (?)
-    pub recovered: CurrencyCollection<C>,
+    pub recovered: CurrencyCollection,
     /// Block creation fees.
-    pub created: CurrencyCollection<C>,
+    pub created: CurrencyCollection,
     /// Minted extra currencies.
-    pub minted: CurrencyCollection<C>,
+    pub minted: CurrencyCollection,
 
     /// Optional copyleft rewards.
-    pub copyleft_rewards: Dict<C, CellHash, Tokens>,
+    pub copyleft_rewards: Dict<CellHash, Tokens>,
 }
 
-impl<C: CellFamily> ValueFlow<C> {
+impl ValueFlow {
     const TAG_V1: u32 = 0xb8e48dfb;
     const TAG_V2: u32 = 0xe0864f6d;
 }
 
-impl<C: CellFamily> Store<C> for ValueFlow<C> {
+impl Store for ValueFlow {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         let tag = if self.copyleft_rewards.is_empty() {
             Self::TAG_V1
@@ -405,7 +405,7 @@ impl<C: CellFamily> Store<C> for ValueFlow<C> {
         };
 
         let cell1 = {
-            let mut builder = CellBuilder::<C>::new();
+            let mut builder = CellBuilder::new();
             ok!(self.from_prev_block.store_into(&mut builder, finalizer));
             ok!(self.to_next_block.store_into(&mut builder, finalizer));
             ok!(self.imported.store_into(&mut builder, finalizer));
@@ -419,7 +419,7 @@ impl<C: CellFamily> Store<C> for ValueFlow<C> {
         ok!(self.fees_collected.store_into(builder, finalizer));
 
         let cell2 = {
-            let mut builder = CellBuilder::<C>::new();
+            let mut builder = CellBuilder::new();
             ok!(self.fees_imported.store_into(&mut builder, finalizer));
             ok!(self.recovered.store_into(&mut builder, finalizer));
             ok!(self.created.store_into(&mut builder, finalizer));
@@ -436,8 +436,8 @@ impl<C: CellFamily> Store<C> for ValueFlow<C> {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for ValueFlow<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for ValueFlow {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let with_copyleft_rewards = match ok!(slice.load_u32()) {
             Self::TAG_V1 => false,
             Self::TAG_V2 => true,
@@ -471,15 +471,15 @@ impl<'a, C: CellFamily> Load<'a, C> for ValueFlow<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prelude::{RcBoc, RcCell, RcCellBuilder, RcCellFamily};
+    use crate::prelude::*;
 
-    fn serialize_any<T: Store<RcCellFamily>>(data: T) -> RcCell {
+    fn serialize_any<T: Store>(data: T) -> Cell {
         CellBuilder::build_from(data).unwrap()
     }
 
-    fn check_block(boc_str: &str) -> RcCell {
-        let boc = RcBoc::decode_base64(boc_str).unwrap();
-        let block = boc.parse::<Block<_>>().unwrap();
+    fn check_block(boc_str: &str) -> Cell {
+        let boc = Boc::decode_base64(boc_str).unwrap();
+        let block = boc.parse::<Block>().unwrap();
         println!("block: {block:#?}");
 
         let info = block.load_info().unwrap();
@@ -700,9 +700,9 @@ mod tests {
     #[test]
     fn shard_ident_store_load() {
         fn check_store_load(shard: ShardIdent) {
-            let mut builder = RcCellBuilder::new();
+            let mut builder = CellBuilder::new();
             shard
-                .store_into(&mut builder, &mut RcCellFamily::default_finalizer())
+                .store_into(&mut builder, &mut Cell::default_finalizer())
                 .unwrap();
             let cell = builder.build().unwrap();
             assert_eq!(cell.bit_len(), ShardIdent::BITS);
@@ -721,8 +721,8 @@ mod tests {
         assert!(shard.split().is_none());
 
         // Try loading from invalid cells
-        fn check_invalid<F: FnOnce(&mut RcCellBuilder) -> Result<(), Error>>(f: F) {
-            let mut builder = RcCellBuilder::new();
+        fn check_invalid<F: FnOnce(&mut CellBuilder) -> Result<(), Error>>(f: F) {
+            let mut builder = CellBuilder::new();
             f(&mut builder).unwrap();
             let cell = builder.build().unwrap();
             assert!(cell.parse::<ShardIdent>().is_err())
@@ -739,8 +739,8 @@ mod tests {
 
     #[test]
     fn proof_for_masterchain_block() {
-        let boc = RcBoc::decode_base64("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").unwrap();
-        let proof = boc.parse::<BlockProof<_>>().unwrap();
+        let boc = Boc::decode_base64("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").unwrap();
+        let proof = boc.parse::<BlockProof>().unwrap();
 
         assert_eq!(proof.proof_for.shard, ShardIdent::MASTERCHAIN);
         assert_eq!(proof.proof_for.seqno, 13121100);
@@ -751,8 +751,8 @@ mod tests {
 
     #[test]
     fn proof_for_shardchain_block() {
-        let boc = RcBoc::decode_base64("te6ccgECDwEAAs8AAaXDBAAAAADwAAAAAAAAAAEndRPGh13esYv1+IiNBF8d0E4W9nAxxWox0/9dfbYfzbMNf7BAsJFC3f6OXhNcq+C1Z/dy9rq/xPVHxMsxSz9swGhTQAEJRgPGh13esYv1+IiNBF8d0E4W9nAxxWox0/9dfbYfzbMNfwAEAiQQEe9VqgAAACoDBAUGAqCbx6mHAAAAAIQBASd1EwAAAAAEAAAAAPAAAAAAAAAAYbUjQwAAE6ADeamAAAAToAN5qYHbMdUdAAMRZADINqwAyAO1xAAAAAcAAAAAAAAALgcIAhG45I37QDuaygQJCiqKBATDffPjKveSZSYvtkZDpIzT+6RfYUrlPaItUrZS8V7HQaP1v/aOVl4LiMM8qu+JUek2p0uQuIHV4AaCN5mrVOwAewB7CwwDiUoz9v0ZQGFiq3f3DnYsuIgizbBpIte2d8WchEzwPiE3cn+PRhRnl9e52rlFK8AWPE59DDMfnMn3HEPFdaM6B7NN0/8dQA0ODgCYAAAToANbJQQAyDasn3vQI1cAvX7TsH6cpLNG/Gcli4REHLB9gYLvAY1RwRThGBO5s7HGv5it3cNwmlhKe7UHYRvZ3j852Y8MYel2RwCYAAAToANqZ0EBJ3USM2ZQuOyJ2K6GEos4at5g1bubtGURZk8RVDYd+S8wz4JIJyFKVPraOO4qeN3eYmJwv1rg2zn+GEDcpFrl66En0AAlgEruBB2JoVR0AldwIOxNCqOACAANABAO5rKACGiMAQMEw33z4yr3kmUmL7ZGQ6SM0/ukX2FK5T2iLVK2UvFex1tvG3oZaJke0Zq49+C17SaNZRZFg/fTM2Liga2R2p8fAHsAAmiMAQNBo/W/9o5WXguIwzyq74lR6TanS5C4gdXgBoI3matU7NxzJDjVef2kcydRvYGpPaaQxMZu1+tYTs5aS6nT9+8bAHsAAgADACAAAQI=").unwrap();
-        let proof = boc.parse::<BlockProof<_>>().unwrap();
+        let boc = Boc::decode_base64("te6ccgECDwEAAs8AAaXDBAAAAADwAAAAAAAAAAEndRPGh13esYv1+IiNBF8d0E4W9nAxxWox0/9dfbYfzbMNf7BAsJFC3f6OXhNcq+C1Z/dy9rq/xPVHxMsxSz9swGhTQAEJRgPGh13esYv1+IiNBF8d0E4W9nAxxWox0/9dfbYfzbMNfwAEAiQQEe9VqgAAACoDBAUGAqCbx6mHAAAAAIQBASd1EwAAAAAEAAAAAPAAAAAAAAAAYbUjQwAAE6ADeamAAAAToAN5qYHbMdUdAAMRZADINqwAyAO1xAAAAAcAAAAAAAAALgcIAhG45I37QDuaygQJCiqKBATDffPjKveSZSYvtkZDpIzT+6RfYUrlPaItUrZS8V7HQaP1v/aOVl4LiMM8qu+JUek2p0uQuIHV4AaCN5mrVOwAewB7CwwDiUoz9v0ZQGFiq3f3DnYsuIgizbBpIte2d8WchEzwPiE3cn+PRhRnl9e52rlFK8AWPE59DDMfnMn3HEPFdaM6B7NN0/8dQA0ODgCYAAAToANbJQQAyDasn3vQI1cAvX7TsH6cpLNG/Gcli4REHLB9gYLvAY1RwRThGBO5s7HGv5it3cNwmlhKe7UHYRvZ3j852Y8MYel2RwCYAAAToANqZ0EBJ3USM2ZQuOyJ2K6GEos4at5g1bubtGURZk8RVDYd+S8wz4JIJyFKVPraOO4qeN3eYmJwv1rg2zn+GEDcpFrl66En0AAlgEruBB2JoVR0AldwIOxNCqOACAANABAO5rKACGiMAQMEw33z4yr3kmUmL7ZGQ6SM0/ukX2FK5T2iLVK2UvFex1tvG3oZaJke0Zq49+C17SaNZRZFg/fTM2Liga2R2p8fAHsAAmiMAQNBo/W/9o5WXguIwzyq74lR6TanS5C4gdXgBoI3matU7NxzJDjVef2kcydRvYGpPaaQxMZu1+tYTs5aS6nT9+8bAHsAAgADACAAAQI=").unwrap();
+        let proof = boc.parse::<BlockProof>().unwrap();
 
         assert_eq!(
             proof.proof_for.shard,

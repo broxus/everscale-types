@@ -1,16 +1,21 @@
 //! Cell tree implementation.
 
-use std::borrow::Borrow;
 use std::ops::{BitOr, BitOrAssign};
 
 use crate::error::Error;
-use crate::util::{unlikely, DisplayHash, TryAsMut};
+use crate::util::{unlikely, DisplayHash};
 
 pub use self::builder::{CellBuilder, CellRefsBuilder, Store};
-pub use self::cell_impl::{rc, sync, StaticCell};
+pub use self::cell_impl::StaticCell;
 pub use self::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 pub use self::slice::{CellSlice, Load};
-pub use self::usage_tree::{Trackable, UsageTree, UsageTreeMode, UsageTreeWithSubtrees};
+pub use self::usage_tree::{UsageTree, UsageTreeMode, UsageTreeWithSubtrees};
+
+#[cfg(not(feature = "sync"))]
+pub use self::cell_impl::rc::Cell;
+
+#[cfg(feature = "sync")]
+pub use self::cell_impl::sync::Cell;
 
 pub use everscale_types_proc::{Load, Store};
 
@@ -28,44 +33,49 @@ mod builder;
 
 mod usage_tree;
 
+#[cfg(feature = "sync")]
+#[doc(hidden)]
+mod __checks {
+    use super::*;
+
+    assert_impl_all!(Cell: Send);
+    assert_impl_all!(CellSlice: Send);
+    assert_impl_all!(CellBuilder: Send);
+}
+
 /// Cell implementation family.
 pub trait CellFamily: Sized {
-    /// Owning container with cell tree node.
-    type Container: AsRef<dyn Cell<Self>>
-        + Borrow<dyn Cell<Self>>
-        + TryAsMut<dyn Cell<Self>>
-        + Store<Self>
-        + for<'a> Load<'a, Self>
-        + Eq
-        + Clone
-        + std::fmt::Debug;
-
     /// Creates an empty cell.
     ///
     /// NOTE: in most cases empty cell is ZST.
-    fn empty_cell() -> CellContainer<Self>;
+    fn empty_cell() -> Cell;
 
     /// Returns a static reference to the empty cell
-    fn empty_cell_ref() -> &'static dyn Cell<Self>;
+    fn empty_cell_ref() -> &'static DynCell;
 
     /// Returns a static reference to the cell with all zeros.
-    fn all_zeros_ref() -> &'static dyn Cell<Self>;
+    fn all_zeros_ref() -> &'static DynCell;
 
     /// Returns a static reference to the cell with all ones.
-    fn all_ones_ref() -> &'static dyn Cell<Self>;
+    fn all_ones_ref() -> &'static DynCell;
 
     /// Creates a virtualized cell from the specified cell.
-    fn virtualize(cell: CellContainer<Self>) -> CellContainer<Self>;
+    fn virtualize(cell: Cell) -> Cell;
 }
 
-/// Type alias for a cell family container.
-pub type CellContainer<C> = <C as CellFamily>::Container;
+/// Dyn trait type alias.
+#[cfg(not(feature = "sync"))]
+pub type DynCell = dyn CellImpl;
+
+/// Dyn trait type alias.
+#[cfg(feature = "sync")]
+pub type DynCell = dyn CellImpl + Send + Sync;
 
 /// Represents the interface of a well-formed cell.
 ///
 /// Since all basic operations are implements via dynamic dispatch,
 /// all high-level helper methods are implemented for `dyn Cell`.
-pub trait Cell<C: CellFamily> {
+pub trait CellImpl {
     /// Returns cell descriptor.
     ///
     /// # See also
@@ -87,14 +97,14 @@ pub trait Cell<C: CellFamily> {
     fn bit_len(&self) -> u16;
 
     /// Returns a reference to the Nth child cell.
-    fn reference(&self, index: u8) -> Option<&dyn Cell<C>>;
+    fn reference(&self, index: u8) -> Option<&DynCell>;
 
     /// Returns the Nth child cell.
-    fn reference_cloned(&self, index: u8) -> Option<CellContainer<C>>;
+    fn reference_cloned(&self, index: u8) -> Option<Cell>;
 
     /// Returns this cell as a virtualized cell, so that all hashes
     /// and depths will have an offset.
-    fn virtualize(&self) -> &dyn Cell<C>;
+    fn virtualize(&self) -> &DynCell;
 
     /// Returns cell hash for the specified level.
     ///
@@ -106,19 +116,16 @@ pub trait Cell<C: CellFamily> {
     fn depth(&self, level: u8) -> u16;
 
     /// Consumes the first child during the deep drop.
-    fn take_first_child(&mut self) -> Option<CellContainer<C>>;
+    fn take_first_child(&mut self) -> Option<Cell>;
 
     /// Replaces the first child with the provided parent during the deep drop.
     ///
     /// Returns `Ok(child)` if child was successfully replaced,
     /// `Err(parent)` otherwise.
-    fn replace_first_child(
-        &mut self,
-        parent: CellContainer<C>,
-    ) -> Result<CellContainer<C>, CellContainer<C>>;
+    fn replace_first_child(&mut self, parent: Cell) -> Result<Cell, Cell>;
 
     /// Consumes the next child (except first) during the deep drop.
-    fn take_next_child(&mut self) -> Option<CellContainer<C>>;
+    fn take_next_child(&mut self) -> Option<Cell>;
 
     /// Returns the sum of all bits and cells of all elements in the cell tree
     /// (including this cell).
@@ -126,7 +133,7 @@ pub trait Cell<C: CellFamily> {
     fn stats(&self) -> CellTreeStats;
 }
 
-impl<C: CellFamily> dyn Cell<C> + '_ {
+impl DynCell {
     /// Computes cell type from descriptor bytes.
     #[inline]
     pub fn cell_type(&self) -> CellType {
@@ -153,7 +160,7 @@ impl<C: CellFamily> dyn Cell<C> + '_ {
 
     /// Tries to load the specified child cell as slice.
     /// Returns an error if the loaded cell is absent or is pruned.
-    pub fn get_reference_as_slice(&self, index: u8) -> Result<CellSlice<'_, C>, Error> {
+    pub fn get_reference_as_slice(&self, index: u8) -> Result<CellSlice<'_>, Error> {
         match self.reference(index) {
             Some(cell) => {
                 // Handle pruned branch access
@@ -194,7 +201,7 @@ impl<C: CellFamily> dyn Cell<C> + '_ {
 
     /// Creates an iterator through child nodes.
     #[inline]
-    pub fn references(&self) -> RefsIter<'_, C> {
+    pub fn references(&self) -> RefsIter<'_> {
         RefsIter {
             cell: self,
             max: self.reference_count(),
@@ -204,7 +211,7 @@ impl<C: CellFamily> dyn Cell<C> + '_ {
 
     /// Returns this cell as a cell slice.
     #[inline]
-    pub fn as_slice(&'_ self) -> CellSlice<'_, C> {
+    pub fn as_slice(&'_ self) -> CellSlice<'_> {
         CellSlice::new(self)
     }
 
@@ -213,7 +220,7 @@ impl<C: CellFamily> dyn Cell<C> + '_ {
     ///
     /// [`Debug`]: std::fmt::Debug
     #[inline]
-    pub fn debug_root(&'_ self) -> DebugCell<'_, C> {
+    pub fn debug_root(&'_ self) -> DebugCell<'_> {
         DebugCell(self)
     }
 
@@ -222,7 +229,7 @@ impl<C: CellFamily> dyn Cell<C> + '_ {
     ///
     /// [`Display`]: std::fmt::Display
     #[inline]
-    pub fn display_root(&'_ self) -> DisplayCellRoot<'_, C> {
+    pub fn display_root(&'_ self) -> DisplayCellRoot<'_> {
         DisplayCellRoot {
             cell: self,
             level: 0,
@@ -234,7 +241,7 @@ impl<C: CellFamily> dyn Cell<C> + '_ {
     ///
     /// [`Display`]: std::fmt::Display
     #[inline]
-    pub fn display_tree(&'_ self) -> DisplayCellTree<'_, C> {
+    pub fn display_tree(&'_ self) -> DisplayCellTree<'_> {
         DisplayCellTree(self)
     }
 
@@ -242,12 +249,12 @@ impl<C: CellFamily> dyn Cell<C> + '_ {
     ///
     /// NOTE: parsing `Cell` will load the first reference!
     #[inline]
-    pub fn parse<'a, T: Load<'a, C>>(&'a self) -> Result<T, Error> {
+    pub fn parse<'a, T: Load<'a>>(&'a self) -> Result<T, Error> {
         T::load_from(&mut self.as_slice())
     }
 }
 
-impl<C: CellFamily> std::fmt::Debug for dyn Cell<C> + '_ {
+impl std::fmt::Debug for DynCell {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         crate::util::debug_struct_field2_finish(
             f,
@@ -260,33 +267,33 @@ impl<C: CellFamily> std::fmt::Debug for dyn Cell<C> + '_ {
     }
 }
 
-impl<C: CellFamily> Eq for dyn Cell<C> + '_ {}
+impl Eq for DynCell {}
 
-impl<C1: CellFamily, C2: CellFamily> PartialEq<dyn Cell<C2> + '_> for dyn Cell<C1> + '_ {
+impl PartialEq<DynCell> for DynCell {
     #[inline]
-    fn eq(&self, other: &dyn Cell<C2>) -> bool {
+    fn eq(&self, other: &DynCell) -> bool {
         self.repr_hash() == other.repr_hash()
     }
 }
 
 /// An iterator through child nodes.
 #[must_use = "iterators are lazy and do nothing unless consumed"]
-pub struct RefsIter<'a, C> {
-    cell: &'a dyn Cell<C>,
+pub struct RefsIter<'a> {
+    cell: &'a DynCell,
     max: u8,
     index: u8,
 }
 
-impl<'a, C: CellFamily> RefsIter<'a, C> {
+impl<'a> RefsIter<'a> {
     /// Returns a cell by children of which we are iterating.
     #[inline]
-    pub fn cell(&self) -> &'a dyn Cell<C> {
+    pub fn cell(&self) -> &'a DynCell {
         self.cell
     }
 
     /// Returns a reference to the next() value without advancing the iterator.
     #[inline]
-    pub fn peek(&self) -> Option<&'a dyn Cell<C>> {
+    pub fn peek(&self) -> Option<&'a DynCell> {
         if self.index >= self.max {
             None
         } else {
@@ -296,7 +303,7 @@ impl<'a, C: CellFamily> RefsIter<'a, C> {
 
     /// Returns a cloned reference to the next() value without advancing the iterator.
     #[inline]
-    pub fn peek_cloned(&self) -> Option<CellContainer<C>> {
+    pub fn peek_cloned(&self) -> Option<Cell> {
         if self.index >= self.max {
             None
         } else {
@@ -306,7 +313,7 @@ impl<'a, C: CellFamily> RefsIter<'a, C> {
 
     /// Returns a reference to the next_back() value without advancing the iterator.
     #[inline]
-    pub fn peek_prev(&self) -> Option<&'a dyn Cell<C>> {
+    pub fn peek_prev(&self) -> Option<&'a DynCell> {
         if self.index > 0 {
             self.cell.reference(self.index - 1)
         } else {
@@ -316,7 +323,7 @@ impl<'a, C: CellFamily> RefsIter<'a, C> {
 
     /// Returns a cloned reference to the next_back() value without advancing the iterator.
     #[inline]
-    pub fn peek_prev_cloned(&self) -> Option<CellContainer<C>> {
+    pub fn peek_prev_cloned(&self) -> Option<Cell> {
         if self.index > 0 {
             self.cell.reference_cloned(self.index - 1)
         } else {
@@ -326,12 +333,12 @@ impl<'a, C: CellFamily> RefsIter<'a, C> {
 
     /// Creates an iterator through child nodes which produces cloned references.
     #[inline]
-    pub fn cloned(self) -> ClonedRefsIter<'a, C> {
+    pub fn cloned(self) -> ClonedRefsIter<'a> {
         ClonedRefsIter { inner: self }
     }
 }
 
-impl<C> Clone for RefsIter<'_, C> {
+impl Clone for RefsIter<'_> {
     #[inline]
     fn clone(&self) -> Self {
         Self {
@@ -342,8 +349,8 @@ impl<C> Clone for RefsIter<'_, C> {
     }
 }
 
-impl<'a, C: CellFamily> Iterator for RefsIter<'a, C> {
-    type Item = &'a dyn Cell<C>;
+impl<'a> Iterator for RefsIter<'a> {
+    type Item = &'a DynCell;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -363,7 +370,7 @@ impl<'a, C: CellFamily> Iterator for RefsIter<'a, C> {
     }
 }
 
-impl<'a, C: CellFamily> DoubleEndedIterator for RefsIter<'a, C> {
+impl<'a> DoubleEndedIterator for RefsIter<'a> {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.max > self.index {
@@ -375,7 +382,7 @@ impl<'a, C: CellFamily> DoubleEndedIterator for RefsIter<'a, C> {
     }
 }
 
-impl<C: CellFamily> ExactSizeIterator for RefsIter<'_, C> {
+impl ExactSizeIterator for RefsIter<'_> {
     #[inline]
     fn len(&self) -> usize {
         self.size_hint().0
@@ -384,31 +391,31 @@ impl<C: CellFamily> ExactSizeIterator for RefsIter<'_, C> {
 
 /// An iterator through child nodes which produces cloned references.
 #[must_use = "iterators are lazy and do nothing unless consumed"]
-pub struct ClonedRefsIter<'a, C> {
-    inner: RefsIter<'a, C>,
+pub struct ClonedRefsIter<'a> {
+    inner: RefsIter<'a>,
 }
 
-impl<'a, C: CellFamily> ClonedRefsIter<'a, C> {
+impl<'a> ClonedRefsIter<'a> {
     /// Returns a cell by children of which we are iterating.
     #[inline]
-    pub fn cell(&self) -> &'a dyn Cell<C> {
+    pub fn cell(&self) -> &'a DynCell {
         self.inner.cell
     }
 
     /// Returns a reference to the next() value without advancing the iterator.
     #[inline]
-    pub fn peek(&self) -> Option<CellContainer<C>> {
+    pub fn peek(&self) -> Option<Cell> {
         self.inner.peek_cloned()
     }
 
     /// Returns a reference to the next_back() value without advancing the iterator.
     #[inline]
-    pub fn peek_prev(&self) -> Option<CellContainer<C>> {
+    pub fn peek_prev(&self) -> Option<Cell> {
         self.inner.peek_prev_cloned()
     }
 }
 
-impl<C> Clone for ClonedRefsIter<'_, C> {
+impl Clone for ClonedRefsIter<'_> {
     #[inline]
     fn clone(&self) -> Self {
         Self {
@@ -417,8 +424,8 @@ impl<C> Clone for ClonedRefsIter<'_, C> {
     }
 }
 
-impl<'a, C: CellFamily> Iterator for ClonedRefsIter<'a, C> {
-    type Item = CellContainer<C>;
+impl<'a> Iterator for ClonedRefsIter<'a> {
+    type Item = Cell;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -437,7 +444,7 @@ impl<'a, C: CellFamily> Iterator for ClonedRefsIter<'a, C> {
     }
 }
 
-impl<'a, C: CellFamily> DoubleEndedIterator for ClonedRefsIter<'a, C> {
+impl<'a> DoubleEndedIterator for ClonedRefsIter<'a> {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.inner.max > self.inner.index {
@@ -449,7 +456,7 @@ impl<'a, C: CellFamily> DoubleEndedIterator for ClonedRefsIter<'a, C> {
     }
 }
 
-impl<C: CellFamily> ExactSizeIterator for ClonedRefsIter<'_, C> {
+impl ExactSizeIterator for ClonedRefsIter<'_> {
     #[inline]
     fn len(&self) -> usize {
         self.size_hint().0
@@ -794,9 +801,9 @@ impl std::ops::AddAssign for CellTreeStats {
 
 /// Helper struct to debug print the root cell.
 #[derive(Clone, Copy)]
-pub struct DebugCell<'a, C: CellFamily>(&'a dyn Cell<C>);
+pub struct DebugCell<'a>(&'a DynCell);
 
-impl<C: CellFamily> std::fmt::Debug for DebugCell<'_, C> {
+impl std::fmt::Debug for DebugCell<'_> {
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
@@ -805,12 +812,12 @@ impl<C: CellFamily> std::fmt::Debug for DebugCell<'_, C> {
 
 /// Helper struct to print only the root cell in the cell tree.
 #[derive(Clone, Copy)]
-pub struct DisplayCellRoot<'a, C> {
-    cell: &'a dyn Cell<C>,
+pub struct DisplayCellRoot<'a> {
+    cell: &'a DynCell,
     level: usize,
 }
 
-impl<C: CellFamily> std::fmt::Display for DisplayCellRoot<'_, C> {
+impl std::fmt::Display for DisplayCellRoot<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // TODO: encode on stack
         let data = hex::encode(self.cell.data());
@@ -839,9 +846,9 @@ impl<C: CellFamily> std::fmt::Display for DisplayCellRoot<'_, C> {
 
 /// Helper struct to print all cells in the cell tree.
 #[derive(Clone, Copy)]
-pub struct DisplayCellTree<'a, C>(&'a dyn Cell<C>);
+pub struct DisplayCellTree<'a>(&'a DynCell);
 
-impl<C: CellFamily> std::fmt::Display for DisplayCellTree<'_, C> {
+impl std::fmt::Display for DisplayCellTree<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut stack = vec![(0, self.0)];
 

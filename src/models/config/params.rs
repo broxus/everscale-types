@@ -10,13 +10,13 @@ use crate::models::block::ShardIdent;
 use crate::models::Lazy;
 
 /// Config voting setup params.
-#[derive(CustomDebug, CustomClone, CustomEq, Store, Load)]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
 #[tlb(tag = "#91")]
-pub struct ConfigVotingSetup<C: CellFamily> {
+pub struct ConfigVotingSetup {
     /// Proposal configuration for non-critical params.
-    pub normal_params: Lazy<C, ConfigProposalSetup>,
+    pub normal_params: Lazy<ConfigProposalSetup>,
     /// Proposal configuration for critical params.
-    pub critical_params: Lazy<C, ConfigProposalSetup>,
+    pub critical_params: Lazy<ConfigProposalSetup>,
 }
 
 /// Config proposal setup params.
@@ -79,11 +79,11 @@ impl WorkchainDescription {
     }
 }
 
-impl<C: CellFamily> Store<C> for WorkchainDescription {
+impl Store for WorkchainDescription {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         if !self.is_valid() {
             return Err(Error::InvalidData);
@@ -106,8 +106,8 @@ impl<C: CellFamily> Store<C> for WorkchainDescription {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for WorkchainDescription {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for WorkchainDescription {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         match slice.load_u8() {
             Ok(Self::TAG) => {}
             Ok(_) => return Err(Error::InvalidTag),
@@ -171,11 +171,11 @@ impl WorkchainFormat {
     }
 }
 
-impl<C: CellFamily> Store<C> for WorkchainFormat {
+impl Store for WorkchainFormat {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         match self {
             Self::Basic(value) => {
@@ -190,8 +190,8 @@ impl<C: CellFamily> Store<C> for WorkchainFormat {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for WorkchainFormat {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for WorkchainFormat {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         Ok(match ok!(slice.load_small_uint(4)) {
             0x1 => Self::Basic(ok!(WorkchainFormatBasic::load_from(slice))),
             0x0 => Self::Extended(ok!(WorkchainFormatExtended::load_from(slice))),
@@ -327,12 +327,8 @@ impl GasLimitsPrices {
     const TAG_FLAT_PFX: u8 = 0xd1;
 }
 
-impl<C: CellFamily> Store<C> for GasLimitsPrices {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder<C>,
-        _: &mut dyn Finalizer<C>,
-    ) -> Result<(), Error> {
+impl Store for GasLimitsPrices {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
         ok!(builder.store_u8(Self::TAG_FLAT_PFX));
         ok!(builder.store_u64(self.flat_gas_limit));
         ok!(builder.store_u64(self.flat_gas_price));
@@ -347,8 +343,8 @@ impl<C: CellFamily> Store<C> for GasLimitsPrices {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for GasLimitsPrices {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for GasLimitsPrices {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let mut result = Self::default();
         loop {
             match slice.load_u8() {
@@ -453,12 +449,8 @@ impl CatchainConfig {
     const TAG_V2: u8 = 0xc2;
 }
 
-impl<C: CellFamily> Store<C> for CatchainConfig {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder<C>,
-        _: &mut dyn Finalizer<C>,
-    ) -> Result<(), Error> {
+impl Store for CatchainConfig {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
         let flags = ((self.isolate_mc_validators as u8) << 1) | (self.shuffle_mc_validators as u8);
         ok!(builder.store_u8(Self::TAG_V2));
         ok!(builder.store_u8(flags));
@@ -469,8 +461,8 @@ impl<C: CellFamily> Store<C> for CatchainConfig {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for CatchainConfig {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for CatchainConfig {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let flags = match slice.load_u8() {
             Ok(Self::TAG_V1) => 0,
             Ok(Self::TAG_V2) => ok!(slice.load_u8()),
@@ -519,12 +511,8 @@ impl ConsensusConfig {
     const TAG_V2: u8 = 0xd7;
 }
 
-impl<C: CellFamily> Store<C> for ConsensusConfig {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder<C>,
-        _: &mut dyn Finalizer<C>,
-    ) -> Result<(), Error> {
+impl Store for ConsensusConfig {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
         let flags = self.new_catchain_ids as u8;
 
         ok!(builder.store_u8(Self::TAG_V2));
@@ -540,8 +528,8 @@ impl<C: CellFamily> Store<C> for ConsensusConfig {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for ConsensusConfig {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for ConsensusConfig {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let (flags, round_candidates) = match slice.load_u8() {
             Ok(Self::TAG_V1) => (0, ok!(NonZeroU32::load_from(slice))),
             Ok(Self::TAG_V2) => {
@@ -588,21 +576,18 @@ impl ValidatorSet {
     const TAG_V2: u8 = 0x12;
 }
 
-impl<C> Store<C> for ValidatorSet
-where
-    for<'c> C: CellFamily + 'c,
-{
+impl Store for ValidatorSet {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         let Ok(total) = u16::try_from(self.list.len()) else {
             return Err(Error::InvalidData)
         };
 
         // TODO: optimize
-        let mut validators = Dict::<C, u16, ValidatorDescription>::new();
+        let mut validators = Dict::<u16, ValidatorDescription>::new();
         for (i, item) in self.list.iter().enumerate() {
             ok!(validators.set_ext(i as u16, item, finalizer));
         }
@@ -617,11 +602,8 @@ where
     }
 }
 
-impl<'a, C> Load<'a, C> for ValidatorSet
-where
-    for<'c> C: DefaultFinalizer + 'c,
-{
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for ValidatorSet {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let with_total_weight = match slice.load_u8() {
             Ok(Self::TAG_V1) => false,
             Ok(Self::TAG_V2) => true,
@@ -637,14 +619,14 @@ where
             return Err(Error::InvalidData);
         }
 
-        let finalizer = &mut C::default_finalizer();
+        let finalizer = &mut Cell::default_finalizer();
 
         let (mut total_weight, validators) = if with_total_weight {
             let total_weight = ok!(slice.load_u64());
-            let dict = ok!(Dict::<C, u16, ValidatorDescription>::load_from(slice));
+            let dict = ok!(Dict::<u16, ValidatorDescription>::load_from(slice));
             (total_weight, dict)
         } else {
-            let dict = ok!(Dict::<C, u16, ValidatorDescription>::load_from_root_ext(
+            let dict = ok!(Dict::<u16, ValidatorDescription>::load_from_root_ext(
                 slice, finalizer
             ));
             (0, dict)
@@ -708,12 +690,8 @@ impl ValidatorDescription {
     const PUBKEY_TAG: u32 = 0x8e81278a;
 }
 
-impl<C: CellFamily> Store<C> for ValidatorDescription {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder<C>,
-        _: &mut dyn Finalizer<C>,
-    ) -> Result<(), Error> {
+impl Store for ValidatorDescription {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
         let with_mc_seqno = self.mc_seqno_since != 0;
 
         let tag = if with_mc_seqno {
@@ -746,8 +724,8 @@ impl<C: CellFamily> Store<C> for ValidatorDescription {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for ValidatorDescription {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for ValidatorDescription {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let (with_adnl, with_mc_seqno) = match slice.load_u8() {
             Ok(Self::TAG_BASIC) => (false, false),
             Ok(Self::TAG_WITH_ADNL) => (true, false),

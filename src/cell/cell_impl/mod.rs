@@ -3,15 +3,15 @@ use std::mem::MaybeUninit;
 #[cfg(feature = "stats")]
 use super::CellTreeStats;
 use super::{
-    Cell, CellContainer, CellDescriptor, CellFamily, CellHash, EMPTY_CELL_HASH, MAX_REF_COUNT,
+    Cell, CellDescriptor, CellFamily, CellHash, CellImpl, DynCell, EMPTY_CELL_HASH, MAX_REF_COUNT,
 };
 use crate::util::TryAsMut;
 
 macro_rules! define_gen_vtable_ptr {
-    (($family:ty, $($param:tt)*) => $($type:tt)*) => {
+    (($($param:tt)*) => $($type:tt)*) => {
         const fn gen_vtable_ptr<$($param)*>() -> *const () {
             let uninit = std::mem::MaybeUninit::<$($type)*>::uninit();
-            let fat_ptr = uninit.as_ptr() as *const dyn crate::cell::Cell<$family>;
+            let fat_ptr = uninit.as_ptr() as *const dyn crate::cell::CellImpl;
             // SAFETY: "fat" pointer consists of two "slim" pointers
             let [_, vtable] = unsafe { std::mem::transmute::<_, [*const (); 2]>(fat_ptr) };
             vtable
@@ -33,11 +33,13 @@ macro_rules! offset_of {
 }
 
 /// Single-threaded cell implementation.
+#[cfg(not(feature = "sync"))]
 pub mod rc;
 /// Thread-safe cell implementation.
+#[cfg(feature = "sync")]
 pub mod sync;
 
-type ReplacedChild<C> = Result<CellContainer<C>, CellContainer<C>>;
+type ReplacedChild = Result<Cell, Cell>;
 
 /// Helper struct for tightly packed cell data.
 #[repr(C)]
@@ -48,7 +50,7 @@ struct HeaderWithData<H, const N: usize> {
 
 struct EmptyOrdinaryCell;
 
-impl<C: CellFamily> Cell<C> for EmptyOrdinaryCell {
+impl CellImpl for EmptyOrdinaryCell {
     fn descriptor(&self) -> CellDescriptor {
         CellDescriptor::new([0, 0])
     }
@@ -61,15 +63,15 @@ impl<C: CellFamily> Cell<C> for EmptyOrdinaryCell {
         0
     }
 
-    fn reference(&self, _: u8) -> Option<&dyn Cell<C>> {
+    fn reference(&self, _: u8) -> Option<&DynCell> {
         None
     }
 
-    fn reference_cloned(&self, _: u8) -> Option<CellContainer<C>> {
+    fn reference_cloned(&self, _: u8) -> Option<Cell> {
         None
     }
 
-    fn virtualize(&self) -> &dyn Cell<C> {
+    fn virtualize(&self) -> &DynCell {
         self
     }
 
@@ -81,15 +83,15 @@ impl<C: CellFamily> Cell<C> for EmptyOrdinaryCell {
         0
     }
 
-    fn take_first_child(&mut self) -> Option<CellContainer<C>> {
+    fn take_first_child(&mut self) -> Option<Cell> {
         None
     }
 
-    fn replace_first_child(&mut self, parent: CellContainer<C>) -> ReplacedChild<C> {
+    fn replace_first_child(&mut self, parent: Cell) -> ReplacedChild {
         Err(parent)
     }
 
-    fn take_next_child(&mut self) -> Option<CellContainer<C>> {
+    fn take_next_child(&mut self) -> Option<Cell> {
         None
     }
 
@@ -130,7 +132,7 @@ impl StaticCell {
     }
 }
 
-impl<C: CellFamily> Cell<C> for StaticCell {
+impl CellImpl for StaticCell {
     fn descriptor(&self) -> CellDescriptor {
         self.descriptor
     }
@@ -143,15 +145,15 @@ impl<C: CellFamily> Cell<C> for StaticCell {
         self.bit_len
     }
 
-    fn reference(&self, _: u8) -> Option<&dyn Cell<C>> {
+    fn reference(&self, _: u8) -> Option<&DynCell> {
         None
     }
 
-    fn reference_cloned(&self, _: u8) -> Option<CellContainer<C>> {
+    fn reference_cloned(&self, _: u8) -> Option<Cell> {
         None
     }
 
-    fn virtualize(&self) -> &dyn Cell<C> {
+    fn virtualize(&self) -> &DynCell {
         self
     }
 
@@ -163,15 +165,15 @@ impl<C: CellFamily> Cell<C> for StaticCell {
         0
     }
 
-    fn take_first_child(&mut self) -> Option<CellContainer<C>> {
+    fn take_first_child(&mut self) -> Option<Cell> {
         None
     }
 
-    fn replace_first_child(&mut self, parent: CellContainer<C>) -> ReplacedChild<C> {
+    fn replace_first_child(&mut self, parent: Cell) -> ReplacedChild {
         Err(parent)
     }
 
-    fn take_next_child(&mut self) -> Option<CellContainer<C>> {
+    fn take_next_child(&mut self) -> Option<Cell> {
         None
     }
 
@@ -221,19 +223,19 @@ const ALL_ONES_CELL_HASH: [u8; 32] = [
     0x66, 0x12, 0x81, 0x70, 0x30, 0x1a, 0x7b, 0xec, 0xc2, 0x7a, 0xf1, 0xad, 0xbe, 0x6a, 0x31, 0xc9,
 ];
 
-type OrdinaryCell<C, const N: usize> = HeaderWithData<OrdinaryCellHeader<C>, N>;
+type OrdinaryCell<const N: usize> = HeaderWithData<OrdinaryCellHeader, N>;
 
-struct OrdinaryCellHeader<C: CellFamily> {
+struct OrdinaryCellHeader {
     bit_len: u16,
     #[cfg(feature = "stats")]
     stats: CellTreeStats,
     hashes: Vec<(CellHash, u16)>,
     descriptor: CellDescriptor,
-    references: [MaybeUninit<CellContainer<C>>; MAX_REF_COUNT],
+    references: [MaybeUninit<Cell>; MAX_REF_COUNT],
     without_first: bool,
 }
 
-impl<C: CellFamily> OrdinaryCellHeader<C> {
+impl OrdinaryCellHeader {
     fn level_descr(&self, level: u8) -> &(CellHash, u16) {
         let hash_index = hash_index(self.descriptor, level);
         debug_assert!((hash_index as usize) < self.hashes.len());
@@ -242,7 +244,7 @@ impl<C: CellFamily> OrdinaryCellHeader<C> {
         unsafe { self.hashes.get_unchecked(hash_index as usize) }
     }
 
-    fn reference(&self, i: u8) -> Option<&CellContainer<C>> {
+    fn reference(&self, i: u8) -> Option<&Cell> {
         if i < self.descriptor.reference_count() {
             // SAFETY: Item is initialized
             let child = unsafe { self.references.get_unchecked(i as usize).assume_init_ref() };
@@ -252,19 +254,19 @@ impl<C: CellFamily> OrdinaryCellHeader<C> {
         }
     }
 
-    fn take_first_child(&mut self) -> Option<CellContainer<C>> {
+    fn take_first_child(&mut self) -> Option<Cell> {
         if self.descriptor.reference_count() > 0 && !self.without_first {
             self.without_first = true;
-            let references_ptr = self.references.as_ptr() as *const CellContainer<C>;
+            let references_ptr = self.references.as_ptr() as *const Cell;
             Some(unsafe { std::ptr::read(references_ptr) })
         } else {
             None
         }
     }
 
-    fn replace_first_child_with_parent(&mut self, parent: CellContainer<C>) -> ReplacedChild<C> {
+    fn replace_first_child_with_parent(&mut self, parent: Cell) -> ReplacedChild {
         if self.descriptor.reference_count() > 0 && !self.without_first {
-            let references_ptr = self.references.as_mut_ptr() as *mut CellContainer<C>;
+            let references_ptr = self.references.as_mut_ptr() as *mut Cell;
             unsafe {
                 let result = Ok(std::ptr::read(references_ptr));
                 std::ptr::write(references_ptr, parent);
@@ -275,10 +277,10 @@ impl<C: CellFamily> OrdinaryCellHeader<C> {
         }
     }
 
-    fn take_next_child(&mut self) -> Option<CellContainer<C>> {
+    fn take_next_child(&mut self) -> Option<Cell> {
         if self.descriptor.reference_count() > 1 {
             self.descriptor.d1 -= 1;
-            let references_ptr = self.references.as_ptr() as *const CellContainer<C>;
+            let references_ptr = self.references.as_ptr() as *const Cell;
             let idx = self.descriptor.d1 & CellDescriptor::REF_COUNT_MASK;
             Some(unsafe { std::ptr::read(references_ptr.add(idx as usize)) })
         } else {
@@ -287,25 +289,23 @@ impl<C: CellFamily> OrdinaryCellHeader<C> {
     }
 }
 
-impl<C: CellFamily> Drop for OrdinaryCellHeader<C> {
+impl Drop for OrdinaryCellHeader {
     fn drop(&mut self) {
         // Returns the nearest ancestor and its consumed next child.
         // Returns `None` if no ancestors with children found.
         #[inline]
-        fn take_ancestor_next_child<C: CellFamily>(
-            parent: CellContainer<C>,
-        ) -> Option<(CellContainer<C>, CellContainer<C>)> {
+        fn take_ancestor_next_child(parent: Cell) -> Option<(Cell, Cell)> {
             let mut ancestor = parent;
             while let Some(ancestor_ref) = ancestor.try_as_mut() {
                 // Try to get the next child from the direct ancestor
                 if let Some(next_child) = ancestor_ref.take_next_child() {
                     return Some((ancestor, next_child));
-                } else if let Some(grandancestor) = ancestor_ref.take_first_child() {
+                } else if let Some(grand_ancestor) = ancestor_ref.take_first_child() {
                     // Drop `ancestor` as it is now a leaf node
                     drop(ancestor);
 
                     // Move one level deeper
-                    ancestor = grandancestor;
+                    ancestor = grand_ancestor;
                 } else {
                     // Break on leaf node
                     break;
@@ -314,7 +314,7 @@ impl<C: CellFamily> Drop for OrdinaryCellHeader<C> {
             None
         }
 
-        fn main_deep_safe_drop<C: CellFamily>(mut parent: CellContainer<C>) {
+        fn main_deep_safe_drop(mut parent: Cell) {
             // Consume first child from parent.
             let mut current = 'curr: {
                 if let Some(parent) = parent.try_as_mut() {
@@ -346,7 +346,7 @@ impl<C: CellFamily> Drop for OrdinaryCellHeader<C> {
                 }
 
                 // Find the next child
-                let Some((ancestor, child)) = take_ancestor_next_child::<C>(parent) else {
+                let Some((ancestor, child)) = take_ancestor_next_child(parent) else {
                     return;
                 };
 
@@ -355,21 +355,21 @@ impl<C: CellFamily> Drop for OrdinaryCellHeader<C> {
             }
         }
 
-        fn deep_drop_impl<C: CellFamily>(cell: &mut CellContainer<C>) {
+        fn deep_drop_impl(cell: &mut Cell) {
             let Some(cell) = cell.try_as_mut() else {
                 return;
             };
 
             if let Some(first_child) = cell.take_first_child() {
-                main_deep_safe_drop::<C>(first_child);
+                main_deep_safe_drop(first_child);
 
                 while let Some(next_child) = cell.take_next_child() {
-                    main_deep_safe_drop::<C>(next_child);
+                    main_deep_safe_drop(next_child);
                 }
             }
         }
 
-        let references_ptr = self.references.as_mut_ptr() as *mut CellContainer<C>;
+        let references_ptr = self.references.as_mut_ptr() as *mut Cell;
         debug_assert!(self.descriptor.reference_count() <= MAX_REF_COUNT as u8);
 
         for i in 0..self.descriptor.reference_count() {
@@ -380,7 +380,7 @@ impl<C: CellFamily> Drop for OrdinaryCellHeader<C> {
             // SAFETY: references were initialized
             unsafe {
                 let child_ptr = references_ptr.add(i as usize);
-                deep_drop_impl::<C>(&mut *child_ptr);
+                deep_drop_impl(&mut *child_ptr);
                 std::ptr::drop_in_place(child_ptr);
             }
         }
@@ -388,7 +388,8 @@ impl<C: CellFamily> Drop for OrdinaryCellHeader<C> {
 }
 
 // TODO: merge VTables for different data array sizes
-impl<C: CellFamily, const N: usize> Cell<C> for OrdinaryCell<C, N> {
+
+impl<const N: usize> CellImpl for OrdinaryCell<N> {
     fn descriptor(&self) -> CellDescriptor {
         self.header.descriptor
     }
@@ -404,15 +405,15 @@ impl<C: CellFamily, const N: usize> Cell<C> for OrdinaryCell<C, N> {
         self.header.bit_len
     }
 
-    fn reference(&self, index: u8) -> Option<&dyn Cell<C>> {
+    fn reference(&self, index: u8) -> Option<&DynCell> {
         Some(self.header.reference(index)?.as_ref())
     }
 
-    fn reference_cloned(&self, index: u8) -> Option<CellContainer<C>> {
+    fn reference_cloned(&self, index: u8) -> Option<Cell> {
         Some(self.header.reference(index)?.clone())
     }
 
-    fn virtualize(&self) -> &dyn Cell<C> {
+    fn virtualize(&self) -> &DynCell {
         if self.header.descriptor.level_mask().is_empty() {
             self
         } else {
@@ -428,15 +429,15 @@ impl<C: CellFamily, const N: usize> Cell<C> for OrdinaryCell<C, N> {
         self.header.level_descr(level).1
     }
 
-    fn take_first_child(&mut self) -> Option<CellContainer<C>> {
+    fn take_first_child(&mut self) -> Option<Cell> {
         self.header.take_first_child()
     }
 
-    fn replace_first_child(&mut self, parent: CellContainer<C>) -> ReplacedChild<C> {
+    fn replace_first_child(&mut self, parent: Cell) -> ReplacedChild {
         self.header.replace_first_child_with_parent(parent)
     }
 
-    fn take_next_child(&mut self) -> Option<CellContainer<C>> {
+    fn take_next_child(&mut self) -> Option<Cell> {
         self.header.take_next_child()
     }
 
@@ -456,7 +457,7 @@ impl LibraryReference {
     const BIT_LEN: u16 = 8 + 256;
 }
 
-impl<C: CellFamily> Cell<C> for LibraryReference {
+impl CellImpl for LibraryReference {
     fn descriptor(&self) -> CellDescriptor {
         self.descriptor
     }
@@ -469,15 +470,15 @@ impl<C: CellFamily> Cell<C> for LibraryReference {
         LibraryReference::BIT_LEN
     }
 
-    fn reference(&self, _: u8) -> Option<&dyn Cell<C>> {
+    fn reference(&self, _: u8) -> Option<&DynCell> {
         None
     }
 
-    fn reference_cloned(&self, _: u8) -> Option<CellContainer<C>> {
+    fn reference_cloned(&self, _: u8) -> Option<Cell> {
         None
     }
 
-    fn virtualize(&self) -> &dyn Cell<C> {
+    fn virtualize(&self) -> &DynCell {
         self
     }
 
@@ -489,15 +490,15 @@ impl<C: CellFamily> Cell<C> for LibraryReference {
         0
     }
 
-    fn take_first_child(&mut self) -> Option<CellContainer<C>> {
+    fn take_first_child(&mut self) -> Option<Cell> {
         None
     }
 
-    fn replace_first_child(&mut self, parent: CellContainer<C>) -> ReplacedChild<C> {
+    fn replace_first_child(&mut self, parent: Cell) -> ReplacedChild {
         Err(parent)
     }
 
-    fn take_next_child(&mut self) -> Option<CellContainer<C>> {
+    fn take_next_child(&mut self) -> Option<Cell> {
         None
     }
 
@@ -525,7 +526,7 @@ impl PrunedBranchHeader {
     }
 }
 
-impl<C: CellFamily, const N: usize> Cell<C> for PrunedBranch<N> {
+impl<const N: usize> CellImpl for PrunedBranch<N> {
     fn descriptor(&self) -> CellDescriptor {
         self.header.descriptor
     }
@@ -541,15 +542,15 @@ impl<C: CellFamily, const N: usize> Cell<C> for PrunedBranch<N> {
         8 + 8 + (self.header.level as u16) * (256 + 16)
     }
 
-    fn reference(&self, _: u8) -> Option<&dyn Cell<C>> {
+    fn reference(&self, _: u8) -> Option<&DynCell> {
         None
     }
 
-    fn reference_cloned(&self, _: u8) -> Option<CellContainer<C>> {
+    fn reference_cloned(&self, _: u8) -> Option<Cell> {
         None
     }
 
-    fn virtualize(&self) -> &dyn Cell<C> {
+    fn virtualize(&self) -> &DynCell {
         VirtualCellWrapper::wrap(self)
     }
 
@@ -583,15 +584,15 @@ impl<C: CellFamily, const N: usize> Cell<C> for PrunedBranch<N> {
         }
     }
 
-    fn take_first_child(&mut self) -> Option<CellContainer<C>> {
+    fn take_first_child(&mut self) -> Option<Cell> {
         None
     }
 
-    fn replace_first_child(&mut self, parent: CellContainer<C>) -> ReplacedChild<C> {
+    fn replace_first_child(&mut self, parent: Cell) -> ReplacedChild {
         Err(parent)
     }
 
-    fn take_next_child(&mut self) -> Option<CellContainer<C>> {
+    fn take_next_child(&mut self) -> Option<Cell> {
         None
     }
 
@@ -604,10 +605,10 @@ impl<C: CellFamily, const N: usize> Cell<C> for PrunedBranch<N> {
 #[repr(transparent)]
 pub struct VirtualCell<T>(T);
 
-impl<C, T> Cell<C> for VirtualCell<T>
+impl<#[cfg(not(feature = "sync"))] T, #[cfg(feature = "sync")] T: Send + Sync> CellImpl
+    for VirtualCell<T>
 where
-    for<'c> C: CellFamily + 'c,
-    T: AsRef<dyn Cell<C>> + TryAsMut<dyn Cell<C>>,
+    T: AsRef<DynCell> + TryAsMut<DynCell> + 'static,
 {
     fn descriptor(&self) -> CellDescriptor {
         self.0.as_ref().descriptor()
@@ -621,15 +622,15 @@ where
         self.0.as_ref().bit_len()
     }
 
-    fn reference(&self, index: u8) -> Option<&dyn Cell<C>> {
+    fn reference(&self, index: u8) -> Option<&DynCell> {
         Some(self.0.as_ref().reference(index)?.virtualize())
     }
 
-    fn reference_cloned(&self, index: u8) -> Option<CellContainer<C>> {
-        Some(C::virtualize(self.0.as_ref().reference_cloned(index)?))
+    fn reference_cloned(&self, index: u8) -> Option<Cell> {
+        Some(Cell::virtualize(self.0.as_ref().reference_cloned(index)?))
     }
 
-    fn virtualize(&self) -> &dyn Cell<C> {
+    fn virtualize(&self) -> &DynCell {
         self
     }
 
@@ -643,15 +644,15 @@ where
         cell.depth(virtual_hash_index(cell.descriptor(), level))
     }
 
-    fn take_first_child(&mut self) -> Option<CellContainer<C>> {
+    fn take_first_child(&mut self) -> Option<Cell> {
         self.0.try_as_mut()?.take_first_child()
     }
 
-    fn take_next_child(&mut self) -> Option<CellContainer<C>> {
+    fn take_next_child(&mut self) -> Option<Cell> {
         self.0.try_as_mut()?.take_next_child()
     }
 
-    fn replace_first_child(&mut self, parent: CellContainer<C>) -> ReplacedChild<C> {
+    fn replace_first_child(&mut self, parent: Cell) -> ReplacedChild {
         match self.0.try_as_mut() {
             Some(cell) => cell.replace_first_child(parent),
             None => Err(parent),
@@ -674,7 +675,11 @@ impl<T> VirtualCellWrapper<T> {
     }
 }
 
-impl<C: CellFamily, T: Cell<C>> Cell<C> for VirtualCellWrapper<T> {
+impl<#[cfg(not(feature = "sync"))] T, #[cfg(feature = "sync")] T: Send + Sync> CellImpl
+    for VirtualCellWrapper<T>
+where
+    T: CellImpl + 'static,
+{
     fn descriptor(&self) -> CellDescriptor {
         self.0.descriptor()
     }
@@ -687,15 +692,15 @@ impl<C: CellFamily, T: Cell<C>> Cell<C> for VirtualCellWrapper<T> {
         self.0.bit_len()
     }
 
-    fn reference(&self, index: u8) -> Option<&dyn Cell<C>> {
+    fn reference(&self, index: u8) -> Option<&DynCell> {
         Some(self.0.reference(index)?.virtualize())
     }
 
-    fn reference_cloned(&self, index: u8) -> Option<CellContainer<C>> {
-        Some(C::virtualize(self.0.reference_cloned(index)?))
+    fn reference_cloned(&self, index: u8) -> Option<Cell> {
+        Some(Cell::virtualize(self.0.reference_cloned(index)?))
     }
 
-    fn virtualize(&self) -> &dyn Cell<C> {
+    fn virtualize(&self) -> &DynCell {
         self
     }
 
@@ -707,15 +712,15 @@ impl<C: CellFamily, T: Cell<C>> Cell<C> for VirtualCellWrapper<T> {
         self.0.depth(virtual_hash_index(self.0.descriptor(), level))
     }
 
-    fn take_first_child(&mut self) -> Option<CellContainer<C>> {
+    fn take_first_child(&mut self) -> Option<Cell> {
         self.0.take_first_child()
     }
 
-    fn replace_first_child(&mut self, parent: CellContainer<C>) -> ReplacedChild<C> {
+    fn replace_first_child(&mut self, parent: Cell) -> ReplacedChild {
         self.0.replace_first_child(parent)
     }
 
-    fn take_next_child(&mut self) -> Option<CellContainer<C>> {
+    fn take_next_child(&mut self) -> Option<Cell> {
         self.0.take_next_child()
     }
 
@@ -744,32 +749,23 @@ fn aligned_leaf_stats(descriptor: CellDescriptor) -> CellTreeStats {
 #[cfg(test)]
 mod tests {
     use crate::boc::Boc;
-    use crate::cell::{CellBuilder, DefaultFinalizer};
-    use crate::prelude::{ArcCellFamily, RcCellFamily};
+    use crate::cell::{Cell, CellBuilder, CellFamily};
 
     #[test]
     fn static_cells() {
-        fn check_static_cells<C>()
-        where
-            for<'c> C: DefaultFinalizer + 'c,
-        {
-            let mut builder = CellBuilder::<C>::new();
-            builder.store_zeros(1023).unwrap();
-            let cell = builder.build().unwrap();
-            let all_zeros = C::all_zeros_ref();
-            assert_eq!(cell.as_ref().repr_hash(), all_zeros.repr_hash());
-            assert_eq!(cell.as_ref().data(), all_zeros.data());
-            assert_eq!(Boc::encode(cell.as_ref()), Boc::encode(all_zeros));
+        let mut builder = CellBuilder::new();
+        builder.store_zeros(1023).unwrap();
+        let cell = builder.build().unwrap();
+        let all_zeros = Cell::all_zeros_ref();
+        assert_eq!(cell.as_ref().repr_hash(), all_zeros.repr_hash());
+        assert_eq!(cell.as_ref().data(), all_zeros.data());
+        assert_eq!(Boc::encode(cell.as_ref()), Boc::encode(all_zeros));
 
-            let builder = CellBuilder::<C>::from_raw_data(&[0xff; 128], 1023).unwrap();
-            let cell = builder.build().unwrap();
-            let all_ones = C::all_ones_ref();
-            assert_eq!(cell.as_ref().repr_hash(), all_ones.repr_hash());
-            assert_eq!(cell.as_ref().data(), all_ones.data());
-            assert_eq!(Boc::encode(cell.as_ref()), Boc::encode(all_ones));
-        }
-
-        check_static_cells::<ArcCellFamily>();
-        check_static_cells::<RcCellFamily>();
+        let builder = CellBuilder::from_raw_data(&[0xff; 128], 1023).unwrap();
+        let cell = builder.build().unwrap();
+        let all_ones = Cell::all_ones_ref();
+        assert_eq!(cell.as_ref().repr_hash(), all_ones.repr_hash());
+        assert_eq!(cell.as_ref().data(), all_ones.data());
+        assert_eq!(Boc::encode(cell.as_ref()), Boc::encode(all_ones));
     }
 }

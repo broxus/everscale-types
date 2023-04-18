@@ -2,7 +2,7 @@ use crate::cell::*;
 use crate::dict::{AugDict, AugDictSkipValue, Dict};
 use crate::error::Error;
 use crate::num::Uint15;
-use crate::util::{CustomClone, CustomDebug, DisplayHash};
+use crate::util::{CustomDebug, DisplayHash};
 
 use crate::models::config::BlockchainConfig;
 use crate::models::currency::CurrencyCollection;
@@ -12,15 +12,15 @@ use crate::models::Lazy;
 use super::ShardHashes;
 
 /// Block content.
-#[derive(CustomDebug, CustomClone, Store, Load)]
+#[derive(CustomDebug, Clone, Store, Load)]
 #[tlb(tag = "#4a33f6fd")]
-pub struct BlockExtra<C: CellFamily> {
+pub struct BlockExtra {
     /// Incoming message description.
-    pub in_msg_description: CellContainer<C>,
+    pub in_msg_description: Cell,
     /// Outgoing message description.
-    pub out_msg_description: CellContainer<C>,
+    pub out_msg_description: Cell,
     /// Block transactions info.
-    pub account_blocks: Lazy<C, AugDict<C, CellHash, CurrencyCollection<C>, AccountBlock<C>>>,
+    pub account_blocks: Lazy<AugDict<CellHash, CurrencyCollection, AccountBlock>>,
     /// Random generator seed.
     #[debug(with = "DisplayHash")]
     pub rand_seed: CellHash,
@@ -28,12 +28,12 @@ pub struct BlockExtra<C: CellFamily> {
     #[debug(with = "DisplayHash")]
     pub created_by: CellHash,
     /// Additional block content.
-    pub custom: Option<Lazy<C, McBlockExtra<C>>>,
+    pub custom: Option<Lazy<McBlockExtra>>,
 }
 
-impl<C: CellFamily> BlockExtra<C> {
+impl BlockExtra {
     /// Tries to load additional block content.
-    pub fn load_custom(&self) -> Result<Option<McBlockExtra<C>>, Error> {
+    pub fn load_custom(&self) -> Result<Option<McBlockExtra>, Error> {
         match &self.custom {
             Some(custom) => match custom.load() {
                 Ok(custom) => Ok(Some(custom)),
@@ -45,26 +45,26 @@ impl<C: CellFamily> BlockExtra<C> {
 }
 
 /// A group of account transactions.
-#[derive(CustomDebug, CustomClone)]
-pub struct AccountBlock<C: CellFamily> {
+#[derive(CustomDebug, Clone)]
+pub struct AccountBlock {
     /// Account id.
     #[debug(with = "DisplayHash")]
     pub account: CellHash,
     /// Dictionary with fees and account transactions.
-    pub transactions: AugDict<C, u64, CurrencyCollection<C>, Lazy<C, Transaction<C>>>,
+    pub transactions: AugDict<u64, CurrencyCollection, Lazy<Transaction>>,
     /// Account state hashes before and after this block.
-    pub state_update: Lazy<C, HashUpdate>,
+    pub state_update: Lazy<HashUpdate>,
 }
 
-impl<C: CellFamily> AccountBlock<C> {
+impl AccountBlock {
     const TAG: u8 = 5;
 }
 
-impl<C: CellFamily> Store<C> for AccountBlock<C> {
+impl Store for AccountBlock {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         let transactions_root = match self.transactions.dict().root() {
             Some(root) => root.as_ref().as_slice(),
@@ -78,11 +78,8 @@ impl<C: CellFamily> Store<C> for AccountBlock<C> {
     }
 }
 
-impl<'a, C> Load<'a, C> for AccountBlock<C>
-where
-    for<'c> C: DefaultFinalizer + 'c,
-{
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for AccountBlock {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         match slice.load_small_uint(4) {
             Ok(Self::TAG) => {}
             Ok(_) => return Err(Error::InvalidTag),
@@ -91,48 +88,51 @@ where
 
         Ok(Self {
             account: ok!(slice.load_u256()),
-            transactions: ok!(AugDict::load_from_root(slice, &mut C::default_finalizer())),
+            transactions: ok!(AugDict::load_from_root(
+                slice,
+                &mut Cell::default_finalizer()
+            )),
             state_update: ok!(Lazy::load_from(slice)),
         })
     }
 }
 
-impl<'a, C: CellFamily> AugDictSkipValue<'a, C> for Lazy<C, Transaction<C>> {
-    fn skip_value(slice: &mut CellSlice<'a, C>) -> bool {
+impl<'a> AugDictSkipValue<'a> for Lazy<Transaction> {
+    fn skip_value(slice: &mut CellSlice<'a>) -> bool {
         slice.try_advance(0, 1)
     }
 }
 
 /// Additional content for masterchain blocks.
-#[derive(CustomDebug, CustomClone)]
-pub struct McBlockExtra<C: CellFamily> {
+#[derive(Debug, Clone)]
+pub struct McBlockExtra {
     /// A tree of the most recent descriptions for all currently existing shards
     /// for all workchains except the masterchain.
-    pub shards: ShardHashes<C>,
+    pub shards: ShardHashes,
     /// Collected/created shard fees.
-    pub fees: ShardFees<C>,
+    pub fees: ShardFees,
     /// Signatures for previous blocks (TODO)
-    pub prev_block_signatures: Dict<C, u16, BlockSignature>,
+    pub prev_block_signatures: Dict<u16, BlockSignature>,
     /// TODO
-    pub recover_create_msg: Option<CellContainer<C>>,
+    pub recover_create_msg: Option<Cell>,
     /// TODO
-    pub mint_msg: Option<CellContainer<C>>,
+    pub mint_msg: Option<Cell>,
     /// Copyleft messages if present.
-    pub copyleft_msgs: Dict<C, Uint15, CellContainer<C>>,
+    pub copyleft_msgs: Dict<Uint15, Cell>,
     /// Blockchain config (if the block is a key block).
-    pub config: Option<BlockchainConfig<C>>,
+    pub config: Option<BlockchainConfig>,
 }
 
-impl<C: CellFamily> McBlockExtra<C> {
+impl McBlockExtra {
     const TAG_V1: u16 = 0xcca5;
     const TAG_V2: u16 = 0xdc75;
 }
 
-impl<C: CellFamily> Store<C> for McBlockExtra<C> {
+impl Store for McBlockExtra {
     fn store_into(
         &self,
-        builder: &mut CellBuilder<C>,
-        finalizer: &mut dyn Finalizer<C>,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         let tag = if self.copyleft_msgs.is_empty() {
             Self::TAG_V1
@@ -141,7 +141,7 @@ impl<C: CellFamily> Store<C> for McBlockExtra<C> {
         };
 
         let cell = {
-            let mut builder = CellBuilder::<C>::new();
+            let mut builder = CellBuilder::new();
             ok!(self
                 .prev_block_signatures
                 .store_into(&mut builder, finalizer));
@@ -169,8 +169,8 @@ impl<C: CellFamily> Store<C> for McBlockExtra<C> {
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for McBlockExtra<C> {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for McBlockExtra {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let with_copyleft = match slice.load_u16() {
             Ok(Self::TAG_V1) => false,
             Ok(Self::TAG_V2) => true,
@@ -195,8 +195,8 @@ impl<'a, C: CellFamily> Load<'a, C> for McBlockExtra<C> {
             shards,
             fees,
             prev_block_signatures: ok!(Dict::load_from(slice)),
-            recover_create_msg: ok!(Option::<CellContainer<C>>::load_from(slice)),
-            mint_msg: ok!(Option::<CellContainer<C>>::load_from(slice)),
+            recover_create_msg: ok!(Option::<Cell>::load_from(slice)),
+            mint_msg: ok!(Option::<Cell>::load_from(slice)),
             copyleft_msgs: if with_copyleft {
                 ok!(Dict::load_from(slice))
             } else {
@@ -208,14 +208,14 @@ impl<'a, C: CellFamily> Load<'a, C> for McBlockExtra<C> {
 }
 
 /// TEMP shard fees mapping sub.
-#[derive(CustomDebug, CustomClone, Store, Load)]
-pub struct ShardFees<C: CellFamily> {
+#[derive(CustomDebug, Clone, Store, Load)]
+pub struct ShardFees {
     /// Dictionary root.
-    pub root: Option<CellContainer<C>>,
+    pub root: Option<Cell>,
     /// `AugDict` root extra part.
-    pub fees: CurrencyCollection<C>,
+    pub fees: CurrencyCollection,
     /// `AugDict` root extra part.
-    pub create: CurrencyCollection<C>,
+    pub create: CurrencyCollection,
 }
 
 /// Block signature pair.
@@ -245,19 +245,15 @@ impl Default for Signature {
     }
 }
 
-impl<C: CellFamily> Store<C> for Signature {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder<C>,
-        _: &mut dyn Finalizer<C>,
-    ) -> Result<(), Error> {
+impl Store for Signature {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
         ok!(builder.store_small_uint(Self::TAG, Self::TAG_LEN));
         builder.store_raw(&self.0, 512)
     }
 }
 
-impl<'a, C: CellFamily> Load<'a, C> for Signature {
-    fn load_from(slice: &mut CellSlice<'a, C>) -> Result<Self, Error> {
+impl<'a> Load<'a> for Signature {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         match slice.load_small_uint(Self::TAG_LEN) {
             Ok(Self::TAG) => {}
             Ok(_) => return Err(Error::InvalidTag),

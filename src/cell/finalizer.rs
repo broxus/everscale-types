@@ -1,8 +1,6 @@
 use sha2::Digest;
 
-use crate::cell::{
-    CellContainer, CellDescriptor, CellFamily, CellHash, CellType, LevelMask, MAX_REF_COUNT,
-};
+use crate::cell::{Cell, CellDescriptor, CellFamily, CellHash, CellType, LevelMask, MAX_REF_COUNT};
 use crate::error::Error;
 use crate::util::{unlikely, ArrayVec};
 
@@ -10,16 +8,16 @@ use crate::util::{unlikely, ArrayVec};
 use crate::cell::CellTreeStats;
 
 /// A trait for describing cell finalization logic.
-pub trait Finalizer<C: CellFamily + ?Sized> {
+pub trait Finalizer {
     /// Builds a new cell from cell parts.
-    fn finalize_cell(&mut self, cell: CellParts<'_, C>) -> Result<CellContainer<C>, Error>;
+    fn finalize_cell(&mut self, cell: CellParts<'_>) -> Result<Cell, Error>;
 }
 
-impl<F, C: CellFamily> Finalizer<C> for F
+impl<F> Finalizer for F
 where
-    F: FnMut(CellParts<C>) -> Result<CellContainer<C>, Error>,
+    F: FnMut(CellParts) -> Result<Cell, Error>,
 {
-    fn finalize_cell(&mut self, cell: CellParts<C>) -> Result<CellContainer<C>, Error> {
+    fn finalize_cell(&mut self, cell: CellParts) -> Result<Cell, Error> {
         (*self)(cell)
     }
 }
@@ -27,14 +25,14 @@ where
 /// Cell family with known default finalizer (noop in most cases).
 pub trait DefaultFinalizer: CellFamily {
     /// The default finalizer type.
-    type Finalizer: Finalizer<Self>;
+    type Finalizer: Finalizer;
 
     /// Creates a default finalizer.
     fn default_finalizer() -> Self::Finalizer;
 }
 
 /// Partially assembled cell.
-pub struct CellParts<'a, C: CellFamily + ?Sized> {
+pub struct CellParts<'a> {
     /// Cell tree storage stats.
     #[cfg(feature = "stats")]
     pub stats: CellTreeStats,
@@ -52,13 +50,13 @@ pub struct CellParts<'a, C: CellFamily + ?Sized> {
     ///
     /// NOTE: it is guaranteed that the length of the array is consistent
     /// with the descriptor.
-    pub references: ArrayVec<CellContainer<C>, MAX_REF_COUNT>,
+    pub references: ArrayVec<Cell, MAX_REF_COUNT>,
 
     /// Cell data slice.
     pub data: &'a [u8],
 }
 
-impl<'a, C: CellFamily + 'a> CellParts<'a, C> {
+impl<'a> CellParts<'a> {
     /// Validates cell and computes all hashes.
     pub fn compute_hashes(&self) -> Result<Vec<(CellHash, u16)>, Error> {
         const HASH_BITS: usize = 256;

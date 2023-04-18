@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::hash::BuildHasher;
 
-use crate::cell::{CellHash, Trackable, UsageTree, UsageTreeWithSubtrees};
+use crate::cell::{CellHash, UsageTree, UsageTreeWithSubtrees};
 
 pub use self::proof::{MerkleProof, MerkleProofBuilder, MerkleProofExtBuilder};
 pub use self::pruned_branch::make_pruned_branch;
@@ -12,6 +12,15 @@ pub use self::update::{MerkleUpdate, MerkleUpdateBuilder};
 mod proof;
 mod pruned_branch;
 mod update;
+
+#[cfg(feature = "sync")]
+#[doc(hidden)]
+mod __checks {
+    use super::*;
+
+    assert_impl_all!(MerkleProof: Send);
+    assert_impl_all!(MerkleUpdate: Send);
+}
 
 /// A cell tree filter that controls which cells will be included
 /// in the Merkle proof or update.
@@ -38,7 +47,7 @@ impl<T: MerkleFilter + ?Sized> MerkleFilter for &T {
     }
 }
 
-impl<C: Trackable> MerkleFilter for UsageTree<C> {
+impl MerkleFilter for UsageTree {
     fn check(&self, cell: &CellHash) -> FilterAction {
         if UsageTree::contains(self, cell) {
             FilterAction::Include
@@ -48,7 +57,7 @@ impl<C: Trackable> MerkleFilter for UsageTree<C> {
     }
 }
 
-impl<C: Trackable> MerkleFilter for UsageTreeWithSubtrees<C> {
+impl MerkleFilter for UsageTreeWithSubtrees {
     fn check(&self, cell: &CellHash) -> FilterAction {
         if UsageTreeWithSubtrees::contains_direct(self, cell) {
             FilterAction::Include
