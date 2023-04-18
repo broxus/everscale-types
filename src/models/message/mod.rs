@@ -3,7 +3,6 @@
 use crate::cell::*;
 use crate::error::Error;
 use crate::num::*;
-use crate::util::{CustomClone, CustomDebug, CustomEq};
 
 use crate::models::account::StateInit;
 use crate::models::currency::CurrencyCollection;
@@ -13,7 +12,7 @@ pub use self::address::*;
 mod address;
 
 /// Blockchain message.
-#[derive(CustomDebug, CustomClone)]
+#[derive(Debug, Clone)]
 pub struct Message<'a> {
     /// Message info.
     pub info: MsgInfo,
@@ -298,7 +297,7 @@ impl DetailedMessageLayout {
 }
 
 /// Message info.
-#[derive(CustomDebug, CustomClone, CustomEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum MsgInfo {
     /// Internal message info,
     Int(IntMsgInfo),
@@ -371,7 +370,7 @@ impl<'a> Load<'a> for MsgInfo {
 }
 
 /// Internal message info.
-#[derive(CustomDebug, CustomClone, CustomEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct IntMsgInfo {
     /// Whether IHR is disabled for the message.
     pub ihr_disabled: bool,

@@ -1,13 +1,12 @@
 use crate::cell::*;
 use crate::dict::Dict;
 use crate::error::Error;
-use crate::util::*;
 
 use super::{BlockId, BlockSignature};
 use crate::models::shard::ValidatorBaseInfo;
 
 /// Typed block proof.
-#[derive(CustomClone, CustomDebug, CustomEq)]
+#[derive(Clone, Debug)]
 pub struct BlockProof {
     /// Id of the related block.
     pub proof_for: BlockId,
@@ -73,7 +72,7 @@ impl<'a> Load<'a> for BlockProof {
 }
 
 /// Masterchain block signatures.
-#[derive(CustomClone, CustomDebug, CustomEq, Store, Load)]
+#[derive(Debug, Clone, Store, Load)]
 #[tlb(tag = "#11")]
 pub struct BlockSignatures {
     /// Brief validator basic info.

@@ -31,7 +31,7 @@ sha2 = "0.10"
 smallvec = { version = "1.9", features = ["union"] }
 thiserror = "1.0"
 
-everscale-types-proc = { version = "=0.1.1", path = "proc" }
+everscale-types-proc = { version = "=0.1.2", path = "proc" }
 
 [dev-dependencies]
 libc = "0.2"

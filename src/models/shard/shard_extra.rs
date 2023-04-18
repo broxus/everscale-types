@@ -2,14 +2,13 @@ use crate::cell::*;
 use crate::dict::{AugDict, Dict};
 use crate::error::Error;
 use crate::num::*;
-use crate::util::{CustomClone, CustomDebug};
 
 use crate::models::block::{BlockRef, ShardHashes};
 use crate::models::config::BlockchainConfig;
 use crate::models::currency::CurrencyCollection;
 
 /// Additional content for masterchain state.
-#[derive(CustomDebug, CustomClone)]
+#[derive(Debug, Clone)]
 pub struct McStateExtra {
     /// A tree of the most recent descriptions for all currently existing shards
     /// for all workchains except the masterchain.
@@ -139,7 +138,7 @@ pub struct ValidatorBaseInfo {
 }
 
 /// A dictionary with old masterchain blocks by seqno.
-#[derive(CustomDebug, CustomClone, Store, Load)]
+#[derive(Debug, Clone, Store, Load)]
 pub struct OldMcBlocksInfo(AugDict<u32, KeyMaxLt, KeyBlockRef>);
 
 /// Entry value for the [`OldMcBlocksInfo`] dictionary.

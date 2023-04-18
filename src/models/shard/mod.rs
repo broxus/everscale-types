@@ -3,7 +3,6 @@
 use crate::cell::*;
 use crate::dict::RawDict;
 use crate::error::*;
-use crate::util::{CustomClone, CustomDebug, CustomEq};
 
 use crate::models::block::{BlockRef, ShardIdent};
 use crate::models::currency::CurrencyCollection;
@@ -17,7 +16,7 @@ mod shard_extra;
 
 /// Applied shard state.
 #[allow(clippy::large_enum_variant)]
-#[derive(CustomDebug, CustomClone, CustomEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ShardState {
     /// The next indivisible state in the shard.
     Unsplit(ShardStateUnsplit),
@@ -55,7 +54,7 @@ impl<'a> Load<'a> for ShardState {
 }
 
 /// State of the single shard.
-#[derive(CustomDebug, CustomClone, CustomEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ShardStateUnsplit {
     /// Global network id.
     pub global_id: i32,
@@ -184,7 +183,7 @@ impl<'a> Load<'a> for ShardStateUnsplit {
 }
 
 /// Next indivisible states after shard split.
-#[derive(CustomDebug, CustomClone, CustomEq, Store, Load)]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
 #[tlb(tag = "#5f327da5")]
 pub struct ShardStateSplit {
     /// Reference to the state of the left shard.

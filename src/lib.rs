@@ -68,10 +68,6 @@
 //! definition in the TLB for the sake of consistency of use.
 //!
 //! All models implement [`Load`] and [`Store`] traits for conversion from/to cells.
-//! Due to the presence of a template cell family parameter, there is some difficulty
-//! with deriving std traits, so this crate re-exports some of the procedural macros
-//! like [`CustomClone`], [`CustomDebug`] and [`CustomEq`] that ignore
-//! parameter bounds.
 //!
 //! - [`RawDict`] constrains only key size in bits. It is useful when a dictionary
 //! can contain multiple types of values.
@@ -112,9 +108,6 @@
 //! [`AugDict`]: dict::AugDict
 //! [`Load`]: cell::Load
 //! [`Store`]: cell::Store
-//! [`CustomClone`]: util::CustomClone
-//! [`CustomDebug`]: util::CustomDebug
-//! [`CustomEq`]: util::CustomEq
 /// Prevents using `From::from` for plain error conversion.
 macro_rules! ok {
     ($e:expr $(,)?) => {

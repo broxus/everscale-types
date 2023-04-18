@@ -3,13 +3,12 @@ use std::borrow::Borrow;
 use crate::cell::*;
 use crate::dict::{self, AugDict, AugDictSkipValue};
 use crate::error::*;
-use crate::util::{CustomClone, CustomDebug, CustomEq};
 
 use crate::models::currency::CurrencyCollection;
 use crate::models::ShardAccount;
 
 /// A dictionary of account states.
-#[derive(CustomDebug, CustomClone, CustomEq, Store, Load)]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
 pub struct ShardAccounts(AugDict<CellHash, DepthBalanceInfo, ShardAccount>);
 
 impl ShardAccounts {
@@ -110,7 +109,7 @@ impl ShardAccounts {
 }
 
 /// Intermediate balance info.
-#[derive(CustomDebug, CustomClone, CustomEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct DepthBalanceInfo {
     /// Depth for which the balance was calculated.
     pub split_depth: u8,
@@ -168,7 +167,7 @@ impl<'a> AugDictSkipValue<'a> for DepthBalanceInfo {
 /// See its documentation for more.
 ///
 /// [`iter`]: ShardAccounts::iter
-#[derive(CustomClone)]
+#[derive(Clone)]
 pub struct ShardAccountsIter<'a> {
     inner: dict::RawIter<'a>,
 }
@@ -211,7 +210,7 @@ impl<'a> Iterator for ShardAccountsIter<'a> {
 /// See its documentation for more.
 ///
 /// [`raw_iter`]: ShardAccounts::raw_iter
-#[derive(CustomClone)]
+#[derive(Clone)]
 pub struct ShardAccountsRawIter<'a> {
     inner: dict::RawIter<'a>,
 }

@@ -9,7 +9,7 @@ use crate::models::currency::CurrencyCollection;
 
 /// A tree of the most recent descriptions for all currently existing shards
 /// for all workchains except the masterchain.
-#[derive(CustomDebug, CustomClone, CustomEq, Store, Load)]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
 pub struct ShardHashes(Dict<i32, Cell>);
 
 impl ShardHashes {
@@ -60,7 +60,7 @@ impl ShardHashes {
 
 /// A tree of the most recent descriptions for all currently existing shards
 /// for a single workchain.
-#[derive(CustomDebug, CustomClone, CustomEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct WorkchainShardHashes {
     workchain: i32,
     root: Cell,
@@ -119,7 +119,7 @@ impl WorkchainShardHashes {
 /// See its documentation for more.
 ///
 /// [`iter`]: ShardHashes::iter
-#[derive(CustomClone)]
+#[derive(Clone)]
 pub struct ShardHashesIter<'a> {
     inner: ShardHashesRawIter<'a>,
 }
@@ -152,7 +152,7 @@ impl Iterator for ShardHashesIter<'_> {
 /// See its documentation for more.
 ///
 /// [`raw_iter`]: ShardHashes::raw_iter
-#[derive(CustomClone)]
+#[derive(Clone)]
 pub struct ShardHashesRawIter<'a> {
     dict_iter: dict::RawIter<'a>,
     shard_hashes_iter: Option<WorkchainShardHashesRawIter<'a>>,
@@ -227,7 +227,7 @@ impl<'a> Iterator for ShardHashesRawIter<'a> {
 /// See its documentation for more.
 ///
 /// [`latest_blocks`]: ShardHashes::latest_blocks
-#[derive(CustomClone)]
+#[derive(Clone)]
 pub struct LatestBlocksIter<'a> {
     inner: ShardHashesRawIter<'a>,
 }
@@ -261,7 +261,7 @@ impl Iterator for LatestBlocksIter<'_> {
 /// See its documentation for more.
 ///
 /// [`iter`]: WorkchainShardHashes::iter
-#[derive(CustomClone)]
+#[derive(Clone)]
 pub struct WorkchainShardHashesIter<'a> {
     inner: WorkchainShardHashesRawIter<'a>,
 }
@@ -295,7 +295,7 @@ impl Iterator for WorkchainShardHashesIter<'_> {
 /// See its documentation for more.
 ///
 /// [`raw_iter`]: WorkchainShardHashes::raw_iter
-#[derive(CustomClone)]
+#[derive(Clone)]
 pub struct WorkchainShardHashesRawIter<'a> {
     workchain: i32,
     leaf: Option<CellSlice<'a>>,
@@ -423,7 +423,7 @@ impl<'a> Iterator for WorkchainShardHashesRawIter<'a> {
 /// See its documentation for more.
 ///
 /// [`latest_blocks`]: WorkchainShardHashes::latest_blocks
-#[derive(CustomClone)]
+#[derive(Clone)]
 pub struct WorkchainLatestBlocksIter<'a> {
     inner: WorkchainShardHashesRawIter<'a>,
 }
@@ -457,7 +457,7 @@ impl Iterator for WorkchainLatestBlocksIter<'_> {
 /// See its documentation for more.
 ///
 /// [`keys`]: WorkchainShardHashes::keys
-#[derive(CustomClone)]
+#[derive(Clone)]
 pub struct WorkchainShardHashesKeysIter<'a> {
     inner: WorkchainShardHashesRawIter<'a>,
 }
@@ -488,7 +488,7 @@ impl<'a> Iterator for WorkchainShardHashesKeysIter<'a> {
 /// See its documentation for more.
 ///
 /// [`raw_values`]: WorkchainShardHashes::raw_values
-#[derive(CustomClone)]
+#[derive(Clone)]
 pub struct WorkchainShardHashesRawValuesIter<'a> {
     inner: WorkchainShardHashesRawIter<'a>,
 }
@@ -513,7 +513,7 @@ impl<'a> Iterator for WorkchainShardHashesRawValuesIter<'a> {
     }
 }
 
-#[derive(CustomClone)]
+#[derive(Clone)]
 struct IterSegment<'a> {
     data: &'a DynCell,
     is_right: bool,
@@ -522,7 +522,7 @@ struct IterSegment<'a> {
 impl Copy for IterSegment<'_> {}
 
 /// Description of the most recent state of the shard.
-#[derive(CustomDebug, CustomClone, CustomEq)]
+#[derive(CustomDebug, Clone, Eq, PartialEq)]
 pub struct ShardDescription {
     /// Sequence number of the latest block in the shard.
     pub seqno: u32,
@@ -796,7 +796,7 @@ impl<'a> Load<'a> for FutureSplitMerge {
 }
 
 /// Proofs from other workchains.
-#[derive(CustomDebug, CustomClone, CustomEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ProofChain {
     /// Amount of proofs (`1..=8`)
     len: u8,

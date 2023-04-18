@@ -104,7 +104,7 @@ impl<'a> Load<'a> for AccountStatus {
 }
 
 /// Shard accounts entry.
-#[derive(CustomDebug, CustomClone, CustomEq, Store, Load)]
+#[derive(CustomDebug, Clone, Eq, PartialEq, Store, Load)]
 pub struct ShardAccount {
     /// Optional reference to account state.
     pub account: Lazy<OptionalAccount>,
@@ -195,7 +195,7 @@ impl<'a> Load<'a> for OptionalAccount {
 }
 
 /// Existing account data.
-#[derive(CustomDebug, CustomClone, CustomEq)]
+#[derive(CustomDebug, Clone, Eq, PartialEq)]
 pub struct Account {
     /// Account address.
     pub address: IntAddr,
@@ -213,7 +213,7 @@ pub struct Account {
 }
 
 /// State of an existing account.
-#[derive(CustomDebug, CustomClone, CustomEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum AccountState {
     /// Account exists but has not yet been deployed.
     Uninit,
@@ -335,7 +335,7 @@ impl<'a> Load<'a> for SpecialFlags {
 }
 
 /// Simple TVM library.
-#[derive(CustomDebug, Clone, CustomEq, Store, Load)]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
 pub struct SimpleLib {
     /// Whether this library is accessible from other accounts.
     pub public: bool,

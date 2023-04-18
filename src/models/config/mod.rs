@@ -14,7 +14,7 @@ pub use self::params::*;
 mod params;
 
 /// Blockchain config.
-#[derive(CustomDebug, CustomClone, CustomEq)]
+#[derive(CustomDebug, Clone, Eq, PartialEq)]
 pub struct BlockchainConfig {
     /// Configuration contract address.
     #[debug(with = "DisplayHash")]

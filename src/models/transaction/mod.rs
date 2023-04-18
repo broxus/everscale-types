@@ -16,7 +16,7 @@ pub use self::phases::*;
 mod phases;
 
 /// Blockchain transaction.
-#[derive(CustomDebug, CustomClone, CustomEq)]
+#[derive(CustomDebug, Clone, Eq, PartialEq)]
 pub struct Transaction {
     /// Account on which this transaction was produced.
     #[debug(with = "DisplayHash")]
@@ -85,7 +85,7 @@ impl Transaction {
 /// See its documentation for more.
 ///
 /// [`iter_out_msgs`]: Transaction::iter_out_msgs
-#[derive(CustomClone)]
+#[derive(Clone)]
 pub struct TxOutMsgIter<'a> {
     inner: dict::RawValues<'a>,
 }
@@ -178,7 +178,7 @@ impl<'a> Load<'a> for Transaction {
 }
 
 /// Detailed transaction info.
-#[derive(CustomDebug, CustomClone, CustomEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TxInfo {
     /// Ordinary transaction info.
     Ordinary(OrdinaryTxInfo),
@@ -225,7 +225,7 @@ impl<'a> Load<'a> for TxInfo {
 }
 
 /// Ordinary transaction info.
-#[derive(CustomDebug, CustomClone, CustomEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct OrdinaryTxInfo {
     /// Whether the credit phase was executed first
     /// (usually set when incoming message has `bounce: false`).

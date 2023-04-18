@@ -2,7 +2,7 @@ use crate::cell::*;
 use crate::dict::{AugDict, AugDictSkipValue, Dict};
 use crate::error::Error;
 use crate::num::Uint15;
-use crate::util::{CustomClone, CustomDebug, DisplayHash};
+use crate::util::{CustomDebug, DisplayHash};
 
 use crate::models::config::BlockchainConfig;
 use crate::models::currency::CurrencyCollection;
@@ -12,7 +12,7 @@ use crate::models::Lazy;
 use super::ShardHashes;
 
 /// Block content.
-#[derive(CustomDebug, CustomClone, Store, Load)]
+#[derive(CustomDebug, Clone, Store, Load)]
 #[tlb(tag = "#4a33f6fd")]
 pub struct BlockExtra {
     /// Incoming message description.
@@ -45,7 +45,7 @@ impl BlockExtra {
 }
 
 /// A group of account transactions.
-#[derive(CustomDebug, CustomClone)]
+#[derive(CustomDebug, Clone)]
 pub struct AccountBlock {
     /// Account id.
     #[debug(with = "DisplayHash")]
@@ -104,7 +104,7 @@ impl<'a> AugDictSkipValue<'a> for Lazy<Transaction> {
 }
 
 /// Additional content for masterchain blocks.
-#[derive(CustomDebug, CustomClone)]
+#[derive(Debug, Clone)]
 pub struct McBlockExtra {
     /// A tree of the most recent descriptions for all currently existing shards
     /// for all workchains except the masterchain.
@@ -208,7 +208,7 @@ impl<'a> Load<'a> for McBlockExtra {
 }
 
 /// TEMP shard fees mapping sub.
-#[derive(CustomDebug, CustomClone, Store, Load)]
+#[derive(CustomDebug, Clone, Store, Load)]
 pub struct ShardFees {
     /// Dictionary root.
     pub root: Option<Cell>,

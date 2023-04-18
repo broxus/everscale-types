@@ -23,7 +23,7 @@ pub struct StoragePhase {
 /// Credit phase info.
 ///
 /// At this phase message balance is added to the account balance.
-#[derive(CustomDebug, CustomClone, CustomEq, Store, Load)]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
 pub struct CreditPhase {
     /// Amount of tokens paid for the debt.
     pub due_fees_collected: Option<Tokens>,

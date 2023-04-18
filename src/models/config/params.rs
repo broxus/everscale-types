@@ -10,7 +10,7 @@ use crate::models::block::ShardIdent;
 use crate::models::Lazy;
 
 /// Config voting setup params.
-#[derive(CustomDebug, CustomClone, CustomEq, Store, Load)]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
 #[tlb(tag = "#91")]
 pub struct ConfigVotingSetup {
     /// Proposal configuration for non-critical params.
