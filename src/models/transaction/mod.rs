@@ -367,6 +367,7 @@ impl<'a> Load<'a> for TickTockTxInfo {
 
 /// Tick-tock transaction execution edge.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TickTock {
     /// Start of the block.
     Tick = 0,

@@ -60,6 +60,7 @@ pub struct StorageInfo {
 
 /// Brief account status.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AccountStatus {
     /// Account exists but has not yet been deployed.
     Uninit = 0b00,

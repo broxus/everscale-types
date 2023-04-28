@@ -479,6 +479,7 @@ pub static EMPTY_CELL_HASH: &CellHash = &[
 
 /// Well-formed cell type.
 #[derive(Default, Debug, Copy, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum CellType {
     /// Cell of this type just stores data and references.
     #[default]

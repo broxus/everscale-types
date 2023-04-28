@@ -9,6 +9,7 @@ macro_rules! decl_global_capability {
     ),*$(,)?}) => {
         $(#[doc = $doc])*
         #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+        #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
         #[repr(u8)]
         $vis enum $ident {$(
             $(#[doc = $var_doc])*

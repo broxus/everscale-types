@@ -150,13 +150,14 @@ pub struct SkippedComputePhase {
 
 /// Enum with reasons for skipping compute phase.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ComputePhaseSkipReason {
     /// Contract doesn't have state to execute.
-    NoState = 0b00,
+    NoState,
     /// Contract state is invalid.
-    BadState = 0b01,
+    BadState,
     /// Not enough gas to execute compute phase.
-    NoGas = 0b10,
+    NoGas,
     /// Account was suspended by the config.
     Suspended,
 }
@@ -360,6 +361,7 @@ pub struct ExecutedBouncePhase {
 
 /// Account status change during transaction execution.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AccountStatusChange {
     /// Account status has not changed.
     Unchanged = 0b0,
