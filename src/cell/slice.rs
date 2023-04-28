@@ -248,7 +248,7 @@ impl<'a> CellSlice<'a> {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// // Cell with empty data
     /// let empty_cell = Cell::empty_cell();
-    /// assert!(empty_cell.as_slice().is_data_empty());
+    /// assert!(empty_cell.as_slice()?.is_data_empty());
     ///
     /// // Cell with some bits in data
     /// let not_empty_cell = {
@@ -256,7 +256,7 @@ impl<'a> CellSlice<'a> {
     ///     builder.store_bit_zero()?;
     ///     builder.build()?
     /// };
-    /// assert!(!not_empty_cell.as_slice().is_data_empty());
+    /// assert!(!not_empty_cell.as_slice()?.is_data_empty());
     /// # Ok(()) }
     /// ```
     pub const fn is_data_empty(&self) -> bool {
@@ -272,7 +272,7 @@ impl<'a> CellSlice<'a> {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// // Cell without references
     /// let empty_cell = Cell::empty_cell();
-    /// assert!(empty_cell.as_slice().is_refs_empty());
+    /// assert!(empty_cell.as_slice()?.is_refs_empty());
     ///
     /// // Cell with some references
     /// let not_empty_cell = {
@@ -280,7 +280,7 @@ impl<'a> CellSlice<'a> {
     ///     builder.store_reference(empty_cell)?;
     ///     builder.build()?
     /// };
-    /// assert!(!not_empty_cell.as_slice().is_refs_empty());
+    /// assert!(!not_empty_cell.as_slice()?.is_refs_empty());
     /// # Ok(()) }
     /// ```
     pub const fn is_refs_empty(&self) -> bool {
@@ -317,7 +317,7 @@ impl<'a> CellSlice<'a> {
     ///     builder.store_zeros(100)?;
     ///     builder.build()?
     /// };
-    /// let mut slice = cell.as_slice();
+    /// let mut slice = cell.as_slice()?;
     /// slice.load_u8()?;
     /// assert_eq!(slice.bits_offset(), 8);
     /// # Ok(()) }
@@ -339,7 +339,7 @@ impl<'a> CellSlice<'a> {
     ///     builder.store_reference(Cell::empty_cell())?;
     ///     builder.build()?
     /// };
-    /// let mut slice = cell.as_slice();
+    /// let mut slice = cell.as_slice()?;
     ///
     /// slice.load_reference()?;
     /// assert_eq!(slice.refs_offset(), 1);
@@ -364,7 +364,7 @@ impl<'a> CellSlice<'a> {
     ///     builder.store_reference(Cell::empty_cell())?;
     ///     builder.build()?
     /// };
-    /// let mut slice = cell.as_slice();
+    /// let mut slice = cell.as_slice()?;
     ///
     /// assert!(slice.has_remaining(10, 2));
     /// assert!(!slice.has_remaining(500, 2)); // too many bits
@@ -420,7 +420,7 @@ impl<'a> CellSlice<'a> {
     ///     builder.store_u32(0xdeadbeaf)?;
     ///     builder.build()?
     /// };
-    /// let slice = cell.as_slice();
+    /// let slice = cell.as_slice()?;
     ///
     /// let prefix = {
     ///     let mut builder = CellBuilder::new();
@@ -428,7 +428,7 @@ impl<'a> CellSlice<'a> {
     ///     builder.build()?
     /// };
     ///
-    /// let without_prefix = slice.strip_data_prefix(&prefix.as_slice()).unwrap();
+    /// let without_prefix = slice.strip_data_prefix(&prefix.as_slice()?).unwrap();
     /// assert_eq!(without_prefix.get_u16(0)?, 0xbeaf);
     /// # Ok(()) }
     /// ```
@@ -463,7 +463,7 @@ impl<'a> CellSlice<'a> {
     ///     builder.store_u32(0xdeadbeaf)?;
     ///     builder.build()?
     /// };
-    /// let slice = cell.as_slice();
+    /// let slice = cell.as_slice()?;
     ///
     /// let prefix = {
     ///     let mut builder = CellBuilder::new();
@@ -471,7 +471,7 @@ impl<'a> CellSlice<'a> {
     ///     builder.build()?
     /// };
     ///
-    /// let lcp = slice.longest_common_data_prefix(&prefix.as_slice());
+    /// let lcp = slice.longest_common_data_prefix(&prefix.as_slice()?);
     /// assert_eq!(lcp.get_u16(0)?, 0xdead);
     /// assert_eq!(lcp.remaining_bits(), 16);
     /// # Ok(()) }
@@ -579,7 +579,7 @@ impl<'a> CellSlice<'a> {
     ///     builder.store_zeros(10)?;
     ///     builder.build()?
     /// };
-    /// assert_eq!(uniform_cell.as_slice().test_uniform(), Some(false));
+    /// assert_eq!(uniform_cell.as_slice()?.test_uniform(), Some(false));
     ///
     /// // Non-uniform cell consisting of 0s and 1s
     /// let non_uniform_cell = {
@@ -588,11 +588,11 @@ impl<'a> CellSlice<'a> {
     ///     builder.store_bit_one()?;
     ///     builder.build()?
     /// };
-    /// assert_eq!(non_uniform_cell.as_slice().test_uniform(), None);
+    /// assert_eq!(non_uniform_cell.as_slice()?.test_uniform(), None);
     ///
     /// // Empty cell is non-uniform
     /// let non_uniform_cell = Cell::empty_cell();
-    /// assert_eq!(non_uniform_cell.as_slice().test_uniform(), None);
+    /// assert_eq!(non_uniform_cell.as_slice()?.test_uniform(), None);
     /// # Ok(()) }
     /// ```
     pub fn test_uniform(&self) -> Option<bool> {
