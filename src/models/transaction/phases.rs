@@ -157,11 +157,19 @@ pub enum ComputePhaseSkipReason {
     BadState = 0b01,
     /// Not enough gas to execute compute phase.
     NoGas = 0b10,
+    /// Account was suspended by the config.
+    Suspended,
 }
 
 impl Store for ComputePhaseSkipReason {
     fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
-        builder.store_small_uint(*self as u8, 2)
+        let (tag, bits) = match self {
+            Self::NoState => (0b00, 2),
+            Self::BadState => (0b01, 2),
+            Self::NoGas => (0b10, 2),
+            Self::Suspended => (0b110, 3),
+        };
+        builder.store_small_uint(tag, bits)
     }
 }
 
@@ -171,7 +179,15 @@ impl<'a> Load<'a> for ComputePhaseSkipReason {
             Ok(0b00) => Ok(Self::NoState),
             Ok(0b01) => Ok(Self::BadState),
             Ok(0b10) => Ok(Self::NoGas),
-            Ok(_) => Err(Error::InvalidTag),
+            Ok(_) => {
+                if ok!(slice.load_bit()) {
+                    // 0b11 -> 1
+                    Err(Error::InvalidTag)
+                } else {
+                    // 0b11 -> 0
+                    Ok(Self::Suspended)
+                }
+            }
             Err(e) => Err(e),
         }
     }
