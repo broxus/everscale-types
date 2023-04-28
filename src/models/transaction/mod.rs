@@ -52,7 +52,7 @@ impl Transaction {
     /// Tries to load the incoming message, if present.
     pub fn load_in_msg(&self) -> Result<Option<Message<'_>>, Error> {
         match &self.in_msg {
-            Some(in_msg) => match Message::load_from(&mut in_msg.as_ref().as_slice()) {
+            Some(in_msg) => match in_msg.parse::<Message>() {
                 Ok(message) => Ok(Some(message)),
                 Err(e) => Err(e),
             },
@@ -96,8 +96,8 @@ impl<'a> Iterator for TxOutMsgIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         match self.inner.next()? {
             Ok(mut value) => {
-                let e = match value.load_reference() {
-                    Ok(value) => match Message::<'a>::load_from(&mut value.as_slice()) {
+                let e = match value.load_reference_as_slice() {
+                    Ok(mut value) => match Message::<'a>::load_from(&mut value) {
                         Ok(message) => return Some(Ok(message)),
                         Err(e) => e,
                     },
@@ -153,7 +153,7 @@ impl<'a> Load<'a> for Transaction {
         }
 
         let (in_msg, out_msgs) = {
-            let slice = &mut ok!(slice.load_reference()).as_slice();
+            let slice = &mut ok!(slice.load_reference_as_slice());
             let in_msg = ok!(Option::<Cell>::load_from(slice));
             let out_msgs = ok!(Dict::load_from(slice));
             (in_msg, out_msgs)
@@ -289,7 +289,7 @@ impl<'a> Load<'a> for OrdinaryTxInfo {
             credit_phase: ok!(Option::<CreditPhase>::load_from(slice)),
             compute_phase: ok!(ComputePhase::load_from(slice)),
             action_phase: match ok!(Option::<Cell>::load_from(slice)) {
-                Some(cell) => Some(ok!(ActionPhase::load_from(&mut cell.as_ref().as_slice()))),
+                Some(cell) => Some(ok!(cell.as_ref().parse::<ActionPhase>())),
                 None => None,
             },
             aborted: ok!(slice.load_bit()),
@@ -349,7 +349,7 @@ impl<'a> Load<'a> for TickTockTxInfo {
         let storage_phase = ok!(StoragePhase::load_from(slice));
         let compute_phase = ok!(ComputePhase::load_from(slice));
         let action_phase = match ok!(Option::<Cell>::load_from(slice)) {
-            Some(cell) => Some(ok!(ActionPhase::load_from(&mut cell.as_ref().as_slice()))),
+            Some(cell) => Some(ok!(cell.as_ref().parse::<ActionPhase>())),
             None => None,
         };
         let flags = ok!(slice.load_small_uint(2));

@@ -942,7 +942,7 @@ mod tests {
     }
 
     #[test]
-    fn store_slice() {
+    fn store_slice() -> anyhow::Result<()> {
         const SOME_HASH: &[u8; 32] = &[
             0xdf, 0x86, 0xce, 0xbc, 0xe8, 0xd5, 0xab, 0x0c, 0x69, 0xb4, 0xce, 0x33, 0xfe, 0x9b,
             0x0e, 0x2c, 0xdf, 0x69, 0xa3, 0xe1, 0x13, 0x7e, 0x64, 0x85, 0x6b, 0xbc, 0xfd, 0x39,
@@ -950,17 +950,19 @@ mod tests {
         ];
 
         let mut builder = CellBuilder::new();
-        builder.store_zeros(3).unwrap();
-        builder.store_u256(SOME_HASH).unwrap();
-        let cell = builder.build().unwrap();
+        builder.store_zeros(3)?;
+        builder.store_u256(SOME_HASH)?;
+        let cell = builder.build()?;
         println!("{}", cell.display_tree());
 
         let mut builder = CellBuilder::new();
-        let mut slice = cell.as_slice();
+        let mut slice = cell.as_slice()?;
         assert!(slice.try_advance(3, 0));
-        builder.store_slice(slice).unwrap();
-        let cell = builder.build().unwrap();
+        builder.store_slice(slice)?;
+        let cell = builder.build()?;
         println!("{}", cell.display_tree());
         assert_eq!(cell.data(), SOME_HASH);
+
+        Ok(())
     }
 }

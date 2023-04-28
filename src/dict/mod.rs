@@ -2,7 +2,6 @@
 
 use crate::cell::*;
 use crate::error::Error;
-use crate::util::unlikely;
 
 pub use aug::*;
 pub use raw::*;
@@ -156,19 +155,14 @@ pub fn dict_insert(
         return Err(Error::CellUnderflow);
     }
 
-    let data = match root.as_ref() {
-        Some(data) => data.as_ref(),
+    let mut data = match root.as_ref() {
+        Some(data) => ok!(data.as_slice()),
         None if mode.can_add() => {
             let data = ok!(make_leaf(key, key_bit_len, value, finalizer));
             return Ok(Some(data));
         }
         None => return Ok(None),
     };
-    // Handle pruned branch access
-    if unlikely(data.descriptor().is_pruned_branch()) {
-        return Err(Error::PrunedBranchAccess);
-    }
-    let mut data = data.as_slice();
 
     let mut stack = Vec::<Segment>::new();
 
@@ -263,15 +257,10 @@ pub fn dict_get<'a: 'b, 'b>(
         return Err(Error::CellUnderflow);
     }
 
-    let data = match root.as_ref() {
-        Some(data) => data.as_ref(),
+    let mut data = match root.as_ref() {
+        Some(data) => ok!(data.as_slice()),
         None => return Ok(None),
     };
-    // Handle pruned branch access
-    if unlikely(data.descriptor().is_pruned_branch()) {
-        return Err(Error::PrunedBranchAccess);
-    }
-    let mut data = data.as_slice();
 
     // Try to find the required leaf
     let is_key_empty = loop {
@@ -440,7 +429,10 @@ fn read_hml_same<'a>(label: &mut CellSlice<'a>, bits_for_len: u16) -> Result<Cel
         true => Cell::all_ones_ref(),
     };
     let len = ok!(label.load_uint(bits_for_len)) as u16;
-    Ok(cell.as_slice().get_prefix(len, 0))
+
+    // SAFETY: cell is a static ordinary cell
+    let slice = unsafe { cell.as_slice_unchecked() };
+    Ok(slice.get_prefix(len, 0))
 }
 
 fn serialize_entry<T: Store>(entry: &T, finalizer: &mut dyn Finalizer) -> Result<Cell, Error> {
@@ -460,30 +452,30 @@ mod tests {
     }
 
     #[test]
-    fn labels() {
+    fn labels() -> anyhow::Result<()> {
         let key_bit_len = 6;
 
         // Build key
         let key = {
             let mut builder = CellBuilder::new();
-            builder.store_zeros(5).unwrap();
-            builder.store_bit_one().unwrap();
-            builder.build().unwrap()
+            builder.store_zeros(5)?;
+            builder.store_bit_one()?;
+            builder.build()?
         };
 
         // Build label
         let label = {
             let mut builder = CellBuilder::new();
-            write_label(&key.as_slice(), key_bit_len, &mut builder).unwrap();
+            write_label(&key.as_slice()?, key_bit_len, &mut builder)?;
             builder.build().unwrap()
         };
 
         // Parse label
-        let parsed_key = read_label(&mut label.as_slice(), key_bit_len).unwrap();
+        let parsed_key = read_label(&mut label.as_slice()?, key_bit_len)?;
         let parsed_key = {
             let mut builder = CellBuilder::new();
-            builder.store_slice(parsed_key).unwrap();
-            builder.build().unwrap()
+            builder.store_slice(parsed_key)?;
+            builder.build()?
         };
 
         // Parsed key should be equal to the original
@@ -493,9 +485,11 @@ mod tests {
             .unwrap()
             .build()
             .unwrap();
-        let prefix = read_label(&mut label.as_slice(), 32).unwrap();
+        let prefix = read_label(&mut label.as_slice()?, 32).unwrap();
 
         println!("{}", build_cell(|b| b.store_slice(prefix)).display_tree());
         assert_eq!(prefix.test_uniform(), Some(false));
+
+        Ok(())
     }
 }

@@ -183,7 +183,29 @@ impl<'a> Copy for CellSlice<'a> {}
 
 impl<'a> CellSlice<'a> {
     /// Constructs a new cell slice from the specified cell.
-    pub fn new(cell: &'a DynCell) -> Self {
+    /// Returns an error if the cell is pruned.
+    pub fn new(cell: &'a DynCell) -> Result<Self, Error> {
+        // Handle pruned branch access
+        if unlikely(cell.descriptor().is_pruned_branch()) {
+            Err(Error::PrunedBranchAccess)
+        } else {
+            Ok(Self {
+                bits_window_start: 0,
+                bits_window_end: cell.bit_len(),
+                refs_window_start: 0,
+                refs_window_end: cell.reference_count(),
+                cell,
+            })
+        }
+    }
+
+    /// Constructs a new cell slice from the specified cell.
+    ///
+    /// # Safety
+    ///
+    /// The following must be true:
+    /// - cell is not pruned
+    pub unsafe fn new_unchecked(cell: &'a DynCell) -> Self {
         Self {
             bits_window_start: 0,
             bits_window_end: cell.bit_len(),
@@ -1142,12 +1164,7 @@ impl<'a> CellSlice<'a> {
                 return Err(Error::CellUnderflow);
             };
 
-            // Handle pruned branch access
-            if unlikely(cell.descriptor().is_pruned_branch()) {
-                Err(Error::PrunedBranchAccess)
-            } else {
-                Ok(CellSlice::new(cell))
-            }
+            CellSlice::new(cell)
         } else {
             Err(Error::CellUnderflow)
         }
@@ -1215,13 +1232,9 @@ impl<'a> CellSlice<'a> {
                 return Err(Error::CellUnderflow);
             };
 
-            // Handle pruned branch access
-            if unlikely(cell.descriptor().is_pruned_branch()) {
-                Err(Error::PrunedBranchAccess)
-            } else {
-                self.refs_window_start += 1;
-                Ok(CellSlice::new(cell))
-            }
+            let res = CellSlice::new(cell);
+            self.refs_window_start += res.is_ok() as u8;
+            res
         } else {
             Err(Error::CellUnderflow)
         }
@@ -1248,11 +1261,9 @@ mod tests {
 
     #[test]
     #[cfg_attr(miri, ignore)] // takes too long to execute on miri
-    fn get_raw() {
-        let cell = CellBuilder::from_raw_data(&[0xff; 128], 200)
-            .and_then(CellBuilder::build)
-            .unwrap();
-        let slice = cell.as_slice();
+    fn get_raw() -> anyhow::Result<()> {
+        let cell = CellBuilder::from_raw_data(&[0xff; 128], 200).and_then(CellBuilder::build)?;
+        let slice = cell.as_slice()?;
 
         let mut data = [0; 1];
         assert!(slice.get_raw(0, &mut data, 100).is_err());
@@ -1260,27 +1271,27 @@ mod tests {
         let mut data = [0; 64];
         assert!(slice.get_raw(0, &mut data, 500).is_err());
 
-        let cell = CellBuilder::from_raw_data(&[0xff; 128], 1023)
-            .and_then(CellBuilder::build)
-            .unwrap();
-        let slice = cell.as_slice();
+        let cell = CellBuilder::from_raw_data(&[0xff; 128], 1023).and_then(CellBuilder::build)?;
+        let slice = cell.as_slice()?;
 
         let mut data = [0; 128];
         for offset in 0..=8 {
             for bits in 0..=(1023 - offset) {
-                slice.get_raw(offset, &mut data, bits).unwrap();
+                slice.get_raw(offset, &mut data, bits)?;
             }
         }
+
+        Ok(())
     }
 
     #[test]
-    fn strip_data_prefix() {
+    fn strip_data_prefix() -> anyhow::Result<()> {
         let cell1 = build_cell(|b| {
             b.store_u16(0xabcd)?;
             b.store_bit_zero()?;
             b.store_u16(0xffff)
         });
-        let mut slice1 = cell1.as_slice();
+        let mut slice1 = cell1.as_slice()?;
         slice1.try_advance(4, 0);
 
         let cell2 = build_cell(|b| {
@@ -1289,24 +1300,26 @@ mod tests {
         });
 
         print_slice("A", slice1);
-        print_slice("B", cell2.as_slice());
-        print_slice("LCP", slice1.longest_common_data_prefix(&cell2.as_slice()));
+        print_slice("B", cell2.as_slice()?);
+        print_slice("LCP", slice1.longest_common_data_prefix(&cell2.as_slice()?));
 
-        let mut without_prefix = slice1.strip_data_prefix(&cell2.as_slice()).unwrap();
+        let mut without_prefix = slice1.strip_data_prefix(&cell2.as_slice()?).unwrap();
         print_slice("Result", without_prefix);
 
         assert_eq!(without_prefix.load_u16(), Ok(0xffff));
         assert!(without_prefix.is_data_empty());
+
+        Ok(())
     }
 
     #[test]
-    fn longest_common_data_prefix() {
+    fn longest_common_data_prefix() -> anyhow::Result<()> {
         let cell1 = build_cell(|b| b.store_u64(0xffffffff00000000));
-        let mut slice1 = cell1.as_slice();
+        let mut slice1 = cell1.as_slice()?;
         slice1.try_advance(1, 0);
 
         let cell2 = build_cell(|b| b.store_u64(0xfffffff000000000));
-        let mut slice2 = cell2.as_slice();
+        let mut slice2 = cell2.as_slice()?;
         slice2.try_advance(6, 0);
 
         let prefix = slice1.longest_common_data_prefix(&slice2);
@@ -1320,80 +1333,86 @@ mod tests {
         let cell1 = build_cell(|b| b.store_u32(0));
         let cell2 = build_cell(|b| b.store_u32(1));
         let prefix = cell1
-            .as_slice()
-            .longest_common_data_prefix(&cell2.as_slice());
+            .as_slice()?
+            .longest_common_data_prefix(&cell2.as_slice()?);
         assert_eq!(prefix.remaining_bits(), 31);
 
         //
         let cell1 = build_cell(|b| b.store_raw(&[0, 0, 2, 2], 32));
-        let mut slice1 = cell1.as_slice();
+        let mut slice1 = cell1.as_slice()?;
         slice1.try_advance(23, 0);
 
         let cell2 = build_cell(|b| b.store_raw(&[0; 128], 1023));
-        let slice2 = cell2.as_slice().get_prefix(8, 0);
+        let slice2 = cell2.as_slice()?.get_prefix(8, 0);
 
         let prefix = slice1.longest_common_data_prefix(&slice2);
         assert_eq!(prefix.remaining_bits(), 7);
 
         //
         let cell1 = build_cell(|b| b.store_u16(0));
-        let mut slice1 = cell1.as_slice();
+        let mut slice1 = cell1.as_slice()?;
         slice1.try_advance(5, 0);
 
         let cell2 = build_cell(|b| b.store_u8(0));
-        let mut slice2 = cell2.as_slice();
+        let mut slice2 = cell2.as_slice()?;
         slice2.try_advance(2, 0);
 
         let prefix = slice1
             .get_prefix(5, 0)
             .longest_common_data_prefix(&slice2.get_prefix(5, 0));
         assert_eq!(prefix.remaining_bits(), 5);
+
+        Ok(())
     }
 
     #[test]
-    fn get_uint() {
+    fn get_uint() -> anyhow::Result<()> {
         let cell = build_cell(|b| b.store_u64(0xfafafafafafafafa));
 
-        let slice = cell.as_slice();
+        let slice = cell.as_slice()?;
         assert_eq!(slice.get_uint(0, 3), Ok(0b111));
         assert_eq!(slice.get_uint(0, 11), Ok(0b11111010111));
         assert_eq!(slice.get_uint(1, 11), Ok(0b11110101111));
         assert_eq!(slice.get_uint(8, 3), Ok(0b111));
         assert_eq!(slice.get_uint(0, 16), Ok(0xfafa));
+
+        Ok(())
     }
 
     #[test]
-    fn test_uniform() {
+    fn test_uniform() -> anyhow::Result<()> {
         let cell = build_cell(|b| b.store_zeros(10));
-        assert_eq!(cell.as_slice().test_uniform(), Some(false));
+        assert_eq!(cell.as_slice()?.test_uniform(), Some(false));
 
         let cell = build_cell(|b| b.store_u8(0xff));
-        assert_eq!(cell.as_slice().test_uniform(), Some(true));
+        assert_eq!(cell.as_slice()?.test_uniform(), Some(true));
 
         let cell = build_cell(|b| b.store_u8(123));
-        assert_eq!(cell.as_slice().test_uniform(), None);
+        assert_eq!(cell.as_slice()?.test_uniform(), None);
 
         let cell = build_cell(|b| b.store_u16(123));
-        assert_eq!(cell.as_slice().test_uniform(), None);
+        assert_eq!(cell.as_slice()?.test_uniform(), None);
 
         let cell = build_cell(|b| {
             b.store_zeros(9)?;
             b.store_bit_one()
         });
-        assert_eq!(cell.as_slice().test_uniform(), None);
+        assert_eq!(cell.as_slice()?.test_uniform(), None);
 
         let cell = build_cell(|b| {
             b.store_zeros(20)?;
             b.store_bit_one()
         });
-        assert_eq!(cell.as_slice().test_uniform(), None);
+        assert_eq!(cell.as_slice()?.test_uniform(), None);
 
         let cell = build_cell(|b| {
             b.store_bit_zero()?;
             b.store_uint(u64::MAX, 29)
         });
-        let mut slice = cell.as_slice();
+        let mut slice = cell.as_slice()?;
         slice.try_advance(1, 0);
         assert_eq!(slice.test_uniform(), Some(true));
+
+        Ok(())
     }
 }

@@ -34,9 +34,10 @@ thiserror = "1.0"
 everscale-types-proc = { version = "=0.1.2", path = "proc" }
 
 [dev-dependencies]
-libc = "0.2"
+anyhow = "1.0"
 base64 = "0.21"
 criterion = "0.4"
+libc = "0.2"
 rand_xorshift = "0.3"
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }

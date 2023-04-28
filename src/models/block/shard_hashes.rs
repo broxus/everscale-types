@@ -307,11 +307,10 @@ impl<'a> WorkchainShardHashesRawIter<'a> {
     /// Creates an iterator over the raw entries of a [`WorkchainShardHashes`].
     pub fn new(workchain: i32, root: &'a DynCell) -> Self {
         let status = 'error: {
-            if root.descriptor().is_pruned_branch() {
-                break 'error IterStatus::Pruned;
-            }
-
-            let mut slice = root.as_slice();
+            let mut slice = match root.as_slice() {
+                Ok(slice) => slice,
+                Err(_) => break 'error IterStatus::Pruned,
+            };
 
             let is_fork = match slice.load_bit() {
                 Ok(bit) => bit,
@@ -667,7 +666,7 @@ impl<'a> Load<'a> for ShardDescription {
         let split_merge_at = ok!(Option::<FutureSplitMerge>::load_from(slice));
 
         let mut cont = if cont_in_cell {
-            Some(ok!(slice.load_reference()).as_slice())
+            Some(ok!(slice.load_reference_as_slice()))
         } else {
             None
         };

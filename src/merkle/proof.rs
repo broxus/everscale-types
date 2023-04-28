@@ -459,59 +459,59 @@ mod tests {
     }
 
     #[test]
-    fn proof_with_subtree() {
+    fn proof_with_subtree() -> anyhow::Result<()> {
         let mut dict = Dict::<u32, u32>::new();
         for i in 0..10 {
-            dict.add(i, i * 10).unwrap();
+            dict.add(i, i * 10)?;
         }
-        let dict = CellBuilder::build_from(dict).unwrap();
+        let dict = CellBuilder::build_from(dict)?;
 
         let some_other_cell = {
             let mut builder = CellBuilder::new();
-            builder.store_u128(123123).unwrap();
-            builder.store_reference(Cell::empty_cell()).unwrap();
-            builder.store_reference(Cell::empty_cell()).unwrap();
-            builder.build().unwrap()
+            builder.store_u128(123123)?;
+            builder.store_reference(Cell::empty_cell())?;
+            builder.store_reference(Cell::empty_cell())?;
+            builder.build()?
         };
 
         let root_cell = {
             let mut builder = CellBuilder::new();
-            builder.store_u128(321321).unwrap();
-            builder.store_reference(some_other_cell).unwrap();
-            builder.store_reference(dict.clone()).unwrap();
-            builder.build().unwrap()
+            builder.store_u128(321321)?;
+            builder.store_reference(some_other_cell)?;
+            builder.store_reference(dict.clone())?;
+            builder.build()?
         };
 
         let mut usage_tree = UsageTree::new(UsageTreeMode::OnDataAccess).with_subtrees();
         let root_cell = usage_tree.track(&root_cell);
 
         {
-            let mut root_cell = root_cell.as_ref().as_slice();
+            let mut root_cell = root_cell.as_ref().as_slice()?;
             root_cell.load_u32().unwrap();
 
             assert!(usage_tree.add_subtree(dict.as_ref()));
         }
 
-        let proof = MerkleProof::create(root_cell.as_ref(), usage_tree)
-            .build()
-            .unwrap();
-        let mut virtual_cell = proof.cell.as_ref().virtualize().as_slice();
+        let proof = MerkleProof::create(root_cell.as_ref(), usage_tree).build()?;
+        let mut virtual_cell = proof.cell.as_ref().virtualize().as_slice()?;
 
         assert_eq!(virtual_cell.load_u128(), Ok(321321));
 
-        let first_ref = virtual_cell.load_reference().unwrap();
+        let first_ref = virtual_cell.load_reference()?;
         assert_eq!(first_ref.cell_type(), CellType::PrunedBranch);
 
-        let second_ref = virtual_cell.load_reference().unwrap();
+        let second_ref = virtual_cell.load_reference()?;
         assert_eq!(second_ref.cell_type(), CellType::Ordinary);
         assert!(second_ref.descriptor().level_mask().is_empty());
 
-        let dict = second_ref.parse::<Dict<u32, u32>>().unwrap();
+        let dict = second_ref.parse::<Dict<u32, u32>>()?;
         for (i, entry) in dict.iter().enumerate() {
-            let (key, value) = entry.unwrap();
+            let (key, value) = entry?;
             assert_eq!(i, key as usize);
             assert_eq!(key * 10, value);
         }
         assert_eq!(dict.values().count(), 10);
+
+        Ok(())
     }
 }

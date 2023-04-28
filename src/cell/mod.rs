@@ -3,7 +3,7 @@
 use std::ops::{BitOr, BitOrAssign};
 
 use crate::error::Error;
-use crate::util::{unlikely, DisplayHash};
+use crate::util::DisplayHash;
 
 pub use self::builder::{CellBuilder, CellRefsBuilder, Store};
 pub use self::cell_impl::StaticCell;
@@ -162,14 +162,7 @@ impl DynCell {
     /// Returns an error if the loaded cell is absent or is pruned.
     pub fn get_reference_as_slice(&self, index: u8) -> Result<CellSlice<'_>, Error> {
         match self.reference(index) {
-            Some(cell) => {
-                // Handle pruned branch access
-                if unlikely(cell.descriptor().is_pruned_branch()) {
-                    Err(Error::PrunedBranchAccess)
-                } else {
-                    Ok(CellSlice::new(cell))
-                }
-            }
+            Some(cell) => CellSlice::new(cell),
             None => Err(Error::CellUnderflow),
         }
     }
@@ -210,9 +203,21 @@ impl DynCell {
     }
 
     /// Returns this cell as a cell slice.
+    /// Returns an error if the cell is pruned.
     #[inline]
-    pub fn as_slice(&'_ self) -> CellSlice<'_> {
+    pub fn as_slice(&'_ self) -> Result<CellSlice<'_>, Error> {
         CellSlice::new(self)
+    }
+
+    /// Returns this cell as a cell slice.
+    ///
+    /// # Safety
+    ///
+    /// The following must be true:
+    /// - cell is not pruned
+    #[inline]
+    pub unsafe fn as_slice_unchecked(&'_ self) -> CellSlice<'_> {
+        CellSlice::new_unchecked(self)
     }
 
     /// Returns an object that implements [`Debug`] for printing only
@@ -250,7 +255,7 @@ impl DynCell {
     /// NOTE: parsing `Cell` will load the first reference!
     #[inline]
     pub fn parse<'a, T: Load<'a>>(&'a self) -> Result<T, Error> {
-        T::load_from(&mut self.as_slice())
+        T::load_from(&mut ok!(self.as_slice()))
     }
 }
 

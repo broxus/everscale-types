@@ -67,7 +67,7 @@ impl Store for AccountBlock {
         finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         let transactions_root = match self.transactions.dict().root() {
-            Some(root) => root.as_ref().as_slice(),
+            Some(root) => ok!(root.as_ref().as_slice()),
             None => return Err(Error::InvalidData),
         };
 
@@ -182,7 +182,7 @@ impl<'a> Load<'a> for McBlockExtra {
         let shards = ok!(ShardHashes::load_from(slice));
         let fees = ok!(ShardFees::load_from(slice));
 
-        let cont = ok!(slice.load_reference());
+        let mut cont = ok!(slice.load_reference_as_slice());
 
         let config = if with_config {
             Some(ok!(BlockchainConfig::load_from(slice)))
@@ -190,7 +190,8 @@ impl<'a> Load<'a> for McBlockExtra {
             None
         };
 
-        let slice = &mut cont.as_slice();
+        let slice = &mut cont;
+
         Ok(Self {
             shards,
             fees,

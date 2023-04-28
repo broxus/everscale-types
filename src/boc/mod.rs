@@ -267,7 +267,8 @@ impl BocRepr {
             Ok(cell) => cell,
             Err(e) => return Err(BocReprError::InvalidBoc(e)),
         };
-        match T::load_from(&mut cell.as_ref().as_slice()) {
+
+        match cell.as_ref().parse::<T>() {
             Ok(data) => Ok(data),
             Err(e) => Err(BocReprError::InvalidData(e)),
         }

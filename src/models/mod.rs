@@ -100,7 +100,7 @@ impl<T: Store> Lazy<T> {
 impl<'a, T: Load<'a> + 'a> Lazy<T> {
     /// Loads inner data from cell.
     pub fn load(&'a self) -> Result<T, Error> {
-        T::load_from(&mut self.cell.as_ref().as_slice())
+        self.cell.as_ref().parse::<T>()
     }
 }
 

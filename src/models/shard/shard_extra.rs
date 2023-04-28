@@ -84,7 +84,7 @@ impl<'a> Load<'a> for McStateExtra {
         let shards = ok!(ShardHashes::load_from(slice));
         let config = ok!(BlockchainConfig::load_from(slice));
 
-        let child_slice = &mut ok!(slice.load_reference()).as_slice();
+        let child_slice = &mut ok!(slice.load_reference_as_slice());
         let flags = ok!(child_slice.load_u16());
 
         if flags >> 2 != 0 {

@@ -249,8 +249,8 @@ impl BlockchainConfig {
     /// Tries to get a raw parameter from the blockchain config.
     pub fn get_raw(&self, id: u32) -> Result<Option<CellSlice<'_>>, Error> {
         match ok!(self.params.get_raw(id)) {
-            Some(slice) => match slice.get_reference(0) {
-                Ok(cell) => Ok(Some(cell.as_slice())),
+            Some(slice) => match slice.get_reference_as_slice(0) {
+                Ok(slice) => Ok(Some(slice)),
                 Err(e) => Err(e),
             },
             None => Ok(None),

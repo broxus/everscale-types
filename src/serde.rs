@@ -89,7 +89,7 @@ impl BocRepr {
         use ::serde::de::Error;
 
         let cell = ok!(Boc::deserialize(deserializer));
-        match T::load_from(&mut cell.as_ref().as_slice()) {
+        match cell.as_ref().parse::<T>() {
             Ok(data) => Ok(data),
             Err(_) => Err(Error::custom("failed to decode object from cells")),
         }

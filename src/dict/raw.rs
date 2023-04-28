@@ -325,7 +325,11 @@ impl<'a> Iterator for RawIter<'a> {
         }
 
         while let Some(mut segment) = self.segments.pop() {
-            let mut data = segment.data.as_slice();
+            // Load segment data
+            let mut data = match segment.data.as_slice() {
+                Ok(data) => data,
+                Err(e) => return Some(Err(self.finish(e))),
+            };
 
             // Read the next key part from the latest segment
             let prefix = match read_label(&mut data, segment.remaining_bit_len) {
@@ -505,7 +509,11 @@ impl<'a> Iterator for RawValues<'a> {
         }
 
         while let Some(mut segment) = self.segments.pop() {
-            let mut data = segment.data.as_slice();
+            // Load segment data
+            let mut data = match segment.data.as_slice() {
+                Ok(data) => data,
+                Err(e) => return Some(Err(self.finish(e))),
+            };
 
             // Read the next key part from the latest segment
             let prefix = match read_label(&mut data, segment.remaining_bit_len) {
@@ -585,15 +593,15 @@ mod tests {
     }
 
     #[test]
-    fn dict_set() {
+    fn dict_set() -> anyhow::Result<()> {
         let mut dict = RawDict::<32>::new();
 
-        let key = CellBuilder::build_from(123u32).unwrap();
+        let key = CellBuilder::build_from(123u32)?;
 
         let empty_value = Cell::empty_cell();
-        let not_empty_value = CellBuilder::build_from(0xffffu16).unwrap();
+        let not_empty_value = CellBuilder::build_from(0xffffu16)?;
 
-        dict.set(key.as_slice(), empty_value.as_slice()).unwrap();
+        dict.set(key.as_slice()?, empty_value.as_slice()?)?;
         {
             let mut values = dict.values();
             let value = values.next().unwrap().unwrap();
@@ -601,133 +609,145 @@ mod tests {
             assert!(values.next().is_none());
         }
 
-        dict.set(key.as_slice(), not_empty_value.as_slice())
-            .unwrap();
+        dict.set(key.as_slice()?, not_empty_value.as_slice()?)?;
         {
             let mut values = dict.values();
-            let mut value = values.next().unwrap().unwrap();
+            let mut value = values.next().unwrap()?;
             assert_eq!(value.load_u16(), Ok(0xffff));
             assert!(value.is_data_empty() && value.is_refs_empty());
             assert!(values.next().is_none());
         }
+
+        Ok(())
     }
 
     #[test]
     #[cfg_attr(miri, ignore)] // takes too long to execute on miri
-    fn dict_set_complex() {
+    fn dict_set_complex() -> anyhow::Result<()> {
         let value = build_cell(|b| b.store_bit_one());
 
         let mut dict = RawDict::<32>::new();
         for i in 0..520 {
             let key = build_cell(|b| b.store_u32(i));
-            dict.set(key.as_slice(), value.as_slice()).unwrap();
+            dict.set(key.as_slice()?, value.as_slice()?)?;
 
             let mut total = 0;
             for (i, item) in dict.iter().enumerate() {
                 total += 1;
-                let (key, value) = item.unwrap();
-                let key = key.build().unwrap();
+                let (key, value) = item?;
+                let key = key.build()?;
                 assert_eq!(value.remaining_bits(), 1);
                 assert_eq!(key.bit_len(), 32);
-                let key = key.as_slice().load_u32().unwrap();
+                let key = key.as_slice()?.load_u32()?;
                 assert_eq!(key, i as u32);
             }
             assert_eq!(total, i + 1);
         }
+
+        Ok(())
     }
 
     #[test]
-    fn dict_replace() {
+    fn dict_replace() -> anyhow::Result<()> {
         let mut dict = RawDict::<32>::new();
 
         //
         dict.replace(
-            build_cell(|b| b.store_u32(123)).as_slice(),
-            build_cell(|b| b.store_bit_zero()).as_slice(),
+            build_cell(|b| b.store_u32(123)).as_slice()?,
+            build_cell(|b| b.store_bit_zero()).as_slice()?,
         )
         .unwrap();
         assert!(!dict
-            .contains_key(build_cell(|b| b.store_u32(123)).as_slice())
+            .contains_key(build_cell(|b| b.store_u32(123)).as_slice()?)
             .unwrap());
 
         //
         dict.set(
-            build_cell(|b| b.store_u32(123)).as_slice(),
-            build_cell(|b| b.store_bit_zero()).as_slice(),
+            build_cell(|b| b.store_u32(123)).as_slice()?,
+            build_cell(|b| b.store_bit_zero()).as_slice()?,
         )
         .unwrap();
         dict.replace(
-            build_cell(|b| b.store_u32(123)).as_slice(),
-            build_cell(|b| b.store_bit_one()).as_slice(),
+            build_cell(|b| b.store_u32(123)).as_slice()?,
+            build_cell(|b| b.store_bit_one()).as_slice()?,
         )
         .unwrap();
 
         let mut value = dict
-            .get(build_cell(|b| b.store_u32(123)).as_slice())
+            .get(build_cell(|b| b.store_u32(123)).as_slice()?)
             .unwrap()
             .unwrap();
         assert_eq!(value.remaining_bits(), 1);
         assert_eq!(value.load_bit(), Ok(true));
+
+        Ok(())
     }
 
     #[test]
-    fn dict_add() {
+    fn dict_add() -> anyhow::Result<()> {
         let mut dict = RawDict::<32>::new();
 
         let key = build_cell(|b| b.store_u32(123));
 
         //
         dict.add(
-            key.as_slice(),
-            build_cell(|b| b.store_bit_zero()).as_slice(),
-        )
-        .unwrap();
-        let mut value = dict.get(key.as_slice()).unwrap().unwrap();
+            key.as_slice()?,
+            build_cell(|b| b.store_bit_zero()).as_slice()?,
+        )?;
+        let mut value = dict.get(key.as_slice()?)?.unwrap();
         assert_eq!(value.remaining_bits(), 1);
         assert_eq!(value.load_bit(), Ok(false));
 
         //
-        dict.add(key.as_slice(), build_cell(|b| b.store_bit_one()).as_slice())
-            .unwrap();
-        let mut value = dict.get(key.as_slice()).unwrap().unwrap();
+        dict.add(
+            key.as_slice()?,
+            build_cell(|b| b.store_bit_one()).as_slice()?,
+        )?;
+        let mut value = dict.get(key.as_slice()?)?.unwrap();
         assert_eq!(value.remaining_bits(), 1);
         assert_eq!(value.load_bit(), Ok(false));
+
+        Ok(())
     }
 
     #[test]
-    fn dict_get() {
+    fn dict_get() -> anyhow::Result<()> {
         let boc =
-            Boc::decode_base64("te6ccgECOwEAASoAAQHAAQIBIBACAgEgAwMCASAEBAIBIAUFAgEgBgYCASAHBwIBIAgIAgEgCQkCASAoCgIBIAsZAgEgDBsCASArDQIBIA4fAgEgLQ8CASAuIQIBIBERAgEgEhICASATEwIBIBQUAgEgFRUCASAWFgIBIBcXAgEgKBgCASAaGQIBIBsbAgEgHRsCASAcHAIBIB8fAgEgKx4CASAiHwIBICAgAgEgISECASAlJQIBIC0jAgEgLiQCASAvJQIBIDMmAgFiNicCAUg4OAIBICkpAgEgKioCASArKwIBICwsAgEgLS0CASAuLgIBIC8vAgEgMzACAWI2MQIBIDcyAAnWAAAmbwIBIDQ0AgEgNTUCASA2NgIBIDc3AgEgODgCASA5OQIBIDo6AAnQAAAmbw==").unwrap();
+            Boc::decode_base64("te6ccgECOwEAASoAAQHAAQIBIBACAgEgAwMCASAEBAIBIAUFAgEgBgYCASAHBwIBIAgIAgEgCQkCASAoCgIBIAsZAgEgDBsCASArDQIBIA4fAgEgLQ8CASAuIQIBIBERAgEgEhICASATEwIBIBQUAgEgFRUCASAWFgIBIBcXAgEgKBgCASAaGQIBIBsbAgEgHRsCASAcHAIBIB8fAgEgKx4CASAiHwIBICAgAgEgISECASAlJQIBIC0jAgEgLiQCASAvJQIBIDMmAgFiNicCAUg4OAIBICkpAgEgKioCASArKwIBICwsAgEgLS0CASAuLgIBIC8vAgEgMzACAWI2MQIBIDcyAAnWAAAmbwIBIDQ0AgEgNTUCASA2NgIBIDc3AgEgODgCASA5OQIBIDo6AAnQAAAmbw==")?;
 
-        let dict = boc.parse::<RawDict<32>>().unwrap();
+        let dict = boc.parse::<RawDict<32>>()?;
 
-        let key = CellBuilder::build_from(u32::from_be_bytes(123u32.to_le_bytes())).unwrap();
-        let value = dict.get(key.as_slice()).unwrap().unwrap();
+        let key = CellBuilder::build_from(u32::from_be_bytes(123u32.to_le_bytes()))?;
+        let value = dict.get(key.as_slice()?)?.unwrap();
 
         let value = {
             let mut builder = CellBuilder::new();
-            builder.store_slice(value).unwrap();
-            builder.build().unwrap()
+            builder.store_slice(value)?;
+            builder.build()?
         };
         println!("{}", value.display_tree());
+
+        Ok(())
     }
 
     #[test]
-    fn dict_iter() {
-        let boc = Boc::decode_base64("te6ccgEBFAEAeAABAcABAgPOQAUCAgHUBAMACQAAAI3gAAkAAACjoAIBIA0GAgEgCgcCASAJCAAJAAAAciAACQAAAIfgAgEgDAsACQAAAFZgAAkAAABsIAIBIBEOAgEgEA8ACQAAADqgAAkAAABQYAIBIBMSAAkAAAAe4AAJAAAAv2A=").unwrap();
-        let dict = boc.parse::<RawDict<32>>().unwrap();
+    fn dict_iter() -> anyhow::Result<()> {
+        let boc = Boc::decode_base64("te6ccgEBFAEAeAABAcABAgPOQAUCAgHUBAMACQAAAI3gAAkAAACjoAIBIA0GAgEgCgcCASAJCAAJAAAAciAACQAAAIfgAgEgDAsACQAAAFZgAAkAAABsIAIBIBEOAgEgEA8ACQAAADqgAAkAAABQYAIBIBMSAAkAAAAe4AAJAAAAv2A=")?;
+        let dict = boc.parse::<RawDict<32>>()?;
 
         let size = dict.values().count();
         assert_eq!(size, 10);
 
         for (i, entry) in dict.iter().enumerate() {
-            let (key, _) = entry.unwrap();
+            let (key, _) = entry?;
 
             let key = {
-                let key_cell = key.build().unwrap();
-                key_cell.as_slice().load_u32().unwrap()
+                let key_cell = key.build()?;
+                key_cell.as_slice()?.load_u32()?
             };
             assert_eq!(key, i as u32);
         }
+
+        Ok(())
     }
 }

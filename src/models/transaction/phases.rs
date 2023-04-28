@@ -89,7 +89,7 @@ impl<'a> Load<'a> for ComputePhase {
         let flags = ok!(slice.load_small_uint(3));
         let gas_fees = ok!(Tokens::load_from(slice));
 
-        let slice = &mut ok!(slice.load_reference()).as_slice();
+        let slice = &mut ok!(slice.load_reference_as_slice());
         Ok(Self::Executed(ExecutedComputePhase {
             success: flags & 0b100 != 0,
             msg_state_used: flags & 0b010 != 0,

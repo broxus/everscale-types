@@ -6,7 +6,7 @@ use everscale_types::prelude::{Boc, Load};
 
 fuzz_target!(|data: &[u8]| -> Corpus {
     if let Ok(cell) = Boc::decode(data) {
-        if Message::load_from(&mut cell.as_slice()).is_ok() {
+        if cell.parse::<Message>().is_ok() {
             return Corpus::Keep;
         }
     }

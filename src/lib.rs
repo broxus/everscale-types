@@ -178,77 +178,74 @@ mod tests {
     }
 
     #[test]
-    fn test_builder() {
-        let parsed_cell = Boc::decode_base64("te6ccgEBAQEAAwAAAbE=").unwrap();
+    fn test_builder() -> anyhow::Result<()> {
+        let parsed_cell = Boc::decode_base64("te6ccgEBAQEAAwAAAbE=")?;
 
         let mut builder = CellBuilder::new();
-        builder.store_bit_one().unwrap();
-        builder.store_bit_zero().unwrap();
-        builder.store_bit_one().unwrap();
-        builder.store_bit_one().unwrap();
-        builder.store_bit_zero().unwrap();
-        builder.store_bit_zero().unwrap();
-        builder.store_bit_zero().unwrap();
-        let built_cell = builder.build().unwrap();
+        builder.store_bit_one()?;
+        builder.store_bit_zero()?;
+        builder.store_bit_one()?;
+        builder.store_bit_one()?;
+        builder.store_bit_zero()?;
+        builder.store_bit_zero()?;
+        builder.store_bit_zero()?;
+        let built_cell = builder.build()?;
 
         assert_eq!(parsed_cell.repr_hash(), built_cell.repr_hash());
 
-        let parsed_cell = Boc::decode_base64("te6ccgEBAQEAggAA////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////").unwrap();
+        let parsed_cell = Boc::decode_base64("te6ccgEBAQEAggAA////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////")?;
 
         let mut builder = CellBuilder::new();
         for _ in 0..MAX_BIT_LEN {
-            builder.store_bit_one().unwrap();
+            builder.store_bit_one()?;
         }
         assert!(builder.store_bit_one().is_err());
-        let built_cell = builder.build().unwrap();
+        let built_cell = builder.build()?;
 
         assert_eq!(parsed_cell.repr_hash(), built_cell.repr_hash());
 
         let mut builder = CellBuilder::new();
-        builder.store_bit_one().unwrap();
-        builder
-            .store_u128(0xaaffaaffaaffaaffaaffaaffaaffaaff)
-            .unwrap();
-        let cell = builder.build().unwrap();
+        builder.store_bit_one()?;
+        builder.store_u128(0xaaffaaffaaffaaffaaffaaffaaffaaff)?;
+        let cell = builder.build()?;
 
         let mut builder = CellBuilder::new();
-        builder.store_bit_one().unwrap();
-        builder.store_u64(0xaaffaaffaaffaaff).unwrap();
-        builder.store_u64(0xaaffaaffaaffaaff).unwrap();
-        assert_eq!(cell.as_ref(), builder.build().unwrap().as_ref());
+        builder.store_bit_one()?;
+        builder.store_u64(0xaaffaaffaaffaaff)?;
+        builder.store_u64(0xaaffaaffaaffaaff)?;
+        assert_eq!(cell.as_ref(), builder.build()?.as_ref());
 
         let mut builder = CellBuilder::new();
-        builder.store_zeros(1020).unwrap();
-        builder.store_small_uint(0x5, 3).unwrap();
-        builder.build().unwrap();
+        builder.store_zeros(1020)?;
+        builder.store_small_uint(0x5, 3)?;
+        builder.build()?;
 
         let mut builder = CellBuilder::new();
-        builder.store_small_uint(5, 3).unwrap();
-        builder
-            .store_u256(&[
-                0xdf, 0x86, 0xce, 0xbc, 0xe8, 0xd5, 0xab, 0x0c, 0x69, 0xb4, 0xce, 0x33, 0xfe, 0x9b,
-                0x0e, 0x2c, 0xdf, 0x69, 0xa3, 0xe1, 0x13, 0x7e, 0x64, 0x85, 0x6b, 0xbc, 0xfd, 0x39,
-                0xe7, 0x9b, 0xc1, 0x6f,
-            ])
-            .unwrap();
-        let cell = builder.build().unwrap();
+        builder.store_small_uint(5, 3)?;
+        builder.store_u256(&[
+            0xdf, 0x86, 0xce, 0xbc, 0xe8, 0xd5, 0xab, 0x0c, 0x69, 0xb4, 0xce, 0x33, 0xfe, 0x9b,
+            0x0e, 0x2c, 0xdf, 0x69, 0xa3, 0xe1, 0x13, 0x7e, 0x64, 0x85, 0x6b, 0xbc, 0xfd, 0x39,
+            0xe7, 0x9b, 0xc1, 0x6f,
+        ])?;
+        let cell = builder.build()?;
 
         let target_cell =
-            Boc::decode_base64("te6ccgEBAQEAIwAAQbvw2dedGrVhjTaZxn/TYcWb7TR8Im/MkK13n6c883gt8A==")
-                .unwrap();
+            Boc::decode_base64("te6ccgEBAQEAIwAAQbvw2dedGrVhjTaZxn/TYcWb7TR8Im/MkK13n6c883gt8A==")?;
         assert_eq!(cell.as_ref(), target_cell.as_ref());
 
         let mut builder = CellBuilder::new();
-        builder.store_zeros(3).unwrap();
-        builder.store_raw(&[0xdd, 0x55], 10).unwrap();
-        builder.store_reference(target_cell).unwrap();
-        builder.store_reference(cell).unwrap();
-        let cell = builder.build().unwrap();
+        builder.store_zeros(3)?;
+        builder.store_raw(&[0xdd, 0x55], 10)?;
+        builder.store_reference(target_cell)?;
+        builder.store_reference(cell)?;
+        let cell = builder.build()?;
 
         let mut builder = CellBuilder::new();
-        builder.store_slice(cell.as_slice()).unwrap();
-        let cell = builder.build().unwrap();
+        builder.store_slice(cell.as_slice()?)?;
+        let cell = builder.build()?;
         println!("{}", cell.display_tree());
+
+        Ok(())
     }
 
     #[test]

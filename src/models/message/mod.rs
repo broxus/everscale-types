@@ -136,7 +136,7 @@ impl<'a, T: Load<'a>> Load<'a> for SliceOrCell<T> {
         let to_cell = ok!(slice.load_bit());
 
         let mut child_cell = if to_cell {
-            Some(ok!(slice.load_reference()).as_slice())
+            Some(ok!(slice.load_reference_as_slice()))
         } else {
             None
         };
@@ -634,7 +634,7 @@ mod tests {
     }
 
     #[test]
-    fn external_message() {
+    fn external_message() -> anyhow::Result<()> {
         let boc = check_message("te6ccgEBAwEA7gABRYgBGRoZkBXGlyf8MT+9+Aps6LyB9WVSLzZvhJSDPgmbHEIMAQHh8Nu9eCxecUj/vM96Y20RjiKgx6WoTw2DovvS/s9dA8fluaPCOfF9jDxVICPgt0F7bK5DLXQwAabrqb7Wnd+hgnWJpZrz4u8JX/jyyB6RENwoAPPEnVzvkFpHxK5gcHDrgAAAYW7VQB2Y8V2LAAAABGACAKMAAAAAAAAAAAAAAACy0F4AgBBMK6mc15szE1BZJlPsqtMkXmhvBh1UIAaIln9JSMkh+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARnFb2fy+DAM");
 
         let body = Boc::decode_base64("te6ccgEBAgEAyAAB4fDbvXgsXnFI/7zPemNtEY4ioMelqE8Ng6L70v7PXQPH5bmjwjnxfYw8VSAj4LdBe2yuQy10MAGm66m+1p3foYJ1iaWa8+LvCV/48sgekRDcKADzxJ1c75BaR8SuYHBw64AAAGFu1UAdmPFdiwAAAARgAQCjAAAAAAAAAAAAAAAAstBeAIAQTCupnNebMxNQWSZT7KrTJF5obwYdVCAGiJZ/SUjJIfgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEZxW9n8vgwDA==").unwrap();
@@ -646,10 +646,12 @@ mod tests {
                 ..Default::default()
             }),
             init: None,
-            body: Some(body.as_slice()),
+            body: Some(body.as_slice()?),
             layout: None,
         });
         assert_eq!(boc.as_ref(), serialized.as_ref());
+
+        Ok(())
     }
 
     #[test]
@@ -679,7 +681,7 @@ mod tests {
     }
 
     #[test]
-    fn internal_message_with_body() {
+    fn internal_message_with_body() -> anyhow::Result<()> {
         let boc = check_message("te6ccgEBBAEA7AABsWgBBMK6mc15szE1BZJlPsqtMkXmhvBh1UIAaIln9JSMkh8AKcyu6HDSN2uCXClQSdunN5ORKwsVegHnQNPiLAwT3wIQF0ZQIAYwZroAAD6ov3v2DMeK7AjAAQFLAAAADMAF47ShSRBdLiDscbrZ36xyWwI6GHiM/l4Mroth4ygz7HgCAaOABHg99SYML+GkoEJQXFyIG56xbLXbw9MCLDl9Vfnxmy7AAAAAAAAAAAAAAAAAAABD4AAAAAAAAAAAAAAAABMS0AAAAAAAAAAAAAACxOw48AAQAwAgAAAAAAAAAAAAAAAAAAAAAA==");
 
         let body = Boc::decode_base64("te6ccgEBAwEAkAABSwAAAAzABeO0oUkQXS4g7HG62d+sclsCOhh4jP5eDK6LYeMoM+x4AQGjgAR4PfUmDC/hpKBCUFxciBuesWy128PTAiw5fVX58ZsuwAAAAAAAAAAAAAAAAAAAQ+AAAAAAAAAAAAAAAAATEtAAAAAAAAAAAAAAAsTsOPAAEAIAIAAAAAAAAAAAAAAAAAAAAAA=").unwrap();
@@ -688,11 +690,9 @@ mod tests {
                 ihr_disabled: true,
                 bounce: true,
                 src: "0:82615d4ce6bcd9989a82c9329f65569922f3437830eaa1003444b3fa4a46490f"
-                    .parse()
-                    .unwrap(),
+                    .parse()?,
                 dst: "0:a732bba1c348ddae0970a541276e9cde4e44ac2c55e8079d034f88b0304f7c08"
-                    .parse()
-                    .unwrap(),
+                    .parse()?,
                 value: CurrencyCollection::new(97621000),
                 fwd_fee: Tokens::new(1586013),
                 created_lt: 34447244000006,
@@ -700,17 +700,19 @@ mod tests {
                 ..Default::default()
             }),
             init: None,
-            body: Some(body.as_slice()),
+            body: Some(body.as_slice()?),
             layout: Some(MessageLayout {
                 init_to_cell: false,
                 body_to_cell: true,
             }),
         });
         assert_eq!(boc.as_ref(), serialized.as_ref());
+
+        Ok(())
     }
 
     #[test]
-    fn internal_message_with_deploy() {
+    fn internal_message_with_deploy() -> anyhow::Result<()> {
         let boc = check_message("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");
 
         let init = Boc::decode_base64("te6ccgECHwEAAusAAgE0BwEBAcACAgPPoAQDAENIAUpnBMEzNuMM19fqFpbnKo8XDAuxxPo5wy4djuha3dClAgEgBgUAQyAFJOanCsVNCqqvMSOs8XJzs2kTAFvABsSPI3yUj4IlSewAQQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAIGits1HggEJIrtUyDjAyDA/+MCIMD+4wLyCxoLCgkAAAOK7UTQ10nDAfhmifhpIds80wABn4ECANcYIPkBWPhC+RDyqN7TPwH4QyG58rQg+COBA+iogggbd0CgufK0+GPTHwHbPPI8GBQMA1LtRNDXScMB+GYi0NMD+kAw+GmpOADcIccA4wIh1w0f8rwh4wMB2zzyPBkZDAEUIIIQFaA4+7rjAg0EkDD4Qm7jAPhG8nMhltTTH9TR0JPU0x/i+kDU0dD6QNH4SfhKxwUgjoDfjoCOFCDIz4UIzoBvz0DJgQCApiC1B/sA4l8E2zzyABQRDh0BCF0i2zwPAnz4SsjO+EsBznABy39wAcsfEssfzvhBiMjPjits1szOyQHMIfsEAdAgizits1jHBZPXTdDe10zQ7R7tU8nbPB4QAATwAgEeMCH6Qm8T1wv/wwAgjoDeEgEQMCHbPPhJxwUTAX5wyMv/cG2AQPRD+EpxWIBA9BYBcliAQPQWyPQAyfhBiMjPjits1szOycjPhID0APQAz4HJ+QDIz4oAQMv/ydAeAhbtRNDXScIBjoDjDRYVADTtRNDT/9M/0wAx+kDU0dD6QNH4a/hq+GP4YgJUcO1E0PQFcSGAQPQOjoDfciKAQPQOjoDf+Gv4aoBA9A7yvdcL//hicPhjFxcBAokYAEOAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAr4RvLgTAIK9KQg9KEcGwAUc29sIDAuNTcuMQEYoAAAAAIw2zz4D/IAHQAs+Er4Q/hCyMv/yz/Pg874S8jOzcntVAAMIPhh7R7Z").unwrap();
@@ -723,11 +725,9 @@ mod tests {
                 ihr_disabled: true,
                 bounce: true,
                 src: "0:098c37c0d8a78b32826de1d956242ee7830f83016eaa930e8c535295aea3ff1b"
-                    .parse()
-                    .unwrap(),
+                    .parse()?,
                 dst: "0:a4232bb25ca73b09e1bb5200f87548f5a51a2d143d296a5a86b4bf74ec83e662"
-                    .parse()
-                    .unwrap(),
+                    .parse()?,
                 value: CurrencyCollection::new(100000000),
                 fwd_fee: Tokens::new(28859554),
                 created_lt: 34447559000008,
@@ -735,17 +735,19 @@ mod tests {
                 ..Default::default()
             }),
             init: Some(init),
-            body: Some(body.as_slice()),
+            body: Some(body.as_slice()?),
             layout: Some(MessageLayout {
                 init_to_cell: true,
                 body_to_cell: true,
             }),
         });
         assert_eq!(boc.as_ref(), serialized.as_ref());
+
+        Ok(())
     }
 
     #[test]
-    fn internal_message_with_deploy_special() {
+    fn internal_message_with_deploy_special() -> anyhow::Result<()> {
         use crate::models::account::*;
 
         let boc = check_message("te6ccgEBAwEAZgABsUgBbEihcGq1yvqcKmG7SIXC+7TB5znc+YFGjyqs3GDGG38/6C2Xq2vdBoTJGfwJ+7clxo9Tw1600zBjtr6ydPBmP2bQ5xx9YAb6cxQAABQ+Ztidisbf8S+gAQIBfQICAAb/AAA=");
@@ -756,8 +758,8 @@ mod tests {
                 tick: true,
                 tock: true,
             }),
-            code: Some(Boc::decode_base64("te6ccgEBAQEABQAABv8AAA==").unwrap()),
-            data: Some(Boc::decode_base64("te6ccgEBAQEABQAABv8AAA==").unwrap()),
+            code: Some(Boc::decode_base64("te6ccgEBAQEABQAABv8AAA==")?),
+            data: Some(Boc::decode_base64("te6ccgEBAQEABQAABv8AAA==")?),
             libraries: Default::default(),
         };
 
@@ -765,11 +767,9 @@ mod tests {
             info: MsgInfo::Int(IntMsgInfo {
                 ihr_disabled: true,
                 src: "0:b62450b8355ae57d4e1530dda442e17dda60f39cee7cc0a34795566e30630dbf"
-                    .parse()
-                    .unwrap(),
+                    .parse()?,
                 dst: "-1:a0b65eadaf741a132467f027eedc971a3d4f0d7ad34cc18edafac9d3c198fd9b"
-                    .parse()
-                    .unwrap(),
+                    .parse()?,
                 value: CurrencyCollection::new(969351000),
                 fwd_fee: Tokens::new(8206730),
                 created_lt: 11129123000005,
@@ -784,5 +784,7 @@ mod tests {
             }),
         });
         assert_eq!(boc.as_ref(), serialized.as_ref());
+
+        Ok(())
     }
 }

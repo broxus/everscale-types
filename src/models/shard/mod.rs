@@ -158,7 +158,7 @@ impl<'a> Load<'a> for ShardStateUnsplit {
         let out_msg_queue_info = ok!(slice.load_reference_cloned());
         let accounts = ok!(Lazy::load_from(slice));
 
-        let child_slice = &mut ok!(slice.load_reference()).as_slice();
+        let child_slice = &mut ok!(slice.load_reference_as_slice());
 
         Ok(Self {
             global_id: ok!(slice.load_u32()) as i32,

@@ -136,7 +136,7 @@ where
             K: Store + DictKey,
         {
             let key = ok!(serialize_entry(key, &mut Cell::default_finalizer()));
-            Ok(ok!(dict_get(root, K::BITS, key.as_ref().as_slice())).is_some())
+            Ok(ok!(dict_get(root, K::BITS, ok!(key.as_ref().as_slice()))).is_some())
         }
         contains_key_impl(&self.root, key.borrow())
     }
@@ -299,7 +299,7 @@ where
             V: Load<'a>,
         {
             let key = ok!(serialize_entry(key, finalizer));
-            let Some(mut value) = ok!(dict_get(root, K::BITS, key.as_ref().as_slice())) else {
+            let Some(mut value) = ok!(dict_get(root, K::BITS, ok!(key.as_ref().as_slice()))) else {
                 return Ok(None);
             };
 
@@ -332,7 +332,7 @@ where
             K: Store + DictKey,
         {
             let key = ok!(serialize_entry(key, finalizer));
-            dict_get(root, K::BITS, key.as_ref().as_slice())
+            dict_get(root, K::BITS, ok!(key.as_ref().as_slice()))
         }
 
         get_raw_ext_impl(&self.root, key.borrow(), finalizer)
@@ -451,9 +451,9 @@ where
         let value = ok!(serialize_entry(value, finalizer));
         self.root = ok!(dict_insert(
             &self.root,
-            &mut key.as_ref().as_slice(),
+            &mut ok!(key.as_ref().as_slice()),
             K::BITS,
-            &value.as_ref().as_slice(),
+            &ok!(value.as_ref().as_slice()),
             mode,
             finalizer
         ));

@@ -110,7 +110,7 @@ impl<'a> Load<'a> for Block {
         let info = ok!(Lazy::load_from(slice));
         let value_flow = ok!(Lazy::load_from(slice));
         let (state_update, out_msg_queue_updates) = if with_out_msg_queue_updates {
-            let slice = &mut ok!(slice.load_reference()).as_slice();
+            let slice = &mut ok!(slice.load_reference_as_slice());
             (
                 ok!(Lazy::load_from(slice)),
                 Some(ok!(Dict::load_from(slice))),
@@ -190,10 +190,10 @@ impl BlockInfo {
 
     /// Tries to load a reference to the previous block (or blocks).
     pub fn load_prev_ref(&self) -> Result<PrevBlockRef, Error> {
-        let mut s = self.prev_ref.as_ref().as_slice();
+        let mut s = ok!(self.prev_ref.as_ref().as_slice());
         Ok(if unlikely(self.after_merge) {
-            let left = ok!(BlockRef::load_from(&mut ok!(s.load_reference()).as_slice()));
-            let right = ok!(BlockRef::load_from(&mut ok!(s.load_reference()).as_slice()));
+            let left = ok!(BlockRef::load_from(&mut ok!(s.load_reference_as_slice())));
+            let right = ok!(BlockRef::load_from(&mut ok!(s.load_reference_as_slice())));
             PrevBlockRef::AfterMerge { left, right }
         } else {
             PrevBlockRef::Single(ok!(BlockRef::load_from(&mut s)))
@@ -445,8 +445,8 @@ impl<'a> Load<'a> for ValueFlow {
         };
 
         let fees_collected = ok!(CurrencyCollection::load_from(slice));
-        let slice1 = &mut ok!(slice.load_reference()).as_slice();
-        let slice2 = &mut ok!(slice.load_reference()).as_slice();
+        let slice1 = &mut ok!(slice.load_reference_as_slice());
+        let slice2 = &mut ok!(slice.load_reference_as_slice());
         let copyleft_rewards = if with_copyleft_rewards {
             ok!(Dict::load_from(slice))
         } else {
