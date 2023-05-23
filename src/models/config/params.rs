@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::num::{NonZeroU16, NonZeroU32, NonZeroU8};
 
 use crate::cell::*;
@@ -574,6 +575,137 @@ pub struct ValidatorSet {
 impl ValidatorSet {
     const TAG_V1: u8 = 0x11;
     const TAG_V2: u8 = 0x12;
+
+    /// Compoutes a validator subset using a zero seed.
+    pub fn compute_subset(
+        &self,
+        shard_ident: ShardIdent,
+        cc_config: &CatchainConfig,
+        cc_seqno: u32,
+    ) -> Option<(Vec<ValidatorDescription>, u32)> {
+        let total = self.list.len();
+        let main = self.main.get() as usize;
+
+        let subset = if shard_ident.is_masterchain() {
+            let count = std::cmp::min(total, main);
+            if !cc_config.shuffle_mc_validators {
+                self.list[0..count].to_vec()
+            } else {
+                let mut prng = ValidatorSetPRNG::new(shard_ident, cc_seqno);
+
+                let mut indices = vec![0; count];
+                for i in 0..count {
+                    let j = prng.next_ranged(i as u64 + 1) as usize; // number 0 .. i
+                    debug_assert!(j <= i);
+                    indices[i] = indices[j];
+                    indices[j] = i;
+                }
+
+                let mut subset = Vec::with_capacity(count);
+                for index in indices.into_iter().take(count) {
+                    subset.push(self.list[index].clone());
+                }
+                subset
+            }
+        } else {
+            let mut prng = ValidatorSetPRNG::new(shard_ident, cc_seqno);
+
+            let vset = if cc_config.isolate_mc_validators {
+                if total <= main {
+                    return None;
+                }
+
+                let mut list = self.list[main..].to_vec();
+
+                let mut total_weight = 0u64;
+                for descr in &mut list {
+                    descr.prev_total_weight = total_weight;
+                    total_weight += descr.weight;
+                }
+
+                Cow::Owned(Self {
+                    utime_since: self.utime_since,
+                    utime_until: self.utime_until,
+                    main: self.main,
+                    total_weight,
+                    list,
+                })
+            } else {
+                Cow::Borrowed(self)
+            };
+
+            let count = std::cmp::min(vset.list.len(), cc_config.shard_validators_num as usize);
+
+            let mut nodes = Vec::with_capacity(count);
+            let mut holes = Vec::<(u64, u64)>::with_capacity(count);
+            let mut total_wt = vset.total_weight;
+
+            for _ in 0..count {
+                debug_assert!(total_wt > 0);
+
+                // Generate a pseudo-random number 0..total_wt-1
+                let mut p = prng.next_ranged(total_wt);
+
+                for (prev_total_weight, weight) in &holes {
+                    if p < *prev_total_weight {
+                        break;
+                    }
+                    p += weight;
+                }
+
+                let entry = vset.at_weight(p);
+
+                nodes.push(ValidatorDescription {
+                    public_key: entry.public_key,
+                    weight: 1,
+                    adnl_addr: entry.adnl_addr,
+                    mc_seqno_since: 0,
+                    prev_total_weight: 0,
+                });
+                debug_assert!(total_wt >= entry.weight);
+                total_wt -= entry.weight;
+
+                let new_hole = (entry.prev_total_weight, entry.weight);
+                let i = holes.partition_point(|item| item <= &new_hole);
+                debug_assert!(i == 0 || holes[i - 1] < new_hole);
+
+                holes.insert(i, new_hole);
+            }
+
+            nodes
+        };
+
+        let hash_short = Self::compute_subset_hash_short(subset.as_slice(), cc_seqno);
+
+        Some((subset, hash_short))
+    }
+
+    /// Compoutes a validator subset short hash.
+    pub fn compute_subset_hash_short(subset: &[ValidatorDescription], cc_seqno: u32) -> u32 {
+        const HASH_SHORT_MAGIC: u32 = 0x901660ED;
+
+        let mut hash = crc32c::crc32c(&HASH_SHORT_MAGIC.to_le_bytes());
+        hash = crc32c::crc32c_append(hash, &cc_seqno.to_le_bytes());
+        hash = crc32c::crc32c_append(hash, &(subset.len() as u32).to_le_bytes());
+
+        for node in subset {
+            hash = crc32c::crc32c_append(hash, node.public_key.as_slice());
+            hash = crc32c::crc32c_append(hash, &node.weight.to_le_bytes());
+            hash = crc32c::crc32c_append(hash, node.adnl_addr.as_ref().unwrap_or(&[0u8; 32]));
+        }
+
+        hash
+    }
+
+    fn at_weight(&self, weight_pos: u64) -> &ValidatorDescription {
+        debug_assert!(weight_pos < self.total_weight);
+        debug_assert!(!self.list.is_empty());
+        let i = self
+            .list
+            .partition_point(|item| item.prev_total_weight <= weight_pos);
+        debug_assert!(i != 0);
+        &self.list[i]
+    }
 }
 
 impl Store for ValidatorSet {
@@ -635,13 +767,17 @@ impl<'a> Load<'a> for ValidatorSet {
         let mut computed_total_weight = 0u64;
         let mut list = Vec::with_capacity(std::cmp::min(total, 512));
         for (i, entry) in validators.iter().enumerate().take(total) {
-            let descr = match entry {
+            let mut descr = match entry {
                 Ok((idx, descr)) if idx as usize == i => descr,
                 Ok(_) => return Err(Error::InvalidData),
                 Err(e) => return Err(e),
             };
 
-            computed_total_weight += descr.weight;
+            descr.prev_total_weight = computed_total_weight;
+            computed_total_weight = match computed_total_weight.checked_add(descr.weight) {
+                Some(weight) => weight,
+                None => return Err(Error::InvalidData),
+            };
             list.push(descr);
         }
 
@@ -680,6 +816,10 @@ pub struct ValidatorDescription {
     pub adnl_addr: Option<CellHash>,
     /// Since which seqno this validator will be active.
     pub mc_seqno_since: u32,
+
+    /// Total weight of the previous validators in the list.
+    /// The field is not serialized.
+    pub prev_total_weight: u64,
 }
 
 impl ValidatorDescription {
@@ -753,6 +893,116 @@ impl<'a> Load<'a> for ValidatorDescription {
             } else {
                 0
             },
+            prev_total_weight: 0,
         })
+    }
+}
+
+/// Random generator used for validator subset calculation.
+pub struct ValidatorSetPRNG {
+    context: [u8; 48],
+    bag: [u64; 8],
+}
+
+impl ValidatorSetPRNG {
+    /// Creates a new generator with zero seed.
+    pub fn new(shard_ident: ShardIdent, cc_seqno: u32) -> Self {
+        let seed = [0; 32];
+        Self::with_seed(shard_ident, cc_seqno, &seed)
+    }
+
+    /// Creates a new generator with the specified seed.
+    pub fn with_seed(shard_ident: ShardIdent, cc_seqno: u32, seed: &[u8; 32]) -> Self {
+        let mut context = [0u8; 48];
+        context[..32].copy_from_slice(seed);
+        context[32..40].copy_from_slice(&shard_ident.prefix().to_be_bytes());
+        context[40..44].copy_from_slice(&shard_ident.workchain().to_be_bytes());
+        context[44..48].copy_from_slice(&cc_seqno.to_be_bytes());
+
+        ValidatorSetPRNG {
+            context,
+            bag: [0; 8],
+        }
+    }
+
+    /// Generates next `u64`.
+    pub fn next_u64(&mut self) -> u64 {
+        if self.cursor() < 7 {
+            let next = self.bag[1 + self.cursor() as usize];
+            self.bag[0] += 1;
+            next
+        } else {
+            self.reset()
+        }
+    }
+
+    /// Generates next `u64` multiplied by the specified range.
+    pub fn next_ranged(&mut self, range: u64) -> u64 {
+        let val = self.next_u64();
+        ((range as u128 * val as u128) >> 64) as u64
+    }
+
+    fn reset(&mut self) -> u64 {
+        use sha2::digest::Digest;
+
+        let hash: [u8; 64] = sha2::Sha512::digest(self.context).into();
+
+        for ctx in &mut self.context {
+            *ctx = ctx.wrapping_add(1);
+            if *ctx != 0 {
+                break;
+            }
+        }
+
+        // SAFETY: `std::mem::size_of::<[u64; 8]>() == 64` and src alignment is 1
+        unsafe {
+            std::ptr::copy_nonoverlapping(hash.as_ptr(), self.bag.as_mut_ptr() as *mut u8, 64);
+        }
+
+        // Swap bytes for little endian
+        #[cfg(target_endian = "little")]
+        self.bag
+            .iter_mut()
+            .for_each(|item| *item = item.swap_bytes());
+
+        // Reset and use bag[0] as counter
+        std::mem::take(&mut self.bag[0])
+    }
+
+    #[inline]
+    const fn cursor(&self) -> u64 {
+        self.bag[0]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validator_set_prng() {
+        fn make_indices(cc_seqno: u32) -> Vec<usize> {
+            let mut prng = ValidatorSetPRNG::new(ShardIdent::BASECHAIN, cc_seqno);
+
+            let count = 10;
+            let mut indices = vec![0; count];
+            for i in 0..count {
+                let j = prng.next_ranged(i as u64 + 1) as usize;
+                debug_assert!(j <= i);
+                indices[i] = indices[j];
+                indices[j] = i;
+            }
+
+            indices
+        }
+
+        let vs10_first = make_indices(10);
+        let vs10_second = make_indices(10);
+        assert_eq!(vs10_first, vs10_second);
+
+        let vs11_first = make_indices(11);
+        let vs11_second = make_indices(11);
+        assert_eq!(vs11_first, vs11_second);
+        assert_ne!(vs10_first, vs11_second);
     }
 }

@@ -9,8 +9,10 @@ use crate::util::*;
 pub use account::*;
 pub use block::*;
 pub use config::*;
+pub use currency::*;
 pub use global_version::*;
 pub use message::*;
+pub use shard::*;
 pub use transaction::*;
 
 pub mod account;

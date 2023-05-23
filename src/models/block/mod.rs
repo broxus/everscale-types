@@ -42,6 +42,9 @@ impl Block {
     const TAG_V1: u32 = 0x11ef55aa;
     const TAG_V2: u32 = 0x11ef55bb;
 
+    const DATA_FOR_SIGN_SIZE: usize = 4 + 32 + 32;
+    const DATA_FOR_SIGN_TAG: [u8; 4] = [0x70, 0x6e, 0x0b, 0xc5];
+
     /// Tries to load block info.
     pub fn load_info(&self) -> Result<BlockInfo, Error> {
         self.info.load()
@@ -60,6 +63,15 @@ impl Block {
     /// Tries to load block content.
     pub fn load_extra(&self) -> Result<BlockExtra, Error> {
         self.extra.load()
+    }
+
+    /// Builds a data for validators to sign.
+    pub fn build_data_for_sign(block_id: &BlockId) -> [u8; Self::DATA_FOR_SIGN_SIZE] {
+        let mut data = [0u8; Self::DATA_FOR_SIGN_SIZE];
+        data[0..4].copy_from_slice(&Self::DATA_FOR_SIGN_TAG);
+        data[4..36].copy_from_slice(&block_id.root_hash);
+        data[36..68].copy_from_slice(&block_id.file_hash);
+        data
     }
 }
 
@@ -187,6 +199,14 @@ pub struct BlockInfo {
 impl BlockInfo {
     const TAG: u32 = 0x9bc7a987;
     const FLAG_WITH_GEN_SOFTWARE: u8 = 0x1;
+
+    /// Tries to load a reference to the masterchain block.
+    pub fn load_master_ref(&self) -> Result<Option<BlockRef>, Error> {
+        match &self.master_ref {
+            Some(master_ref) => master_ref.load().map(Some),
+            None => Ok(None),
+        }
+    }
 
     /// Tries to load a reference to the previous block (or blocks).
     pub fn load_prev_ref(&self) -> Result<PrevBlockRef, Error> {

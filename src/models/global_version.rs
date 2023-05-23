@@ -10,14 +10,14 @@ macro_rules! decl_global_capability {
         $(#[doc = $doc])*
         #[derive(Debug, Copy, Clone, Eq, PartialEq)]
         #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-        #[repr(u8)]
+        #[repr(u64)]
         $vis enum $ident {$(
             $(#[doc = $var_doc])*
-            $field = $descr
+            $field = 1u64 << $descr
         ),*,}
 
         impl GlobalCapability {
-            fn from_bit_offset(bit_offset: u32) -> Option<Self> {
+            const fn from_bit_offset(bit_offset: u32) -> Option<Self> {
                 Some(match bit_offset {
                     $($descr => Self::$field),*,
                     _ => return None,
@@ -166,6 +166,31 @@ decl_global_capability! {
     }
 }
 
+impl std::ops::BitOr<GlobalCapability> for u64 {
+    type Output = u64;
+
+    #[inline]
+    fn bitor(self, rhs: GlobalCapability) -> Self::Output {
+        self | (rhs as u64)
+    }
+}
+
+impl std::ops::BitOr<u64> for GlobalCapability {
+    type Output = u64;
+
+    #[inline]
+    fn bitor(self, rhs: u64) -> Self::Output {
+        (self as u64) | rhs
+    }
+}
+
+impl std::ops::BitOrAssign<GlobalCapability> for u64 {
+    #[inline]
+    fn bitor_assign(&mut self, rhs: GlobalCapability) {
+        *self = *self | rhs;
+    }
+}
+
 /// Software info.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Store, Load)]
 #[tlb(tag = "#c4")]
@@ -204,7 +229,7 @@ impl GlobalCapabilities {
     /// Returns `true` if the specified capability is enabled.
     #[inline]
     pub const fn contains(&self, capability: GlobalCapability) -> bool {
-        (self.0 & 1u64 << (capability as u8)) != 0
+        (self.0 & (capability as u64)) != 0
     }
 
     /// Converts this wrapper into an underlying type.

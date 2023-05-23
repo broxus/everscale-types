@@ -23,6 +23,14 @@ impl BlockId {
     /// The number of data bits that this struct occupies.
     pub const BITS: u16 = ShardIdent::BITS + 32 + 256 + 256;
 
+    /// Returns `true` if this block id is for a masterchain block.
+    ///
+    /// See [`ShardIdent::MASTERCHAIN`]
+    #[inline]
+    pub const fn is_masterchain(&self) -> bool {
+        self.shard.is_masterchain()
+    }
+
     /// Returns short block id.
     pub const fn as_short_id(&self) -> BlockIdShort {
         BlockIdShort {
@@ -128,6 +136,20 @@ impl std::fmt::Display for BlockIdShort {
     }
 }
 
+impl From<(ShardIdent, u32)> for BlockIdShort {
+    #[inline]
+    fn from((shard, seqno): (ShardIdent, u32)) -> Self {
+        Self { shard, seqno }
+    }
+}
+
+impl From<BlockIdShort> for (ShardIdent, u32) {
+    #[inline]
+    fn from(value: BlockIdShort) -> Self {
+        (value.shard, value.seqno)
+    }
+}
+
 /// Shard ident.
 #[derive(Clone, Copy, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct ShardIdent {
@@ -213,6 +235,16 @@ impl ShardIdent {
     #[inline]
     pub const fn prefix(&self) -> u64 {
         self.prefix
+    }
+
+    /// Returns `true` if this shard is a masterchain shard.
+    ///
+    /// See [`MASTERCHAIN`]
+    ///
+    /// [`MASTERCHAIN`]: Self::MASTERCHAIN
+    #[inline]
+    pub const fn is_masterchain(&self) -> bool {
+        self.workchain == Self::MASTERCHAIN.workchain
     }
 
     /// Returns `true` if this shard could not be merged further.
