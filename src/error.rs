@@ -27,6 +27,9 @@ pub enum Error {
     /// Tree of cells is too deep.
     #[error("cell depth overflow")]
     DepthOverflow,
+    /// Signature check failed.
+    #[error("invalid signature")]
+    InvalidSignature,
 }
 
 /// Error type for integer parsing related errors.

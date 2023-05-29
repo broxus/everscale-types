@@ -525,6 +525,31 @@ impl CellType {
             CellType::MerkleUpdate => 4,
         }
     }
+
+    /// Decodes any cell type from byte.
+    #[inline]
+    pub const fn from_byte(byte: u8) -> Option<Self> {
+        Some(match byte {
+            0xff => CellType::Ordinary,
+            1 => CellType::PrunedBranch,
+            2 => CellType::LibraryReference,
+            3 => CellType::MerkleProof,
+            4 => CellType::MerkleUpdate,
+            _ => return None,
+        })
+    }
+
+    /// Decodes exotic cell type from byte.
+    #[inline]
+    pub const fn from_byte_exotic(byte: u8) -> Option<Self> {
+        Some(match byte {
+            1 => CellType::PrunedBranch,
+            2 => CellType::LibraryReference,
+            3 => CellType::MerkleProof,
+            4 => CellType::MerkleUpdate,
+            _ => return None,
+        })
+    }
 }
 
 impl From<CellType> for u8 {

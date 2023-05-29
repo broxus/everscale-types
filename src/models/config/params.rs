@@ -1,6 +1,8 @@
 use std::borrow::Cow;
 use std::num::{NonZeroU16, NonZeroU32, NonZeroU8};
 
+use everscale_crypto::ed25519;
+
 use crate::cell::*;
 use crate::dict::Dict;
 use crate::error::Error;
@@ -8,7 +10,7 @@ use crate::num::{Tokens, Uint12};
 use crate::util::*;
 
 use crate::models::block::ShardIdent;
-use crate::models::Lazy;
+use crate::models::{Lazy, Signature};
 
 /// Config voting setup params.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
@@ -828,6 +830,15 @@ impl ValidatorDescription {
     const TAG_WITH_MC_SEQNO: u8 = 0x93;
 
     const PUBKEY_TAG: u32 = 0x8e81278a;
+
+    /// Verifies message signature and current public key.
+    pub fn verify_signature(&self, data: &[u8], signature: &Signature) -> bool {
+        if let Some(public_key) = ed25519::PublicKey::from_bytes(self.public_key) {
+            public_key.verify_raw(data, signature.as_ref())
+        } else {
+            false
+        }
+    }
 }
 
 impl Store for ValidatorDescription {

@@ -77,14 +77,9 @@ impl<'a> CellParts<'a> {
                 return Err(Error::InvalidCell);
             };
 
-            const PRUNED_BRANCH: u8 = CellType::PrunedBranch.to_byte();
-            const MERKLE_PROOF: u8 = CellType::MerkleProof.to_byte();
-            const MERKLE_UPDATE: u8 = CellType::MerkleUpdate.to_byte();
-            const LIBRARY_REFERENCE: u8 = CellType::LibraryReference.to_byte();
-
-            match first_byte {
+            match CellType::from_byte_exotic(first_byte) {
                 // 8 bits type, 8 bits level mask, level x (hash, depth)
-                PRUNED_BRANCH => {
+                Some(CellType::PrunedBranch) => {
                     if unlikely(level == 0) {
                         return Err(Error::InvalidCell);
                     }
@@ -103,7 +98,7 @@ impl<'a> CellParts<'a> {
                     (CellType::PrunedBranch, level_mask)
                 }
                 // 8 bits type, hash, depth
-                MERKLE_PROOF => {
+                Some(CellType::MerkleProof) => {
                     const EXPECTED_BIT_LEN: usize = 8 + HASH_BITS + DEPTH_BITS;
                     if unlikely(bit_len != EXPECTED_BIT_LEN || references.len() != 1) {
                         return Err(Error::InvalidCell);
@@ -112,7 +107,7 @@ impl<'a> CellParts<'a> {
                     (CellType::MerkleProof, self.children_mask.virtualize(1))
                 }
                 // 8 bits type, 2 x (hash, depth)
-                MERKLE_UPDATE => {
+                Some(CellType::MerkleUpdate) => {
                     const EXPECTED_BIT_LEN: usize = 8 + 2 * (HASH_BITS + DEPTH_BITS);
                     if unlikely(bit_len != EXPECTED_BIT_LEN || references.len() != 2) {
                         return Err(Error::InvalidCell);
@@ -121,7 +116,7 @@ impl<'a> CellParts<'a> {
                     (CellType::MerkleUpdate, self.children_mask.virtualize(1))
                 }
                 // 8 bits type, hash
-                LIBRARY_REFERENCE => {
+                Some(CellType::LibraryReference) => {
                     const EXPECTED_BIT_LEN: usize = 8 + HASH_BITS;
                     if unlikely(bit_len != EXPECTED_BIT_LEN || !references.is_empty()) {
                         return Err(Error::InvalidCell);

@@ -4,7 +4,7 @@ use crate::error::Error;
 use crate::num::Uint15;
 use crate::util::{CustomDebug, DisplayHash};
 
-use crate::models::config::BlockchainConfig;
+use crate::models::config::{BlockchainConfig, ValidatorDescription};
 use crate::models::currency::CurrencyCollection;
 use crate::models::transaction::{HashUpdate, Transaction};
 use crate::models::Lazy;
@@ -229,6 +229,43 @@ pub struct BlockSignature {
     pub signature: Signature,
 }
 
+/// Signature verification utils.
+pub trait BlockSignatureExt {
+    /// Verifies signatures for the specified data and the provided list of nodes.
+    fn check_signatures(&self, list: &[ValidatorDescription], data: &[u8]) -> Result<u64, Error>;
+}
+
+impl BlockSignatureExt for Dict<u16, BlockSignature> {
+    fn check_signatures(&self, list: &[ValidatorDescription], data: &[u8]) -> Result<u64, Error> {
+        // Collect nodes by short id
+        let mut unique_nodes =
+            ahash::HashMap::<[u8; 32], &ValidatorDescription>::with_capacity_and_hasher(
+                list.len(),
+                Default::default(),
+            );
+
+        for node in list {
+            let node_id_short = tl_proto::hash(everscale_crypto::tl::PublicKey::Ed25519 {
+                key: &node.public_key,
+            });
+            unique_nodes.insert(node_id_short, node);
+        }
+
+        let mut weight = 0;
+        for value in self.values() {
+            let value = ok!(value);
+            if let Some(node) = unique_nodes.get(&value.node_id_short) {
+                if !node.verify_signature(data, &value.signature) {
+                    return Err(Error::InvalidSignature);
+                }
+                weight += node.weight;
+            }
+        }
+
+        Ok(weight)
+    }
+}
+
 /// Ed25519 signature.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Signature(pub [u8; 64]);
@@ -243,6 +280,13 @@ impl Default for Signature {
     #[inline]
     fn default() -> Self {
         Self([0; 64])
+    }
+}
+
+impl AsRef<[u8; 64]> for Signature {
+    #[inline]
+    fn as_ref(&self) -> &[u8; 64] {
+        &self.0
     }
 }
 
