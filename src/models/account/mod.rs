@@ -4,7 +4,6 @@ use crate::cell::*;
 use crate::dict::*;
 use crate::error::*;
 use crate::num::*;
-use crate::util::*;
 
 use crate::models::currency::CurrencyCollection;
 use crate::models::message::IntAddr;
@@ -105,13 +104,12 @@ impl<'a> Load<'a> for AccountStatus {
 }
 
 /// Shard accounts entry.
-#[derive(CustomDebug, Clone, Eq, PartialEq, Store, Load)]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
 pub struct ShardAccount {
     /// Optional reference to account state.
     pub account: Lazy<OptionalAccount>,
     /// The exact hash of the last transaction.
-    #[debug(with = "DisplayHash")]
-    pub last_trans_hash: CellHash,
+    pub last_trans_hash: HashBytes,
     /// The exact logical time of the last transaction.
     pub last_trans_lt: u64,
 }
@@ -187,7 +185,7 @@ impl<'a> Load<'a> for OptionalAccount {
             balance: ok!(CurrencyCollection::load_from(slice)),
             state: ok!(AccountState::load_from(slice)),
             init_code_hash: if with_init_code_hash {
-                ok!(Option::<CellHash>::load_from(slice))
+                ok!(Option::<HashBytes>::load_from(slice))
             } else {
                 None
             },
@@ -196,7 +194,7 @@ impl<'a> Load<'a> for OptionalAccount {
 }
 
 /// Existing account data.
-#[derive(CustomDebug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Account {
     /// Account address.
     pub address: IntAddr,
@@ -209,8 +207,7 @@ pub struct Account {
     /// Account state.
     pub state: AccountState,
     /// Optional initial code hash.
-    #[debug(with = "DisplayOptionalHash")]
-    pub init_code_hash: Option<CellHash>,
+    pub init_code_hash: Option<HashBytes>,
 }
 
 /// State of an existing account.
@@ -221,7 +218,7 @@ pub enum AccountState {
     /// Account exists and has been deployed.
     Active(StateInit),
     /// Account exists but has been frozen. Contains a hash of the last known [`StateInit`].
-    Frozen(CellHash),
+    Frozen(HashBytes),
 }
 
 impl Store for AccountState {
@@ -274,7 +271,7 @@ pub struct StateInit {
     /// Optional contract data.
     pub data: Option<Cell>,
     /// Libraries used in smart-contract.
-    pub libraries: Dict<CellHash, SimpleLib>,
+    pub libraries: Dict<HashBytes, SimpleLib>,
 }
 
 impl Default for StateInit {

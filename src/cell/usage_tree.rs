@@ -1,5 +1,5 @@
 use super::cell_impl::VirtualCellWrapper;
-use super::{Cell, CellDescriptor, CellHash, CellImpl, DynCell};
+use super::{Cell, CellDescriptor, HashBytes, CellImpl, DynCell};
 use crate::util::TryAsMut;
 
 #[cfg(feature = "stats")]
@@ -36,7 +36,7 @@ impl UsageTree {
 
     /// Returns `true` if the cell with the specified representation hash
     /// is present in this usage tree.
-    pub fn contains(&self, repr_hash: &CellHash) -> bool {
+    pub fn contains(&self, repr_hash: &HashBytes) -> bool {
         self.state.contains(repr_hash)
     }
 
@@ -52,7 +52,7 @@ impl UsageTree {
 /// Usage tree for a family of cells with subtrees.
 pub struct UsageTreeWithSubtrees {
     state: SharedState,
-    subtrees: ahash::HashSet<CellHash>,
+    subtrees: ahash::HashSet<HashBytes>,
 }
 
 impl UsageTreeWithSubtrees {
@@ -65,13 +65,13 @@ impl UsageTreeWithSubtrees {
 
     /// Returns `true` if the cell with the specified representation hash
     /// is present in this usage tree.
-    pub fn contains_direct(&self, repr_hash: &CellHash) -> bool {
+    pub fn contains_direct(&self, repr_hash: &HashBytes) -> bool {
         self.state.as_ref().contains(repr_hash)
     }
 
     /// Returns `true` if the subtree root with the specified representation hash
     /// is present in this usage tree.
-    pub fn contains_subtree(&self, repr_hash: &CellHash) -> bool {
+    pub fn contains_subtree(&self, repr_hash: &HashBytes) -> bool {
         self.subtrees.contains(repr_hash)
     }
 
@@ -131,7 +131,7 @@ impl CellImpl for UsageCell {
         VirtualCellWrapper::wrap(self)
     }
 
-    fn hash(&self, level: u8) -> &CellHash {
+    fn hash(&self, level: u8) -> &HashBytes {
         self.cell.hash(level)
     }
 
@@ -165,11 +165,11 @@ mod rc {
     use std::rc::Rc;
 
     use super::{UsageTreeMode, VisitedCell};
-    use crate::cell::{Cell, CellHash, DynCell};
+    use crate::cell::{Cell, HashBytes, DynCell};
 
     pub type SharedState = Rc<UsageTreeState>;
 
-    type VisitedCells = std::cell::RefCell<ahash::HashMap<CellHash, VisitedCell>>;
+    type VisitedCells = std::cell::RefCell<ahash::HashMap<HashBytes, VisitedCell>>;
 
     pub struct UsageTreeState {
         mode: UsageTreeMode,
@@ -213,7 +213,7 @@ mod rc {
         }
 
         #[inline]
-        pub fn contains(&self, repr_hash: &CellHash) -> bool {
+        pub fn contains(&self, repr_hash: &HashBytes) -> bool {
             if let Some(cell) = self.visited.borrow().get(repr_hash) {
                 cell.include
             } else {
@@ -259,11 +259,11 @@ mod sync {
     use std::sync::{Arc, Mutex};
 
     use super::{UsageTreeMode, VisitedCell};
-    use crate::cell::{Cell, CellHash, DynCell};
+    use crate::cell::{Cell, HashBytes, DynCell};
 
     pub type SharedState = Arc<UsageTreeState>;
 
-    type VisitedCells = Mutex<ahash::HashMap<CellHash, VisitedCell>>;
+    type VisitedCells = Mutex<ahash::HashMap<HashBytes, VisitedCell>>;
 
     pub struct UsageTreeState {
         mode: UsageTreeMode,
@@ -307,7 +307,7 @@ mod sync {
         }
 
         #[inline]
-        pub fn contains(&self, repr_hash: &CellHash) -> bool {
+        pub fn contains(&self, repr_hash: &HashBytes) -> bool {
             let visited = self.visited.lock().expect("lock failed");
             if let Some(cell) = visited.get(repr_hash) {
                 cell.include

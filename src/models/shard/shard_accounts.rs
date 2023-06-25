@@ -9,7 +9,7 @@ use crate::models::ShardAccount;
 
 /// A dictionary of account states.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
-pub struct ShardAccounts(AugDict<CellHash, DepthBalanceInfo, ShardAccount>);
+pub struct ShardAccounts(AugDict<HashBytes, DepthBalanceInfo, ShardAccount>);
 
 impl ShardAccounts {
     /// Returns the account state corresponding to the key.
@@ -17,7 +17,7 @@ impl ShardAccounts {
     /// Key is serialized using the default finalizer.
     pub fn get<'a: 'b, 'b, Q>(&'a self, key: Q) -> Result<Option<ShardAccount>, Error>
     where
-        Q: Borrow<CellHash> + 'b,
+        Q: Borrow<HashBytes> + 'b,
     {
         self.get_ext(key, &mut Cell::default_finalizer())
     }
@@ -31,11 +31,11 @@ impl ShardAccounts {
         finalizer: &mut dyn Finalizer,
     ) -> Result<Option<ShardAccount>, Error>
     where
-        Q: Borrow<CellHash> + 'b,
+        Q: Borrow<HashBytes> + 'b,
     {
         fn get_ext_impl(
             dict: &ShardAccounts,
-            key: &CellHash,
+            key: &HashBytes,
             finalizer: &mut dyn Finalizer,
         ) -> Result<Option<ShardAccount>, Error> {
             match dict.get_raw_ext(key, finalizer) {
@@ -62,7 +62,7 @@ impl ShardAccounts {
     /// Key is serialized using the default finalizer.
     pub fn get_raw<'a: 'b, 'b, Q>(&'a self, key: Q) -> Result<Option<CellSlice<'a>>, Error>
     where
-        Q: Borrow<CellHash> + 'b,
+        Q: Borrow<HashBytes> + 'b,
     {
         self.0
             .dict()
@@ -78,7 +78,7 @@ impl ShardAccounts {
         finalizer: &mut dyn Finalizer,
     ) -> Result<Option<CellSlice<'a>>, Error>
     where
-        Q: Borrow<CellHash>,
+        Q: Borrow<HashBytes>,
     {
         self.0.dict().get_raw_ext(key, finalizer)
     }
@@ -86,13 +86,13 @@ impl ShardAccounts {
     /// Returns `true` if the dictionary contains a state for the specified account id.
     pub fn contains_account<Q>(&self, key: Q) -> Result<bool, Error>
     where
-        Q: Borrow<CellHash>,
+        Q: Borrow<HashBytes>,
     {
         self.0.dict().contains_key(key)
     }
 
     /// Gets an iterator over the entries of the shard accounts (without augmentation),
-    /// sorted by account id. The iterator element is `Result<(CellHash, ShardAccount)>`.
+    /// sorted by account id. The iterator element is `Result<(HashBytes, ShardAccount)>`.
     ///
     /// If the dict is invalid, finishes after the first invalid element, returning an error.
     pub fn iter(&self) -> ShardAccountsIter<'_> {
@@ -100,7 +100,7 @@ impl ShardAccounts {
     }
 
     /// Gets an iterator over the raw entries of the shard accounts, sorted by account id.
-    /// The iterator element is `Result<(CellHash, CellSlice)>`.
+    /// The iterator element is `Result<(HashBytes, CellSlice)>`.
     ///
     /// If the dict is invalid, finishes after the first invalid element, returning an error.
     pub fn raw_iter(&self) -> ShardAccountsRawIter<'_> {
@@ -181,7 +181,7 @@ impl<'a> ShardAccountsIter<'a> {
 }
 
 impl<'a> Iterator for ShardAccountsIter<'a> {
-    type Item = Result<(CellHash, ShardAccount), Error>;
+    type Item = Result<(HashBytes, ShardAccount), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         Some(match self.inner.next()? {
@@ -189,7 +189,10 @@ impl<'a> Iterator for ShardAccountsIter<'a> {
                 let e = if DepthBalanceInfo::skip_value(&mut value) {
                     match ShardAccount::load_from(&mut value) {
                         Ok(value) => {
-                            return Some(Ok((key.raw_data()[..32].try_into().unwrap(), value)))
+                            return Some(Ok((
+                                HashBytes(key.raw_data()[..32].try_into().unwrap()),
+                                value,
+                            )))
                         }
                         Err(e) => e,
                     }
@@ -224,11 +227,11 @@ impl<'a> ShardAccountsRawIter<'a> {
 }
 
 impl<'a> Iterator for ShardAccountsRawIter<'a> {
-    type Item = Result<(CellHash, CellSlice<'a>), Error>;
+    type Item = Result<(HashBytes, CellSlice<'a>), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         Some(match self.inner.next()? {
-            Ok((key, value)) => Ok((key.raw_data()[..32].try_into().unwrap(), value)),
+            Ok((key, value)) => Ok((HashBytes(key.raw_data()[..32].try_into().unwrap()), value)),
             Err(e) => Err(e),
         })
     }

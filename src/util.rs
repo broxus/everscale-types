@@ -2,8 +2,6 @@
 
 use std::mem::MaybeUninit;
 
-pub use everscale_types_proc::CustomDebug;
-
 /// Brings [unlikely](core::intrinsics::unlikely) to stable rust.
 #[inline(always)]
 pub(crate) const fn unlikely(b: bool) -> bool {
@@ -33,38 +31,6 @@ pub(crate) fn decode_base64<T: AsRef<[u8]>>(data: T) -> Result<Vec<u8>, base64::
         base64::engine::general_purpose::STANDARD.decode(data)
     }
     decode_base64_impl(data.as_ref())
-}
-
-/// Helper struct to pretty-print hash.
-#[derive(Clone, Copy)]
-pub struct DisplayHash<'a>(pub &'a [u8; 32]);
-
-impl std::fmt::Display for DisplayHash<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut output = [0u8; 64];
-        hex::encode_to_slice(self.0, &mut output).ok();
-
-        // SAFETY: output is guaranteed to contain only [0-9a-f]
-        let output = unsafe { std::str::from_utf8_unchecked(&output) };
-        f.write_str(output)
-    }
-}
-
-impl std::fmt::Debug for DisplayHash<'_> {
-    #[inline(always)]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(self, f)
-    }
-}
-
-/// Helper struct to pretty-print optinal hash.
-#[derive(Clone, Copy)]
-pub struct DisplayOptionalHash<'a>(pub &'a Option<[u8; 32]>);
-
-impl std::fmt::Debug for DisplayOptionalHash<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(&self.0.as_ref().map(DisplayHash), f)
-    }
 }
 
 /// Small on-stack vector of max length N.
@@ -186,8 +152,7 @@ pub trait TryAsMut<T: ?Sized> {
     fn try_as_mut(&mut self) -> Option<&mut T>;
 }
 
-#[doc(hidden)]
-pub fn debug_tuple_field1_finish(
+pub(crate) fn debug_tuple_field1_finish(
     f: &mut std::fmt::Formatter<'_>,
     name: &str,
     value1: &dyn std::fmt::Debug,
@@ -197,34 +162,7 @@ pub fn debug_tuple_field1_finish(
     builder.finish()
 }
 
-#[doc(hidden)]
-pub fn debug_tuple_field2_finish(
-    f: &mut std::fmt::Formatter<'_>,
-    name: &str,
-    value1: &dyn std::fmt::Debug,
-    value2: &dyn std::fmt::Debug,
-) -> std::fmt::Result {
-    let mut builder = std::fmt::Formatter::debug_tuple(f, name);
-    builder.field(value1);
-    builder.field(value2);
-    builder.finish()
-}
-
-#[doc(hidden)]
-pub fn debug_tuple_fields_finish(
-    f: &mut std::fmt::Formatter<'_>,
-    name: &str,
-    values: &[&dyn std::fmt::Debug],
-) -> std::fmt::Result {
-    let mut builder = std::fmt::Formatter::debug_tuple(f, name);
-    for value in values {
-        builder.field(value);
-    }
-    builder.finish()
-}
-
-#[doc(hidden)]
-pub fn debug_struct_field1_finish(
+pub(crate) fn debug_struct_field1_finish(
     f: &mut std::fmt::Formatter<'_>,
     name: &str,
     name1: &str,
@@ -235,8 +173,7 @@ pub fn debug_struct_field1_finish(
     builder.finish()
 }
 
-#[doc(hidden)]
-pub fn debug_struct_field2_finish(
+pub(crate) fn debug_struct_field2_finish(
     f: &mut std::fmt::Formatter<'_>,
     name: &str,
     name1: &str,
@@ -247,86 +184,5 @@ pub fn debug_struct_field2_finish(
     let mut builder = std::fmt::Formatter::debug_struct(f, name);
     builder.field(name1, value1);
     builder.field(name2, value2);
-    builder.finish()
-}
-
-#[doc(hidden)]
-#[allow(clippy::too_many_arguments)]
-pub fn debug_struct_field3_finish(
-    f: &mut std::fmt::Formatter<'_>,
-    name: &str,
-    name1: &str,
-    value1: &dyn std::fmt::Debug,
-    name2: &str,
-    value2: &dyn std::fmt::Debug,
-    name3: &str,
-    value3: &dyn std::fmt::Debug,
-) -> std::fmt::Result {
-    let mut builder = std::fmt::Formatter::debug_struct(f, name);
-    builder.field(name1, value1);
-    builder.field(name2, value2);
-    builder.field(name3, value3);
-    builder.finish()
-}
-
-#[doc(hidden)]
-#[allow(clippy::too_many_arguments)]
-pub fn debug_struct_field4_finish(
-    f: &mut std::fmt::Formatter<'_>,
-    name: &str,
-    name1: &str,
-    value1: &dyn std::fmt::Debug,
-    name2: &str,
-    value2: &dyn std::fmt::Debug,
-    name3: &str,
-    value3: &dyn std::fmt::Debug,
-    name4: &str,
-    value4: &dyn std::fmt::Debug,
-) -> std::fmt::Result {
-    let mut builder = std::fmt::Formatter::debug_struct(f, name);
-    builder.field(name1, value1);
-    builder.field(name2, value2);
-    builder.field(name3, value3);
-    builder.field(name4, value4);
-    builder.finish()
-}
-
-#[doc(hidden)]
-#[allow(clippy::too_many_arguments)]
-pub fn debug_struct_field5_finish(
-    f: &mut std::fmt::Formatter<'_>,
-    name: &str,
-    name1: &str,
-    value1: &dyn std::fmt::Debug,
-    name2: &str,
-    value2: &dyn std::fmt::Debug,
-    name3: &str,
-    value3: &dyn std::fmt::Debug,
-    name4: &str,
-    value4: &dyn std::fmt::Debug,
-    name5: &str,
-    value5: &dyn std::fmt::Debug,
-) -> std::fmt::Result {
-    let mut builder = std::fmt::Formatter::debug_struct(f, name);
-    builder.field(name1, value1);
-    builder.field(name2, value2);
-    builder.field(name3, value3);
-    builder.field(name4, value4);
-    builder.field(name5, value5);
-    builder.finish()
-}
-
-#[doc(hidden)]
-pub fn debug_struct_fields_finish(
-    f: &mut std::fmt::Formatter<'_>,
-    name: &str,
-    names: &[&str],
-    values: &[&dyn std::fmt::Debug],
-) -> std::fmt::Result {
-    assert_eq!(names.len(), values.len());
-    let mut builder = std::fmt::Formatter::debug_struct(f, name);
-    for (name, value) in std::iter::zip(names, values) {
-        builder.field(name, value);
-    }
     builder.finish()
 }

@@ -69,8 +69,8 @@ impl Block {
     pub fn build_data_for_sign(block_id: &BlockId) -> [u8; Self::DATA_FOR_SIGN_SIZE] {
         let mut data = [0u8; Self::DATA_FOR_SIGN_SIZE];
         data[0..4].copy_from_slice(&Self::DATA_FOR_SIGN_TAG);
-        data[4..36].copy_from_slice(&block_id.root_hash);
-        data[36..68].copy_from_slice(&block_id.file_hash);
+        data[4..36].copy_from_slice(block_id.root_hash.as_ref());
+        data[36..68].copy_from_slice(block_id.file_hash.as_ref());
         data
     }
 }
@@ -366,18 +366,16 @@ pub enum PrevBlockRef {
 }
 
 /// Reference to the external block.
-#[derive(CustomDebug, Clone, Eq, PartialEq, Store, Load)]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
 pub struct BlockRef {
     /// The end of the logical time of the referenced block.
     pub end_lt: u64,
     /// Sequence number of the referenced block.
     pub seqno: u32,
     /// Representation hash of the root cell of the referenced block.
-    #[debug(with = "DisplayHash")]
-    pub root_hash: CellHash,
+    pub root_hash: HashBytes,
     /// Hash of the BOC encoded root cell of the referenced block.
-    #[debug(with = "DisplayHash")]
-    pub file_hash: CellHash,
+    pub file_hash: HashBytes,
 }
 
 /// Tokens flow info.
@@ -404,7 +402,7 @@ pub struct ValueFlow {
     pub minted: CurrencyCollection,
 
     /// Optional copyleft rewards.
-    pub copyleft_rewards: Dict<CellHash, Tokens>,
+    pub copyleft_rewards: Dict<HashBytes, Tokens>,
 }
 
 impl ValueFlow {
@@ -601,8 +599,8 @@ mod tests {
         let block_id = BlockId {
             shard: ShardIdent::MASTERCHAIN,
             seqno: 123321,
-            root_hash: [123; 32],
-            file_hash: [234; 32],
+            root_hash: HashBytes([123; 32]),
+            file_hash: HashBytes([234; 32]),
         };
 
         let s = block_id.to_string();

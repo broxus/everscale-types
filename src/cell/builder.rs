@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 use crate::cell::{
-    Cell, CellDescriptor, CellHash, CellSlice, DynCell, LevelMask, MAX_BIT_LEN, MAX_REF_COUNT,
+    Cell, CellDescriptor, HashBytes, CellSlice, DynCell, LevelMask, MAX_BIT_LEN, MAX_REF_COUNT,
 };
 use crate::error::Error;
 use crate::util::ArrayVec;
@@ -156,7 +156,7 @@ impl_primitive_store! {
     i64 => |b, v| b.store_u64(*v as u64),
     u128 => |b, v| b.store_u128(*v),
     i128 => |b, v| b.store_u128(*v as u128),
-    CellHash => |b, v| b.store_u256(v),
+    HashBytes => |b, v| b.store_u256(v),
 }
 
 /// Builder for constructing cells with densely packed data.
@@ -411,7 +411,7 @@ impl CellBuilder {
 
     /// Tries to store 32 bytes in the cell,
     /// returning `false` if there is not enough remaining capacity.
-    pub fn store_u256(&mut self, value: &[u8; 32]) -> Result<(), Error> {
+    pub fn store_u256(&mut self, value: &HashBytes) -> Result<(), Error> {
         if self.bit_len + 256 <= MAX_BIT_LEN {
             let q = (self.bit_len / 8) as usize;
             let r = self.bit_len % 8;
@@ -943,11 +943,11 @@ mod tests {
 
     #[test]
     fn store_slice() -> anyhow::Result<()> {
-        const SOME_HASH: &[u8; 32] = &[
+        const SOME_HASH: &HashBytes = HashBytes::wrap(&[
             0xdf, 0x86, 0xce, 0xbc, 0xe8, 0xd5, 0xab, 0x0c, 0x69, 0xb4, 0xce, 0x33, 0xfe, 0x9b,
             0x0e, 0x2c, 0xdf, 0x69, 0xa3, 0xe1, 0x13, 0x7e, 0x64, 0x85, 0x6b, 0xbc, 0xfd, 0x39,
             0xe7, 0x9b, 0xc1, 0x6f,
-        ];
+        ]);
 
         let mut builder = CellBuilder::new();
         builder.store_zeros(3)?;

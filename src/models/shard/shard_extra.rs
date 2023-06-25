@@ -24,11 +24,11 @@ pub struct McStateExtra {
     /// Optional reference to the latest known key block.
     pub last_key_block: Option<BlockRef>,
     /// Block creation stats for validators from the current set.
-    pub block_create_stats: Option<Dict<CellHash, CreatorStats>>,
+    pub block_create_stats: Option<Dict<HashBytes, CreatorStats>>,
     /// Total balance of all accounts.
     pub global_balance: CurrencyCollection,
     /// Optional copyleft rewards.
-    pub copyleft_rewards: Dict<CellHash, Tokens>,
+    pub copyleft_rewards: Dict<HashBytes, Tokens>,
 }
 
 impl McStateExtra {

@@ -4,19 +4,16 @@ use std::hash::BuildHasher;
 use super::{make_pruned_branch, FilterAction, MerkleFilter, MerkleProofBuilder};
 use crate::cell::*;
 use crate::error::Error;
-use crate::util::*;
 
 /// Parsed Merkle update representation.
 ///
 /// NOTE: Serialized into `MerkleUpdate` cell.
-#[derive(CustomDebug, Clone)]
+#[derive(Debug, Clone)]
 pub struct MerkleUpdate {
     /// Representation hash of the original cell.
-    #[debug(with = "DisplayHash")]
-    pub old_hash: CellHash,
+    pub old_hash: HashBytes,
     /// Representation hash of the updated cell.
-    #[debug(with = "DisplayHash")]
-    pub new_hash: CellHash,
+    pub new_hash: HashBytes,
     /// Representation depth of the original cell.
     pub old_depth: u16,
     /// Representation depth of the updated cell.
@@ -135,8 +132,8 @@ impl MerkleUpdate {
         }
 
         struct Applier<'a> {
-            old_cells: ahash::HashMap<CellHash, Cell>,
-            new_cells: ahash::HashMap<CellHash, Cell>,
+            old_cells: ahash::HashMap<HashBytes, Cell>,
+            new_cells: ahash::HashMap<HashBytes, Cell>,
             finalizer: &'a mut dyn Finalizer,
         }
 
@@ -234,7 +231,7 @@ impl MerkleUpdate {
         }
     }
 
-    fn find_old_cells(&self) -> Result<ahash::HashSet<&CellHash>, Error> {
+    fn find_old_cells(&self) -> Result<ahash::HashSet<&HashBytes>, Error> {
         let mut visited = ahash::HashSet::default();
         let mut old_cells = ahash::HashSet::default();
 
@@ -349,10 +346,10 @@ struct BuilderImpl<'a, 'b> {
 impl<'a: 'b, 'b> BuilderImpl<'a, 'b> {
     fn build(self) -> Result<MerkleUpdate, Error> {
         struct Resolver<'a, S> {
-            pruned_branches: HashMap<&'a CellHash, bool, S>,
-            visited: HashSet<&'a CellHash, S>,
+            pruned_branches: HashMap<&'a HashBytes, bool, S>,
+            visited: HashSet<&'a HashBytes, S>,
             filter: &'a dyn MerkleFilter,
-            changed_cells: HashSet<&'a CellHash, S>,
+            changed_cells: HashSet<&'a HashBytes, S>,
         }
 
         impl<'a, S> Resolver<'a, S>
@@ -409,7 +406,7 @@ impl<'a: 'b, 'b> BuilderImpl<'a, 'b> {
 
         impl<F: MerkleFilter> MerkleFilter for InvertedFilter<F> {
             #[inline]
-            fn check(&self, cell: &CellHash) -> FilterAction {
+            fn check(&self, cell: &HashBytes) -> FilterAction {
                 if self.0.check(cell) == FilterAction::Skip {
                     // TODO: check if FilterAction::IncludeSubtree is correct,
                     // because it is more optimal to just include the new subtree
@@ -500,7 +497,7 @@ mod tests {
 
     #[test]
     fn dict_merkle_update() {
-        fn visit_all_cells(cell: &Cell) -> ahash::HashSet<&CellHash> {
+        fn visit_all_cells(cell: &Cell) -> ahash::HashSet<&HashBytes> {
             let mut result = ahash::HashSet::default();
 
             let mut stack = vec![cell.as_ref()];

@@ -2,7 +2,6 @@ use proc_macro::TokenStream;
 use quote::quote;
 
 mod bound;
-mod derive_debug;
 mod derive_load;
 mod derive_store;
 mod internals;
@@ -10,17 +9,6 @@ mod internals;
 #[derive(Copy, Clone, Eq, PartialEq)]
 enum Derive {
     Debug,
-}
-
-/// Implements [`Debug`] for the type.
-///
-/// [`Debug`]: core::fmt::Debug
-#[proc_macro_derive(CustomDebug, attributes(debug, bounds))]
-pub fn derive_debug(input: TokenStream) -> TokenStream {
-    let input = syn::parse_macro_input!(input as syn::DeriveInput);
-    derive_debug::impl_derive(input)
-        .unwrap_or_else(to_compile_errors)
-        .into()
 }
 
 /// Implements `Load` for the type.

@@ -107,15 +107,6 @@ pub struct Field<'a> {
     pub original: &'a syn::Field,
 }
 
-impl Field<'_> {
-    pub fn member_name(&self) -> String {
-        match &self.member {
-            syn::Member::Named(ident) => ident.to_string(),
-            syn::Member::Unnamed(ident) => ident.index.to_string(),
-        }
-    }
-}
-
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Style {
     Struct,

@@ -53,7 +53,7 @@ impl<'a> AugDictSkipValue<'a> for CurrencyCollection {
 /// Dictionary with amounts for multiple currencies.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
 #[repr(transparent)]
-pub struct ExtraCurrencyCollection(Dict<CellHash, VarUint248>);
+pub struct ExtraCurrencyCollection(Dict<HashBytes, VarUint248>);
 
 impl Default for ExtraCurrencyCollection {
     #[inline]
@@ -74,7 +74,7 @@ impl ExtraCurrencyCollection {
     }
 
     /// Returns the underlying dictionary.
-    pub const fn as_dict(&self) -> &Dict<CellHash, VarUint248> {
+    pub const fn as_dict(&self) -> &Dict<HashBytes, VarUint248> {
         &self.0
     }
 }

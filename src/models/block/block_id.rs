@@ -2,21 +2,18 @@ use std::str::FromStr;
 
 use crate::cell::*;
 use crate::error::{Error, ParseBlockIdError};
-use crate::util::*;
 
 /// Full block id.
-#[derive(CustomDebug, Default, Clone, Copy, Eq, Hash, PartialEq, Ord, PartialOrd, Store, Load)]
+#[derive(Debug, Default, Clone, Copy, Eq, Hash, PartialEq, Ord, PartialOrd, Store, Load)]
 pub struct BlockId {
     /// Block shard ident.
     pub shard: ShardIdent,
     /// Block number in shard.
     pub seqno: u32,
     /// Representation hash of the root cell of the block.
-    #[debug(with = "DisplayHash")]
-    pub root_hash: CellHash,
+    pub root_hash: HashBytes,
     /// Hash of the BOC encoded root cell of the block.
-    #[debug(with = "DisplayHash")]
-    pub file_hash: CellHash,
+    pub file_hash: HashBytes,
 }
 
 impl BlockId {
@@ -85,7 +82,7 @@ impl FromStr for BlockId {
 
         'hash: {
             if let Some(hash) = parts.next() {
-                if hex::decode_to_slice(hash, &mut result.root_hash).is_ok() {
+                if hex::decode_to_slice(hash, &mut result.root_hash.0).is_ok() {
                     break 'hash;
                 }
             }
@@ -94,7 +91,7 @@ impl FromStr for BlockId {
 
         'hash: {
             if let Some(hash) = parts.next() {
-                if hex::decode_to_slice(hash, &mut result.file_hash).is_ok() {
+                if hex::decode_to_slice(hash, &mut result.file_hash.0).is_ok() {
                     break 'hash;
                 }
             }
@@ -113,10 +110,7 @@ impl std::fmt::Display for BlockId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!(
             "{}:{}:{}:{}",
-            self.shard,
-            self.seqno,
-            DisplayHash(&self.root_hash),
-            DisplayHash(&self.file_hash)
+            self.shard, self.seqno, self.root_hash, self.file_hash,
         ))
     }
 }
@@ -364,7 +358,8 @@ impl ShardIdent {
     }
 
     /// Returns `true` if the specified account could be stored in the current shard.
-    pub const fn contains_account(&self, account: &CellHash) -> bool {
+    pub const fn contains_account(&self, account: &HashBytes) -> bool {
+        let account = &account.0;
         let mut bits = self.prefix_len();
 
         let mut byte = 0;

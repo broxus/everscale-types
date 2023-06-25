@@ -2,12 +2,12 @@ use std::collections::HashMap;
 use std::hash::BuildHasher;
 
 use super::BocTag;
-use crate::cell::{CellDescriptor, CellHash, DynCell};
+use crate::cell::{CellDescriptor, HashBytes, DynCell};
 
 /// Intermediate BOC serializer state.
 pub struct BocHeader<'a, S = ahash::RandomState> {
     root_rev_indices: Vec<u32>,
-    rev_indices: HashMap<&'a CellHash, u32, S>,
+    rev_indices: HashMap<&'a HashBytes, u32, S>,
     rev_cells: Vec<&'a DynCell>,
     total_data_size: u64,
     reference_count: u64,
@@ -122,7 +122,7 @@ where
             if descriptor.store_hashes() {
                 let hash_count = descriptor.level_mask().level() + 1;
                 for level in 0..hash_count {
-                    target.extend_from_slice(cell.hash(level));
+                    target.extend_from_slice(cell.hash(level).as_ref());
                 }
                 for level in 0..hash_count {
                     target.extend_from_slice(&cell.depth(level).to_be_bytes());

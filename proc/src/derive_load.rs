@@ -163,7 +163,7 @@ fn load_op(lifetime_def: &syn::LifetimeDef, ty: &syn::Type) -> TokenStream {
                         "u32" => (quote!(load_u32()), None),
                         "i64" => (quote!(load_u64()), Some(quote!(as i64))),
                         "u64" => (quote!(load_u64()), None),
-                        "CellHash" => (quote!(load_u256()), None),
+                        "HashBytes" => (quote!(load_u256()), None),
                         "CellImpl" => (quote!(load_reference()), None),
                         "Cell" => (quote!(load_reference_cloned()), None),
                         _ => break 'fallback,

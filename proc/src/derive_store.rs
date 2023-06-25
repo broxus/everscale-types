@@ -136,7 +136,7 @@ fn store_op(field_ident: &TokenStream, ty: &syn::Type) -> TokenStream {
                         "NonZeroU8" => quote!(store_u8(#field_ident.get())),
                         "NonZeroU16" => quote!(store_u16(#field_ident.get())),
                         "NonZeroU32" => quote!(store_u32(#field_ident.get())),
-                        "CellHash" => quote!(store_u256(&#field_ident)),
+                        "HashBytes" => quote!(store_u256(&#field_ident)),
                         "CellContainer" => quote!(store_reference(#field_ident.clone())),
                         _ => break 'fallback,
                     };

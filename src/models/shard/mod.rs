@@ -197,7 +197,6 @@ mod tests {
     use super::*;
     use crate::models::Block;
     use crate::prelude::Boc;
-    use crate::util::DisplayHash;
 
     fn check_state(data: Cell) {
         let data = data.parse::<ShardStateUnsplit>().unwrap();
@@ -208,7 +207,7 @@ mod tests {
         for entry in shard_accounts.iter() {
             let (id, shard_state) = entry.unwrap();
             let account = shard_state.load_account().unwrap();
-            println!("{}: {account:#?}", DisplayHash(&id));
+            println!("{id}: {account:#?}");
         }
 
         let _elector = shard_accounts.get([0x33; 32]).unwrap().unwrap();

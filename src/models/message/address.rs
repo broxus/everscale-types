@@ -96,15 +96,14 @@ impl<'a> Load<'a> for IntAddr {
 }
 
 /// Standard internal address.
-#[derive(CustomDebug, Default, Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Default, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct StdAddr {
     /// Optional anycast info.
     pub anycast: Option<Box<Anycast>>,
     /// Workchain id (one-byte range).
     pub workchain: i8,
     /// Account id.
-    #[debug(with = "DisplayHash")]
-    pub address: [u8; 32],
+    pub address: HashBytes,
 }
 
 impl StdAddr {
@@ -121,7 +120,7 @@ impl StdAddr {
 
     /// Constructs a new standard address without anycast info.
     #[inline]
-    pub const fn new(workchain: i8, address: [u8; 32]) -> Self {
+    pub const fn new(workchain: i8, address: HashBytes) -> Self {
         Self {
             anycast: None,
             workchain,
@@ -145,11 +144,7 @@ impl std::fmt::Display for StdAddr {
             ok!(f.write_fmt(format_args!("{anycast}:")))
         }
 
-        f.write_fmt(format_args!(
-            "{}:{}",
-            self.workchain,
-            DisplayHash(&self.address)
-        ))
+        f.write_fmt(format_args!("{}:{}", self.workchain, self.address))
     }
 }
 
@@ -180,7 +175,7 @@ impl FromStr for StdAddr {
         }
 
         match parts.next() {
-            Some(part) => match hex::decode_to_slice(part, &mut result.address) {
+            Some(part) => match hex::decode_to_slice(part, &mut result.address.0) {
                 Ok(()) => {}
                 Err(_) => return Err(ParseAddrError::InvalidAccountId),
             },
@@ -246,7 +241,7 @@ impl crate::dict::DictKey for StdAddr {
             anycast: None,
             // 100xxxxx | xxxaaaaa -> xxxxxxxx
             workchain: ((first_byte << R) | (second_byte >> SHIFT)) as i8,
-            address: [0; 32],
+            address: HashBytes::ZERO,
         };
 
         // SAFETY: transmuting [u8; 32] to [u128; 2] is safe
@@ -497,10 +492,14 @@ mod tests {
     #[test]
     fn dict_with_std_addr_keys() {
         let mut dict = Dict::<StdAddr, u32>::new();
-        dict.set(StdAddr::new(-1, [0x33; 32]), 123).unwrap();
-        dict.set(StdAddr::new(0, [0x10; 32]), 321).unwrap();
-        dict.set(StdAddr::new(-1, [0x55; 32]), 234).unwrap();
-        dict.set(StdAddr::new(0, [0x20; 32]), 432).unwrap();
+        dict.set(StdAddr::new(-1, HashBytes([0x33; 32])), 123)
+            .unwrap();
+        dict.set(StdAddr::new(0, HashBytes([0x10; 32])), 321)
+            .unwrap();
+        dict.set(StdAddr::new(-1, HashBytes([0x55; 32])), 234)
+            .unwrap();
+        dict.set(StdAddr::new(0, HashBytes([0x20; 32])), 432)
+            .unwrap();
 
         for entry in dict.iter() {
             let (addr, value) = entry.unwrap();

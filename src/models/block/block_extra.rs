@@ -2,7 +2,6 @@ use crate::cell::*;
 use crate::dict::{AugDict, AugDictSkipValue, Dict};
 use crate::error::Error;
 use crate::num::Uint15;
-use crate::util::{CustomDebug, DisplayHash};
 
 use crate::models::config::{BlockchainConfig, ValidatorDescription};
 use crate::models::currency::CurrencyCollection;
@@ -12,7 +11,7 @@ use crate::models::Lazy;
 use super::ShardHashes;
 
 /// Block content.
-#[derive(CustomDebug, Clone, Store, Load)]
+#[derive(Debug, Clone, Store, Load)]
 #[tlb(tag = "#4a33f6fd")]
 pub struct BlockExtra {
     /// Incoming message description.
@@ -20,13 +19,11 @@ pub struct BlockExtra {
     /// Outgoing message description.
     pub out_msg_description: Cell,
     /// Block transactions info.
-    pub account_blocks: Lazy<AugDict<CellHash, CurrencyCollection, AccountBlock>>,
+    pub account_blocks: Lazy<AugDict<HashBytes, CurrencyCollection, AccountBlock>>,
     /// Random generator seed.
-    #[debug(with = "DisplayHash")]
-    pub rand_seed: CellHash,
+    pub rand_seed: HashBytes,
     /// Public key of the collator who produced this block.
-    #[debug(with = "DisplayHash")]
-    pub created_by: CellHash,
+    pub created_by: HashBytes,
     /// Additional block content.
     pub custom: Option<Lazy<McBlockExtra>>,
 }
@@ -45,11 +42,10 @@ impl BlockExtra {
 }
 
 /// A group of account transactions.
-#[derive(CustomDebug, Clone)]
+#[derive(Debug, Clone)]
 pub struct AccountBlock {
     /// Account id.
-    #[debug(with = "DisplayHash")]
-    pub account: CellHash,
+    pub account: HashBytes,
     /// Dictionary with fees and account transactions.
     pub transactions: AugDict<u64, CurrencyCollection, Lazy<Transaction>>,
     /// Account state hashes before and after this block.
@@ -209,7 +205,7 @@ impl<'a> Load<'a> for McBlockExtra {
 }
 
 /// TEMP shard fees mapping sub.
-#[derive(CustomDebug, Clone, Store, Load)]
+#[derive(Debug, Clone, Store, Load)]
 pub struct ShardFees {
     /// Dictionary root.
     pub root: Option<Cell>,
@@ -220,11 +216,10 @@ pub struct ShardFees {
 }
 
 /// Block signature pair.
-#[derive(CustomDebug, Clone, Store, Load)]
+#[derive(Debug, Clone, Store, Load)]
 pub struct BlockSignature {
     /// Signer node short id.
-    #[debug(with = "DisplayHash")]
-    pub node_id_short: CellHash,
+    pub node_id_short: HashBytes,
     /// Signature data.
     pub signature: Signature,
 }
@@ -246,7 +241,7 @@ impl BlockSignatureExt for Dict<u16, BlockSignature> {
 
         for node in list {
             let node_id_short = tl_proto::hash(everscale_crypto::tl::PublicKey::Ed25519 {
-                key: &node.public_key,
+                key: node.public_key.as_ref(),
             });
             unique_nodes.insert(node_id_short, node);
         }

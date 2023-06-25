@@ -7,7 +7,7 @@ use super::{
     PrunedBranch, PrunedBranchHeader, VirtualCell, ALL_ONES_CELL, ALL_ZEROS_CELL,
 };
 use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
-use crate::cell::{CellFamily, CellHash, CellImpl, CellType, DynCell};
+use crate::cell::{CellFamily, HashBytes, CellImpl, CellType, DynCell};
 use crate::error::Error;
 use crate::util::TryAsMut;
 
@@ -127,7 +127,7 @@ impl Finalizer for RcCellFinalizer {
     }
 }
 
-unsafe fn make_cell(ctx: CellParts, hashes: Vec<(CellHash, u16)>) -> Cell {
+unsafe fn make_cell(ctx: CellParts, hashes: Vec<(HashBytes, u16)>) -> Cell {
     match ctx.descriptor.cell_type() {
         CellType::PrunedBranch => {
             debug_assert!(hashes.len() == 1);

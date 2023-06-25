@@ -2,9 +2,9 @@ use std::num::{NonZeroU16, NonZeroU32, NonZeroU8};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::cell::{Cell, CellHash, CellType, DynCell, LevelMask, RefsIter};
+use crate::cell::{Cell, HashBytes, CellType, DynCell, LevelMask, RefsIter};
 use crate::error::Error;
-use crate::util::{unlikely, CustomDebug};
+use crate::util::unlikely;
 
 /// A data structure that can be deserialized from cells.
 pub trait Load<'a>: Sized {
@@ -141,7 +141,7 @@ impl_primitive_loads! {
         }
         Err(e) => Err(e),
     },
-    CellHash => |s| s.load_u256(),
+    HashBytes => |s| s.load_u256(),
 }
 
 impl<'a> Load<'a> for &'a DynCell {
@@ -157,7 +157,7 @@ impl<'a> Load<'a> for Cell {
 }
 
 /// A read-only view for a subrange of a cell
-#[derive(CustomDebug)]
+#[derive(Debug)]
 pub struct CellSlice<'a> {
     cell: &'a DynCell,
     bits_window_start: u16,
@@ -877,7 +877,7 @@ impl<'a> CellSlice<'a> {
     }
 
     /// Reads 32 bytes starting from the `offset`.
-    pub fn get_u256(&self, offset: u16) -> Result<[u8; 32], Error> {
+    pub fn get_u256(&self, offset: u16) -> Result<HashBytes, Error> {
         if self.bits_window_start + offset + 256 <= self.bits_window_end {
             let index = self.bits_window_start + offset;
             let data = self.cell.data();
@@ -888,7 +888,9 @@ impl<'a> CellSlice<'a> {
 
             if r == 0 && q + 32 <= data_len {
                 // SAFETY: `q + 32 <= data_len`
-                Ok(unsafe { *(data.as_ptr().add(q) as *const [u8; 32]) })
+                Ok(HashBytes(unsafe {
+                    *(data.as_ptr().add(q) as *const [u8; 32])
+                }))
             } else if r != 0 && q + 33 <= data_len {
                 // ___xxxxx|...|zzz_____ -> xxxxx...|...zzz
                 //  r^
@@ -927,7 +929,7 @@ impl<'a> CellSlice<'a> {
     }
 
     /// Tries to read the next 32 bytes, incrementing the bits window start.
-    pub fn load_u256(&mut self) -> Result<[u8; 32], Error> {
+    pub fn load_u256(&mut self) -> Result<HashBytes, Error> {
         let res = self.get_u256(0);
         self.bits_window_start += 256 * res.is_ok() as u16;
         res

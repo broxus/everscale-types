@@ -4,16 +4,14 @@ use std::hash::BuildHasher;
 use super::{make_pruned_branch, FilterAction, MerkleFilter};
 use crate::cell::*;
 use crate::error::Error;
-use crate::util::*;
 
 /// Parsed Merkle proof representation.
 ///
 /// NOTE: Serialized into `MerkleProof` cell.
-#[derive(CustomDebug, Clone)]
+#[derive(Debug, Clone)]
 pub struct MerkleProof {
     /// Representation hash of the original cell.
-    #[debug(with = "DisplayHash")]
-    pub hash: CellHash,
+    pub hash: HashBytes,
     /// Representation depth of the origin cell.
     pub depth: u16,
     /// Partially pruned tree with the contents of the original cell.
@@ -105,15 +103,15 @@ impl MerkleProof {
     /// Proof creation will fail if the specified child is not found.
     pub fn create_for_cell<'a>(
         root: &'a DynCell,
-        child_hash: &'a CellHash,
+        child_hash: &'a HashBytes,
     ) -> MerkleProofBuilder<'a, impl MerkleFilter + 'a> {
         struct RootOrChild<'a> {
-            cells: ahash::HashSet<&'a CellHash>,
-            child_hash: &'a CellHash,
+            cells: ahash::HashSet<&'a HashBytes>,
+            child_hash: &'a HashBytes,
         }
 
         impl MerkleFilter for RootOrChild<'_> {
-            fn check(&self, cell: &CellHash) -> FilterAction {
+            fn check(&self, cell: &HashBytes) -> FilterAction {
                 if self.cells.contains(cell) || cell == self.child_hash {
                     FilterAction::Include
                 } else {
@@ -215,7 +213,7 @@ where
     pub fn build_raw_ext(
         self,
         finalizer: &mut dyn Finalizer,
-    ) -> Result<(Cell, ahash::HashMap<&'a CellHash, bool>), Error> {
+    ) -> Result<(Cell, ahash::HashMap<&'a HashBytes, bool>), Error> {
         let mut pruned_branches = Default::default();
         let mut builder = BuilderImpl {
             root: self.root,
@@ -232,8 +230,8 @@ where
 struct BuilderImpl<'a, 'b, S = ahash::RandomState> {
     root: &'a DynCell,
     filter: &'b dyn MerkleFilter,
-    cells: HashMap<&'a CellHash, Cell, S>,
-    pruned_branches: Option<&'b mut HashMap<&'a CellHash, bool, S>>,
+    cells: HashMap<&'a HashBytes, Cell, S>,
+    pruned_branches: Option<&'b mut HashMap<&'a HashBytes, bool, S>>,
     finalizer: &'b mut dyn Finalizer,
 }
 

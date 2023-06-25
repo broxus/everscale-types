@@ -4,7 +4,6 @@ use crate::cell::*;
 use crate::dict::{self, Dict};
 use crate::error::*;
 use crate::num::*;
-use crate::util::*;
 
 use crate::models::account::AccountStatus;
 use crate::models::currency::CurrencyCollection;
@@ -16,16 +15,14 @@ pub use self::phases::*;
 mod phases;
 
 /// Blockchain transaction.
-#[derive(CustomDebug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Transaction {
     /// Account on which this transaction was produced.
-    #[debug(with = "DisplayHash")]
-    pub account: CellHash,
+    pub account: HashBytes,
     /// Logical time when the transaction was created.
     pub lt: u64,
     /// The hash of the previous transaction on the same account.
-    #[debug(with = "DisplayHash")]
-    pub prev_trans_hash: CellHash,
+    pub prev_trans_hash: HashBytes,
     /// The logical time of the previous transaction on the same account.
     pub prev_trans_lt: u64,
     /// Unix timestamp when the transaction was created.
@@ -394,15 +391,13 @@ impl<'a> Load<'a> for TickTock {
 }
 
 /// Account state hash update.
-#[derive(CustomDebug, Clone, Copy, Eq, PartialEq, Store, Load)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Store, Load)]
 #[tlb(tag = "#72")]
 pub struct HashUpdate {
     /// Old account state hash.
-    #[debug(with = "DisplayHash")]
-    pub old: CellHash,
+    pub old: HashBytes,
     /// New account state hash.
-    #[debug(with = "DisplayHash")]
-    pub new: CellHash,
+    pub new: HashBytes,
 }
 
 #[cfg(test)]

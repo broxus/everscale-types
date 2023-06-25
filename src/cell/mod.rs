@@ -3,7 +3,6 @@
 use std::ops::{BitOr, BitOrAssign};
 
 use crate::error::Error;
-use crate::util::DisplayHash;
 
 pub use self::builder::{CellBuilder, CellRefsBuilder, Store};
 pub use self::cell_impl::StaticCell;
@@ -110,7 +109,7 @@ pub trait CellImpl {
     ///
     /// Cell representation hash is the hash at the maximum level ([`LevelMask::MAX_LEVEL`]).
     /// Use `repr_hash` as a simple alias for this.
-    fn hash(&self, level: u8) -> &CellHash;
+    fn hash(&self, level: u8) -> &HashBytes;
 
     /// Returns cell depth for the specified level.
     fn depth(&self, level: u8) -> u16;
@@ -177,7 +176,7 @@ impl DynCell {
 
     /// Returns a representation hash of the cell.
     #[inline]
-    pub fn repr_hash(&self) -> &CellHash {
+    pub fn repr_hash(&self) -> &HashBytes {
         self.hash(LevelMask::MAX_LEVEL)
     }
 
@@ -267,7 +266,7 @@ impl std::fmt::Debug for DynCell {
             "ty",
             &self.cell_type(),
             "hash",
-            &DisplayHash(self.repr_hash()),
+            self.repr_hash(),
         )
     }
 }
@@ -469,13 +468,133 @@ impl ExactSizeIterator for ClonedRefsIter<'_> {
 }
 
 /// Type alias for a cell hash.
-pub type CellHash = [u8; 32];
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[repr(transparent)]
+pub struct HashBytes(pub [u8; 32]);
+
+impl HashBytes {
+    /// Array of zero bytes.
+    pub const ZERO: Self = Self([0; 32]);
+
+    /// Wraps a reference to an internal array into a newtype reference.
+    #[inline(always)]
+    pub const fn wrap(value: &[u8; 32]) -> &Self {
+        // SAFETY: HashBytes is #[repr(transparent)]
+        unsafe { &*(value as *const [u8; 32] as *const Self) }
+    }
+
+    /// Returns a slice containing the entire array.
+    pub fn as_slice(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+
+    /// Returns a raw pointer to the slice's buffer.
+    #[inline(always)]
+    pub const fn as_ptr(&self) -> *const u8 {
+        &self.0 as *const [u8] as *const u8
+    }
+}
+
+impl Default for HashBytes {
+    #[inline(always)]
+    fn default() -> Self {
+        Self::ZERO
+    }
+}
+
+impl AsRef<[u8; 32]> for HashBytes {
+    #[inline(always)]
+    fn as_ref(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+impl std::borrow::Borrow<[u8; 32]> for HashBytes {
+    #[inline(always)]
+    fn borrow(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+impl std::borrow::Borrow<HashBytes> for [u8; 32] {
+    #[inline(always)]
+    fn borrow(&self) -> &HashBytes {
+        HashBytes::wrap(self)
+    }
+}
+
+impl PartialEq<[u8; 32]> for HashBytes {
+    #[inline(always)]
+    fn eq(&self, other: &[u8; 32]) -> bool {
+        &self.0 == other
+    }
+}
+
+impl PartialEq<HashBytes> for [u8; 32] {
+    #[inline(always)]
+    fn eq(&self, other: &HashBytes) -> bool {
+        self == &other.0
+    }
+}
+
+impl PartialEq<[u8]> for HashBytes {
+    #[inline(always)]
+    fn eq(&self, other: &[u8]) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<HashBytes> for [u8] {
+    #[inline(always)]
+    fn eq(&self, other: &HashBytes) -> bool {
+        self == other.0
+    }
+}
+
+impl From<[u8; 32]> for HashBytes {
+    #[inline(always)]
+    fn from(value: [u8; 32]) -> Self {
+        Self(value)
+    }
+}
+
+impl From<sha2::digest::Output<sha2::Sha256>> for HashBytes {
+    #[inline(always)]
+    fn from(value: sha2::digest::Output<sha2::Sha256>) -> Self {
+        Self(value.into())
+    }
+}
+
+impl From<HashBytes> for [u8; 32] {
+    #[inline(always)]
+    fn from(value: HashBytes) -> Self {
+        value.0
+    }
+}
+
+impl std::fmt::Display for HashBytes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut output = [0u8; 64];
+        hex::encode_to_slice(self.as_ref(), &mut output).ok();
+
+        // SAFETY: output is guaranteed to contain only [0-9a-f]
+        let output = unsafe { std::str::from_utf8_unchecked(&output) };
+        f.write_str(output)
+    }
+}
+
+impl std::fmt::Debug for HashBytes {
+    #[inline(always)]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self, f)
+    }
+}
 
 /// Hash of an empty (0 bits of data, no refs) ordinary cell.
-pub static EMPTY_CELL_HASH: &CellHash = &[
+pub static EMPTY_CELL_HASH: &HashBytes = HashBytes::wrap(&[
     0x96, 0xa2, 0x96, 0xd2, 0x24, 0xf2, 0x85, 0xc6, 0x7b, 0xee, 0x93, 0xc3, 0x0f, 0x8a, 0x30, 0x91,
     0x57, 0xf0, 0xda, 0xa3, 0x5d, 0xc5, 0xb8, 0x7e, 0x41, 0x0b, 0x78, 0x63, 0x0a, 0x09, 0xcf, 0xc7,
-];
+]);
 
 /// Well-formed cell type.
 #[derive(Default, Debug, Copy, Clone, Eq, PartialEq)]
@@ -869,7 +988,7 @@ impl std::fmt::Display for DisplayCellRoot<'_> {
                     descriptor.reference_count(),
                     descriptor.level_mask(),
                     repr_depth,
-                    DisplayHash(repr_hash),
+                    repr_hash,
                 ))
         }
     }

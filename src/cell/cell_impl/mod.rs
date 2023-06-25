@@ -3,7 +3,7 @@ use std::mem::MaybeUninit;
 #[cfg(feature = "stats")]
 use super::CellTreeStats;
 use super::{
-    Cell, CellDescriptor, CellFamily, CellHash, CellImpl, DynCell, EMPTY_CELL_HASH, MAX_REF_COUNT,
+    Cell, CellDescriptor, CellFamily, HashBytes, CellImpl, DynCell, EMPTY_CELL_HASH, MAX_REF_COUNT,
 };
 use crate::util::TryAsMut;
 
@@ -75,7 +75,7 @@ impl CellImpl for EmptyOrdinaryCell {
         self
     }
 
-    fn hash(&self, _: u8) -> &CellHash {
+    fn hash(&self, _: u8) -> &HashBytes {
         EMPTY_CELL_HASH
     }
 
@@ -157,8 +157,8 @@ impl CellImpl for StaticCell {
         self
     }
 
-    fn hash(&self, _: u8) -> &CellHash {
-        self.hash
+    fn hash(&self, _: u8) -> &HashBytes {
+        HashBytes::wrap(self.hash)
     }
 
     fn depth(&self, _: u8) -> u16 {
@@ -229,14 +229,14 @@ struct OrdinaryCellHeader {
     bit_len: u16,
     #[cfg(feature = "stats")]
     stats: CellTreeStats,
-    hashes: Vec<(CellHash, u16)>,
+    hashes: Vec<(HashBytes, u16)>,
     descriptor: CellDescriptor,
     references: [MaybeUninit<Cell>; MAX_REF_COUNT],
     without_first: bool,
 }
 
 impl OrdinaryCellHeader {
-    fn level_descr(&self, level: u8) -> &(CellHash, u16) {
+    fn level_descr(&self, level: u8) -> &(HashBytes, u16) {
         let hash_index = hash_index(self.descriptor, level);
         debug_assert!((hash_index as usize) < self.hashes.len());
 
@@ -421,7 +421,7 @@ impl<const N: usize> CellImpl for OrdinaryCell<N> {
         }
     }
 
-    fn hash(&self, level: u8) -> &CellHash {
+    fn hash(&self, level: u8) -> &HashBytes {
         &self.header.level_descr(level).0
     }
 
@@ -448,7 +448,7 @@ impl<const N: usize> CellImpl for OrdinaryCell<N> {
 }
 
 struct LibraryReference {
-    repr_hash: CellHash,
+    repr_hash: HashBytes,
     descriptor: CellDescriptor,
     data: [u8; 33],
 }
@@ -482,7 +482,7 @@ impl CellImpl for LibraryReference {
         self
     }
 
-    fn hash(&self, _: u8) -> &CellHash {
+    fn hash(&self, _: u8) -> &HashBytes {
         &self.repr_hash
     }
 
@@ -514,7 +514,7 @@ impl CellImpl for LibraryReference {
 type PrunedBranch<const N: usize> = HeaderWithData<PrunedBranchHeader, N>;
 
 struct PrunedBranchHeader {
-    repr_hash: CellHash,
+    repr_hash: HashBytes,
     level: u8,
     descriptor: CellDescriptor,
 }
@@ -554,7 +554,7 @@ impl<const N: usize> CellImpl for PrunedBranch<N> {
         VirtualCellWrapper::wrap(self)
     }
 
-    fn hash(&self, level: u8) -> &CellHash {
+    fn hash(&self, level: u8) -> &HashBytes {
         let hash_index = hash_index(self.header.descriptor, level);
         if hash_index == self.header.level {
             &self.header.repr_hash
@@ -565,7 +565,7 @@ impl<const N: usize> CellImpl for PrunedBranch<N> {
             let data_ptr = std::ptr::addr_of!(self.data) as *const u8;
 
             // SAFETY: Cell was created from a well-formed parts, so data is big enough
-            unsafe { &*(data_ptr.add(offset) as *const [u8; 32]) }
+            HashBytes::wrap(unsafe { &*(data_ptr.add(offset) as *const [u8; 32]) })
         }
     }
 
@@ -634,7 +634,7 @@ where
         self
     }
 
-    fn hash(&self, level: u8) -> &CellHash {
+    fn hash(&self, level: u8) -> &HashBytes {
         let cell = self.0.as_ref();
         cell.hash(virtual_hash_index(cell.descriptor(), level))
     }
@@ -704,7 +704,7 @@ where
         self
     }
 
-    fn hash(&self, level: u8) -> &CellHash {
+    fn hash(&self, level: u8) -> &HashBytes {
         self.0.hash(virtual_hash_index(self.0.descriptor(), level))
     }
 

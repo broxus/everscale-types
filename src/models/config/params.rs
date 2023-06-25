@@ -7,7 +7,6 @@ use crate::cell::*;
 use crate::dict::Dict;
 use crate::error::Error;
 use crate::num::{Tokens, Uint12};
-use crate::util::*;
 
 use crate::models::block::ShardIdent;
 use crate::models::{Lazy, Signature};
@@ -45,7 +44,7 @@ pub struct ConfigProposalSetup {
 }
 
 /// Workchain description.
-#[derive(CustomDebug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct WorkchainDescription {
     /// Unix timestamp from which blocks can be produced.
     pub enabled_since: u32,
@@ -60,11 +59,9 @@ pub struct WorkchainDescription {
     /// Whether the workchain accepts messages.
     pub accept_msgs: bool,
     /// A hash of the zerostate root cell.
-    #[debug(with = "DisplayHash")]
-    pub zerostate_root_hash: CellHash,
+    pub zerostate_root_hash: HashBytes,
     /// A hash of the zerostate file.
-    #[debug(with = "DisplayHash")]
-    pub zerostate_file_hash: CellHash,
+    pub zerostate_file_hash: HashBytes,
     /// Workchain version.
     pub version: u32,
     /// Workchain format description.
@@ -693,7 +690,13 @@ impl ValidatorSet {
         for node in subset {
             hash = crc32c::crc32c_append(hash, node.public_key.as_slice());
             hash = crc32c::crc32c_append(hash, &node.weight.to_le_bytes());
-            hash = crc32c::crc32c_append(hash, node.adnl_addr.as_ref().unwrap_or(&[0u8; 32]));
+            hash = crc32c::crc32c_append(
+                hash,
+                node.adnl_addr
+                    .as_ref()
+                    .unwrap_or(HashBytes::wrap(&[0u8; 32]))
+                    .as_ref(),
+            );
         }
 
         hash
@@ -806,16 +809,14 @@ impl<'a> Load<'a> for ValidatorSet {
 }
 
 /// Validator description.
-#[derive(CustomDebug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ValidatorDescription {
     /// Validator public key.
-    #[debug(with = "DisplayHash")]
-    pub public_key: CellHash, // TODO: replace with everscale_crypto::ed25519::PublicKey ?
+    pub public_key: HashBytes, // TODO: replace with everscale_crypto::ed25519::PublicKey ?
     /// Validator weight in some units.
     pub weight: u64,
     /// Optional validator ADNL address.
-    #[debug(with = "DisplayOptionalHash")]
-    pub adnl_addr: Option<CellHash>,
+    pub adnl_addr: Option<HashBytes>,
     /// Since which seqno this validator will be active.
     pub mc_seqno_since: u32,
 
@@ -833,7 +834,7 @@ impl ValidatorDescription {
 
     /// Verifies message signature and current public key.
     pub fn verify_signature(&self, data: &[u8], signature: &Signature) -> bool {
-        if let Some(public_key) = ed25519::PublicKey::from_bytes(self.public_key) {
+        if let Some(public_key) = ed25519::PublicKey::from_bytes(self.public_key.0) {
             public_key.verify_raw(data, signature.as_ref())
         } else {
             false
@@ -860,7 +861,7 @@ impl Store for ValidatorDescription {
 
         let mut adnl = self.adnl_addr.as_ref();
         if with_mc_seqno {
-            adnl = Some(&[0; 32]);
+            adnl = Some(HashBytes::wrap(&[0; 32]));
         }
 
         if let Some(adnl) = adnl {

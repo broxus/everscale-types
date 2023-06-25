@@ -1,7 +1,6 @@
 use crate::cell::*;
 use crate::error::Error;
 use crate::num::*;
-use crate::util::*;
 
 use crate::models::account::StorageUsedShort;
 use crate::models::currency::CurrencyCollection;
@@ -109,7 +108,7 @@ impl<'a> Load<'a> for ComputePhase {
 }
 
 /// Executed compute phase info.
-#[derive(CustomDebug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ExecutedComputePhase {
     /// Whether the execution was successful.
     pub success: bool,
@@ -134,11 +133,9 @@ pub struct ExecutedComputePhase {
     /// The number of VM steps it took to complete this phase.
     pub vm_steps: u32,
     /// Hash of the initial state of the VM.
-    #[debug(with = "DisplayHash")]
-    pub vm_init_state_hash: CellHash,
+    pub vm_init_state_hash: HashBytes,
     /// Hash of the VM state after executing this phase.
-    #[debug(with = "DisplayHash")]
-    pub vm_final_state_hash: CellHash,
+    pub vm_final_state_hash: HashBytes,
 }
 
 /// Skipped compute phase info.
@@ -198,7 +195,7 @@ impl<'a> Load<'a> for ComputePhaseSkipReason {
 ///
 /// At this phase the list of actions from the compute phase
 /// is converted into updates and outgoing messages.
-#[derive(CustomDebug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ActionPhase {
     /// Whether the execution was successful.
     pub success: bool,
@@ -225,8 +222,7 @@ pub struct ActionPhase {
     /// The number of outgoing messages created by the compute phase.
     pub messages_created: u16,
     /// The hash of the actions list.
-    #[debug(with = "DisplayHash")]
-    pub action_list_hash: CellHash,
+    pub action_list_hash: HashBytes,
     /// The total number of unique cells (bits / refs) of produced messages.
     pub total_message_size: StorageUsedShort,
 }

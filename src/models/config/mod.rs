@@ -4,7 +4,6 @@ use crate::cell::*;
 use crate::dict::{Dict, DictKey};
 use crate::error::Error;
 use crate::num::Tokens;
-use crate::util::*;
 
 use crate::models::currency::ExtraCurrencyCollection;
 use crate::models::global_version::GlobalVersion;
@@ -14,11 +13,10 @@ pub use self::params::*;
 mod params;
 
 /// Blockchain config.
-#[derive(CustomDebug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct BlockchainConfig {
     /// Configuration contract address.
-    #[debug(with = "DisplayHash")]
-    pub address: CellHash,
+    pub address: HashBytes,
     /// Configuration parameters.
     pub params: Dict<u32, Cell>,
 }
@@ -47,14 +45,14 @@ impl BlockchainConfig {
     /// Returns the elector account address (in masterchain).
     ///
     /// Uses [`ConfigParam1`].
-    pub fn get_elector_address(&self) -> Result<CellHash, Error> {
+    pub fn get_elector_address(&self) -> Result<HashBytes, Error> {
         ok!(self.get::<ConfigParam1>()).ok_or(Error::CellUnderflow)
     }
 
     /// Returns the minter account address (in masterchain).
     ///
     /// Uses [`ConfigParam2`] with a fallback to [`ConfigParam0`] (config).
-    pub fn get_minter_address(&self) -> Result<CellHash, Error> {
+    pub fn get_minter_address(&self) -> Result<HashBytes, Error> {
         match ok!(self.get::<ConfigParam2>()) {
             Some(address) => Ok(address),
             None => ok!(self.get::<ConfigParam0>()).ok_or(Error::CellUnderflow),
@@ -64,7 +62,7 @@ impl BlockchainConfig {
     /// Returns the fee collector account address (in masterchain).
     ///
     /// Uses [`ConfigParam3`] with a fallback to [`ConfigParam1`] (elector).
-    pub fn get_fee_collector_address(&self) -> Result<CellHash, Error> {
+    pub fn get_fee_collector_address(&self) -> Result<HashBytes, Error> {
         match ok!(self.get::<ConfigParam3>()) {
             Some(address) => Ok(address),
             None => ok!(self.get::<ConfigParam1>()).ok_or(Error::CellUnderflow),
@@ -199,7 +197,7 @@ impl BlockchainConfig {
     /// Returns a list of fundamental account addresses (in masterchain).
     ///
     /// Uses [`ConfigParam31`].
-    pub fn get_fundamental_addresses(&self) -> Result<Dict<CellHash, ()>, Error> {
+    pub fn get_fundamental_addresses(&self) -> Result<Dict<HashBytes, ()>, Error> {
         ok!(self.get::<ConfigParam31>()).ok_or(Error::CellUnderflow)
     }
 
@@ -344,15 +342,15 @@ macro_rules! define_config_params {
 
 define_config_params! {
     /// Configuration account address (in masterchain).
-    0 => ConfigParam0(CellHash),
+    0 => ConfigParam0(HashBytes),
     /// Elector account address (in masterchain).
-    1 => ConfigParam1(CellHash),
+    1 => ConfigParam1(HashBytes),
     /// Minter account address (in masterchain).
-    2 => ConfigParam2(CellHash),
+    2 => ConfigParam2(HashBytes),
     /// Fee collector account address (in masterchain).
-    3 => ConfigParam3(CellHash),
+    3 => ConfigParam3(HashBytes),
     /// DNS root account address (in masterchain).
-    4 => ConfigParam4(CellHash),
+    4 => ConfigParam4(HashBytes),
 
     /// Mint new price and mint add price (unused).
     6 => ConfigParam6(CellSlice<'a>),
@@ -444,7 +442,7 @@ define_config_params! {
     /// Fundamental smartcontract addresses.
     ///
     /// Contains a dictionary with addresses (in masterchain) of fundamental contracts as keys.
-    31 => ConfigParam31(Dict<CellHash, ()>),
+    31 => ConfigParam31(Dict<HashBytes, ()>),
 
     /// Previous validator set.
     ///
@@ -486,15 +484,15 @@ mod tests {
 
         assert_eq!(
             blockchain_config.get::<ConfigParam0>().unwrap(),
-            Some([0x55; 32])
+            Some(HashBytes([0x55; 32]))
         );
         assert_eq!(
             blockchain_config.get::<ConfigParam1>().unwrap(),
-            Some([0x33; 32])
+            Some(HashBytes([0x33; 32]))
         );
         assert_eq!(
             blockchain_config.get::<ConfigParam2>().unwrap(),
-            Some([0x00; 32])
+            Some(HashBytes([0x00; 32]))
         );
         assert_eq!(blockchain_config.get::<ConfigParam3>().unwrap(), None);
         assert_eq!(blockchain_config.get::<ConfigParam4>().unwrap(), None);
@@ -689,7 +687,7 @@ mod tests {
         let fundamental_smc = blockchain_config.get::<ConfigParam31>().unwrap().unwrap();
         for entry in fundamental_smc.keys() {
             let address = entry.unwrap();
-            println!("{}", DisplayHash(&address));
+            println!("{address}");
         }
 
         assert!(blockchain_config.get::<ConfigParam32>().unwrap().is_none());

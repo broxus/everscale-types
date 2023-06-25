@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::hash::BuildHasher;
 
-use crate::cell::{CellHash, UsageTree, UsageTreeWithSubtrees};
+use crate::cell::{HashBytes, UsageTree, UsageTreeWithSubtrees};
 
 pub use self::proof::{MerkleProof, MerkleProofBuilder, MerkleProofExtBuilder};
 pub use self::pruned_branch::make_pruned_branch;
@@ -26,7 +26,7 @@ mod __checks {
 /// in the Merkle proof or update.
 pub trait MerkleFilter {
     /// Returns how the cell should be included in the Merkle proof or update.
-    fn check(&self, cell: &CellHash) -> FilterAction;
+    fn check(&self, cell: &HashBytes) -> FilterAction;
 }
 
 /// Merkle filter action.
@@ -42,13 +42,13 @@ pub enum FilterAction {
 
 impl<T: MerkleFilter + ?Sized> MerkleFilter for &T {
     #[inline]
-    fn check(&self, cell: &CellHash) -> FilterAction {
+    fn check(&self, cell: &HashBytes) -> FilterAction {
         <T as MerkleFilter>::check(self, cell)
     }
 }
 
 impl MerkleFilter for UsageTree {
-    fn check(&self, cell: &CellHash) -> FilterAction {
+    fn check(&self, cell: &HashBytes) -> FilterAction {
         if UsageTree::contains(self, cell) {
             FilterAction::Include
         } else {
@@ -58,7 +58,7 @@ impl MerkleFilter for UsageTree {
 }
 
 impl MerkleFilter for UsageTreeWithSubtrees {
-    fn check(&self, cell: &CellHash) -> FilterAction {
+    fn check(&self, cell: &HashBytes) -> FilterAction {
         if UsageTreeWithSubtrees::contains_direct(self, cell) {
             FilterAction::Include
         } else if UsageTreeWithSubtrees::contains_subtree(self, cell) {
@@ -69,8 +69,8 @@ impl MerkleFilter for UsageTreeWithSubtrees {
     }
 }
 
-impl<S: BuildHasher> MerkleFilter for HashSet<CellHash, S> {
-    fn check(&self, cell: &CellHash) -> FilterAction {
+impl<S: BuildHasher> MerkleFilter for HashSet<HashBytes, S> {
+    fn check(&self, cell: &HashBytes) -> FilterAction {
         if HashSet::contains(self, cell) {
             FilterAction::Include
         } else {
@@ -79,8 +79,8 @@ impl<S: BuildHasher> MerkleFilter for HashSet<CellHash, S> {
     }
 }
 
-impl<S: BuildHasher> MerkleFilter for HashSet<&CellHash, S> {
-    fn check(&self, cell: &CellHash) -> FilterAction {
+impl<S: BuildHasher> MerkleFilter for HashSet<&HashBytes, S> {
+    fn check(&self, cell: &HashBytes) -> FilterAction {
         if HashSet::contains(self, cell) {
             FilterAction::Include
         } else {

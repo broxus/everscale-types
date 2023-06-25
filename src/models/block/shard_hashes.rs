@@ -521,7 +521,7 @@ struct IterSegment<'a> {
 impl Copy for IterSegment<'_> {}
 
 /// Description of the most recent state of the shard.
-#[derive(CustomDebug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ShardDescription {
     /// Sequence number of the latest block in the shard.
     pub seqno: u32,
@@ -532,11 +532,9 @@ pub struct ShardDescription {
     /// The end of the logical time range since the last MC block.
     pub end_lt: u64,
     /// Representation hash of the root cell of the latest block in the shard.
-    #[debug(with = "DisplayHash")]
-    pub root_hash: CellHash,
+    pub root_hash: HashBytes,
     /// Hash of the BOC encoded root cell of the latest block in the shard.
-    #[debug(with = "DisplayHash")]
-    pub file_hash: CellHash,
+    pub file_hash: HashBytes,
     /// Whether this shard splits in the next block.
     pub before_split: bool,
     /// Whether this shard merges in the next block.
@@ -563,7 +561,7 @@ pub struct ShardDescription {
     /// Amount of funds created in this shard since the last masterchain block.
     pub funds_created: CurrencyCollection,
     /// Copyleft rewards if present.
-    pub copyleft_rewards: Dict<CellHash, Tokens>,
+    pub copyleft_rewards: Dict<HashBytes, Tokens>,
     /// Proofs from other workchains.
     pub proof_chain: Option<ProofChain>,
 }

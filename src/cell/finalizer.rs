@@ -1,6 +1,6 @@
 use sha2::Digest;
 
-use crate::cell::{Cell, CellDescriptor, CellFamily, CellHash, CellType, LevelMask, MAX_REF_COUNT};
+use crate::cell::{Cell, CellDescriptor, CellFamily, HashBytes, CellType, LevelMask, MAX_REF_COUNT};
 use crate::error::Error;
 use crate::util::{unlikely, ArrayVec};
 
@@ -58,7 +58,7 @@ pub struct CellParts<'a> {
 
 impl<'a> CellParts<'a> {
     /// Validates cell and computes all hashes.
-    pub fn compute_hashes(&self) -> Result<Vec<(CellHash, u16)>, Error> {
+    pub fn compute_hashes(&self) -> Result<Vec<(HashBytes, u16)>, Error> {
         const HASH_BITS: usize = 256;
         const DEPTH_BITS: usize = 16;
 
@@ -136,7 +136,7 @@ impl<'a> CellParts<'a> {
 
         let level_offset = cell_type.is_merkle() as u8;
 
-        let mut hashes = Vec::<(CellHash, u16)>::with_capacity(hashes_len);
+        let mut hashes = Vec::<(HashBytes, u16)>::with_capacity(hashes_len);
         for level in 0..hashes_len {
             let mut hasher = sha2::Sha256::new();
 
