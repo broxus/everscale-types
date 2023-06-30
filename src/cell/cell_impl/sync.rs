@@ -8,7 +8,7 @@ use super::{
     PrunedBranch, PrunedBranchHeader, VirtualCell, ALL_ONES_CELL, ALL_ZEROS_CELL,
 };
 use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
-use crate::cell::{CellFamily, HashBytes, CellImpl, CellType, DynCell};
+use crate::cell::{CellFamily, CellImpl, CellType, DynCell, HashBytes};
 use crate::error::Error;
 use crate::util::TryAsMut;
 

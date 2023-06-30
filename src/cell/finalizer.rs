@@ -1,6 +1,8 @@
 use sha2::Digest;
 
-use crate::cell::{Cell, CellDescriptor, CellFamily, HashBytes, CellType, LevelMask, MAX_REF_COUNT};
+use crate::cell::{
+    Cell, CellDescriptor, CellFamily, CellType, HashBytes, LevelMask, MAX_REF_COUNT,
+};
 use crate::error::Error;
 use crate::util::{unlikely, ArrayVec};
 

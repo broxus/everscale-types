@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::hash::BuildHasher;
 
 use super::BocTag;
-use crate::cell::{CellDescriptor, HashBytes, DynCell};
+use crate::cell::{CellDescriptor, DynCell, HashBytes};
 
 /// Intermediate BOC serializer state.
 pub struct BocHeader<'a, S = ahash::RandomState> {

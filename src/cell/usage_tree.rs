@@ -1,5 +1,5 @@
 use super::cell_impl::VirtualCellWrapper;
-use super::{Cell, CellDescriptor, HashBytes, CellImpl, DynCell};
+use super::{Cell, CellDescriptor, CellImpl, DynCell, HashBytes};
 use crate::util::TryAsMut;
 
 #[cfg(feature = "stats")]
@@ -165,7 +165,7 @@ mod rc {
     use std::rc::Rc;
 
     use super::{UsageTreeMode, VisitedCell};
-    use crate::cell::{Cell, HashBytes, DynCell};
+    use crate::cell::{Cell, DynCell, HashBytes};
 
     pub type SharedState = Rc<UsageTreeState>;
 
@@ -259,7 +259,7 @@ mod sync {
     use std::sync::{Arc, Mutex};
 
     use super::{UsageTreeMode, VisitedCell};
-    use crate::cell::{Cell, HashBytes, DynCell};
+    use crate::cell::{Cell, DynCell, HashBytes};
 
     pub type SharedState = Arc<UsageTreeState>;
 

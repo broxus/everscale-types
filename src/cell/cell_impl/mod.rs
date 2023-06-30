@@ -3,7 +3,7 @@ use std::mem::MaybeUninit;
 #[cfg(feature = "stats")]
 use super::CellTreeStats;
 use super::{
-    Cell, CellDescriptor, CellFamily, HashBytes, CellImpl, DynCell, EMPTY_CELL_HASH, MAX_REF_COUNT,
+    Cell, CellDescriptor, CellFamily, CellImpl, DynCell, HashBytes, EMPTY_CELL_HASH, MAX_REF_COUNT,
 };
 use crate::util::TryAsMut;
 

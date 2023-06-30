@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 use crate::cell::{
-    Cell, CellDescriptor, HashBytes, CellSlice, DynCell, LevelMask, MAX_BIT_LEN, MAX_REF_COUNT,
+    Cell, CellDescriptor, CellSlice, DynCell, HashBytes, LevelMask, MAX_BIT_LEN, MAX_REF_COUNT,
 };
 use crate::error::Error;
 use crate::util::ArrayVec;

@@ -2,7 +2,7 @@ use std::num::{NonZeroU16, NonZeroU32, NonZeroU8};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::cell::{Cell, HashBytes, CellType, DynCell, LevelMask, RefsIter};
+use crate::cell::{Cell, CellType, DynCell, HashBytes, LevelMask, RefsIter};
 use crate::error::Error;
 use crate::util::unlikely;
 
