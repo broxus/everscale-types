@@ -27,8 +27,8 @@ impl ShardHashes {
     ///
     /// If the dict or tree is invalid, finishes after the first invalid element,
     /// returning an error.
-    pub fn raw_iter(&self) -> ShardHashesRawIter<'_> {
-        ShardHashesRawIter::new(self.0.root())
+    pub fn raw_iter(&self) -> ShardsTreeRawIter<'_> {
+        ShardsTreeRawIter::new(self.0.root())
     }
 
     /// Gets an iterator over the latest blocks in all shards, sorted by
@@ -68,12 +68,12 @@ pub struct WorkchainShardHashes {
 
 impl WorkchainShardHashes {
     /// Gets an iterator over the keys of the shard descriptions tree, sorted by key.
-    /// The iterator element type is `Result<CellSlice>`.
+    /// The iterator element type is `Result<ShardIdent>`.
     ///
     /// If the tree is invalid, finishes after the first invalid element,
     /// returning an error.
-    pub fn keys(&self) -> WorkchainShardHashesKeysIter<'_> {
-        WorkchainShardHashesKeysIter::new(self.workchain, self.root.as_ref())
+    pub fn keys(&self) -> WorkchainShardsTreeKeysIter<'_> {
+        WorkchainShardsTreeKeysIter::new(self.workchain, self.root.as_ref())
     }
 
     /// Gets an iterator over the entries of the shard descriptions tree, sorted by key.
@@ -99,8 +99,8 @@ impl WorkchainShardHashes {
     ///
     /// If the tree is invalid, finishes after the first invalid element,
     /// returning an error.
-    pub fn raw_iter(&self) -> WorkchainShardHashesRawIter<'_> {
-        WorkchainShardHashesRawIter::new(self.workchain, self.root.as_ref())
+    pub fn raw_iter(&self) -> WorkchainShardsTreeRawIter<'_> {
+        WorkchainShardsTreeRawIter::new(self.workchain, self.root.as_ref())
     }
 
     /// Gets an iterator over the raw values of the shard descriptions tree, sorted by key.
@@ -108,8 +108,8 @@ impl WorkchainShardHashes {
     ///
     /// If the tree is invalid, finishes after the first invalid element,
     /// returning an error.
-    pub fn raw_values(&self) -> WorkchainShardHashesRawValuesIter<'_> {
-        WorkchainShardHashesRawValuesIter::new(self.workchain, self.root.as_ref())
+    pub fn raw_values(&self) -> WorkchainShardsTreeRawValuesIter<'_> {
+        WorkchainShardsTreeRawValuesIter::new(self.workchain, self.root.as_ref())
     }
 }
 
@@ -121,13 +121,13 @@ impl WorkchainShardHashes {
 /// [`iter`]: ShardHashes::iter
 #[derive(Clone)]
 pub struct ShardHashesIter<'a> {
-    inner: ShardHashesRawIter<'a>,
+    inner: ShardsTreeRawIter<'a>,
 }
 
 impl<'a> ShardHashesIter<'a> {
     fn new(dict: &'a Option<Cell>) -> Self {
         Self {
-            inner: ShardHashesRawIter::new(dict),
+            inner: ShardsTreeRawIter::new(dict),
         }
     }
 }
@@ -146,81 +146,6 @@ impl Iterator for ShardHashesIter<'_> {
     }
 }
 
-/// An iterator over the raw entries of a [`ShardHashes`].
-///
-/// This struct is created by the [`raw_iter`] method on [`ShardHashes`].
-/// See its documentation for more.
-///
-/// [`raw_iter`]: ShardHashes::raw_iter
-#[derive(Clone)]
-pub struct ShardHashesRawIter<'a> {
-    dict_iter: dict::RawIter<'a>,
-    shard_hashes_iter: Option<WorkchainShardHashesRawIter<'a>>,
-    status: IterStatus,
-}
-
-impl<'a> ShardHashesRawIter<'a> {
-    fn new(dict: &'a Option<Cell>) -> Self {
-        Self {
-            dict_iter: dict::RawIter::new(dict, 32),
-            shard_hashes_iter: None,
-            status: IterStatus::Valid,
-        }
-    }
-
-    #[inline(always)]
-    fn finish(&mut self, error: Error) -> Error {
-        self.status = IterStatus::Broken;
-        error
-    }
-}
-
-impl<'a> Iterator for ShardHashesRawIter<'a> {
-    type Item = Result<(ShardIdent, CellSlice<'a>), Error>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if unlikely(!self.status.is_valid()) {
-            return if self.status.is_pruned() {
-                self.status = IterStatus::Broken;
-                Some(Err(Error::PrunedBranchAccess))
-            } else {
-                None
-            };
-        }
-
-        loop {
-            // Try to read next item from the current shards tree
-            if let Some(iter) = &mut self.shard_hashes_iter {
-                match iter.next() {
-                    Some(next_item) => break Some(next_item),
-                    None => self.shard_hashes_iter = None,
-                }
-            }
-
-            // Try to get a shards tree for the next workchain
-            self.shard_hashes_iter = Some(match self.dict_iter.next()? {
-                Ok((key, value)) => {
-                    // Parse workchain id from the raw iterator
-                    let workchain = match i32::from_raw_data(key.raw_data()) {
-                        Some(workchain) => workchain,
-                        None => return Some(Err(self.finish(Error::CellUnderflow))),
-                    };
-
-                    // Shards tree is in the first reference in each value
-                    let tree_root = match value.get_reference(0) {
-                        Ok(cell) => cell,
-                        Err(e) => break Some(Err(self.finish(e))),
-                    };
-
-                    // Create shards tree iterator
-                    WorkchainShardHashesRawIter::new(workchain, tree_root)
-                }
-                Err(e) => break Some(Err(self.finish(e))),
-            });
-        }
-    }
-}
-
 /// An iterator over the latest blocks of a [`ShardHashes`].
 ///
 /// This struct is created by the [`latest_blocks`] method on [`ShardHashes`].
@@ -229,14 +154,14 @@ impl<'a> Iterator for ShardHashesRawIter<'a> {
 /// [`latest_blocks`]: ShardHashes::latest_blocks
 #[derive(Clone)]
 pub struct LatestBlocksIter<'a> {
-    inner: ShardHashesRawIter<'a>,
+    inner: ShardsTreeRawIter<'a>,
 }
 
 impl<'a> LatestBlocksIter<'a> {
     /// Creates an iterator over the latest blocks of a [`ShardHashes`].
     pub fn new(dict: &'a Option<Cell>) -> Self {
         Self {
-            inner: ShardHashesRawIter::new(dict),
+            inner: ShardsTreeRawIter::new(dict),
         }
     }
 }
@@ -263,14 +188,14 @@ impl Iterator for LatestBlocksIter<'_> {
 /// [`iter`]: WorkchainShardHashes::iter
 #[derive(Clone)]
 pub struct WorkchainShardHashesIter<'a> {
-    inner: WorkchainShardHashesRawIter<'a>,
+    inner: WorkchainShardsTreeRawIter<'a>,
 }
 
 impl<'a> WorkchainShardHashesIter<'a> {
     /// Creates an iterator over the entries of a [`WorkchainShardHashes`].
     pub fn new(workchain: i32, root: &'a DynCell) -> Self {
         Self {
-            inner: WorkchainShardHashesRawIter::new(workchain, root),
+            inner: WorkchainShardsTreeRawIter::new(workchain, root),
         }
     }
 }
@@ -289,133 +214,6 @@ impl Iterator for WorkchainShardHashesIter<'_> {
     }
 }
 
-/// An iterator over the raw entries of a [`WorkchainShardHashes`].
-///
-/// This struct is created by the [`raw_iter`] method on [`WorkchainShardHashes`].
-/// See its documentation for more.
-///
-/// [`raw_iter`]: WorkchainShardHashes::raw_iter
-#[derive(Clone)]
-pub struct WorkchainShardHashesRawIter<'a> {
-    workchain: i32,
-    leaf: Option<CellSlice<'a>>,
-    segments: Vec<IterSegment<'a>>,
-    status: IterStatus,
-}
-
-impl<'a> WorkchainShardHashesRawIter<'a> {
-    /// Creates an iterator over the raw entries of a [`WorkchainShardHashes`].
-    pub fn new(workchain: i32, root: &'a DynCell) -> Self {
-        let status = 'error: {
-            let mut slice = match root.as_slice() {
-                Ok(slice) => slice,
-                Err(_) => break 'error IterStatus::Pruned,
-            };
-
-            let is_fork = match slice.load_bit() {
-                Ok(bit) => bit,
-                Err(_) => break 'error IterStatus::Broken,
-            };
-
-            let mut result = Self {
-                workchain,
-                leaf: None,
-                segments: Vec::new(),
-                status: IterStatus::Valid,
-            };
-
-            if is_fork {
-                result.segments.push(IterSegment {
-                    data: root,
-                    is_right: false,
-                });
-            } else {
-                result.leaf = Some(slice);
-            }
-
-            return result;
-        };
-
-        // Fallback to broken iterator
-        Self {
-            workchain,
-            leaf: None,
-            segments: Vec::new(),
-            status,
-        }
-    }
-
-    fn finish(&mut self, err: Error) -> Error {
-        self.status = IterStatus::Broken;
-        err
-    }
-}
-
-impl<'a> Iterator for WorkchainShardHashesRawIter<'a> {
-    type Item = Result<(ShardIdent, CellSlice<'a>), Error>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        fn build_shard_prefix(segments: &[IterSegment<'_>]) -> u64 {
-            let mut result = ShardIdent::PREFIX_FULL;
-            for segment in segments {
-                result = (ShardIdent::PREFIX_FULL * segment.is_right as u64) | result >> 1;
-            }
-            result
-        }
-
-        if unlikely(!self.status.is_valid()) {
-            return if self.status.is_pruned() {
-                self.status = IterStatus::Broken;
-                Some(Err(Error::PrunedBranchAccess))
-            } else {
-                None
-            };
-        }
-
-        let leaf = match self.leaf.take() {
-            Some(leaf) => leaf,
-            None => loop {
-                let segment = self.segments.last()?;
-                let mut slice = match segment.data.get_reference_as_slice(segment.is_right as u8) {
-                    Ok(child) => child,
-                    Err(e) => return Some(Err(self.finish(e))),
-                };
-
-                match slice.load_bit() {
-                    // Break on leaf
-                    Ok(false) => break slice,
-                    // Add segment on fork
-                    Ok(true) if self.segments.len() < ShardIdent::MAX_SPLIT_DEPTH as usize => {
-                        self.segments.push(IterSegment {
-                            data: slice.cell(),
-                            is_right: false,
-                        })
-                    }
-                    _ => return Some(Err(self.finish(Error::CellUnderflow))),
-                };
-            },
-        };
-
-        // Build shard prefix from segments
-        // SAFETY: segments lengths is guaranteed to be in range 1..=ShardIdent::MAX_SPLIT_DEPTH
-        let shard_prefix = unsafe {
-            ShardIdent::new_unchecked(self.workchain, build_shard_prefix(&self.segments))
-        };
-
-        // Remove all finished segments from the top of the stack
-        while matches!(self.segments.last(), Some(segment) if segment.is_right) {
-            self.segments.pop();
-        }
-
-        // Move last bit
-        if let Some(segment) = self.segments.last_mut() {
-            segment.is_right = true;
-        }
-
-        Some(Ok((shard_prefix, leaf)))
-    }
-}
-
 /// An iterator over the latest blocks of a [`WorkchainShardHashes`].
 ///
 /// This struct is created by the [`latest_blocks`] method on [`WorkchainShardHashes`].
@@ -424,14 +222,14 @@ impl<'a> Iterator for WorkchainShardHashesRawIter<'a> {
 /// [`latest_blocks`]: WorkchainShardHashes::latest_blocks
 #[derive(Clone)]
 pub struct WorkchainLatestBlocksIter<'a> {
-    inner: WorkchainShardHashesRawIter<'a>,
+    inner: WorkchainShardsTreeRawIter<'a>,
 }
 
 impl<'a> WorkchainLatestBlocksIter<'a> {
     /// Creates an iterator over the latest blocks of a [`WorkchainShardHashes`].
     pub fn new(workchain: i32, root: &'a DynCell) -> Self {
         Self {
-            inner: WorkchainShardHashesRawIter::new(workchain, root),
+            inner: WorkchainShardsTreeRawIter::new(workchain, root),
         }
     }
 }
@@ -449,76 +247,6 @@ impl Iterator for WorkchainLatestBlocksIter<'_> {
         })
     }
 }
-
-/// An iterator over the keys of a [`WorkchainShardHashes`].
-///
-/// This struct is created by the [`keys`] method on [`WorkchainShardHashes`].
-/// See its documentation for more.
-///
-/// [`keys`]: WorkchainShardHashes::keys
-#[derive(Clone)]
-pub struct WorkchainShardHashesKeysIter<'a> {
-    inner: WorkchainShardHashesRawIter<'a>,
-}
-
-impl<'a> WorkchainShardHashesKeysIter<'a> {
-    /// Creates an iterator over the keys of a [`WorkchainShardHashes`].
-    pub fn new(workchain: i32, root: &'a DynCell) -> Self {
-        Self {
-            inner: WorkchainShardHashesRawIter::new(workchain, root),
-        }
-    }
-}
-
-impl<'a> Iterator for WorkchainShardHashesKeysIter<'a> {
-    type Item = Result<ShardIdent, Error>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.inner.next()? {
-            Ok((key, _)) => Some(Ok(key)),
-            Err(e) => Some(Err(e)),
-        }
-    }
-}
-
-/// An iterator over the raw values of a [`WorkchainShardHashes`].
-///
-/// This struct is created by the [`raw_values`] method on [`WorkchainShardHashes`].
-/// See its documentation for more.
-///
-/// [`raw_values`]: WorkchainShardHashes::raw_values
-#[derive(Clone)]
-pub struct WorkchainShardHashesRawValuesIter<'a> {
-    inner: WorkchainShardHashesRawIter<'a>,
-}
-
-impl<'a> WorkchainShardHashesRawValuesIter<'a> {
-    /// Creates an iterator over the raw values of a [`WorkchainShardHashes`].
-    pub fn new(workchain: i32, root: &'a DynCell) -> Self {
-        Self {
-            inner: WorkchainShardHashesRawIter::new(workchain, root),
-        }
-    }
-}
-
-impl<'a> Iterator for WorkchainShardHashesRawValuesIter<'a> {
-    type Item = Result<CellSlice<'a>, Error>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.inner.next()? {
-            Ok((_, value)) => Some(Ok(value)),
-            Err(e) => Some(Err(e)),
-        }
-    }
-}
-
-#[derive(Clone)]
-struct IterSegment<'a> {
-    data: &'a DynCell,
-    is_right: bool,
-}
-
-impl Copy for IterSegment<'_> {}
 
 /// Description of the most recent state of the shard.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -564,6 +292,9 @@ pub struct ShardDescription {
     pub copyleft_rewards: Dict<HashBytes, Tokens>,
     /// Proofs from other workchains.
     pub proof_chain: Option<ProofChain>,
+    /// Collator ranges for all possible validator sets.
+    #[cfg(feature = "venom")]
+    pub collators: Option<ShardCollators>,
 }
 
 impl ShardDescription {
@@ -573,6 +304,8 @@ impl ShardDescription {
     const TAG_V2: u8 = 0xb;
     const TAG_V3: u8 = 0xc;
     const TAG_V4: u8 = 0xd;
+    #[cfg(feature = "venom")]
+    const TAG_V5: u8 = 0xe;
 }
 
 impl Store for ShardDescription {
@@ -581,13 +314,22 @@ impl Store for ShardDescription {
         builder: &mut CellBuilder,
         finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
-        let tag = if self.proof_chain.is_some() {
+        #[allow(unused_mut)]
+        let mut tag = if self.proof_chain.is_some() {
             Self::TAG_V4
         } else if !self.copyleft_rewards.is_empty() {
             Self::TAG_V3
         } else {
             Self::TAG_V1
         };
+        #[cfg(feature = "venom")]
+        if self.collators.is_some() {
+            // Copyleft rewards are not supported in fast finality mode.
+            if !self.copyleft_rewards.is_empty() {
+                return Err(Error::InvalidData);
+            }
+            tag = Self::TAG_V5;
+        }
 
         let flags = ((self.before_split as u8) << 7)
             | ((self.before_merge as u8) << 6)
@@ -614,16 +356,26 @@ impl Store for ShardDescription {
             ok!(self.fees_collected.store_into(&mut builder, finalizer));
             ok!(self.funds_created.store_into(&mut builder, finalizer));
 
-            if let Some(proof_chain) = &self.proof_chain {
-                ok!(if self.copyleft_rewards.is_empty() {
-                    builder.store_bit_zero()
-                } else {
-                    ok!(builder.store_bit_one());
-                    self.copyleft_rewards.store_into(&mut builder, finalizer)
-                });
-                ok!(proof_chain.store_into(&mut builder, finalizer));
-            } else if !self.copyleft_rewards.is_empty() {
-                ok!(self.copyleft_rewards.store_into(&mut builder, finalizer));
+            #[allow(unused_labels)]
+            'cell: {
+                #[cfg(feature = "venom")]
+                if self.collators.is_some() {
+                    ok!(self.proof_chain.store_into(&mut builder, finalizer));
+                    ok!(self.collators.store_into(&mut builder, finalizer));
+                    break 'cell;
+                }
+
+                if let Some(proof_chain) = &self.proof_chain {
+                    ok!(if self.copyleft_rewards.is_empty() {
+                        builder.store_bit_zero()
+                    } else {
+                        ok!(builder.store_bit_one());
+                        self.copyleft_rewards.store_into(&mut builder, finalizer)
+                    });
+                    ok!(proof_chain.store_into(&mut builder, finalizer));
+                } else if !self.copyleft_rewards.is_empty() {
+                    ok!(self.copyleft_rewards.store_into(&mut builder, finalizer));
+                }
             }
 
             ok!(builder.build_ext(finalizer))
@@ -635,15 +387,21 @@ impl Store for ShardDescription {
 
 impl<'a> Load<'a> for ShardDescription {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        let (cont_in_cell, with_copyleft, with_proof_chain) =
+        #[allow(unused_mut)]
+        let (cont_in_cell, with_copyleft, mut with_proof_chain, with_collators) =
             match slice.load_small_uint(Self::TAG_LEN) {
-                Ok(Self::TAG_V1) => (true, false, false),
-                Ok(Self::TAG_V2) => (false, false, false),
-                Ok(Self::TAG_V3) => (true, true, false),
-                Ok(Self::TAG_V4) => (true, true, true),
+                Ok(Self::TAG_V1) => (true, false, false, false),
+                Ok(Self::TAG_V2) => (false, false, false, false),
+                Ok(Self::TAG_V3) => (true, true, false, false),
+                Ok(Self::TAG_V4) => (true, true, true, false),
+                #[cfg(feature = "venom")]
+                Ok(Self::TAG_V5) => (true, false, true, true),
                 Ok(_) => return Err(Error::InvalidTag),
                 Err(e) => return Err(e),
             };
+
+        #[cfg(not(feature = "venom"))]
+        let _ = with_collators;
 
         let seqno = ok!(slice.load_u32());
         let reg_mc_seqno = ok!(slice.load_u32());
@@ -681,11 +439,21 @@ impl<'a> Load<'a> for ShardDescription {
         } else {
             Dict::new()
         };
+
+        #[cfg(feature = "venom")]
+        if with_collators && !ok!(slice.load_bit()) {
+            // Emulate optional bit
+            with_proof_chain = false;
+        }
+
         let proof_chain = if with_proof_chain {
             Some(ok!(ProofChain::load_from(slice)))
         } else {
             None
         };
+
+        #[cfg(feature = "venom")]
+        let collators = ok!(Option::<ShardCollators>::load_from(slice));
 
         Ok(Self {
             seqno,
@@ -708,6 +476,8 @@ impl<'a> Load<'a> for ShardDescription {
             funds_created,
             copyleft_rewards,
             proof_chain,
+            #[cfg(feature = "venom")]
+            collators,
         })
     }
 }
@@ -811,6 +581,7 @@ impl Store for ProofChain {
 impl<'a> Load<'a> for ProofChain {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let len = ok!(slice.load_u8());
+        #[cfg(not(feature = "venom"))]
         if !(1..=8).contains(&len) {
             return Err(Error::InvalidData);
         }
@@ -820,3 +591,465 @@ impl<'a> Load<'a> for ProofChain {
         })
     }
 }
+
+/// Collator range description.
+#[cfg(feature = "venom")]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+pub struct CollatorRange {
+    /// Collator index in validator set.
+    pub collator: u16,
+    /// A seqno of the first block in range.
+    pub start: u32,
+    /// A seqno of the last block in range.
+    pub finish: u32,
+}
+
+/// Collator ranges for all possible validator sets.
+#[cfg(feature = "venom")]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[tlb(tag = "#1")]
+pub struct ShardCollators {
+    /// Range for the previous collator.
+    pub prev: CollatorRange,
+    /// Range for the previous collator in the right shard after merge.
+    pub prev2: Option<CollatorRange>,
+    /// Range for the current collator.
+    pub current: CollatorRange,
+    /// Range for the next collator.
+    pub next: CollatorRange,
+    /// Range for the next collator in the right shard before split.
+    pub next2: Option<CollatorRange>,
+    /// Unix timestamp when collator ranges were updated.
+    pub updated_at: u32,
+}
+
+/// Shard block reference.
+#[cfg(feature = "venom")]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+pub struct ShardBlockRef {
+    /// Sequence number of the referenced block.
+    pub seqno: u32,
+    /// Representation hash of the root cell of the referenced block.
+    pub root_hash: HashBytes,
+    /// Hash of the BOC encoded root cell of the referenced block.
+    pub file_hash: HashBytes,
+    /// The end of the logical time of the referenced block.
+    pub end_lt: u64,
+}
+
+/// A tree of the most recent shard block references for all currently existing shards
+/// for all workchains except the masterchain.
+#[cfg(feature = "venom")]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+pub struct ShardBlockRefs(Dict<i32, Cell>);
+
+#[cfg(feature = "venom")]
+impl ShardBlockRefs {
+    /// Gets an iterator over the entries of the shard block references trees, sorted by
+    /// shard ident. The iterator element is `Result<(ShardIdent, ShardBlockRef)>`.
+    ///
+    /// If the dict or tree is invalid, finishes after the first invalid element.
+    /// returning an error.
+    pub fn iter(&self) -> ShardBlockRefsIter<'_> {
+        ShardBlockRefsIter::new(self.0.root())
+    }
+
+    /// Gets an iterator over the raw entries of the shard block references trees, sorted by
+    /// shard ident. The iterator element is `Result<(ShardIdent, CellSlice)>`.
+    ///
+    /// If the dict or tree is invalid, finishes after the first invalid element,
+    /// returning an error.
+    pub fn raw_iter(&self) -> ShardsTreeRawIter<'_> {
+        ShardsTreeRawIter::new(self.0.root())
+    }
+
+    /// Returns a references tree root for the specified workchain.
+    pub fn get_workchain_shards(
+        &self,
+        workchain: i32,
+    ) -> Result<Option<WorkchainShardBlockRefs>, Error> {
+        match self.0.get(workchain) {
+            Ok(Some(root)) => Ok(Some(WorkchainShardBlockRefs { workchain, root })),
+            Ok(None) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Returns `true` if the dictionary contains a workchain for the specified id.
+    pub fn contains_workchain<Q>(&self, workchain: i32) -> Result<bool, Error> {
+        self.0.contains_key(workchain)
+    }
+}
+
+/// An iterator over the entries of a [`ShardBlockRefs`].
+///
+/// This struct is created by the [`iter`] method on [`ShardBlockRefs`].
+/// See its documentation for more.
+///
+/// [`iter`]: ShardBlockRefs::iter
+#[derive(Clone)]
+#[cfg(feature = "venom")]
+pub struct ShardBlockRefsIter<'a> {
+    inner: ShardsTreeRawIter<'a>,
+}
+
+#[cfg(feature = "venom")]
+impl<'a> ShardBlockRefsIter<'a> {
+    fn new(dict: &'a Option<Cell>) -> Self {
+        Self {
+            inner: ShardsTreeRawIter::new(dict),
+        }
+    }
+}
+
+#[cfg(feature = "venom")]
+impl Iterator for ShardBlockRefsIter<'_> {
+    type Item = Result<(ShardIdent, ShardBlockRef), Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(match self.inner.next()? {
+            Ok((shard_ident, mut value)) => match ShardBlockRef::load_from(&mut value) {
+                Ok(value) => Ok((shard_ident, value)),
+                Err(e) => Err(self.inner.finish(e)),
+            },
+            Err(e) => Err(e),
+        })
+    }
+}
+
+/// A tree of the most recent shard block references for all currently existing shards
+/// for a single workchain.
+#[cfg(feature = "venom")]
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct WorkchainShardBlockRefs {
+    workchain: i32,
+    root: Cell,
+}
+
+#[cfg(feature = "venom")]
+impl WorkchainShardBlockRefs {
+    /// Gets an iterator over the keys of the shard block references tree, sorted by key.
+    /// The iterator element type is `Result<ShardIdent>`.
+    ///
+    /// If the tree is invalid, finishes after the first invalid element,
+    /// returning an error.
+    pub fn keys(&self) -> WorkchainShardsTreeKeysIter<'_> {
+        WorkchainShardsTreeKeysIter::new(self.workchain, self.root.as_ref())
+    }
+
+    /// Gets an iterator over the entries of the shard block references tree, sorted by key.
+    /// The iterator element type is `Result<(ShardIdent, ShardBlockRef)>`.
+    ///
+    /// If the tree is invalid, finishes after the first invalid element,
+    /// returning an error.
+    pub fn iter(&self) -> WorkchainShardBlockRefsIter<'_> {
+        WorkchainShardBlockRefsIter::new(self.workchain, self.root.as_ref())
+    }
+
+    /// Gets an iterator over the raw entries of the shard block references tree, sorted by key.
+    /// The iterator element type is `Result<(ShardIdent, CellSlice)>`.
+    ///
+    /// If the tree is invalid, finishes after the first invalid element,
+    /// returning an error.
+    pub fn raw_iter(&self) -> WorkchainShardsTreeRawIter<'_> {
+        WorkchainShardsTreeRawIter::new(self.workchain, self.root.as_ref())
+    }
+
+    /// Gets an iterator over the raw values of the shard block references tree, sorted by key.
+    /// The iterator element type is `Result<CellSlice>`.
+    ///
+    /// If the tree is invalid, finishes after the first invalid element,
+    /// returning an error.
+    pub fn raw_values(&self) -> WorkchainShardsTreeRawValuesIter<'_> {
+        WorkchainShardsTreeRawValuesIter::new(self.workchain, self.root.as_ref())
+    }
+}
+
+/// An iterator over the entries of a [`WorkchainShardBlockRefs`].
+///
+/// This struct is created by the [`iter`] method on [`WorkchainShardBlockRefs`].
+/// See its documentation for more.
+///
+/// [`iter`]: WorkchainShardBlockRefs::iter
+#[derive(Clone)]
+#[cfg(feature = "venom")]
+pub struct WorkchainShardBlockRefsIter<'a> {
+    inner: WorkchainShardsTreeRawIter<'a>,
+}
+
+#[cfg(feature = "venom")]
+impl<'a> WorkchainShardBlockRefsIter<'a> {
+    /// Creates an iterator over the entries of a [`WorkchainShardBlockRefs`].
+    pub fn new(workchain: i32, root: &'a DynCell) -> Self {
+        Self {
+            inner: WorkchainShardsTreeRawIter::new(workchain, root),
+        }
+    }
+}
+
+#[cfg(feature = "venom")]
+impl Iterator for WorkchainShardBlockRefsIter<'_> {
+    type Item = Result<(ShardIdent, ShardBlockRef), Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(match self.inner.next()? {
+            Ok((shard_ident, mut value)) => match ShardBlockRef::load_from(&mut value) {
+                Ok(value) => Ok((shard_ident, value)),
+                Err(e) => Err(self.inner.finish(e)),
+            },
+            Err(e) => Err(e),
+        })
+    }
+}
+
+/// An iterator over the raw entries of shard trees in multiple workchains.
+#[derive(Clone)]
+pub struct ShardsTreeRawIter<'a> {
+    dict_iter: dict::RawIter<'a>,
+    shard_hashes_iter: Option<WorkchainShardsTreeRawIter<'a>>,
+    status: IterStatus,
+}
+
+impl<'a> ShardsTreeRawIter<'a> {
+    fn new(dict: &'a Option<Cell>) -> Self {
+        Self {
+            dict_iter: dict::RawIter::new(dict, 32),
+            shard_hashes_iter: None,
+            status: IterStatus::Valid,
+        }
+    }
+
+    #[inline(always)]
+    fn finish(&mut self, error: Error) -> Error {
+        self.status = IterStatus::Broken;
+        error
+    }
+}
+
+impl<'a> Iterator for ShardsTreeRawIter<'a> {
+    type Item = Result<(ShardIdent, CellSlice<'a>), Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if unlikely(!self.status.is_valid()) {
+            return if self.status.is_pruned() {
+                self.status = IterStatus::Broken;
+                Some(Err(Error::PrunedBranchAccess))
+            } else {
+                None
+            };
+        }
+
+        loop {
+            // Try to read next item from the current shards tree
+            if let Some(iter) = &mut self.shard_hashes_iter {
+                match iter.next() {
+                    Some(next_item) => break Some(next_item),
+                    None => self.shard_hashes_iter = None,
+                }
+            }
+
+            // Try to get a shards tree for the next workchain
+            self.shard_hashes_iter = Some(match self.dict_iter.next()? {
+                Ok((key, value)) => {
+                    // Parse workchain id from the raw iterator
+                    let workchain = match i32::from_raw_data(key.raw_data()) {
+                        Some(workchain) => workchain,
+                        None => return Some(Err(self.finish(Error::CellUnderflow))),
+                    };
+
+                    // Shards tree is in the first reference in each value
+                    let tree_root = match value.get_reference(0) {
+                        Ok(cell) => cell,
+                        Err(e) => break Some(Err(self.finish(e))),
+                    };
+
+                    // Create shards tree iterator
+                    WorkchainShardsTreeRawIter::new(workchain, tree_root)
+                }
+                Err(e) => break Some(Err(self.finish(e))),
+            });
+        }
+    }
+}
+
+/// An iterator over the keys of a shards tree in a single workchain.
+#[derive(Clone)]
+pub struct WorkchainShardsTreeKeysIter<'a> {
+    inner: WorkchainShardsTreeRawIter<'a>,
+}
+
+impl<'a> WorkchainShardsTreeKeysIter<'a> {
+    /// Creates an iterator over the keys of a shards tree in a single workchain.
+    pub fn new(workchain: i32, root: &'a DynCell) -> Self {
+        Self {
+            inner: WorkchainShardsTreeRawIter::new(workchain, root),
+        }
+    }
+}
+
+impl<'a> Iterator for WorkchainShardsTreeKeysIter<'a> {
+    type Item = Result<ShardIdent, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.inner.next()? {
+            Ok((key, _)) => Some(Ok(key)),
+            Err(e) => Some(Err(e)),
+        }
+    }
+}
+
+/// An iterator over the raw values of a shards tree in a single workchain.
+#[derive(Clone)]
+pub struct WorkchainShardsTreeRawValuesIter<'a> {
+    inner: WorkchainShardsTreeRawIter<'a>,
+}
+
+impl<'a> WorkchainShardsTreeRawValuesIter<'a> {
+    /// Creates an iterator over the raw values of a shards tree in a single workchain.
+    pub fn new(workchain: i32, root: &'a DynCell) -> Self {
+        Self {
+            inner: WorkchainShardsTreeRawIter::new(workchain, root),
+        }
+    }
+}
+
+impl<'a> Iterator for WorkchainShardsTreeRawValuesIter<'a> {
+    type Item = Result<CellSlice<'a>, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.inner.next()? {
+            Ok((_, value)) => Some(Ok(value)),
+            Err(e) => Some(Err(e)),
+        }
+    }
+}
+
+/// An iterator over the raw entries of a shards tree in a single workchain.
+#[derive(Clone)]
+pub struct WorkchainShardsTreeRawIter<'a> {
+    workchain: i32,
+    leaf: Option<CellSlice<'a>>,
+    segments: Vec<IterSegment<'a>>,
+    status: IterStatus,
+}
+
+impl<'a> WorkchainShardsTreeRawIter<'a> {
+    /// Creates an iterator over the raw entries of a shards tree in a single workchain.
+    pub fn new(workchain: i32, root: &'a DynCell) -> Self {
+        let status = 'error: {
+            let mut slice = match root.as_slice() {
+                Ok(slice) => slice,
+                Err(_) => break 'error IterStatus::Pruned,
+            };
+
+            let is_fork = match slice.load_bit() {
+                Ok(bit) => bit,
+                Err(_) => break 'error IterStatus::Broken,
+            };
+
+            let mut result = Self {
+                workchain,
+                leaf: None,
+                segments: Vec::new(),
+                status: IterStatus::Valid,
+            };
+
+            if is_fork {
+                result.segments.push(IterSegment {
+                    data: root,
+                    is_right: false,
+                });
+            } else {
+                result.leaf = Some(slice);
+            }
+
+            return result;
+        };
+
+        // Fallback to a broken iterator
+        Self {
+            workchain,
+            leaf: None,
+            segments: Vec::new(),
+            status,
+        }
+    }
+
+    fn finish(&mut self, err: Error) -> Error {
+        self.status = IterStatus::Broken;
+        err
+    }
+}
+
+impl<'a> Iterator for WorkchainShardsTreeRawIter<'a> {
+    type Item = Result<(ShardIdent, CellSlice<'a>), Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        fn build_shard_prefix(segments: &[IterSegment<'_>]) -> u64 {
+            let mut result = ShardIdent::PREFIX_FULL;
+            for segment in segments {
+                result = (ShardIdent::PREFIX_FULL * segment.is_right as u64) | result >> 1;
+            }
+            result
+        }
+
+        if unlikely(!self.status.is_valid()) {
+            return if self.status.is_pruned() {
+                self.status = IterStatus::Broken;
+                Some(Err(Error::PrunedBranchAccess))
+            } else {
+                None
+            };
+        }
+
+        let leaf = match self.leaf.take() {
+            Some(leaf) => leaf,
+            None => loop {
+                let segment = self.segments.last()?;
+                let mut slice = match segment.data.get_reference_as_slice(segment.is_right as u8) {
+                    Ok(child) => child,
+                    Err(e) => return Some(Err(self.finish(e))),
+                };
+
+                match slice.load_bit() {
+                    // Break on leaf
+                    Ok(false) => break slice,
+                    // Add segment on fork
+                    Ok(true) if self.segments.len() < ShardIdent::MAX_SPLIT_DEPTH as usize => {
+                        self.segments.push(IterSegment {
+                            data: slice.cell(),
+                            is_right: false,
+                        })
+                    }
+                    _ => return Some(Err(self.finish(Error::CellUnderflow))),
+                };
+            },
+        };
+
+        // Build shard prefix from segments
+        // SAFETY: segments lengths is guaranteed to be in range 1..=ShardIdent::MAX_SPLIT_DEPTH
+        let shard_prefix = unsafe {
+            ShardIdent::new_unchecked(self.workchain, build_shard_prefix(&self.segments))
+        };
+
+        // Remove all finished segments from the top of the stack
+        while matches!(self.segments.last(), Some(segment) if segment.is_right) {
+            self.segments.pop();
+        }
+
+        // Move last bit
+        if let Some(segment) = self.segments.last_mut() {
+            segment.is_right = true;
+        }
+
+        Some(Ok((shard_prefix, leaf)))
+    }
+}
+
+#[derive(Clone)]
+struct IterSegment<'a> {
+    data: &'a DynCell,
+    is_right: bool,
+}
+
+impl Copy for IterSegment<'_> {}

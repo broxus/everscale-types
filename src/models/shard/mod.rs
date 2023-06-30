@@ -11,6 +11,9 @@ use crate::models::Lazy;
 pub use self::shard_accounts::*;
 pub use self::shard_extra::*;
 
+#[cfg(feature = "venom")]
+use super::ShardBlockRefs;
+
 mod shard_accounts;
 mod shard_extra;
 
@@ -66,6 +69,9 @@ pub struct ShardStateUnsplit {
     pub vert_seqno: u32,
     /// Unix timestamp when the block was created.
     pub gen_utime: u32,
+    /// Milliseconds part of the timestamp when the block was created.
+    #[cfg(feature = "venom")]
+    pub gen_utime_ms: u16,
     /// Logical time when the state was created.
     pub gen_lt: u64,
     /// Minimal referenced seqno of the masterchain block.
@@ -90,10 +96,15 @@ pub struct ShardStateUnsplit {
     pub master_ref: Option<BlockRef>,
     /// Shard state additional info.
     pub custom: Option<Lazy<McStateExtra>>,
+    /// References to the latest known blocks from all shards.
+    #[cfg(feature = "venom")]
+    pub shard_block_refs: Option<ShardBlockRefs>,
 }
 
 impl ShardStateUnsplit {
-    const TAG: u32 = 0x9023afe2;
+    const TAG_V1: u32 = 0x9023afe2;
+    #[cfg(feature = "venom")]
+    const TAG_V2: u32 = 0x9023aeee;
 
     /// Tries to load shard accounts dictionary.
     pub fn load_accounts(&self) -> Result<ShardAccounts, Error> {
@@ -131,7 +142,11 @@ impl Store for ShardStateUnsplit {
             ok!(builder.build_ext(finalizer))
         };
 
-        ok!(builder.store_u32(Self::TAG));
+        #[cfg(not(feature = "venom"))]
+        ok!(builder.store_u32(Self::TAG_V1));
+        #[cfg(feature = "venom")]
+        ok!(builder.store_u32(Self::TAG_V2));
+
         ok!(builder.store_u32(self.global_id as u32));
         ok!(self.shard_ident.store_into(builder, finalizer));
         ok!(builder.store_u32(self.seqno));
@@ -143,29 +158,56 @@ impl Store for ShardStateUnsplit {
         ok!(builder.store_bit(self.before_split));
         ok!(builder.store_reference(self.accounts.cell.clone()));
         ok!(builder.store_reference(child_cell));
-        self.custom.store_into(builder, finalizer)
+
+        #[cfg(not(feature = "venom"))]
+        ok!(self.custom.store_into(builder, finalizer));
+
+        #[cfg(feature = "venom")]
+        if self.custom.is_some() && self.shard_block_refs.is_some() {
+            return Err(Error::InvalidData);
+        } else if let Some(refs) = &self.shard_block_refs {
+            ok!(refs.store_into(builder, finalizer));
+        } else {
+            ok!(self.custom.store_into(builder, finalizer));
+        }
+
+        Ok(())
     }
 }
 
 impl<'a> Load<'a> for ShardStateUnsplit {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        match slice.load_u32() {
-            Ok(Self::TAG) => {}
+        let fast_finality = match slice.load_u32() {
+            Ok(Self::TAG_V1) => false,
+            #[cfg(feature = "venom")]
+            Ok(Self::TAG_V2) => true,
             Ok(_) => return Err(Error::InvalidTag),
             Err(e) => return Err(e),
-        }
+        };
+
+        #[cfg(not(feature = "venom"))]
+        let _ = fast_finality;
 
         let out_msg_queue_info = ok!(slice.load_reference_cloned());
         let accounts = ok!(Lazy::load_from(slice));
 
         let child_slice = &mut ok!(slice.load_reference_as_slice());
 
+        let global_id = ok!(slice.load_u32()) as i32;
+        let shard_ident = ok!(ShardIdent::load_from(slice));
+
         Ok(Self {
-            global_id: ok!(slice.load_u32()) as i32,
-            shard_ident: ok!(ShardIdent::load_from(slice)),
+            global_id,
+            shard_ident,
             seqno: ok!(slice.load_u32()),
             vert_seqno: ok!(slice.load_u32()),
             gen_utime: ok!(slice.load_u32()),
+            #[cfg(feature = "venom")]
+            gen_utime_ms: if fast_finality {
+                ok!(slice.load_u16())
+            } else {
+                0
+            },
             gen_lt: ok!(slice.load_u64()),
             min_ref_mc_seqno: ok!(slice.load_u32()),
             out_msg_queue_info,
@@ -177,7 +219,20 @@ impl<'a> Load<'a> for ShardStateUnsplit {
             total_validator_fees: ok!(CurrencyCollection::load_from(child_slice)),
             libraries: ok!(RawDict::load_from(child_slice)),
             master_ref: ok!(Option::<BlockRef>::load_from(child_slice)),
-            custom: ok!(Option::<Lazy<McStateExtra>>::load_from(slice)),
+            #[allow(unused_labels)]
+            custom: 'custom: {
+                #[cfg(feature = "venom")]
+                if !shard_ident.is_masterchain() {
+                    break 'custom None;
+                }
+                ok!(Option::<Lazy<McStateExtra>>::load_from(slice))
+            },
+            #[cfg(feature = "venom")]
+            shard_block_refs: if shard_ident.is_masterchain() {
+                None
+            } else {
+                Some(ok!(ShardBlockRefs::load_from(slice)))
+            },
         })
     }
 }

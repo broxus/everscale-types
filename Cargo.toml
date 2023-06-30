@@ -52,6 +52,7 @@ sync = []
 stats = []
 serde = ["dep:serde", "base64"]
 models = ["dep:everscale-crypto", "dep:tl-proto"]
+venom = []
 
 [profile.release]
 debug = true

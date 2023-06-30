@@ -8,11 +8,12 @@ use crate::models::currency::CurrencyCollection;
 use crate::models::transaction::{HashUpdate, Transaction};
 use crate::models::Lazy;
 
+#[cfg(feature = "venom")]
+use super::ShardBlockRefs;
 use super::ShardHashes;
 
 /// Block content.
-#[derive(Debug, Clone, Store, Load)]
-#[tlb(tag = "#4a33f6fd")]
+#[derive(Debug, Clone)]
 pub struct BlockExtra {
     /// Incoming message description.
     pub in_msg_description: Cell,
@@ -26,6 +27,91 @@ pub struct BlockExtra {
     pub created_by: HashBytes,
     /// Additional block content.
     pub custom: Option<Lazy<McBlockExtra>>,
+    /// References to the latest known blocks from all shards.
+    #[cfg(feature = "venom")]
+    pub shard_block_refs: ShardBlockRefs,
+}
+
+impl BlockExtra {
+    const TAG_V1: u32 = 0x4a33f6fd;
+    #[cfg(feature = "venom")]
+    const TAG_V2: u32 = 0x4a33f6fc;
+}
+
+impl Store for BlockExtra {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
+    ) -> Result<(), Error> {
+        #[cfg(not(feature = "venom"))]
+        ok!(builder.store_u32(Self::TAG_V1));
+        #[cfg(feature = "venom")]
+        ok!(builder.store_u32(Self::TAG_V2));
+
+        ok!(builder.store_reference(self.in_msg_description.clone()));
+        ok!(builder.store_reference(self.out_msg_description.clone()));
+        ok!(builder.store_reference(self.account_blocks.cell.clone()));
+        ok!(builder.store_u256(&self.rand_seed));
+        ok!(builder.store_u256(&self.created_by));
+
+        #[cfg(not(feature = "venom"))]
+        ok!(self.custom.store_into(builder, finalizer));
+
+        #[cfg(feature = "venom")]
+        ok!(builder.store_reference({
+            let mut builder = CellBuilder::new();
+
+            ok!(self.custom.store_into(&mut builder, finalizer));
+            ok!(self.shard_block_refs.store_into(&mut builder, finalizer));
+
+            ok!(builder.build_ext(finalizer))
+        }));
+
+        Ok(())
+    }
+}
+
+impl<'a> Load<'a> for BlockExtra {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
+        let tag = ok!(slice.load_u32());
+        #[cfg(not(feature = "venom"))]
+        if tag != Self::TAG_V1 {
+            return Err(Error::InvalidTag);
+        }
+        #[cfg(feature = "venom")]
+        if tag != Self::TAG_V1 && tag != Self::TAG_V2 {
+            return Err(Error::InvalidTag);
+        }
+
+        let in_msg_description = ok!(slice.load_reference_cloned());
+        let out_msg_description = ok!(slice.load_reference_cloned());
+        let account_blocks = ok!(Lazy::load_from(slice));
+        let rand_seed = ok!(slice.load_u256());
+        let created_by = ok!(slice.load_u256());
+
+        #[cfg(not(feature = "venom"))]
+        let custom = ok!(Option::<Lazy<_>>::load_from(slice));
+
+        #[cfg(feature = "venom")]
+        let (custom, shard_block_refs) = {
+            let slice = &mut ok!(slice.load_reference_as_slice());
+            let custom = ok!(Option::<Lazy<_>>::load_from(slice));
+            let shard_block_refs = ok!(ShardBlockRefs::load_from(slice));
+            (custom, shard_block_refs)
+        };
+
+        Ok(Self {
+            in_msg_description,
+            out_msg_description,
+            account_blocks,
+            rand_seed,
+            created_by,
+            custom,
+            #[cfg(feature = "venom")]
+            shard_block_refs,
+        })
+    }
 }
 
 impl BlockExtra {

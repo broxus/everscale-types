@@ -163,6 +163,36 @@ decl_global_capability! {
         ///
         /// Mask: `0x4000000`.
         CapSignatureWithId = 26,
+
+        /// Execute bounce phase even after failed action phase.
+        ///
+        /// Mask: `0x8000000`.
+        CapBounceAfterFailedAction = 27,
+
+        /// Groth16 support in TVM.
+        ///
+        /// Mask: `0x10000000`
+        CapGroth16 = 28,
+
+        /// Makes all fees in config in gas units.
+        ///
+        /// Mask: `0x20000000`
+        CapFeeInGasUnits = 29,
+
+        /// Big cells support.
+        ///
+        /// Mask: `0x40000000`
+        CapBigCells = 30,
+
+        /// Suspend addresses using a config param.
+        ///
+        /// Mask: `0x80000000`
+        CapSuspendedList = 31,
+
+        /// Adds intershard communication between master blocks.
+        ///
+        /// Mask: `0x100000000`
+        CapFastFinality = 32,
     }
 }
 
