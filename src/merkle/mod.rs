@@ -13,6 +13,9 @@ mod proof;
 mod pruned_branch;
 mod update;
 
+#[cfg(test)]
+mod tests;
+
 #[cfg(feature = "sync")]
 #[doc(hidden)]
 mod __checks {
