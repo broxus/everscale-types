@@ -931,10 +931,12 @@ impl ValidatorSetPRNG {
         context[40..44].copy_from_slice(&shard_ident.workchain().to_be_bytes());
         context[44..48].copy_from_slice(&cc_seqno.to_be_bytes());
 
-        ValidatorSetPRNG {
+        let mut res = ValidatorSetPRNG {
             context,
             bag: [0; 8],
-        }
+        };
+        res.bag[0] = 8;
+        res
     }
 
     /// Generates next `u64`.
@@ -959,7 +961,7 @@ impl ValidatorSetPRNG {
 
         let hash: [u8; 64] = sha2::Sha512::digest(self.context).into();
 
-        for ctx in &mut self.context {
+        for ctx in self.context[..32].iter_mut().rev() {
             *ctx = ctx.wrapping_add(1);
             if *ctx != 0 {
                 break;
