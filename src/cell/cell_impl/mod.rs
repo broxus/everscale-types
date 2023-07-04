@@ -665,10 +665,12 @@ where
     }
 }
 
+/// A wrapper type which implements a virtualized cell interface.
 #[repr(transparent)]
 pub struct VirtualCellWrapper<T>(T);
 
 impl<T> VirtualCellWrapper<T> {
+    /// Wraps a cell reference.
     pub fn wrap(value: &T) -> &Self {
         // SAFETY: VirtualCellWrapper<T> is #[repr(transparent)]
         unsafe { &*(value as *const T as *const Self) }

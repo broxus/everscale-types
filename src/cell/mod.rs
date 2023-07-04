@@ -5,7 +5,7 @@ use std::ops::{BitOr, BitOrAssign};
 use crate::error::Error;
 
 pub use self::builder::{CellBuilder, CellRefsBuilder, Store};
-pub use self::cell_impl::StaticCell;
+pub use self::cell_impl::{StaticCell, VirtualCellWrapper};
 pub use self::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 pub use self::slice::{CellSlice, Load};
 pub use self::usage_tree::{UsageTree, UsageTreeMode, UsageTreeWithSubtrees};
@@ -476,6 +476,16 @@ impl HashBytes {
     /// Array of zero bytes.
     pub const ZERO: Self = Self([0; 32]);
 
+    /// Converts slice to a hash bytes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the length of the slice is not 32 bytes.
+    #[inline]
+    pub fn from_slice(slice: &[u8]) -> Self {
+        Self(slice.try_into().expect("slice with incorrect length"))
+    }
+
     /// Wraps a reference to an internal array into a newtype reference.
     #[inline(always)]
     pub const fn wrap(value: &[u8; 32]) -> &Self {
@@ -484,8 +494,23 @@ impl HashBytes {
     }
 
     /// Returns a slice containing the entire array.
-    pub fn as_slice(&self) -> &[u8] {
+    pub const fn as_slice(&self) -> &[u8] {
         self.0.as_slice()
+    }
+
+    /// Returns a mutable slice containing the entire array.
+    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        self.0.as_mut_slice()
+    }
+
+    /// Returns an internal array.
+    pub const fn as_array(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    /// Returns a mutable internal array.
+    pub fn as_mut_array(&mut self) -> &mut [u8; 32] {
+        &mut self.0
     }
 
     /// Returns a raw pointer to the slice's buffer.

@@ -357,6 +357,11 @@ impl ShardIdent {
         }
     }
 
+    /// Returns whether the shard depth is in the possible range.
+    pub const fn can_split(&self) -> bool {
+        self.prefix_len() < Self::MAX_SPLIT_DEPTH as u16
+    }
+
     /// Returns `true` if the specified account could be stored in the current shard.
     pub const fn contains_account(&self, account: &HashBytes) -> bool {
         let account = &account.0;

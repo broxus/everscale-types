@@ -5,6 +5,63 @@ use super::{make_pruned_branch, FilterAction, MerkleFilter};
 use crate::cell::*;
 use crate::error::Error;
 
+/// Non-owning parsed Merkle proof representation.
+///
+/// NOTE: Serialized into `MerkleProof` cell.
+#[derive(Debug, Clone)]
+pub struct MerkleProofRef<'a> {
+    /// Representation hash of the original cell.
+    pub hash: HashBytes,
+    /// Representation depth of the origin cell.
+    pub depth: u16,
+    /// Partially pruned tree with the contents of the original cell.
+    pub cell: &'a DynCell,
+}
+
+impl Eq for MerkleProofRef<'_> {}
+
+impl PartialEq for MerkleProofRef<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.hash == other.hash && self.depth == other.depth && self.cell == other.cell
+    }
+}
+
+impl Default for MerkleProofRef<'_> {
+    fn default() -> Self {
+        Self {
+            hash: *EMPTY_CELL_HASH,
+            depth: 0,
+            cell: Cell::empty_cell_ref(),
+        }
+    }
+}
+
+impl<'a> Load<'a> for MerkleProofRef<'a> {
+    fn load_from(s: &mut CellSlice<'a>) -> Result<Self, Error> {
+        if !s.has_remaining(MerkleProof::BITS, MerkleProof::REFS) {
+            return Err(Error::CellUnderflow);
+        }
+
+        if ok!(s.get_u8(0)) != CellType::MerkleProof.to_byte() {
+            return Err(Error::InvalidCell);
+        }
+
+        let res = Self {
+            hash: ok!(s.get_u256(8)),
+            depth: ok!(s.get_u16(8 + 256)),
+            cell: ok!(s.get_reference(0)),
+        };
+        if res.cell.hash(0) == &res.hash
+            && res.cell.depth(0) == res.depth
+            && s.try_advance(MerkleProof::BITS, MerkleProof::REFS)
+        {
+            Ok(res)
+        } else {
+            Err(Error::InvalidCell)
+        }
+    }
+}
+
 /// Parsed Merkle proof representation.
 ///
 /// NOTE: Serialized into `MerkleProof` cell.

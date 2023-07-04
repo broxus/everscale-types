@@ -5,7 +5,7 @@ use std::hash::BuildHasher;
 
 use crate::cell::{HashBytes, UsageTree, UsageTreeWithSubtrees};
 
-pub use self::proof::{MerkleProof, MerkleProofBuilder, MerkleProofExtBuilder};
+pub use self::proof::{MerkleProof, MerkleProofBuilder, MerkleProofExtBuilder, MerkleProofRef};
 pub use self::pruned_branch::make_pruned_branch;
 pub use self::update::{MerkleUpdate, MerkleUpdateBuilder};
 
