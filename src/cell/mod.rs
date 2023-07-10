@@ -891,6 +891,11 @@ impl LevelMask {
         Self(self.0 & Self::from_level(level).0).level()
     }
 
+    /// Returns whether the specified level is included into the mask.
+    pub const fn contains(self, level: u8) -> bool {
+        level == 0 || self.0 & LevelMask::from_level(level).0 != 0
+    }
+
     /// Creates a new mask, shifted by the offset.
     #[inline(always)]
     pub const fn virtualize(self, offset: u8) -> Self {
@@ -901,6 +906,17 @@ impl LevelMask {
     #[inline]
     pub const fn to_byte(self) -> u8 {
         self.0
+    }
+}
+
+impl IntoIterator for LevelMask {
+    type Item = u8;
+    type IntoIter = LevelMaskIter;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        // Include zero level
+        LevelMaskIter(1 | self.0 << 1)
     }
 }
 
@@ -937,6 +953,34 @@ impl From<LevelMask> for u8 {
 impl std::fmt::Debug for LevelMask {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("{:03b}", self.0))
+    }
+}
+
+/// _de Brujn_ level presence bitset iterator.
+#[derive(Clone)]
+pub struct LevelMaskIter(u8);
+
+impl Iterator for LevelMaskIter {
+    type Item = u8;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        (self.0 != 0).then(|| {
+            //  111 - 1   = 110
+            // !110       = 001
+            //  111 & 001 = 001
+            let mask = self.0 & !(self.0 - 1);
+
+            // 111 & !001 = 110
+            self.0 &= !mask;
+
+            mask.trailing_zeros() as u8
+        })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.0.count_ones() as usize;
+        (len, Some(len))
     }
 }
 

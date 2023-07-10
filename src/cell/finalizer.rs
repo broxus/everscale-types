@@ -137,15 +137,21 @@ impl<'a> CellParts<'a> {
         }
 
         let level_offset = cell_type.is_merkle() as u8;
+        let is_pruned = cell_type.is_pruned_branch();
 
         let mut hashes = Vec::<(HashBytes, u16)>::with_capacity(hashes_len);
-        for level in 0..hashes_len {
+        for level in 0..4 {
+            // Skip non-zero levels for pruned branches and insignificant hashes for other cells
+            if level != 0 && (is_pruned || !level_mask.contains(level)) {
+                continue;
+            }
+
             let mut hasher = sha2::Sha256::new();
 
-            let level_mask = if cell_type == CellType::PrunedBranch {
+            let level_mask = if is_pruned {
                 level_mask
             } else {
-                LevelMask::from_level(level as u8)
+                LevelMask::from_level(level)
             };
 
             descriptor.d1 &= !(CellDescriptor::LEVEL_MASK | CellDescriptor::STORE_HASHES_MASK);
@@ -155,16 +161,15 @@ impl<'a> CellParts<'a> {
             if level == 0 {
                 hasher.update(self.data);
             } else {
-                debug_assert!((level - 1) < hashes.len());
                 // SAFETY: new hash is added on each iteration, so there will
                 // definitely be a hash, when level>0
-                let prev_hash = unsafe { hashes.get_unchecked(level - 1) };
+                let prev_hash = unsafe { hashes.last().unwrap_unchecked() };
                 hasher.update(prev_hash.0.as_slice());
             }
 
             let mut depth = 0;
             for child in references {
-                let child_depth = child.as_ref().depth(level as u8 + level_offset);
+                let child_depth = child.as_ref().depth(level + level_offset);
                 let next_depth = match child_depth.checked_add(1) {
                     Some(next_depth) => next_depth,
                     None => return Err(Error::DepthOverflow),
@@ -175,7 +180,7 @@ impl<'a> CellParts<'a> {
             }
 
             for child in references {
-                let child_hash = child.as_ref().hash(level as u8 + level_offset);
+                let child_hash = child.as_ref().hash(level + level_offset);
                 hasher.update(child_hash.as_slice());
             }
 

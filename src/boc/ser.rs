@@ -120,11 +120,11 @@ where
             descriptor.d1 &= !(u8::from(self.without_hashes) * CellDescriptor::STORE_HASHES_MASK);
             target.extend_from_slice(&[descriptor.d1, descriptor.d2]);
             if descriptor.store_hashes() {
-                let hash_count = descriptor.level_mask().level() + 1;
-                for level in 0..hash_count {
+                let level_mask = descriptor.level_mask();
+                for level in level_mask {
                     target.extend_from_slice(cell.hash(level).as_ref());
                 }
-                for level in 0..hash_count {
+                for level in level_mask {
                     target.extend_from_slice(&cell.depth(level).to_be_bytes());
                 }
             }

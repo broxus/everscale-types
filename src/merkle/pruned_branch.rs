@@ -8,10 +8,10 @@ pub fn make_pruned_branch(
     finalizer: &mut dyn Finalizer,
 ) -> Result<Cell, Error> {
     let descriptor = cell.descriptor();
+    let cell_level_mask = descriptor.level_mask();
 
     let mut builder = CellBuilder::new();
-    let level_mask = LevelMask::new(descriptor.level_mask().to_byte() | (1 << merkle_depth));
-    let hash_count = descriptor.hash_count();
+    let level_mask = LevelMask::new(cell_level_mask.to_byte() | (1 << merkle_depth));
 
     builder.set_level_mask(level_mask);
     builder.set_exotic(true);
@@ -21,12 +21,12 @@ pub fn make_pruned_branch(
         level_mask.to_byte(),
     ]));
 
-    for i in 0..hash_count {
-        _ = builder.store_u256(cell.hash(i));
+    for level in cell_level_mask {
+        _ = builder.store_u256(cell.hash(level));
     }
 
-    for i in 0..hash_count {
-        _ = builder.store_u16(cell.depth(i));
+    for level in cell_level_mask {
+        _ = builder.store_u16(cell.depth(level));
     }
 
     builder.build_ext(finalizer)
