@@ -3,7 +3,7 @@ name = "everscale-types"
 description = "A set of primitive types and utilities for the Everscale blockchain."
 authors = ["Ivan Kalinin <i.kalinin@dexpa.io>"]
 repository = "https://github.com/broxus/everscale-types"
-version = "0.1.0-pre.9"
+version = "0.1.0-rc.0"
 edition = "2021"
 rust-version = "1.65"
 include = ["src/**/*.rs", "benches/**/*.rs", "LICENSE-*", "README.md"]
@@ -39,7 +39,7 @@ everscale-types-proc = { version = "=0.1.2", path = "proc" }
 [dev-dependencies]
 anyhow = "1.0"
 base64 = "0.21"
-criterion = "0.4"
+criterion = "0.5"
 libc = "0.2"
 rand_xorshift = "0.3"
 rand = "0.8"
