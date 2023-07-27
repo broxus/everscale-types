@@ -156,7 +156,62 @@ impl<'a> Load<'a> for Cell {
     }
 }
 
-/// A read-only view for a subrange of a cell
+/// An owned [`CellSlice`] container.
+#[derive(Clone)]
+pub struct OwnedCellSlice {
+    // TODO: optimize layout
+    cell: Cell,
+    // NOTE: cell slice points to the
+    cell_slice: CellSlice<'static>,
+}
+
+impl OwnedCellSlice {
+    /// Constructs a new cell slice from the specified cell.
+    /// Returns an error if the cell is pruned.
+    pub fn new(cell: Cell) -> Result<Self, Error> {
+        let cell_slice = ok!(cell.as_slice());
+        Ok(Self {
+            // SAFETY: cell reference points to the pinned location
+            cell_slice: unsafe { std::mem::transmute::<_, CellSlice<'static>>(cell_slice) },
+            cell,
+        })
+    }
+
+    /// Constructs a new cell slice from the specified cell.
+    ///
+    /// # Safety
+    ///
+    /// The following must be true:
+    /// - cell is not pruned
+    pub unsafe fn new_unchecked(cell: Cell) -> Self {
+        let cell_slice = cell.as_slice_unchecked();
+        Self {
+            // SAFETY: cell reference points to the pinned location
+            cell_slice: unsafe { std::mem::transmute::<_, CellSlice<'static>>(cell_slice) },
+            cell,
+        }
+    }
+
+    /// Returns a reference to the underlying owned cell.
+    pub fn cell(&self) -> &Cell {
+        &self.cell
+    }
+
+    /// Returns an immutable reference to the underlying slice.
+    #[inline]
+    pub fn as_ref<'a>(&'a self) -> &'a CellSlice<'a> {
+        &self.cell_slice
+    }
+
+    /// Returns a mutable reference to the underlying slice.
+    #[inline]
+    pub fn as_mut<'a>(&'a mut self) -> &'a mut CellSlice<'a> {
+        // SAFETY: cell reference points to the pinned location
+        unsafe { std::mem::transmute::<_, &'a mut CellSlice<'a>>(&mut self.cell_slice) }
+    }
+}
+
+/// A read-only view for a subrange of a cell.
 #[derive(Debug)]
 pub struct CellSlice<'a> {
     cell: &'a DynCell,
