@@ -198,12 +198,14 @@ impl OwnedCellSlice {
     }
 
     /// Returns an immutable reference to the underlying slice.
+    #[allow(clippy::should_implement_trait)]
     #[inline]
-    pub fn as_ref<'a>(&'a self) -> &'a CellSlice<'a> {
+    pub fn as_ref(&'_ self) -> &'_ CellSlice<'_> {
         &self.cell_slice
     }
 
     /// Returns a mutable reference to the underlying slice.
+    #[allow(clippy::should_implement_trait)]
     #[inline]
     pub fn as_mut<'a>(&'a mut self) -> &'a mut CellSlice<'a> {
         // SAFETY: cell reference points to the pinned location
