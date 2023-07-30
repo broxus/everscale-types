@@ -5,7 +5,8 @@ use std::sync::Arc;
 
 use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 use crate::cell::{
-    Cell, CellDescriptor, CellSlice, DynCell, HashBytes, LevelMask, MAX_BIT_LEN, MAX_REF_COUNT,
+    Cell, CellDescriptor, CellSlice, CellType, DynCell, HashBytes, LevelMask, MAX_BIT_LEN,
+    MAX_REF_COUNT,
 };
 use crate::error::Error;
 use crate::util::ArrayVec;
@@ -162,7 +163,6 @@ impl_primitive_store! {
 /// Builder for constructing cells with densely packed data.
 pub struct CellBuilder {
     data: [u8; 128],
-    level_mask: Option<LevelMask>,
     bit_len: u16,
     is_exotic: bool,
     references: ArrayVec<Cell, MAX_REF_COUNT>,
@@ -179,7 +179,6 @@ impl Clone for CellBuilder {
     fn clone(&self) -> Self {
         Self {
             data: self.data,
-            level_mask: self.level_mask,
             bit_len: self.bit_len,
             is_exotic: self.is_exotic,
             references: self.references.clone(),
@@ -248,7 +247,6 @@ impl CellBuilder {
     pub fn new() -> Self {
         Self {
             data: [0; 128],
-            level_mask: None,
             bit_len: 0,
             is_exotic: false,
             references: Default::default(),
@@ -292,19 +290,6 @@ impl CellBuilder {
     #[inline]
     pub fn has_capacity(&self, bits: u16, refs: u8) -> bool {
         self.bit_len + bits <= MAX_BIT_LEN && self.references.len() + refs as usize <= MAX_REF_COUNT
-    }
-
-    /// Explicitly sets the level mask.
-    #[inline]
-    pub fn with_level_mask(mut self, level_mask: LevelMask) -> Self {
-        self.level_mask = Some(level_mask);
-        self
-    }
-
-    /// Explicitly sets the level mask.
-    #[inline]
-    pub fn set_level_mask(&mut self, level_mask: LevelMask) {
-        self.level_mask = Some(level_mask);
     }
 
     /// Marks this cell as exotic.
@@ -718,24 +703,6 @@ fn store_raw(
 }
 
 impl CellBuilder {
-    /// Computes the cell level from the level mask.
-    pub fn compute_level(&self) -> u8 {
-        self.compute_level_mask().level()
-    }
-
-    /// Computes the cell level mask from children.
-    pub fn compute_level_mask(&self) -> LevelMask {
-        if let Some(level_mask) = self.level_mask {
-            level_mask
-        } else {
-            let mut children_mask = LevelMask::EMPTY;
-            for child in self.references.as_ref() {
-                children_mask |= child.as_ref().descriptor().level_mask();
-            }
-            children_mask
-        }
-    }
-
     /// Returns a slice of the child cells stored in the builder.
     #[inline]
     pub fn references(&self) -> &[Cell] {
@@ -821,7 +788,24 @@ impl CellBuilder {
         }
 
         let is_exotic = self.is_exotic;
-        let level_mask = self.level_mask.unwrap_or(children_mask);
+
+        let level_mask = 'mask: {
+            // NOTE: make only a brief check here, as it will raise a proper arror in finalier
+            if is_exotic && self.bit_len >= 8 {
+                if let Some(ty) = CellType::from_byte_exotic(self.data[0]) {
+                    match ty {
+                        CellType::PrunedBranch => break 'mask LevelMask::new(self.data[1]),
+                        CellType::MerkleProof | CellType::MerkleUpdate => {
+                            break 'mask children_mask.virtualize(1)
+                        }
+                        CellType::LibraryReference => break 'mask LevelMask::EMPTY,
+                        _ => {}
+                    };
+                }
+            }
+
+            children_mask
+        };
 
         let d1 = CellDescriptor::compute_d1(level_mask, is_exotic, self.references.len() as u8);
         let d2 = CellDescriptor::compute_d2(self.bit_len);

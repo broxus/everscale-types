@@ -127,8 +127,6 @@ impl Store for MerkleProof {
             return Err(Error::CellOverflow);
         }
 
-        let level_mask = self.cell.as_ref().level_mask();
-        b.set_level_mask(level_mask.virtualize(1));
         b.set_exotic(true);
         ok!(b.store_u8(CellType::MerkleProof.to_byte()));
         ok!(b.store_u256(&self.hash));
@@ -378,15 +376,9 @@ where
 
                 let cell = last.references.cell();
 
-                // Compute children mask
-                let children_mask =
-                    last.descriptor.level_mask() | last.children.compute_level_mask();
-                let merkle_offset = last.descriptor.is_merkle() as u8;
-
                 // Build the cell
                 let mut builder = CellBuilder::new();
                 builder.set_exotic(last.descriptor.is_exotic());
-                builder.set_level_mask(children_mask.virtualize(merkle_offset));
                 _ = builder.store_cell_data(cell);
                 builder.set_references(last.children);
                 let proof_cell = ok!(builder.build_ext(self.finalizer));

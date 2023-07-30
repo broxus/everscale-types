@@ -86,9 +86,7 @@ impl Store for MerkleUpdate {
         if !b.has_capacity(Self::BITS, Self::REFS) {
             return Err(Error::CellOverflow);
         }
-        let old_level_mask = self.old.as_ref().level_mask();
-        let new_level_mask = self.new.as_ref().level_mask();
-        b.set_level_mask((old_level_mask | new_level_mask).virtualize(1));
+
         b.set_exotic(true);
         ok!(b.store_u8(CellType::MerkleUpdate.to_byte()));
         ok!(b.store_u256(&self.old_hash));
@@ -140,8 +138,7 @@ impl MerkleUpdate {
         impl Applier<'_> {
             fn run(&mut self, cell: &DynCell, merkle_depth: u8) -> Result<Cell, Error> {
                 let descriptor = cell.descriptor();
-                let merkle_offset = descriptor.cell_type().is_merkle() as u8;
-                let child_merkle_depth = merkle_depth + merkle_offset;
+                let child_merkle_depth = merkle_depth + descriptor.cell_type().is_merkle() as u8;
 
                 // Start building a new cell
                 let mut result = CellBuilder::new();
@@ -181,7 +178,6 @@ impl MerkleUpdate {
                     _ = result.store_reference(child);
                 }
 
-                result.set_level_mask(children_mask.virtualize(merkle_offset));
                 _ = result.store_cell_data(cell);
 
                 result.build_ext(self.finalizer)

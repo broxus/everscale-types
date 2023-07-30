@@ -13,7 +13,6 @@ pub fn make_pruned_branch(
     let mut builder = CellBuilder::new();
     let level_mask = LevelMask::new(cell_level_mask.to_byte() | (1 << merkle_depth));
 
-    builder.set_level_mask(level_mask);
     builder.set_exotic(true);
 
     _ = builder.store_u16(u16::from_be_bytes([
