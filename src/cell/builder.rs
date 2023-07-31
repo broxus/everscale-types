@@ -790,7 +790,7 @@ impl CellBuilder {
         let is_exotic = self.is_exotic;
 
         let level_mask = 'mask: {
-            // NOTE: make only a brief check here, as it will raise a proper arror in finalier
+            // NOTE: make only a brief check here, as it will raise a proper error in finalier
             if is_exotic && self.bit_len >= 8 {
                 if let Some(ty) = CellType::from_byte_exotic(self.data[0]) {
                     match ty {

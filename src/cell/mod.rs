@@ -1049,16 +1049,16 @@ impl std::fmt::Display for DisplayCellRoot<'_> {
             let repr_hash = self.cell.repr_hash();
             let descriptor = self.cell.descriptor();
             f.write_fmt(format_args!(
-                    "{:indent$}{:?}: {data}\n{:indent$}bits: {:>4}, refs: {}, l: {:?}, depth: {}, hash: {}\n",
-                    "",
-                    descriptor.cell_type(),
-                    "",
-                    self.cell.bit_len(),
-                    descriptor.reference_count(),
-                    descriptor.level_mask(),
-                    repr_depth,
-                    repr_hash,
-                ))
+                "{:indent$}{:?}: {data}\n{:indent$}bits: {:>4}, refs: {}, l: {:?}, depth: {}, hash: {}\n",
+                "",
+                descriptor.cell_type(),
+                "",
+                self.cell.bit_len(),
+                descriptor.reference_count(),
+                descriptor.level_mask(),
+                repr_depth,
+                repr_hash,
+            ))
         }
     }
 }
