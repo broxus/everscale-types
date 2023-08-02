@@ -2,6 +2,7 @@
 
 use crate::cell::*;
 use crate::error::Error;
+use crate::util::unlikely;
 
 pub use aug::*;
 pub use raw::*;
@@ -78,6 +79,145 @@ impl SetMode {
     }
 }
 
+/// Removes the value associated with key in dictionary.
+/// Returns a tuple with a new dictionary cell and an optional removed value.
+pub fn dict_remove_owned(
+    root: &Option<Cell>,
+    key: &mut CellSlice,
+    key_bit_len: u16,
+    allow_subtree: bool,
+    finalizer: &mut dyn Finalizer,
+) -> Result<(Option<Cell>, Option<CellSliceParts>), Error> {
+    if !allow_subtree && key.remaining_bits() != key_bit_len {
+        return Err(Error::CellUnderflow);
+    }
+
+    let Some(root) = root else {
+        return Ok((None, None));
+    };
+    let mut data = root.as_ref();
+
+    let mut stack = Vec::<Segment>::new();
+
+    // Find the node with value
+    let mut prev_key_bit_len = key.remaining_bits();
+    let removed = loop {
+        let mut remaining_data = ok!(data.as_slice());
+
+        // Read the next part of the key from the current data
+        let prefix = &mut ok!(read_label(&mut remaining_data, key.remaining_bits()));
+
+        // Match the prefix with the key
+        let lcp = key.longest_common_data_prefix(prefix);
+        match lcp.remaining_bits().cmp(&key.remaining_bits()) {
+            // If all bits match, an existing value was found
+            std::cmp::Ordering::Equal => break remaining_data.range(),
+            // LCP is less than prefix, an edge to slice was found
+            std::cmp::Ordering::Less if lcp.remaining_bits() < prefix.remaining_bits() => {
+                return Ok((Some(root.clone()), None))
+            }
+            // The key contains the entire prefix, but there are still some bits left
+            std::cmp::Ordering::Less => {
+                // Fail fast if there are not enough references in the fork
+                if data.reference_count() != 2 {
+                    return Err(Error::CellUnderflow);
+                }
+
+                // Remove the LCP from the key
+                prev_key_bit_len = key.remaining_bits();
+                key.try_advance(lcp.remaining_bits(), 0);
+
+                // Load the next branch
+                let next_branch = match key.load_bit() {
+                    Ok(false) => Branch::Left,
+                    Ok(true) => Branch::Right,
+                    Err(e) => return Err(e),
+                };
+
+                let child = match data.reference(next_branch as u8) {
+                    Some(child) => {
+                        // Handle pruned branch access
+                        if unlikely(child.descriptor().is_pruned_branch()) {
+                            return Err(Error::PrunedBranchAccess);
+                        }
+                        child
+                    }
+                    None => return Err(Error::CellUnderflow),
+                };
+
+                // Push an intermediate edge to the stack
+                stack.push(Segment { data, next_branch });
+                data = child;
+            }
+            std::cmp::Ordering::Greater => {
+                debug_assert!(false, "LCP of prefix and key can't be greater than key");
+                unsafe { std::hint::unreachable_unchecked() };
+            }
+        }
+    };
+
+    // Rebuild the leaf node
+    let (mut leaf, removed) = if let Some(last) = stack.pop() {
+        let index = last.next_branch as u8;
+
+        // Load value branch
+        let Some(value) = last.data.reference_cloned(index) else {
+            return Err(Error::CellUnderflow);
+        };
+
+        // Load parent label
+        let pfx = {
+            // SAFETY: `last.data` was already checked for pruned branch access.
+            let mut parent = unsafe { last.data.as_slice_unchecked() };
+            ok!(read_label(&mut parent, prev_key_bit_len))
+        };
+
+        // Load the opposite branch
+        let mut opposite = ok!(last.data.get_reference_as_slice(1 - index));
+        let rem = ok!(read_label(&mut opposite, key.remaining_bits()));
+
+        // Build an edge cell
+        let mut builder = CellBuilder::new();
+        ok!(write_label_parts(
+            &pfx,
+            index == 0,
+            &rem,
+            prev_key_bit_len,
+            &mut builder
+        ));
+        ok!(builder.store_slice(opposite));
+        let leaf = ok!(builder.build_ext(finalizer));
+
+        // Return the new cell and the removed one
+        (leaf, (value, removed))
+    } else {
+        return Ok((None, Some((root.clone(), removed))));
+    };
+
+    // Rebuild the tree starting from leaves
+    while let Some(last) = stack.pop() {
+        // Load the opposite branch
+        let (left, right) = match last.next_branch {
+            Branch::Left => match last.data.reference_cloned(1) {
+                Some(cell) => (leaf, cell),
+                None => return Err(Error::CellUnderflow),
+            },
+            Branch::Right => match last.data.reference_cloned(0) {
+                Some(cell) => (cell, leaf),
+                None => return Err(Error::CellUnderflow),
+            },
+        };
+
+        let mut builder = CellBuilder::new();
+        ok!(builder.store_cell_data(last.data));
+        ok!(builder.store_reference(left));
+        ok!(builder.store_reference(right));
+        leaf = ok!(builder.build_ext(finalizer));
+    }
+
+    Ok((Some(leaf), Some(removed)))
+}
+
 /// Inserts the value associated with key in dictionary
 /// in accordance with the logic of the specified [`SetMode`].
 pub fn dict_insert(
@@ -138,26 +278,12 @@ pub fn dict_insert(
         builder.build_ext(finalizer)
     }
 
-    #[derive(Clone, Copy, Eq, PartialEq)]
-    enum Branch {
-        // Branch for a key part that starts with bit 0
-        Left = 0,
-        // Branch for a key part that starts with bit 1
-        Right = 1,
-    }
-
-    #[derive(Clone, Copy)]
-    struct Segment<'a> {
-        data: CellSlice<'a>,
-        next_branch: Branch,
-    }
-
     if key.remaining_bits() != key_bit_len {
         return Err(Error::CellUnderflow);
     }
 
     let mut data = match root.as_ref() {
-        Some(data) => ok!(data.as_slice()),
+        Some(data) => data.as_ref(),
         None if mode.can_add() => {
             let data = ok!(make_leaf(key, key_bit_len, value, finalizer));
             return Ok(Some(data));
@@ -168,7 +294,7 @@ pub fn dict_insert(
     let mut stack = Vec::<Segment>::new();
 
     let mut leaf = loop {
-        let mut remaining_data = data;
+        let mut remaining_data = ok!(data.as_slice());
 
         // Read the next part of the key from the current data
         let prefix = &mut ok!(read_label(&mut remaining_data, key.remaining_bits()));
@@ -196,8 +322,7 @@ pub fn dict_insert(
             // The key contains the entire prefix, but there are still some bits left
             std::cmp::Ordering::Less => {
                 // Fail fast if there are not enough references in the fork
-                let cell = data.cell();
-                if cell.reference_count() != 2 {
+                if data.reference_count() != 2 {
                     return Err(Error::CellUnderflow);
                 }
 
@@ -211,7 +336,16 @@ pub fn dict_insert(
                     Err(e) => return Err(e),
                 };
 
-                let child = ok!(cell.get_reference_as_slice(next_branch as u8));
+                let child = match data.reference(next_branch as u8) {
+                    Some(child) => {
+                        // Handle pruned branch access
+                        if unlikely(child.descriptor().is_pruned_branch()) {
+                            return Err(Error::PrunedBranchAccess);
+                        }
+                        child
+                    }
+                    None => return Err(Error::CellUnderflow),
+                };
 
                 // Push an intermediate edge to the stack
                 stack.push(Segment { data, next_branch });
@@ -228,18 +362,18 @@ pub fn dict_insert(
     while let Some(last) = stack.pop() {
         // Load the opposite branch
         let (left, right) = match last.next_branch {
-            Branch::Left => match last.data.cell().reference_cloned(1) {
+            Branch::Left => match last.data.reference_cloned(1) {
                 Some(cell) => (leaf, cell),
                 None => return Err(Error::CellUnderflow),
             },
-            Branch::Right => match last.data.cell().reference_cloned(0) {
+            Branch::Right => match last.data.reference_cloned(0) {
                 Some(cell) => (cell, leaf),
                 None => return Err(Error::CellUnderflow),
             },
         };
 
         let mut builder = CellBuilder::new();
-        ok!(builder.store_slice_data(last.data));
+        ok!(builder.store_cell_data(last.data));
         ok!(builder.store_reference(left));
         ok!(builder.store_reference(right));
         leaf = ok!(builder.build_ext(finalizer));
@@ -318,6 +452,12 @@ pub fn dict_load_from_root(
     builder.build_ext(finalizer)
 }
 
+#[derive(Clone, Copy)]
+struct Segment<'a> {
+    data: &'a DynCell,
+    next_branch: Branch,
+}
+
 fn write_label(key: &CellSlice, key_bit_len: u16, label: &mut CellBuilder) -> Result<(), Error> {
     if key_bit_len == 0 || key.is_data_empty() {
         return write_hml_empty(label);
@@ -338,12 +478,56 @@ fn write_label(key: &CellSlice, key_bit_len: u16, label: &mut CellBuilder) -> Re
     }
 
     if hml_short_len <= MAX_BIT_LEN && hml_short_len <= hml_long_len {
-        write_hml_short(key, label)
+        ok!(write_hml_short_tag(remaining_bits, label));
     } else if hml_long_len <= MAX_BIT_LEN {
-        write_hml_long(key, bits_for_len, label)
+        ok!(write_hml_long_tag(remaining_bits, bits_for_len, label));
     } else {
-        Err(Error::InvalidData)
+        return Err(Error::InvalidData);
     }
+    label.store_slice_data(key)
+}
+
+fn write_label_parts(
+    pfx: &CellSlice,
+    bit: bool,
+    rem: &CellSlice,
+    key_bit_len: u16,
+    label: &mut CellBuilder,
+) -> Result<(), Error> {
+    if key_bit_len == 0 {
+        return write_hml_empty(label);
+    }
+
+    let bits_for_len = (16 - key_bit_len.leading_zeros()) as u16;
+
+    let remaining_bits = pfx.remaining_bits() + 1 + rem.remaining_bits();
+
+    let hml_short_len = 2 + 2 * remaining_bits;
+    let hml_long_len = 2 + bits_for_len + remaining_bits;
+    let hml_same_len = 3 + bits_for_len;
+
+    if hml_same_len < hml_long_len && hml_same_len < hml_short_len {
+        if let Some(pfx_bit) = pfx.test_uniform() {
+            if pfx_bit == bit {
+                if let Some(rem_bit) = rem.test_uniform() {
+                    if rem_bit == bit {
+                        return write_hml_same(bit, remaining_bits, bits_for_len, label);
+                    }
+                }
+            }
+        }
+    }
+
+    if hml_short_len <= MAX_BIT_LEN && hml_short_len <= hml_long_len {
+        ok!(write_hml_short_tag(remaining_bits, label));
+    } else if hml_long_len <= MAX_BIT_LEN {
+        ok!(write_hml_long_tag(remaining_bits, bits_for_len, label));
+    } else {
+        return Err(Error::InvalidData);
+    }
+    ok!(label.store_slice_data(pfx));
+    ok!(label.store_bit(bit));
+    label.store_slice_data(rem)
 }
 
 fn read_label<'a>(label: &mut CellSlice<'a>, key_bit_len: u16) -> Result<CellSlice<'a>, Error> {
@@ -364,10 +548,9 @@ fn write_hml_empty(label: &mut CellBuilder) -> Result<(), Error> {
     label.store_zeros(2)
 }
 
-fn write_hml_short(key: &CellSlice, label: &mut CellBuilder) -> Result<(), Error> {
+fn write_hml_short_tag(len: u16, label: &mut CellBuilder) -> Result<(), Error> {
     ok!(label.store_bit_zero());
 
-    let len = key.remaining_bits();
     for _ in 0..len / 32 {
         ok!(label.store_u32(u32::MAX));
     }
@@ -376,8 +559,7 @@ fn write_hml_short(key: &CellSlice, label: &mut CellBuilder) -> Result<(), Error
     if rem != 0 {
         ok!(label.store_uint(u64::MAX, rem));
     }
-    ok!(label.store_bit_zero());
-    label.store_slice_data(key)
+    label.store_bit_zero()
 }
 
 fn read_hml_short<'a>(label: &mut CellSlice<'a>) -> Result<CellSlice<'a>, Error> {
@@ -393,15 +575,10 @@ fn read_hml_short<'a>(label: &mut CellSlice<'a>) -> Result<CellSlice<'a>, Error>
     }
 }
 
-fn write_hml_long(
-    key: &CellSlice,
-    bits_for_len: u16,
-    label: &mut CellBuilder,
-) -> Result<(), Error> {
+fn write_hml_long_tag(len: u16, bits_for_len: u16, label: &mut CellBuilder) -> Result<(), Error> {
     ok!(label.store_bit_one());
     ok!(label.store_bit_zero());
-    ok!(label.store_uint(key.remaining_bits() as u64, bits_for_len));
-    label.store_slice_data(key)
+    label.store_uint(len as u64, bits_for_len)
 }
 
 fn read_hml_long<'a>(label: &mut CellSlice<'a>, bits_for_len: u16) -> Result<CellSlice<'a>, Error> {
@@ -440,6 +617,14 @@ fn serialize_entry<T: Store>(entry: &T, finalizer: &mut dyn Finalizer) -> Result
     let mut builder = CellBuilder::new();
     ok!(entry.store_into(&mut builder, finalizer));
     builder.build_ext(finalizer)
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Branch {
+    // Branch for a key part that starts with bit 0
+    Left = 0,
+    // Branch for a key part that starts with bit 1
+    Right = 1,
 }
 
 #[cfg(test)]

@@ -2,7 +2,7 @@ use crate::cell::*;
 use crate::error::Error;
 use crate::util::{unlikely, IterStatus};
 
-use super::{dict_get, dict_insert, dict_load_from_root, read_label, SetMode};
+use super::{dict_get, dict_insert, dict_load_from_root, dict_remove_owned, read_label, SetMode};
 
 /// Dictionary with fixed length keys (where `N` is a number of bits in each key).
 ///
@@ -190,6 +190,18 @@ impl<const N: u16> RawDict<N> {
         Ok(())
     }
 
+    /// Removes the value associated with key in dictionary.
+    /// Returns an optional removed value as cell slice parts.
+    pub fn remove_ext(
+        &mut self,
+        mut key: CellSlice<'_>,
+        finalizer: &mut dyn Finalizer,
+    ) -> Result<Option<CellSliceParts>, Error> {
+        let (dict, removed) = ok!(dict_remove_owned(&self.0, &mut key, N, false, finalizer));
+        self.0 = dict;
+        Ok(removed)
+    }
+
     /// Gets an iterator over the entries of the dictionary, sorted by key.
     /// The iterator element type is `Result<(CellBuilder, CellSlice)>`.
     ///
@@ -258,6 +270,16 @@ impl<const N: u16> RawDict<N> {
     /// [`add_ext`]: RawDict::add_ext
     pub fn add(&mut self, key: CellSlice<'_>, value: CellSlice<'_>) -> Result<(), Error> {
         self.add_ext(key, value, &mut Cell::default_finalizer())
+    }
+
+    /// Removes the value associated with key in dictionary.
+    /// Returns an optional removed value as cell slice parts.
+    ///
+    /// Use [`remove_ext`] if you need to use a custom finalizer.
+    ///
+    /// [`remove_ext`]: RawDict::remove_ext
+    pub fn remove(&mut self, key: CellSlice<'_>) -> Result<Option<CellSliceParts>, Error> {
+        self.remove_ext(key, &mut Cell::default_finalizer())
     }
 }
 

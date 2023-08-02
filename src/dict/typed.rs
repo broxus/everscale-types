@@ -2,6 +2,7 @@ use std::borrow::Borrow;
 use std::marker::PhantomData;
 
 use crate::cell::*;
+use crate::dict::dict_remove_owned;
 use crate::error::Error;
 use crate::util::*;
 
@@ -165,6 +166,35 @@ where
         Q: Borrow<K> + 'b,
     {
         self.get_raw_ext(key, &mut Cell::default_finalizer())
+    }
+
+    /// Removes the value associated with key in dictionary.
+    /// Returns an optional removed value.
+    ///
+    /// Key is serialized using the default finalizer.
+    pub fn remove<Q>(&mut self, key: Q) -> Result<Option<V>, Error>
+    where
+        Q: Borrow<K>,
+        for<'a> V: Load<'a> + 'static,
+    {
+        match ok!(self.remove_raw_ext(key, &mut Cell::default_finalizer())) {
+            Some((cell, range)) => {
+                let mut slice = ok!(range.apply(&cell));
+                Ok(Some(ok!(V::load_from(&mut slice))))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Removes the value associated with key in dictionary.
+    /// Returns an optional removed value as cell slice parts.
+    ///
+    /// Key is serialized using the default finalizer.
+    pub fn remove_raw<Q>(&mut self, key: Q) -> Result<Option<CellSliceParts>, Error>
+    where
+        Q: Borrow<K>,
+    {
+        self.remove_raw_ext(key, &mut Cell::default_finalizer())
     }
 }
 
@@ -336,6 +366,41 @@ where
         }
 
         get_raw_ext_impl(&self.root, key.borrow(), finalizer)
+    }
+
+    /// Removes the value associated with key in dictionary.
+    /// Returns an optional removed value as cell slice parts.
+    ///
+    /// Key is serialized using the provided finalizer.
+    pub fn remove_raw_ext<Q>(
+        &mut self,
+        key: Q,
+        finalizer: &mut dyn Finalizer,
+    ) -> Result<Option<CellSliceParts>, Error>
+    where
+        Q: Borrow<K>,
+    {
+        pub fn remove_raw_ext_impl<K>(
+            root: &Option<Cell>,
+            key: &K,
+            finalizer: &mut dyn Finalizer,
+        ) -> Result<(Option<Cell>, Option<CellSliceParts>), Error>
+        where
+            K: Store + DictKey,
+        {
+            let key = ok!(serialize_entry(key, finalizer));
+            dict_remove_owned(
+                root,
+                &mut ok!(key.as_ref().as_slice()),
+                K::BITS,
+                false,
+                finalizer,
+            )
+        }
+
+        let (dict, removed) = ok!(remove_raw_ext_impl(&self.root, key.borrow(), finalizer));
+        self.root = dict;
+        Ok(removed)
     }
 
     /// Gets an iterator over the raw entries of the dictionary, sorted by key.
@@ -619,6 +684,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use anyhow::Context;
+
     use super::*;
     use crate::prelude::*;
 
@@ -662,6 +729,42 @@ mod tests {
 
         dict.add(123, true).unwrap();
         assert_eq!(dict.get(123).unwrap(), Some(false));
+    }
+
+    #[test]
+    fn dict_remove() {
+        let mut dict = Dict::<u32, u32>::new();
+
+        for i in 0..10 {
+            dict.set(i, i).unwrap();
+        }
+
+        let mut check_remove = |n: u32, expected: Option<u32>| -> anyhow::Result<()> {
+            let removed = dict.remove(n).context("Failed to remove")?;
+            anyhow::ensure!(removed == expected);
+            Ok(())
+        };
+
+        check_remove(0, Some(0)).unwrap();
+
+        check_remove(4, Some(4)).unwrap();
+
+        check_remove(9, Some(9)).unwrap();
+        check_remove(9, None).unwrap();
+
+        check_remove(5, Some(5)).unwrap();
+        check_remove(5, None).unwrap();
+
+        check_remove(100, None).unwrap();
+
+        check_remove(1, Some(1)).unwrap();
+        check_remove(2, Some(2)).unwrap();
+        check_remove(3, Some(3)).unwrap();
+        check_remove(6, Some(6)).unwrap();
+        check_remove(7, Some(7)).unwrap();
+        check_remove(8, Some(8)).unwrap();
+
+        assert!(dict.is_empty());
     }
 
     #[test]

@@ -156,58 +156,152 @@ impl<'a> Load<'a> for Cell {
     }
 }
 
-/// An owned [`CellSlice`] container.
-#[derive(Clone)]
-pub struct OwnedCellSlice {
-    // TODO: optimize layout
-    cell: Cell,
-    // NOTE: cell slice points to the
-    cell_slice: CellSlice<'static>,
+/// Owned cell slice parts alias.
+pub type CellSliceParts = (Cell, SliceRange);
+
+/// Indices of the slice data and refs windows.
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct SliceRange {
+    bits_start: u16,
+    bits_end: u16,
+    refs_start: u8,
+    refs_end: u8,
 }
 
-impl OwnedCellSlice {
-    /// Constructs a new cell slice from the specified cell.
-    /// Returns an error if the cell is pruned.
-    pub fn new(cell: Cell) -> Result<Self, Error> {
-        let cell_slice = ok!(cell.as_slice());
-        Ok(Self {
-            // SAFETY: cell reference points to the pinned location
-            cell_slice: unsafe { std::mem::transmute::<_, CellSlice<'static>>(cell_slice) },
-            cell,
-        })
+impl SliceRange {
+    /// Returns an empty slice range.
+    pub const fn empty() -> Self {
+        SliceRange {
+            bits_start: 0,
+            bits_end: 0,
+            refs_start: 0,
+            refs_end: 0,
+        }
     }
 
-    /// Constructs a new cell slice from the specified cell.
+    /// Returns a full range for the specified cell.
+    pub fn full(cell: &DynCell) -> Self {
+        Self {
+            bits_start: 0,
+            bits_end: cell.bit_len(),
+            refs_start: 0,
+            refs_end: cell.reference_count(),
+        }
+    }
+
+    /// Constructs a new cell slice from the specified cell using the current range.
+    /// Returns an error if the cell is pruned.
+    ///
+    /// NOTE: the resulting range will be truncated to cell bounds.
+    #[inline]
+    pub fn apply<T>(self, cell: &T) -> Result<CellSlice<'_>, Error>
+    where
+        T: AsRef<DynCell>,
+    {
+        fn apply_impl(range: SliceRange, cell: &DynCell) -> Result<CellSlice<'_>, Error> {
+            // Handle pruned branch access
+            if unlikely(cell.descriptor().is_pruned_branch()) {
+                Err(Error::PrunedBranchAccess)
+            } else {
+                let bits_end = std::cmp::min(range.bits_end, cell.bit_len());
+                let refs_end = std::cmp::min(range.refs_end, cell.reference_count());
+                Ok(CellSlice {
+                    range: SliceRange {
+                        bits_start: std::cmp::min(range.bits_start, bits_end),
+                        bits_end,
+                        refs_start: std::cmp::min(range.refs_start, refs_end),
+                        refs_end,
+                    },
+                    cell,
+                })
+            }
+        }
+        apply_impl(self, cell.as_ref())
+    }
+
+    /// Constructs a new cell slice from the specified cell using the current range.
+    ///
+    /// NOTE: the resulting range will be truncated to cell bounds.
     ///
     /// # Safety
     ///
     /// The following must be true:
     /// - cell is not pruned
-    pub unsafe fn new_unchecked(cell: Cell) -> Self {
-        let cell_slice = cell.as_slice_unchecked();
-        Self {
-            // SAFETY: cell reference points to the pinned location
-            cell_slice: unsafe { std::mem::transmute::<_, CellSlice<'static>>(cell_slice) },
-            cell,
+    /// - range is in cell bounds
+    pub unsafe fn apply_unchecked<T>(self, cell: &T) -> CellSlice<'_>
+    where
+        T: AsRef<DynCell>,
+    {
+        CellSlice {
+            range: self,
+            cell: cell.as_ref(),
         }
     }
 
-    /// Returns a reference to the underlying owned cell.
-    pub fn cell(&self) -> &Cell {
-        &self.cell
+    /// Returns the number of remaining bits of data in the slice.
+    pub const fn remaining_bits(&self) -> u16 {
+        if self.bits_start > self.bits_end {
+            0
+        } else {
+            self.bits_end - self.bits_start
+        }
     }
 
-    /// Returns an immutable reference to the underlying slice.
-    #[inline]
-    pub fn pin(&'_ self) -> &'_ CellSlice<'_> {
-        &self.cell_slice
+    /// Returns the number of remaining references in the slice.
+    pub const fn remaining_refs(&self) -> u8 {
+        if self.refs_start > self.refs_end {
+            0
+        } else {
+            self.refs_end - self.refs_start
+        }
     }
 
-    /// Returns a mutable reference to the underlying slice.
-    #[inline]
-    pub fn pin_mut<'a>(&'a mut self) -> &'a mut CellSlice<'a> {
-        // SAFETY: cell reference points to the pinned location
-        unsafe { std::mem::transmute::<_, &'a mut CellSlice<'a>>(&mut self.cell_slice) }
+    /// Returns whether there are no bits of data left.
+    pub const fn is_data_empty(&self) -> bool {
+        self.bits_start >= self.bits_end
+    }
+
+    /// Returns whether there are no references left.
+    pub const fn is_refs_empty(&self) -> bool {
+        self.refs_start >= self.refs_end
+    }
+
+    /// Returns the start of the data window.
+    pub const fn bits_offset(&self) -> u16 {
+        self.bits_start
+    }
+
+    /// Returns the start of the references window.
+    pub const fn refs_offset(&self) -> u8 {
+        self.refs_start
+    }
+
+    /// Returns true if the slice contains at least `bits` and `refs`.
+    pub const fn has_remaining(&self, bits: u16, refs: u8) -> bool {
+        self.bits_start + bits <= self.bits_end && self.refs_start + refs <= self.refs_end
+    }
+
+    /// Tries to advance the start of data and refs windows,
+    /// returns `false` if `bits` or `refs` are greater than the remainder.
+    pub fn try_advance(&mut self, bits: u16, refs: u8) -> bool {
+        if self.bits_start + bits <= self.bits_end && self.refs_start + refs <= self.refs_end {
+            self.bits_start += bits;
+            self.refs_start += refs;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Returns a slice range starting at the same bits and refs offsets,
+    /// and containing no more than `bits` of data and `refs` of children.
+    pub fn get_prefix(&self, bits: u16, refs: u8) -> Self {
+        Self {
+            bits_start: self.bits_start,
+            bits_end: std::cmp::min(self.bits_start + bits, self.bits_end),
+            refs_start: self.refs_start,
+            refs_end: std::cmp::min(self.refs_start + refs, self.refs_end),
+        }
     }
 }
 
@@ -215,10 +309,7 @@ impl OwnedCellSlice {
 #[derive(Debug, Eq, PartialEq)]
 pub struct CellSlice<'a> {
     cell: &'a DynCell,
-    bits_window_start: u16,
-    bits_window_end: u16,
-    refs_window_start: u8,
-    refs_window_end: u8,
+    range: SliceRange,
 }
 
 impl<'a> Clone for CellSlice<'a> {
@@ -226,10 +317,7 @@ impl<'a> Clone for CellSlice<'a> {
     fn clone(&self) -> Self {
         Self {
             cell: self.cell,
-            bits_window_start: self.bits_window_start,
-            bits_window_end: self.bits_window_end,
-            refs_window_start: self.refs_window_start,
-            refs_window_end: self.refs_window_end,
+            range: self.range,
         }
     }
 }
@@ -245,10 +333,7 @@ impl<'a> CellSlice<'a> {
             Err(Error::PrunedBranchAccess)
         } else {
             Ok(Self {
-                bits_window_start: 0,
-                bits_window_end: cell.bit_len(),
-                refs_window_start: 0,
-                refs_window_end: cell.reference_count(),
+                range: SliceRange::full(cell),
                 cell,
             })
         }
@@ -262,12 +347,15 @@ impl<'a> CellSlice<'a> {
     /// - cell is not pruned
     pub unsafe fn new_unchecked(cell: &'a DynCell) -> Self {
         Self {
-            bits_window_start: 0,
-            bits_window_end: cell.bit_len(),
-            refs_window_start: 0,
-            refs_window_end: cell.reference_count(),
+            range: SliceRange::full(cell),
             cell,
         }
+    }
+
+    /// Returns an underlying range indices.
+    #[inline]
+    pub const fn range(&self) -> SliceRange {
+        self.range
     }
 
     /// Returns a reference to the underlying cell.
@@ -315,7 +403,7 @@ impl<'a> CellSlice<'a> {
     /// # Ok(()) }
     /// ```
     pub const fn is_data_empty(&self) -> bool {
-        self.bits_window_start >= self.bits_window_end
+        self.range.is_data_empty()
     }
 
     /// Returns whether there are no references left.
@@ -339,25 +427,17 @@ impl<'a> CellSlice<'a> {
     /// # Ok(()) }
     /// ```
     pub const fn is_refs_empty(&self) -> bool {
-        self.refs_window_start >= self.refs_window_end
-    }
-
-    /// Returns the number of remaining references in the slice.
-    pub const fn remaining_refs(&self) -> u8 {
-        if self.refs_window_start > self.refs_window_end {
-            0
-        } else {
-            self.refs_window_end - self.refs_window_start
-        }
+        self.range.is_refs_empty()
     }
 
     /// Returns the number of remaining bits of data in the slice.
     pub const fn remaining_bits(&self) -> u16 {
-        if self.bits_window_start > self.bits_window_end {
-            0
-        } else {
-            self.bits_window_end - self.bits_window_start
-        }
+        self.range.remaining_bits()
+    }
+
+    /// Returns the number of remaining references in the slice.
+    pub const fn remaining_refs(&self) -> u8 {
+        self.range.remaining_refs()
     }
 
     /// Returns the start of the data window.
@@ -379,7 +459,7 @@ impl<'a> CellSlice<'a> {
     /// ```
     #[inline]
     pub fn bits_offset(&self) -> u16 {
-        self.bits_window_start
+        self.range.bits_offset()
     }
 
     /// Returns the start of the references window.
@@ -402,7 +482,7 @@ impl<'a> CellSlice<'a> {
     /// ```
     #[inline]
     pub const fn refs_offset(&self) -> u8 {
-        self.refs_window_start
+        self.range.refs_offset()
     }
 
     /// Returns true if the slice contains at least `bits` and `refs`.
@@ -428,22 +508,13 @@ impl<'a> CellSlice<'a> {
     /// ```
     #[inline]
     pub const fn has_remaining(&self, bits: u16, refs: u8) -> bool {
-        self.bits_window_start + bits <= self.bits_window_end
-            && self.refs_window_start + refs <= self.refs_window_end
+        self.range.has_remaining(bits, refs)
     }
 
     /// Tries to advance the start of data and refs windows,
     /// returns `false` if `bits` or `refs` are greater than the remainder.
     pub fn try_advance(&mut self, bits: u16, refs: u8) -> bool {
-        if self.bits_window_start + bits <= self.bits_window_end
-            && self.refs_window_start + refs <= self.refs_window_end
-        {
-            self.bits_window_start += bits;
-            self.refs_window_start += refs;
-            true
-        } else {
-            false
-        }
+        self.range.try_advance(bits, refs)
     }
 
     /// Compares two slices by their data window **content** and refs.
@@ -457,12 +528,11 @@ impl<'a> CellSlice<'a> {
 
         // Fast check
         if a.cell == b.cell
-            && a.bits_window_start == b.bits_window_start
-            && a.refs_window_start == b.refs_window_start
+            && a.bits_offset() == b.bits_offset()
+            && a.refs_offset() == b.refs_offset()
         {
-            return Ok(
-                (a.bits_window_end, a.refs_window_end).cmp(&(b.bits_window_end, b.refs_window_end))
-            );
+            return Ok((a.remaining_bits(), a.remaining_refs())
+                .cmp(&(b.remaining_bits(), b.remaining_refs())));
         }
 
         // Slow patch
@@ -504,10 +574,7 @@ impl<'a> CellSlice<'a> {
     pub fn get_prefix(&self, bits: u16, refs: u8) -> Self {
         Self {
             cell: self.cell,
-            bits_window_start: self.bits_window_start,
-            bits_window_end: std::cmp::min(self.bits_window_start + bits, self.bits_window_end),
-            refs_window_start: self.refs_window_start,
-            refs_window_end: std::cmp::min(self.refs_window_start + refs, self.refs_window_end),
+            range: self.range.get_prefix(bits, refs),
         }
     }
 
@@ -590,24 +657,24 @@ impl<'a> CellSlice<'a> {
     }
 
     fn longest_common_data_prefix_impl(&self, other: &Self, max_hint: u16) -> u16 {
-        if self.bits_window_start >= self.bits_window_end
-            || other.bits_window_start >= other.bits_window_end
+        if self.range.bits_start >= self.range.bits_end
+            || other.range.bits_start >= other.range.bits_end
         {
             return 0;
         }
-        let self_remaining_bits = self.bits_window_end - self.bits_window_start;
+        let self_remaining_bits = self.range.bits_end - self.range.bits_start;
         let self_data = self.cell.data();
-        let other_remaining_bits = other.bits_window_end - other.bits_window_start;
+        let other_remaining_bits = other.range.bits_end - other.range.bits_start;
         let other_data = other.cell.data();
 
         // Compute max prefix length in bits
         let max_bit_len = std::cmp::min(self_remaining_bits, other_remaining_bits).min(max_hint);
 
         // Compute shifts and data offsets
-        let self_r = self.bits_window_start % 8;
-        let self_q = (self.bits_window_start / 8) as usize;
-        let other_r = other.bits_window_start % 8;
-        let other_q = (other.bits_window_start / 8) as usize;
+        let self_r = self.range.bits_start % 8;
+        let self_q = (self.range.bits_start / 8) as usize;
+        let other_r = other.range.bits_start % 8;
+        let other_q = (other.range.bits_start / 8) as usize;
 
         // Compute remaining bytes to check
         let self_bytes = (((self_r + max_bit_len) + 7) / 8) as usize;
@@ -704,19 +771,19 @@ impl<'a> CellSlice<'a> {
     /// # Ok(()) }
     /// ```
     pub fn test_uniform(&self) -> Option<bool> {
-        if self.bits_window_start >= self.bits_window_end {
+        if self.range.bits_start >= self.range.bits_end {
             return None;
         }
-        let mut remaining_bits = self.bits_window_end - self.bits_window_start;
+        let mut remaining_bits = self.range.bits_end - self.range.bits_start;
         let data = self.cell.data();
 
         // Check if data is enough
-        if (self.bits_window_end + 7) / 8 > data.len() as u16 {
+        if (self.range.bits_end + 7) / 8 > data.len() as u16 {
             return None;
         }
 
-        let r = self.bits_window_start % 8;
-        let q = (self.bits_window_start / 8) as usize;
+        let r = self.range.bits_start % 8;
+        let q = (self.range.bits_start / 8) as usize;
 
         unsafe {
             let mut data_ptr = data.as_ptr().add(q);
@@ -761,8 +828,8 @@ impl<'a> CellSlice<'a> {
 
     /// Tries to read the bit at the specified offset (relative to the current bits window).
     pub fn get_bit(&self, offset: u16) -> Result<bool, Error> {
-        if self.bits_window_start + offset < self.bits_window_end {
-            let index = self.bits_window_start + offset;
+        if self.range.bits_start + offset < self.range.bits_end {
+            let index = self.range.bits_start + offset;
             if let Some(byte) = self.cell.data().get((index / 8) as usize) {
                 return Ok((byte >> (7 - index % 8)) & 1 != 0);
             }
@@ -772,10 +839,10 @@ impl<'a> CellSlice<'a> {
 
     /// Tries to read the next bit, incrementing the bits window start.
     pub fn load_bit(&mut self) -> Result<bool, Error> {
-        if self.bits_window_start < self.bits_window_end {
-            let index = self.bits_window_start;
+        if self.range.bits_start < self.range.bits_end {
+            let index = self.range.bits_start;
             if let Some(byte) = self.cell.data().get((index / 8) as usize) {
-                self.bits_window_start += 1;
+                self.range.bits_start += 1;
                 return Ok((byte >> (7 - index % 8)) & 1 != 0);
             }
         }
@@ -796,8 +863,8 @@ impl<'a> CellSlice<'a> {
 
     /// Reads `u16` starting from the `offset`.
     pub fn get_u16(&self, offset: u16) -> Result<u16, Error> {
-        if self.bits_window_start + offset + 16 <= self.bits_window_end {
-            let index = self.bits_window_start + offset;
+        if self.range.bits_start + offset + 16 <= self.range.bits_end {
+            let index = self.range.bits_start + offset;
             let data = self.cell.data();
             let data_len = data.len();
 
@@ -840,14 +907,14 @@ impl<'a> CellSlice<'a> {
     /// Tries to read the next `u16`, incrementing the bits window start.
     pub fn load_u16(&mut self) -> Result<u16, Error> {
         let res = self.get_u16(0);
-        self.bits_window_start += 16 * res.is_ok() as u16;
+        self.range.bits_start += 16 * res.is_ok() as u16;
         res
     }
 
     /// Reads `u32` starting from the `offset`.
     pub fn get_u32(&self, offset: u16) -> Result<u32, Error> {
-        if self.bits_window_start + offset + 32 <= self.bits_window_end {
-            let index = self.bits_window_start + offset;
+        if self.range.bits_start + offset + 32 <= self.range.bits_end {
+            let index = self.range.bits_start + offset;
             let data = self.cell.data();
             let data_len = data.len();
 
@@ -890,14 +957,14 @@ impl<'a> CellSlice<'a> {
     /// Tries to read the next `u32`, incrementing the bits window start.
     pub fn load_u32(&mut self) -> Result<u32, Error> {
         let res = self.get_u32(0);
-        self.bits_window_start += 32 * res.is_ok() as u16;
+        self.range.bits_start += 32 * res.is_ok() as u16;
         res
     }
 
     /// Reads `u64` starting from the `offset`.
     pub fn get_u64(&self, offset: u16) -> Result<u64, Error> {
-        if self.bits_window_start + offset + 64 <= self.bits_window_end {
-            let index = self.bits_window_start + offset;
+        if self.range.bits_start + offset + 64 <= self.range.bits_end {
+            let index = self.range.bits_start + offset;
             let data = self.cell.data();
             let data_len = data.len();
 
@@ -937,14 +1004,14 @@ impl<'a> CellSlice<'a> {
     /// Tries to read the next `u64`, incrementing the bits window start.
     pub fn load_u64(&mut self) -> Result<u64, Error> {
         let res = self.get_u64(0);
-        self.bits_window_start += 64 * res.is_ok() as u16;
+        self.range.bits_start += 64 * res.is_ok() as u16;
         res
     }
 
     /// Reads `u128` starting from the `offset`.
     pub fn get_u128(&self, offset: u16) -> Result<u128, Error> {
-        if self.bits_window_start + offset + 128 <= self.bits_window_end {
-            let index = self.bits_window_start + offset;
+        if self.range.bits_start + offset + 128 <= self.range.bits_end {
+            let index = self.range.bits_start + offset;
             let data = self.cell.data();
             let data_len = data.len();
 
@@ -980,14 +1047,14 @@ impl<'a> CellSlice<'a> {
     /// Tries to read the next `u128`, incrementing the bits window start.
     pub fn load_u128(&mut self) -> Result<u128, Error> {
         let res = self.get_u128(0);
-        self.bits_window_start += 128 * res.is_ok() as u16;
+        self.range.bits_start += 128 * res.is_ok() as u16;
         res
     }
 
     /// Reads 32 bytes starting from the `offset`.
     pub fn get_u256(&self, offset: u16) -> Result<HashBytes, Error> {
-        if self.bits_window_start + offset + 256 <= self.bits_window_end {
-            let index = self.bits_window_start + offset;
+        if self.range.bits_start + offset + 256 <= self.range.bits_end {
+            let index = self.range.bits_start + offset;
             let data = self.cell.data();
             let data_len = data.len();
 
@@ -1039,7 +1106,7 @@ impl<'a> CellSlice<'a> {
     /// Tries to read the next 32 bytes, incrementing the bits window start.
     pub fn load_u256(&mut self) -> Result<HashBytes, Error> {
         let res = self.get_u256(0);
-        self.bits_window_start += 256 * res.is_ok() as u16;
+        self.range.bits_start += 256 * res.is_ok() as u16;
         res
     }
 
@@ -1052,8 +1119,8 @@ impl<'a> CellSlice<'a> {
             return Ok(0);
         }
 
-        if bits <= 8 && self.bits_window_start + offset + bits <= self.bits_window_end {
-            let index = self.bits_window_start + offset;
+        if bits <= 8 && self.range.bits_start + offset + bits <= self.range.bits_end {
+            let index = self.range.bits_start + offset;
 
             let r = index % 8;
             let q = (index / 8) as usize;
@@ -1092,7 +1159,7 @@ impl<'a> CellSlice<'a> {
     /// and reading more than 8 bits always fails.
     pub fn load_small_uint(&mut self, bits: u16) -> Result<u8, Error> {
         let res = self.get_small_uint(0, bits);
-        self.bits_window_start += bits * res.is_ok() as u16;
+        self.range.bits_start += bits * res.is_ok() as u16;
         res
     }
 
@@ -1106,13 +1173,13 @@ impl<'a> CellSlice<'a> {
             return Ok(0);
         }
 
-        if bits <= 64 && self.bits_window_start + offset + bits <= self.bits_window_end {
-            let index = self.bits_window_start + offset;
+        if bits <= 64 && self.range.bits_start + offset + bits <= self.range.bits_end {
+            let index = self.range.bits_start + offset;
             let data = self.cell.data();
             let data_len = data.len();
 
             // Check if data is enough
-            if (self.bits_window_end + 7) / 8 > data_len as u16 {
+            if (self.range.bits_end + 7) / 8 > data_len as u16 {
                 return Err(Error::CellUnderflow);
             }
 
@@ -1157,7 +1224,7 @@ impl<'a> CellSlice<'a> {
     /// and reading more than 64 bits always fails.
     pub fn load_uint(&mut self, bits: u16) -> Result<u64, Error> {
         let res = self.get_uint(0, bits);
-        self.bits_window_start += bits * res.is_ok() as u16;
+        self.range.bits_start += bits * res.is_ok() as u16;
         res
     }
 
@@ -1172,8 +1239,8 @@ impl<'a> CellSlice<'a> {
             return Ok(&mut target[..0]);
         }
 
-        if self.bits_window_start + bits <= self.bits_window_end {
-            let index = self.bits_window_start + offset;
+        if self.range.bits_start + bits <= self.range.bits_end {
+            let index = self.range.bits_start + offset;
             let data = self.cell.data();
             let data_len = data.len();
 
@@ -1234,22 +1301,22 @@ impl<'a> CellSlice<'a> {
         bits: u16,
     ) -> Result<&'b mut [u8], Error> {
         let res = self.get_raw(0, target, bits);
-        self.bits_window_start += bits * res.is_ok() as u16;
+        self.range.bits_start += bits * res.is_ok() as u16;
         res
     }
 
     /// Reads all remaining bits and refs into the new slice.
     pub fn load_remaining(&mut self) -> CellSlice<'a> {
         let result = *self;
-        self.bits_window_start = self.bits_window_end;
-        self.refs_window_start = self.refs_window_end;
+        self.range.bits_start = self.range.bits_end;
+        self.range.refs_start = self.range.refs_end;
         result
     }
 
     /// Returns a reference to the Nth child cell (relative to this slice's refs window).
     pub fn get_reference(&self, index: u8) -> Result<&'a DynCell, Error> {
-        if self.refs_window_start + index < self.refs_window_end {
-            if let Some(cell) = self.cell.reference(self.refs_window_start + index) {
+        if self.range.refs_start + index < self.range.refs_end {
+            if let Some(cell) = self.cell.reference(self.range.refs_start + index) {
                 return Ok(cell);
             }
         }
@@ -1258,8 +1325,8 @@ impl<'a> CellSlice<'a> {
 
     /// Returns the Nth child cell (relative to this slice's refs window).
     pub fn get_reference_cloned(&self, index: u8) -> Result<Cell, Error> {
-        if self.refs_window_start + index < self.refs_window_end {
-            if let Some(cell) = self.cell.reference_cloned(self.refs_window_start + index) {
+        if self.range.refs_start + index < self.range.refs_end {
+            if let Some(cell) = self.cell.reference_cloned(self.range.refs_start + index) {
                 return Ok(cell);
             }
         }
@@ -1269,8 +1336,8 @@ impl<'a> CellSlice<'a> {
     /// Tries to load the specified child cell as slice.
     /// Returns an error if the loaded cell is absent or is pruned.
     pub fn get_reference_as_slice(&self, index: u8) -> Result<CellSlice<'a>, Error> {
-        if self.refs_window_start + index < self.refs_window_end {
-            let Some(cell) = self.cell.reference(self.refs_window_start + index) else {
+        if self.range.refs_start + index < self.range.refs_end {
+            let Some(cell) = self.cell.reference(self.range.refs_start + index) else {
                 return Err(Error::CellUnderflow);
             };
 
@@ -1284,8 +1351,8 @@ impl<'a> CellSlice<'a> {
     pub fn references(&self) -> RefsIter<'a> {
         RefsIter {
             cell: self.cell,
-            max: self.refs_window_end,
-            index: self.refs_window_start,
+            max: self.range.refs_end,
+            index: self.range.refs_start,
         }
     }
 
@@ -1298,19 +1365,19 @@ impl<'a> CellSlice<'a> {
     /// Returns this slice, but with references skipped.
     #[inline]
     pub fn without_references(mut self) -> Self {
-        self.refs_window_start = self.refs_window_end;
+        self.range.refs_start = self.range.refs_end;
         self
     }
 
     /// Returns a reference to the next child cell (relative to this slice's refs window),
     /// incrementing the refs window start.
     pub fn load_reference(&mut self) -> Result<&'a DynCell, Error> {
-        if self.refs_window_start < self.refs_window_end {
-            let res = match self.cell.reference(self.refs_window_start) {
+        if self.range.refs_start < self.range.refs_end {
+            let res = match self.cell.reference(self.range.refs_start) {
                 Some(cell) => Ok(cell),
                 None => Err(Error::CellUnderflow),
             };
-            self.refs_window_start += res.is_ok() as u8;
+            self.range.refs_start += res.is_ok() as u8;
             res
         } else {
             Err(Error::CellUnderflow)
@@ -1320,12 +1387,12 @@ impl<'a> CellSlice<'a> {
     /// Returns the next child cell (relative to this slice's refs window),
     /// incrementing the refs window start.
     pub fn load_reference_cloned(&mut self) -> Result<Cell, Error> {
-        if self.refs_window_start < self.refs_window_end {
-            let res = match self.cell.reference_cloned(self.refs_window_start) {
+        if self.range.refs_start < self.range.refs_end {
+            let res = match self.cell.reference_cloned(self.range.refs_start) {
                 Some(cell) => Ok(cell),
                 None => Err(Error::CellUnderflow),
             };
-            self.refs_window_start += res.is_ok() as u8;
+            self.range.refs_start += res.is_ok() as u8;
             res
         } else {
             Err(Error::CellUnderflow)
@@ -1337,13 +1404,13 @@ impl<'a> CellSlice<'a> {
     ///
     /// NOTE: In case of pruned cell access the current slice remains unchanged.
     pub fn load_reference_as_slice(&mut self) -> Result<CellSlice<'a>, Error> {
-        if self.refs_window_start < self.refs_window_end {
-            let Some(cell) = self.cell.reference(self.refs_window_start) else {
+        if self.range.refs_start < self.range.refs_end {
+            let Some(cell) = self.cell.reference(self.range.refs_start) else {
                 return Err(Error::CellUnderflow);
             };
 
             let res = CellSlice::new(cell);
-            self.refs_window_start += res.is_ok() as u8;
+            self.range.refs_start += res.is_ok() as u8;
             res
         } else {
             Err(Error::CellUnderflow)
