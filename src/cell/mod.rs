@@ -7,7 +7,7 @@ use crate::error::Error;
 pub use self::builder::{CellBuilder, CellRefsBuilder, Store};
 pub use self::cell_impl::{StaticCell, VirtualCellWrapper};
 pub use self::finalizer::{CellParts, DefaultFinalizer, Finalizer};
-pub use self::slice::{CellSlice, CellSliceParts, Load, SliceRange};
+pub use self::slice::{CellSlice, CellSliceParts, Load, CellSliceRange};
 pub use self::usage_tree::{UsageTree, UsageTreeMode, UsageTreeWithSubtrees};
 
 #[cfg(not(feature = "sync"))]

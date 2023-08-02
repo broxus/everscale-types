@@ -157,21 +157,21 @@ impl<'a> Load<'a> for Cell {
 }
 
 /// Owned cell slice parts alias.
-pub type CellSliceParts = (Cell, SliceRange);
+pub type CellSliceParts = (Cell, CellSliceRange);
 
 /// Indices of the slice data and refs windows.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct SliceRange {
+pub struct CellSliceRange {
     bits_start: u16,
     bits_end: u16,
     refs_start: u8,
     refs_end: u8,
 }
 
-impl SliceRange {
+impl CellSliceRange {
     /// Returns an empty slice range.
     pub const fn empty() -> Self {
-        SliceRange {
+        CellSliceRange {
             bits_start: 0,
             bits_end: 0,
             refs_start: 0,
@@ -198,7 +198,7 @@ impl SliceRange {
     where
         T: AsRef<DynCell>,
     {
-        fn apply_impl(range: SliceRange, cell: &DynCell) -> Result<CellSlice<'_>, Error> {
+        fn apply_impl(range: CellSliceRange, cell: &DynCell) -> Result<CellSlice<'_>, Error> {
             // Handle pruned branch access
             if unlikely(cell.descriptor().is_pruned_branch()) {
                 Err(Error::PrunedBranchAccess)
@@ -206,7 +206,7 @@ impl SliceRange {
                 let bits_end = std::cmp::min(range.bits_end, cell.bit_len());
                 let refs_end = std::cmp::min(range.refs_end, cell.reference_count());
                 Ok(CellSlice {
-                    range: SliceRange {
+                    range: CellSliceRange {
                         bits_start: std::cmp::min(range.bits_start, bits_end),
                         bits_end,
                         refs_start: std::cmp::min(range.refs_start, refs_end),
@@ -309,7 +309,7 @@ impl SliceRange {
 #[derive(Debug, Eq, PartialEq)]
 pub struct CellSlice<'a> {
     cell: &'a DynCell,
-    range: SliceRange,
+    range: CellSliceRange,
 }
 
 impl<'a> Clone for CellSlice<'a> {
@@ -333,7 +333,7 @@ impl<'a> CellSlice<'a> {
             Err(Error::PrunedBranchAccess)
         } else {
             Ok(Self {
-                range: SliceRange::full(cell),
+                range: CellSliceRange::full(cell),
                 cell,
             })
         }
@@ -347,14 +347,14 @@ impl<'a> CellSlice<'a> {
     /// - cell is not pruned
     pub unsafe fn new_unchecked(cell: &'a DynCell) -> Self {
         Self {
-            range: SliceRange::full(cell),
+            range: CellSliceRange::full(cell),
             cell,
         }
     }
 
     /// Returns an underlying range indices.
     #[inline]
-    pub const fn range(&self) -> SliceRange {
+    pub const fn range(&self) -> CellSliceRange {
         self.range
     }
 
