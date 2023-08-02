@@ -212,7 +212,7 @@ impl OwnedCellSlice {
 }
 
 /// A read-only view for a subrange of a cell.
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct CellSlice<'a> {
     cell: &'a DynCell,
     bits_window_start: u16,
@@ -444,6 +444,59 @@ impl<'a> CellSlice<'a> {
         } else {
             false
         }
+    }
+
+    /// Compares two slices by their data window **content** and refs.
+    ///
+    /// NOTE: this method is quite computationally heavy as it compares the content
+    /// of two potentially unaligned slices. Use it with caution or check by cell.
+    pub fn cmp_by_content(&self, b: &CellSlice) -> Result<std::cmp::Ordering, Error> {
+        use std::cmp::Ordering;
+
+        let a = self;
+
+        // Fast check
+        if a.cell == b.cell
+            && a.bits_window_start == b.bits_window_start
+            && a.refs_window_start == b.refs_window_start
+        {
+            return Ok(
+                (a.bits_window_end, a.refs_window_end).cmp(&(b.bits_window_end, b.refs_window_end))
+            );
+        }
+
+        // Slow patch
+        match (a.remaining_bits(), a.remaining_refs())
+            .cmp(&(b.remaining_bits(), b.remaining_refs()))
+        {
+            Ordering::Equal => {}
+            ord => return Ok(ord),
+        };
+
+        let bits = a.remaining_bits();
+        let rem = bits % 32;
+        for offset in (0..bits - rem).step_by(32) {
+            match ok!(a.get_u32(offset)).cmp(&ok!(b.get_u32(offset))) {
+                Ordering::Equal => {}
+                ord => return Ok(ord),
+            }
+        }
+
+        if rem > 0 {
+            match ok!(a.get_uint(bits - rem, rem)).cmp(&ok!(b.get_uint(bits - rem, rem))) {
+                Ordering::Equal => {}
+                ord => return Ok(ord),
+            }
+        }
+
+        for (a, b) in self.references().zip(b.references()) {
+            match a.repr_hash().cmp(b.repr_hash()) {
+                Ordering::Equal => {}
+                ord => return Ok(ord),
+            }
+        }
+
+        Ok(Ordering::Equal)
     }
 
     /// Returns a slice starting at the same bits and refs offsets,
@@ -1469,6 +1522,53 @@ mod tests {
         let mut slice = cell.as_slice()?;
         slice.try_advance(1, 0);
         assert_eq!(slice.test_uniform(), Some(true));
+
+        Ok(())
+    }
+
+    #[test]
+    fn compare_by_content() -> anyhow::Result<()> {
+        fn cmp<L, R>(l: L, r: R) -> Result<std::cmp::Ordering, Error>
+        where
+            L: FnOnce(&mut CellBuilder) -> Result<(), Error>,
+            R: FnOnce(&mut CellBuilder) -> Result<(), Error>,
+        {
+            let cell1 = build_cell(l);
+            let cell2 = build_cell(r);
+            cell1.as_slice()?.cmp_by_content(&cell2.as_slice()?)
+        }
+
+        assert_eq!(
+            cmp(
+                |b| b.store_u64(0xffffffff0000000f),
+                |b| b.store_u64(0xffffffff00000000)
+            )?,
+            std::cmp::Ordering::Greater
+        );
+
+        assert_eq!(
+            cmp(
+                |b| b.store_u64(0xfffffff00000000),
+                |b| b.store_u64(0xffffffff00000000)
+            )?,
+            std::cmp::Ordering::Less
+        );
+
+        assert_eq!(
+            cmp(
+                |b| b.store_u64(0xffffffff00000000),
+                |b| b.store_u64(0xffffffff00000000)
+            )?,
+            std::cmp::Ordering::Equal
+        );
+
+        assert_eq!(
+            cmp(
+                |b| b.store_uint(0xffffffff00000000, 60),
+                |b| b.store_u64(0xffffffff00000000)
+            )?,
+            std::cmp::Ordering::Less
+        );
 
         Ok(())
     }

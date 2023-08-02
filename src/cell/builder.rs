@@ -186,6 +186,17 @@ impl Clone for CellBuilder {
     }
 }
 
+impl Eq for CellBuilder {}
+
+impl PartialEq for CellBuilder {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.bit_len == other.bit_len
+            && self.data == other.data
+            && self.references.as_ref() == other.references.as_ref()
+    }
+}
+
 macro_rules! impl_store_uint {
     ($self:ident, $value:ident, bytes: $bytes:literal, bits: $bits:literal) => {
         if $self.bit_len + $bits <= MAX_BIT_LEN {
@@ -290,6 +301,12 @@ impl CellBuilder {
     #[inline]
     pub fn has_capacity(&self, bits: u16, refs: u8) -> bool {
         self.bit_len + bits <= MAX_BIT_LEN && self.references.len() + refs as usize <= MAX_REF_COUNT
+    }
+
+    /// Returns whether this cell will be built as an exotic.
+    #[inline]
+    pub fn is_exotic(&self) -> bool {
+        self.is_exotic
     }
 
     /// Marks this cell as exotic.
