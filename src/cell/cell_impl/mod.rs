@@ -1,3 +1,4 @@
+use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 
 #[cfg(feature = "stats")]
@@ -10,10 +11,12 @@ use crate::util::TryAsMut;
 macro_rules! define_gen_vtable_ptr {
     (($($param:tt)*) => $($type:tt)*) => {
         const fn gen_vtable_ptr<$($param)*>() -> *const () {
-            let uninit = std::mem::MaybeUninit::<$($type)*>::uninit();
-            let fat_ptr = uninit.as_ptr() as *const dyn crate::cell::CellImpl;
             // SAFETY: "fat" pointer consists of two "slim" pointers
-            let [_, vtable] = unsafe { std::mem::transmute::<_, [*const (); 2]>(fat_ptr) };
+            let [_, vtable] = unsafe {
+                std::mem::transmute::<*const dyn crate::cell::CellImpl, [*const (); 2]>(
+                    std::ptr::null::<$($type)*>(),
+                )
+            };
             vtable
         }
     };
@@ -631,17 +634,17 @@ where
     }
 
     fn virtualize(&self) -> &DynCell {
-        self
+        self.0.as_ref().virtualize()
     }
 
     fn hash(&self, level: u8) -> &HashBytes {
         let cell = self.0.as_ref();
-        cell.hash(virtual_hash_index(cell.descriptor(), level))
+        cell.hash(virtual_hash_index(cell.descriptor(), level, 0))
     }
 
     fn depth(&self, level: u8) -> u16 {
         let cell = self.0.as_ref();
-        cell.depth(virtual_hash_index(cell.descriptor(), level))
+        cell.depth(virtual_hash_index(cell.descriptor(), level, 0))
     }
 
     fn take_first_child(&mut self) -> Option<Cell> {
@@ -667,9 +670,9 @@ where
 
 /// A wrapper type which implements a virtualized cell interface.
 #[repr(transparent)]
-pub struct VirtualCellWrapper<T>(T);
+pub struct VirtualCellWrapper<T, const L: u8 = 0>(T);
 
-impl<T> VirtualCellWrapper<T> {
+impl<T> VirtualCellWrapper<T, 0> {
     /// Wraps a cell reference.
     pub fn wrap(value: &T) -> &Self {
         // SAFETY: VirtualCellWrapper<T> is #[repr(transparent)]
@@ -677,8 +680,8 @@ impl<T> VirtualCellWrapper<T> {
     }
 }
 
-impl<#[cfg(not(feature = "sync"))] T, #[cfg(feature = "sync")] T: Send + Sync> CellImpl
-    for VirtualCellWrapper<T>
+impl<#[cfg(not(feature = "sync"))] T, #[cfg(feature = "sync")] T: Send + Sync, const L: u8> CellImpl
+    for VirtualCellWrapper<T, L>
 where
     T: CellImpl + 'static,
 {
@@ -695,23 +698,25 @@ where
     }
 
     fn reference(&self, index: u8) -> Option<&DynCell> {
-        Some(self.0.reference(index)?.virtualize())
+        dyn_reference_virtualize(&self.0, index)
     }
 
     fn reference_cloned(&self, index: u8) -> Option<Cell> {
-        Some(Cell::virtualize(self.0.reference_cloned(index)?))
+        dyn_reference_virtualize_cloned(&self.0, index)
     }
 
     fn virtualize(&self) -> &DynCell {
-        self
+        unsafe { virtualize_into_next_wrapper(L, &self.0) }
     }
 
     fn hash(&self, level: u8) -> &HashBytes {
-        self.0.hash(virtual_hash_index(self.0.descriptor(), level))
+        self.0
+            .hash(virtual_hash_index(self.0.descriptor(), level, L))
     }
 
     fn depth(&self, level: u8) -> u16 {
-        self.0.depth(virtual_hash_index(self.0.descriptor(), level))
+        self.0
+            .depth(virtual_hash_index(self.0.descriptor(), level, L))
     }
 
     fn take_first_child(&mut self) -> Option<Cell> {
@@ -732,8 +737,63 @@ where
     }
 }
 
-fn virtual_hash_index(descriptor: CellDescriptor, level: u8) -> u8 {
-    descriptor.level_mask().virtualize(1).hash_index(level)
+#[inline(never)]
+fn dyn_reference_virtualize(cell: &DynCell, index: u8) -> Option<&DynCell> {
+    Some(cell.reference(index)?.virtualize())
+}
+
+#[inline(never)]
+fn dyn_reference_virtualize_cloned(cell: &DynCell, index: u8) -> Option<Cell> {
+    Some(Cell::virtualize(cell.reference_cloned(index)?))
+}
+
+const unsafe fn virtualize_into_next_wrapper<
+    #[cfg(not(feature = "sync"))] T: CellImpl + Sized + 'static,
+    #[cfg(feature = "sync")] T: CellImpl + Sized + Send + Sync + 'static,
+>(
+    level: u8,
+    cell: &T,
+) -> &DynCell {
+    const fn gen_vtable_ptr<
+        #[cfg(not(feature = "sync"))] T: CellImpl,
+        #[cfg(feature = "sync")] T: CellImpl + Send + Sync,
+        const L: u8,
+    >() -> *const ()
+    where
+        T: 'static,
+    {
+        // SAFETY: "fat" pointer consists of two "slim" pointers
+        let [_, vtable] = unsafe {
+            std::mem::transmute::<*const dyn CellImpl, [*const (); 2]>(std::ptr::null::<
+                VirtualCellWrapper<T, L>,
+            >())
+        };
+        vtable
+    }
+
+    struct Vtable<T>(PhantomData<T>);
+
+    impl<#[cfg(not(feature = "sync"))] T, #[cfg(feature = "sync")] T: Send + Sync> Vtable<T>
+    where
+        T: CellImpl + 'static,
+    {
+        const LEVELS: [*const (); 2] = [gen_vtable_ptr::<T, 1>(), gen_vtable_ptr::<T, 2>()];
+    }
+
+    let vtable = Vtable::<T>::LEVELS[(level != 0) as usize];
+
+    // Construct fat pointer with vtable info
+    let data = cell as *const T as *const ();
+    let ptr: *const DynCell = std::mem::transmute([data, vtable]);
+
+    &*ptr
+}
+
+fn virtual_hash_index(descriptor: CellDescriptor, level: u8, offset: u8) -> u8 {
+    descriptor
+        .level_mask()
+        .virtualize(1 + offset)
+        .hash_index(level)
 }
 
 fn hash_index(descriptor: CellDescriptor, level: u8) -> u8 {

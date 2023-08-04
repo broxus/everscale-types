@@ -7,7 +7,7 @@ use crate::error::Error;
 pub use self::builder::{CellBuilder, CellRefsBuilder, Store};
 pub use self::cell_impl::{StaticCell, VirtualCellWrapper};
 pub use self::finalizer::{CellParts, DefaultFinalizer, Finalizer};
-pub use self::slice::{CellSlice, CellSliceParts, Load, CellSliceRange};
+pub use self::slice::{CellSlice, CellSliceParts, CellSliceRange, Load};
 pub use self::usage_tree::{UsageTree, UsageTreeMode, UsageTreeWithSubtrees};
 
 #[cfg(not(feature = "sync"))]
@@ -1126,5 +1126,47 @@ mod tests {
                 assert_eq!(hash_index, HASH_INDEX_TABLE[mask.0 as usize][i as usize]);
             }
         }
+    }
+
+    #[test]
+    fn ultra_virtual_cell_by_ref() {
+        let cell = Cell::empty_cell();
+
+        let pruned1 =
+            crate::merkle::make_pruned_branch(cell.as_ref(), 0, &mut Cell::default_finalizer())
+                .unwrap();
+
+        let pruned2 =
+            crate::merkle::make_pruned_branch(pruned1.as_ref(), 1, &mut Cell::default_finalizer())
+                .unwrap();
+
+        let pruned3 =
+            crate::merkle::make_pruned_branch(pruned2.as_ref(), 2, &mut Cell::default_finalizer())
+                .unwrap();
+
+        // Level 3 -> 2
+        let pruned3 = pruned3.virtualize();
+        assert_eq!(pruned3.repr_hash(), pruned2.repr_hash());
+        assert_eq!(pruned3.repr_depth(), pruned2.repr_depth());
+
+        // Level 2 -> 1
+        let pruned3 = pruned3.virtualize();
+        assert_eq!(pruned3.repr_hash(), pruned1.repr_hash());
+        assert_eq!(pruned3.repr_depth(), pruned1.repr_depth());
+
+        // Level 1 -> 0
+        let pruned3 = pruned3.virtualize();
+        assert_eq!(pruned3.repr_hash(), cell.repr_hash());
+        assert_eq!(pruned3.repr_depth(), cell.repr_depth());
+
+        // Level 0 -> 0
+        let pruned3 = pruned3.virtualize();
+        assert_eq!(pruned3.repr_hash(), cell.repr_hash());
+        assert_eq!(pruned3.repr_depth(), cell.repr_depth());
+
+        // Level 0 -> 0 (just in case)
+        let pruned3 = pruned3.virtualize();
+        assert_eq!(pruned3.repr_hash(), cell.repr_hash());
+        assert_eq!(pruned3.repr_depth(), cell.repr_depth());
     }
 }
