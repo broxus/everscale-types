@@ -607,7 +607,7 @@ impl<'a> CellSlice<'a> {
     /// assert_eq!(without_prefix.get_u16(0)?, 0xbeaf);
     /// # Ok(()) }
     /// ```
-    pub fn strip_data_prefix(&self, prefix: &CellSlice<'a>) -> Option<CellSlice<'a>> {
+    pub fn strip_data_prefix<'b>(&self, prefix: &CellSlice<'b>) -> Option<CellSlice<'a>> {
         let prefix_len = prefix.remaining_bits();
         if prefix_len == 0 {
             Some(*self)

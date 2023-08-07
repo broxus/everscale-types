@@ -427,6 +427,66 @@ pub fn dict_get<'a: 'b, 'b>(
     Ok(if is_key_empty { Some(data) } else { None })
 }
 
+/// Returns cell slice parts of the value corresponding to the key.
+pub fn dict_get_owned(
+    root: &Option<Cell>,
+    key_bit_len: u16,
+    mut key: CellSlice<'_>,
+) -> Result<Option<CellSliceParts>, Error> {
+    if key.remaining_bits() != key_bit_len {
+        return Err(Error::CellUnderflow);
+    }
+
+    let Some(root) = root else {
+        return Ok(None);
+    };
+    let mut data = ok!(root.as_slice());
+    let mut prev = None;
+
+    // Try to find the required leaf
+    let is_key_empty = loop {
+        // Read the key part written in the current edge
+        let prefix = ok!(read_label(&mut data, key.remaining_bits()));
+
+        // Remove this prefix from the key
+        match key.strip_data_prefix(&prefix) {
+            Some(stripped_key) => {
+                if stripped_key.is_data_empty() {
+                    // All key parts were collected <=> value found
+                    break true;
+                } else if data.remaining_refs() < 2 {
+                    // Reached leaf while key was not fully constructed
+                    return Ok(None);
+                } else {
+                    key = stripped_key;
+                }
+            }
+            None => break key.is_data_empty(),
+        }
+
+        // Load next child based on the next bit
+        let child_index = ok!(key.load_bit()) as u8;
+        prev = Some((data.cell(), child_index));
+        data = ok!(data.cell().get_reference_as_slice(child_index));
+    };
+
+    // Return the last slice as data
+    Ok(if is_key_empty {
+        Some(match prev {
+            Some((prev, child_index)) => {
+                let cell = match prev.reference_cloned(child_index) {
+                    Some(cell) => cell,
+                    None => return Err(Error::CellUnderflow),
+                };
+                (cell, data.range())
+            }
+            None => (root.clone(), data.range()),
+        })
+    } else {
+        None
+    })
+}
+
 /// Loads a non-empty dictionary from the root cell.
 pub fn dict_load_from_root(
     slice: &mut CellSlice<'_>,

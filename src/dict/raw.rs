@@ -2,7 +2,10 @@ use crate::cell::*;
 use crate::error::Error;
 use crate::util::{unlikely, IterStatus};
 
-use super::{dict_get, dict_insert, dict_load_from_root, dict_remove_owned, read_label, SetMode};
+use super::{
+    dict_get, dict_get_owned, dict_insert, dict_load_from_root, dict_remove_owned, read_label,
+    SetMode,
+};
 
 /// Dictionary with fixed length keys (where `N` is a number of bits in each key).
 ///
@@ -125,8 +128,13 @@ impl<const N: u16> RawDict<N> {
     }
 
     /// Returns a `CellSlice` of the value corresponding to the key.
-    pub fn get<'a: 'b, 'b>(&'a self, key: CellSlice<'b>) -> Result<Option<CellSlice<'a>>, Error> {
+    pub fn get<'a>(&'a self, key: CellSlice<'_>) -> Result<Option<CellSlice<'a>>, Error> {
         dict_get(&self.0, N, key)
+    }
+
+    /// Returns cell slice parts of the value corresponding to the key.
+    pub fn get_owned(&self, key: CellSlice<'_>) -> Result<Option<CellSliceParts>, Error> {
+        dict_get_owned(&self.0, N, key)
     }
 
     /// Returns `true` if the dictionary contains a value for the specified key.
@@ -741,6 +749,11 @@ mod tests {
 
         let key = CellBuilder::build_from(u32::from_be_bytes(123u32.to_le_bytes()))?;
         let value = dict.get(key.as_slice()?)?.unwrap();
+
+        {
+            let (cell, range) = dict.get_owned(key.as_slice()?)?.unwrap();
+            assert_eq!(range.apply(&cell).unwrap(), value);
+        }
 
         let value = {
             let mut builder = CellBuilder::new();
