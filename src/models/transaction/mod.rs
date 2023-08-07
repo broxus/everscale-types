@@ -1,4 +1,4 @@
-//! Message models.
+//! Transaction models.
 
 use crate::cell::*;
 use crate::dict::{self, Dict};

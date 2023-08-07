@@ -14,6 +14,7 @@ pub use global_version::*;
 pub use message::*;
 pub use shard::*;
 pub use transaction::*;
+pub use vm::*;
 
 pub mod account;
 pub mod block;
@@ -23,6 +24,7 @@ pub mod global_version;
 pub mod message;
 pub mod shard;
 pub mod transaction;
+pub mod vm;
 
 #[cfg(feature = "sync")]
 #[doc(hidden)]

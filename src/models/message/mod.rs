@@ -14,6 +14,70 @@ mod address;
 #[cfg(test)]
 mod tests;
 
+/// Lazy-loaded message model.
+#[derive(Debug, Clone, Eq)]
+#[repr(transparent)]
+pub struct LazyMessage(Cell);
+
+impl LazyMessage {
+    /// Serializes the provided data and returns the typed wrapper around it.
+    pub fn new(data: &Message) -> Result<Self, Error> {
+        let mut builder = CellBuilder::new();
+        let finalizer = &mut Cell::default_finalizer();
+        ok!(data.store_into(&mut builder, finalizer));
+        Ok(Self::from_raw(ok!(builder.build_ext(finalizer))))
+    }
+
+    /// Wraps the cell in a typed wrapper.
+    #[inline]
+    pub fn from_raw(cell: Cell) -> Self {
+        Self(cell)
+    }
+
+    /// Converts into the underlying cell.
+    #[inline]
+    pub fn into_inner(self) -> Cell {
+        self.0
+    }
+
+    /// Returns the underlying cell.
+    #[inline]
+    pub fn inner(&self) -> &Cell {
+        &self.0
+    }
+
+    /// Loads inner data from cell.
+    pub fn load(&self) -> Result<Message<'_>, Error> {
+        self.0.as_ref().parse::<Message>()
+    }
+}
+
+impl PartialEq for LazyMessage {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.0.as_ref() == other.0.as_ref()
+    }
+}
+
+impl PartialEq<Cell> for LazyMessage {
+    #[inline]
+    fn eq(&self, other: &Cell) -> bool {
+        self.0.as_ref() == other.as_ref()
+    }
+}
+
+impl Store for LazyMessage {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
+        builder.store_reference(self.0.clone())
+    }
+}
+
+impl<'a> Load<'a> for LazyMessage {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
+        slice.load_reference_cloned().map(Self)
+    }
+}
+
 /// Blockchain message.
 #[derive(Debug, Clone)]
 pub struct Message<'a> {
