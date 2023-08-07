@@ -3,8 +3,8 @@ use crate::error::Error;
 use crate::util::{unlikely, IterStatus};
 
 use super::{
-    dict_get, dict_get_owned, dict_insert, dict_load_from_root, dict_remove_owned, read_label,
-    SetMode,
+    dict_find_bound, dict_find_bound_owned, dict_get, dict_get_owned, dict_insert,
+    dict_load_from_root, dict_remove_owned, read_label, DictBound, SetMode,
 };
 
 /// Dictionary with fixed length keys (where `N` is a number of bits in each key).
@@ -135,6 +135,50 @@ impl<const N: u16> RawDict<N> {
     /// Returns cell slice parts of the value corresponding to the key.
     pub fn get_owned(&self, key: CellSlice<'_>) -> Result<Option<CellSliceParts>, Error> {
         dict_get_owned(&self.0, N, key)
+    }
+
+    /// Returns the lowest key and a value corresponding to the key.
+    pub fn get_min(&self, signed: bool) -> Result<Option<(CellBuilder, CellSlice<'_>)>, Error> {
+        dict_find_bound(&self.0, N, DictBound::Min, signed)
+    }
+
+    /// Returns the largest key and a value corresponding to the key.
+    pub fn get_max(&self, signed: bool) -> Result<Option<(CellBuilder, CellSlice<'_>)>, Error> {
+        dict_find_bound(&self.0, N, DictBound::Max, signed)
+    }
+
+    /// Finds the specified dict bound and returns a key and a value corresponding to the key.
+    pub fn get_bound(
+        &self,
+        bound: DictBound,
+        signed: bool,
+    ) -> Result<Option<(CellBuilder, CellSlice<'_>)>, Error> {
+        dict_find_bound(&self.0, N, bound, signed)
+    }
+
+    /// Returns the lowest key and cell slice parts corresponding to the key.
+    pub fn get_min_owned(
+        &self,
+        signed: bool,
+    ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
+        dict_find_bound_owned(&self.0, N, DictBound::Min, signed)
+    }
+
+    /// Returns the largest key and cell slice parts corresponding to the key.
+    pub fn get_max_owned(
+        &self,
+        signed: bool,
+    ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
+        dict_find_bound_owned(&self.0, N, DictBound::Max, signed)
+    }
+
+    /// Finds the specified dict bound and returns a key and cell slice parts corresponding to the key.
+    pub fn get_bound_owned(
+        &self,
+        bound: DictBound,
+        signed: bool,
+    ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
+        dict_find_bound_owned(&self.0, N, bound, signed)
     }
 
     /// Returns `true` if the dictionary contains a value for the specified key.

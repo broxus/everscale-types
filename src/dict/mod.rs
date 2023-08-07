@@ -487,6 +487,158 @@ pub fn dict_get_owned(
     })
 }
 
+/// Finds the specified dict bound and returns a key and a value corresponding to the key.
+pub fn dict_find_bound<'a: 'b, 'b>(
+    root: &'a Option<Cell>,
+    mut key_bit_len: u16,
+    bound: DictBound,
+    signed: bool,
+) -> Result<Option<(CellBuilder, CellSlice<'b>)>, Error> {
+    let mut data = match root {
+        Some(data) => ok!(data.as_slice()),
+        None => return Ok(None),
+    };
+
+    let mut direction = None;
+    let mut key = CellBuilder::new();
+
+    // Try to find the required leaf
+    loop {
+        // Read the key part written in the current edge
+        let prefix = ok!(read_label(&mut data, key_bit_len));
+        #[allow(clippy::needless_borrow)]
+        if !prefix.is_data_empty() {
+            ok!(key.store_slice_data(&prefix));
+        }
+
+        match key_bit_len.checked_sub(prefix.remaining_bits()) {
+            Some(0) => break,
+            Some(remaining) => {
+                key_bit_len = remaining;
+                if data.remaining_refs() < 2 {
+                    return Err(Error::CellUnderflow);
+                }
+            }
+            None => return Err(Error::CellUnderflow),
+        }
+
+        if key_bit_len < 1 {
+            return Err(Error::CellUnderflow);
+        }
+        key_bit_len -= 1;
+
+        let child_index = match direction {
+            // Compute direction by the first part
+            None => {
+                let mut child_index = *direction.insert(bound.into_bit());
+                // Invert first bit for signed keys if starting from the empty part
+                if signed && prefix.is_data_empty() {
+                    child_index = !child_index;
+                }
+                child_index
+            }
+            // Use the same direction for all remaining parts
+            Some(direction) => direction,
+        };
+
+        ok!(key.store_bit(child_index));
+
+        // Load next child based on the next bit
+        data = ok!(data.cell().get_reference_as_slice(child_index as u8));
+    }
+
+    // Return the last slice as data
+    Ok(Some((key, data)))
+}
+
+/// Finds the specified dict bound and returns a key and cell slice parts corresponding to the key.
+pub fn dict_find_bound_owned(
+    root: &Option<Cell>,
+    mut key_bit_len: u16,
+    bound: DictBound,
+    signed: bool,
+) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
+    let Some(root) = root else {
+        return Ok(None);
+    };
+    let mut data = ok!(root.as_slice());
+    let mut prev = None;
+
+    let mut direction = None;
+    let mut key = CellBuilder::new();
+
+    // Try to find the required leaf
+    loop {
+        // Read the key part written in the current edge
+        let prefix = ok!(read_label(&mut data, key_bit_len));
+        #[allow(clippy::needless_borrow)]
+        if !prefix.is_data_empty() {
+            ok!(key.store_slice_data(&prefix));
+        }
+
+        match key_bit_len.checked_sub(prefix.remaining_bits()) {
+            Some(0) => break,
+            Some(remaining) => {
+                key_bit_len = remaining;
+                if data.remaining_refs() < 2 {
+                    return Err(Error::CellUnderflow);
+                }
+            }
+            None => return Err(Error::CellUnderflow),
+        }
+
+        let child_index = match direction {
+            // Compute direction by the first part
+            None => {
+                let mut child_index = *direction.insert(bound.into_bit());
+                // Invert first bit for signed keys if starting from the empty part
+                if signed && prefix.is_data_empty() {
+                    child_index = !child_index;
+                }
+                child_index
+            }
+            // Use the same direction for all remaining parts
+            Some(direction) => direction,
+        };
+
+        ok!(key.store_bit(child_index));
+
+        // Load next child based on the next bit
+        prev = Some((data.cell(), child_index));
+        data = ok!(data.cell().get_reference_as_slice(child_index as u8));
+    }
+
+    // Build cell slice parts
+    let slice = match prev {
+        Some((prev, child_index)) => {
+            let cell = match prev.reference_cloned(child_index as u8) {
+                Some(cell) => cell,
+                None => return Err(Error::CellUnderflow),
+            };
+            (cell, data.range())
+        }
+        None => (root.clone(), data.range()),
+    };
+
+    // Return the last slice as data
+    Ok(Some((key, slice)))
+}
+
+/// Dictionary bound.
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub enum DictBound {
+    /// The lowest dictionary key.
+    Min,
+    /// The largest dictionary key.
+    Max,
+}
+
+impl DictBound {
+    fn into_bit(self) -> bool {
+        self == Self::Max
+    }
+}
+
 /// Loads a non-empty dictionary from the root cell.
 pub fn dict_load_from_root(
     slice: &mut CellSlice<'_>,

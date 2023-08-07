@@ -6,7 +6,7 @@ use crate::dict::dict_remove_owned;
 use crate::error::Error;
 use crate::util::*;
 
-use super::raw::*;
+use super::{dict_find_bound, raw::*, DictBound};
 use super::{dict_get, dict_insert, dict_load_from_root, serialize_entry, DictKey, SetMode};
 
 /// Typed dictionary with fixed length keys.
@@ -300,6 +300,43 @@ where
         V: Load<'a>,
     {
         Values::new(&self.root, K::BITS)
+    }
+
+    /// Returns the lowest key and a value corresponding to the key.
+    pub fn get_min<'a>(&'a self, signed: bool) -> Result<Option<(K, V)>, Error>
+    where
+        V: Load<'a>,
+    {
+        Ok(match ok!(self.get_bound_raw(DictBound::Min, signed)) {
+            Some((key, ref mut value)) => Some((key, ok!(V::load_from(value)))),
+            None => None,
+        })
+    }
+
+    /// Returns the lowest key and a value corresponding to the key.
+    pub fn get_max<'a>(&'a self, signed: bool) -> Result<Option<(K, V)>, Error>
+    where
+        V: Load<'a>,
+    {
+        Ok(match ok!(self.get_bound_raw(DictBound::Max, signed)) {
+            Some((key, ref mut value)) => Some((key, ok!(V::load_from(value)))),
+            None => None,
+        })
+    }
+
+    /// Finds the specified dict bound and returns a key and a raw value corresponding to the key.
+    pub fn get_bound_raw(
+        &self,
+        bound: DictBound,
+        signed: bool,
+    ) -> Result<Option<(K, CellSlice<'_>)>, Error> {
+        let Some((key, value)) = ok!(dict_find_bound(&self.root, K::BITS, bound, signed)) else {
+            return Ok(None);
+        };
+        match K::from_raw_data(key.raw_data()) {
+            Some(key) => Ok(Some((key, value))),
+            None => Err(Error::CellUnderflow),
+        }
     }
 }
 
@@ -706,6 +743,20 @@ mod tests {
         for i in 0..520 {
             dict.set(i, true).unwrap();
         }
+    }
+
+    #[test]
+    fn dict_bounds() {
+        let mut dict = Dict::<i32, bool>::new();
+        for i in -10..=10 {
+            dict.set(i, i < 0).unwrap();
+        }
+
+        assert_eq!(dict.get_min(false).unwrap(), Some((0, false)));
+        assert_eq!(dict.get_max(false).unwrap(), Some((-1, true)));
+
+        assert_eq!(dict.get_min(true).unwrap(), Some((-10, true)));
+        assert_eq!(dict.get_max(true).unwrap(), Some((10, false)));
     }
 
     #[test]
