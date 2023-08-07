@@ -514,37 +514,19 @@ pub fn dict_find_bound<'a: 'b, 'b>(
         match key_bit_len.checked_sub(prefix.remaining_bits()) {
             Some(0) => break,
             Some(remaining) => {
-                key_bit_len = remaining;
                 if data.remaining_refs() < 2 {
                     return Err(Error::CellUnderflow);
                 }
+                key_bit_len = remaining - 1;
             }
             None => return Err(Error::CellUnderflow),
         }
 
-        if key_bit_len < 1 {
-            return Err(Error::CellUnderflow);
-        }
-        key_bit_len -= 1;
-
-        let child_index = match direction {
-            // Compute direction by the first part
-            None => {
-                let mut child_index = *direction.insert(bound.into_bit());
-                // Invert first bit for signed keys if starting from the empty part
-                if signed && prefix.is_data_empty() {
-                    child_index = !child_index;
-                }
-                child_index
-            }
-            // Use the same direction for all remaining parts
-            Some(direction) => direction,
-        };
-
-        ok!(key.store_bit(child_index));
+        let next_branch = bound.update_direction(&prefix, signed, &mut direction);
+        ok!(key.store_bit(next_branch.into_bit()));
 
         // Load next child based on the next bit
-        data = ok!(data.cell().get_reference_as_slice(child_index as u8));
+        data = ok!(data.cell().get_reference_as_slice(next_branch as u8));
     }
 
     // Return the last slice as data
@@ -579,39 +561,26 @@ pub fn dict_find_bound_owned(
         match key_bit_len.checked_sub(prefix.remaining_bits()) {
             Some(0) => break,
             Some(remaining) => {
-                key_bit_len = remaining;
                 if data.remaining_refs() < 2 {
                     return Err(Error::CellUnderflow);
                 }
+                key_bit_len = remaining - 1;
             }
             None => return Err(Error::CellUnderflow),
         }
 
-        let child_index = match direction {
-            // Compute direction by the first part
-            None => {
-                let mut child_index = *direction.insert(bound.into_bit());
-                // Invert first bit for signed keys if starting from the empty part
-                if signed && prefix.is_data_empty() {
-                    child_index = !child_index;
-                }
-                child_index
-            }
-            // Use the same direction for all remaining parts
-            Some(direction) => direction,
-        };
-
-        ok!(key.store_bit(child_index));
+        let next_branch = bound.update_direction(&prefix, signed, &mut direction);
+        ok!(key.store_bit(next_branch.into_bit()));
 
         // Load next child based on the next bit
-        prev = Some((data.cell(), child_index));
-        data = ok!(data.cell().get_reference_as_slice(child_index as u8));
+        prev = Some((data.cell(), next_branch));
+        data = ok!(data.cell().get_reference_as_slice(next_branch as u8));
     }
 
     // Build cell slice parts
     let slice = match prev {
-        Some((prev, child_index)) => {
-            let cell = match prev.reference_cloned(child_index as u8) {
+        Some((prev, next_branch)) => {
+            let cell = match prev.reference_cloned(next_branch as u8) {
                 Some(cell) => cell,
                 None => return Err(Error::CellUnderflow),
             };
@@ -624,6 +593,132 @@ pub fn dict_find_bound_owned(
     Ok(Some((key, slice)))
 }
 
+/// Removes the specified dict bound and returns a removed key and cell slice parts.
+pub fn dict_remove_bound_owned(
+    root: &Option<Cell>,
+    mut key_bit_len: u16,
+    bound: DictBound,
+    signed: bool,
+    finalizer: &mut dyn Finalizer,
+) -> Result<(Option<Cell>, Option<DictOwnedEntry>), Error> {
+    let Some(root) = root else {
+        return Ok((None, None));
+    };
+    let mut data = root.as_ref();
+
+    let mut stack = Vec::<Segment>::new();
+
+    let mut direction = None;
+    let mut key = CellBuilder::new();
+
+    // Try to find the required leaf
+    let mut prev_key_bit_len = key_bit_len;
+    let removed = loop {
+        let mut remaining_data = ok!(data.as_slice());
+
+        // Read the key part written in the current edge
+        let prefix = ok!(read_label(&mut remaining_data, key_bit_len));
+        #[allow(clippy::needless_borrow)]
+        if !prefix.is_data_empty() {
+            ok!(key.store_slice_data(&prefix));
+        }
+
+        match key_bit_len.checked_sub(prefix.remaining_bits()) {
+            Some(0) => break remaining_data.range(),
+            Some(remaining) => {
+                if remaining_data.remaining_refs() < 2 {
+                    return Err(Error::CellUnderflow);
+                }
+                prev_key_bit_len = key_bit_len;
+                key_bit_len = remaining - 1;
+            }
+            None => return Err(Error::CellUnderflow),
+        };
+
+        let next_branch = bound.update_direction(&prefix, signed, &mut direction);
+        ok!(key.store_bit(next_branch.into_bit()));
+
+        let child = match data.reference(next_branch as u8) {
+            Some(child) => {
+                // Handle pruned branch access
+                if unlikely(child.descriptor().is_pruned_branch()) {
+                    return Err(Error::PrunedBranchAccess);
+                }
+                child
+            }
+            None => return Err(Error::CellUnderflow),
+        };
+
+        // Push an intermediate edge to the stack
+        stack.push(Segment { data, next_branch });
+        data = child;
+    };
+
+    // Rebuild the leaf node
+    let (mut leaf, removed) = if let Some(last) = stack.pop() {
+        let index = last.next_branch as u8;
+
+        // Load value branch
+        let Some(value) = last.data.reference_cloned(index) else {
+            return Err(Error::CellUnderflow);
+        };
+
+        // Load parent label
+        let pfx = {
+            // SAFETY: `last.data` was already checked for pruned branch access.
+            let mut parent = unsafe { last.data.as_slice_unchecked() };
+            ok!(read_label(&mut parent, prev_key_bit_len))
+        };
+
+        // Load the opposite branch
+        let mut opposite = ok!(last.data.get_reference_as_slice(1 - index));
+        let rem = ok!(read_label(&mut opposite, key_bit_len));
+
+        // Build an edge cell
+        let mut builder = CellBuilder::new();
+        ok!(write_label_parts(
+            &pfx,
+            index == 0,
+            &rem,
+            prev_key_bit_len,
+            &mut builder
+        ));
+        ok!(builder.store_slice(opposite));
+        let leaf = ok!(builder.build_ext(finalizer));
+
+        // Return the new cell and the removed one
+        (leaf, (value, removed))
+    } else {
+        return Ok((None, Some((key, (root.clone(), removed)))));
+    };
+
+    // Rebuild the tree starting from leaves
+    while let Some(last) = stack.pop() {
+        // Load the opposite branch
+        let (left, right) = match last.next_branch {
+            Branch::Left => match last.data.reference_cloned(1) {
+                Some(cell) => (leaf, cell),
+                None => return Err(Error::CellUnderflow),
+            },
+            Branch::Right => match last.data.reference_cloned(0) {
+                Some(cell) => (cell, leaf),
+                None => return Err(Error::CellUnderflow),
+            },
+        };
+
+        let mut builder = CellBuilder::new();
+        ok!(builder.store_cell_data(last.data));
+        ok!(builder.store_reference(left));
+        ok!(builder.store_reference(right));
+        leaf = ok!(builder.build_ext(finalizer));
+    }
+
+    Ok((Some(leaf), Some((key, removed))))
+}
+
+/// Type alias for a pair of key and value as cell slice parts.
+pub type DictOwnedEntry = (CellBuilder, CellSliceParts);
+
 /// Dictionary bound.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub enum DictBound {
@@ -634,8 +729,32 @@ pub enum DictBound {
 }
 
 impl DictBound {
-    fn into_bit(self) -> bool {
-        self == Self::Max
+    fn update_direction(
+        self,
+        prefix: &CellSlice<'_>,
+        signed: bool,
+        direction: &mut Option<Branch>,
+    ) -> Branch {
+        match direction {
+            // Compute direction by the first part
+            None => {
+                let mut branch = *direction.insert(self.into_branch());
+                // Invert first bit for signed keys if starting from the empty part
+                if signed && prefix.is_data_empty() {
+                    branch = branch.reversed();
+                }
+                branch
+            }
+            // Use the same direction for all remaining parts
+            Some(direction) => *direction,
+        }
+    }
+
+    fn into_branch(self) -> Branch {
+        match self {
+            Self::Min => Branch::Left,
+            Self::Max => Branch::Right,
+        }
     }
 }
 
@@ -837,6 +956,19 @@ enum Branch {
     Left = 0,
     // Branch for a key part that starts with bit 1
     Right = 1,
+}
+
+impl Branch {
+    fn into_bit(self) -> bool {
+        self == Self::Right
+    }
+
+    fn reversed(self) -> Self {
+        match self {
+            Self::Left => Self::Right,
+            Self::Right => Self::Left,
+        }
+    }
 }
 
 #[cfg(test)]

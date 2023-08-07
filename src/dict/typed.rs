@@ -6,8 +6,11 @@ use crate::dict::dict_remove_owned;
 use crate::error::Error;
 use crate::util::*;
 
-use super::{dict_find_bound, raw::*, DictBound};
-use super::{dict_get, dict_insert, dict_load_from_root, serialize_entry, DictKey, SetMode};
+use super::{
+    dict_find_bound, dict_get, dict_insert, dict_load_from_root, serialize_entry, DictBound,
+    DictKey, SetMode,
+};
+use super::{dict_remove_bound_owned, raw::*};
 
 /// Typed dictionary with fixed length keys.
 pub struct Dict<K, V> {
@@ -196,6 +199,40 @@ where
     {
         self.remove_raw_ext(key, &mut Cell::default_finalizer())
     }
+
+    /// Removes the lowest key from the dict.
+    /// Returns an optional removed key and value as cell slice parts.
+    ///
+    /// Use [`remove_bound_ext`] if you need to use a custom finalizer.
+    ///
+    /// [`remove_bound_ext`]: RawDict::remove_bound_ext
+    pub fn remove_min_raw(&mut self, signed: bool) -> Result<Option<(K, CellSliceParts)>, Error> {
+        self.remove_bound_raw_ext(DictBound::Min, signed, &mut Cell::default_finalizer())
+    }
+
+    /// Removes the largest key from the dict.
+    /// Returns an optional removed key and value as cell slice parts.
+    ///
+    /// Use [`remove_bound_ext`] if you need to use a custom finalizer.
+    ///
+    /// [`remove_bound_ext`]: RawDict::remove_bound_ext
+    pub fn remove_max_raw(&mut self, signed: bool) -> Result<Option<(K, CellSliceParts)>, Error> {
+        self.remove_bound_raw_ext(DictBound::Max, signed, &mut Cell::default_finalizer())
+    }
+
+    /// Removes the specified dict bound.
+    /// Returns an optional removed key and value as cell slice parts.
+    ///
+    /// Use [`remove_bound_ext`] if you need to use a custom finalizer.
+    ///
+    /// [`remove_bound_ext`]: RawDict::remove_bound_ext
+    pub fn remove_bound_raw(
+        &mut self,
+        bound: DictBound,
+        signed: bool,
+    ) -> Result<Option<(K, CellSliceParts)>, Error> {
+        self.remove_bound_raw_ext(bound, signed, &mut Cell::default_finalizer())
+    }
 }
 
 impl<K, V> Dict<K, V>
@@ -337,6 +374,33 @@ where
             Some(key) => Ok(Some((key, value))),
             None => Err(Error::CellUnderflow),
         }
+    }
+
+    /// Removes the specified dict bound.
+    /// Returns an optional removed key and value as cell slice parts.
+    ///
+    /// Key and dict are serialized using the provided finalizer.
+    pub fn remove_bound_raw_ext(
+        &mut self,
+        bound: DictBound,
+        signed: bool,
+        finalizer: &mut dyn Finalizer,
+    ) -> Result<Option<(K, CellSliceParts)>, Error> {
+        let (dict, removed) = ok!(dict_remove_bound_owned(
+            &self.root,
+            K::BITS,
+            bound,
+            signed,
+            finalizer
+        ));
+        self.root = dict;
+        Ok(match removed {
+            Some((key, value)) => match K::from_raw_data(key.raw_data()) {
+                Some(key) => Some((key, value)),
+                None => return Err(Error::CellUnderflow),
+            },
+            None => None,
+        })
     }
 }
 
@@ -757,6 +821,68 @@ mod tests {
 
         assert_eq!(dict.get_min(true).unwrap(), Some((-10, true)));
         assert_eq!(dict.get_max(true).unwrap(), Some((10, false)));
+    }
+
+    #[test]
+    fn dict_remove_bounds() {
+        let mut dict = Dict::<i32, bool>::new();
+        for i in -10..=10 {
+            dict.set(i, i < 0).unwrap();
+        }
+
+        let parse_removed = |(i, (cell, range)): (i32, CellSliceParts)| {
+            let mut value = range.apply(&cell)?;
+            let value = bool::load_from(&mut value)?;
+            Ok::<_, Error>((i, value))
+        };
+
+        // Min, unsigned
+        {
+            let mut dict = dict.clone();
+            for i in 0..=10 {
+                let removed = dict.remove_min_raw(false).unwrap().unwrap();
+                assert_eq!(parse_removed(removed).unwrap(), (i, false));
+            }
+            for i in -10..=-1 {
+                let removed = dict.remove_min_raw(false).unwrap().unwrap();
+                assert_eq!(parse_removed(removed).unwrap(), (i, true));
+            }
+            assert!(dict.is_empty());
+        }
+
+        // Min, signed
+        {
+            let mut dict = dict.clone();
+            for i in -10..=10 {
+                let removed = dict.remove_min_raw(true).unwrap().unwrap();
+                assert_eq!(parse_removed(removed).unwrap(), (i, i < 0));
+            }
+            assert!(dict.is_empty());
+        }
+
+        // Max, unsigned
+        {
+            let mut dict = dict.clone();
+            for i in (-10..=-1).rev() {
+                let removed = dict.remove_max_raw(false).unwrap().unwrap();
+                assert_eq!(parse_removed(removed).unwrap(), (i, true));
+            }
+            for i in (0..=10).rev() {
+                let removed = dict.remove_max_raw(false).unwrap().unwrap();
+                assert_eq!(parse_removed(removed).unwrap(), (i, false));
+            }
+            assert!(dict.is_empty());
+        }
+
+        // Max, signed
+        {
+            let mut dict = dict.clone();
+            for i in (-10..=10).rev() {
+                let removed = dict.remove_max_raw(true).unwrap().unwrap();
+                assert_eq!(parse_removed(removed).unwrap(), (i, i < 0));
+            }
+            assert!(dict.is_empty());
+        }
     }
 
     #[test]

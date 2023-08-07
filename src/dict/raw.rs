@@ -4,7 +4,8 @@ use crate::util::{unlikely, IterStatus};
 
 use super::{
     dict_find_bound, dict_find_bound_owned, dict_get, dict_get_owned, dict_insert,
-    dict_load_from_root, dict_remove_owned, read_label, DictBound, SetMode,
+    dict_load_from_root, dict_remove_bound_owned, dict_remove_owned, read_label, DictBound,
+    DictOwnedEntry, SetMode,
 };
 
 /// Dictionary with fixed length keys (where `N` is a number of bits in each key).
@@ -254,6 +255,21 @@ impl<const N: u16> RawDict<N> {
         Ok(removed)
     }
 
+    /// Removes the specified dict bound.
+    /// Returns an optional removed key and value as cell slice parts.
+    pub fn remove_bound_ext(
+        &mut self,
+        bound: DictBound,
+        signed: bool,
+        finalizer: &mut dyn Finalizer,
+    ) -> Result<Option<DictOwnedEntry>, Error> {
+        let (dict, removed) = ok!(dict_remove_bound_owned(
+            &self.0, N, bound, signed, finalizer
+        ));
+        self.0 = dict;
+        Ok(removed)
+    }
+
     /// Gets an iterator over the entries of the dictionary, sorted by key.
     /// The iterator element type is `Result<(CellBuilder, CellSlice)>`.
     ///
@@ -332,6 +348,40 @@ impl<const N: u16> RawDict<N> {
     /// [`remove_ext`]: RawDict::remove_ext
     pub fn remove(&mut self, key: CellSlice<'_>) -> Result<Option<CellSliceParts>, Error> {
         self.remove_ext(key, &mut Cell::default_finalizer())
+    }
+
+    /// Removes the lowest key from the dict.
+    /// Returns an optional removed key and value as cell slice parts.
+    ///
+    /// Use [`remove_bound_ext`] if you need to use a custom finalizer.
+    ///
+    /// [`remove_bound_ext`]: RawDict::remove_bound_ext
+    pub fn remove_min(&mut self, signed: bool) -> Result<Option<DictOwnedEntry>, Error> {
+        self.remove_bound_ext(DictBound::Min, signed, &mut Cell::default_finalizer())
+    }
+
+    /// Removes the largest key from the dict.
+    /// Returns an optional removed key and value as cell slice parts.
+    ///
+    /// Use [`remove_bound_ext`] if you need to use a custom finalizer.
+    ///
+    /// [`remove_bound_ext`]: RawDict::remove_bound_ext
+    pub fn remove_max(&mut self, signed: bool) -> Result<Option<DictOwnedEntry>, Error> {
+        self.remove_bound_ext(DictBound::Max, signed, &mut Cell::default_finalizer())
+    }
+
+    /// Removes the specified dict bound.
+    /// Returns an optional removed key and value as cell slice parts.
+    ///
+    /// Use [`remove_bound_ext`] if you need to use a custom finalizer.
+    ///
+    /// [`remove_bound_ext`]: RawDict::remove_bound_ext
+    pub fn remove_bound(
+        &mut self,
+        bound: DictBound,
+        signed: bool,
+    ) -> Result<Option<DictOwnedEntry>, Error> {
+        self.remove_bound_ext(bound, signed, &mut Cell::default_finalizer())
     }
 }
 
