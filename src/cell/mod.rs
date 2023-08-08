@@ -3,6 +3,7 @@
 use std::ops::{BitOr, BitOrAssign};
 
 use crate::error::Error;
+use crate::util::Bitstring;
 
 pub use self::builder::{CellBuilder, CellRefsBuilder, Store};
 pub use self::cell_impl::{StaticCell, VirtualCellWrapper};
@@ -247,6 +248,27 @@ impl DynCell {
     #[inline]
     pub fn display_tree(&'_ self) -> DisplayCellTree<'_> {
         DisplayCellTree(self)
+    }
+
+    /// Returns an object which will display cell data as a bitstring
+    /// with a termination bit.
+    #[inline]
+    pub fn display_data(&self) -> impl std::fmt::Display + '_ {
+        struct DisplayData<'a>(&'a DynCell);
+
+        impl std::fmt::Display for DisplayData<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                std::fmt::Display::fmt(
+                    &Bitstring {
+                        bytes: self.0.data(),
+                        bit_len: self.0.bit_len(),
+                    },
+                    f,
+                )
+            }
+        }
+
+        DisplayData(self)
     }
 
     /// Converts this cell into a slice and tries to load the specified type from it.

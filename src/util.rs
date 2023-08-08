@@ -152,6 +152,54 @@ pub trait TryAsMut<T: ?Sized> {
     fn try_as_mut(&mut self) -> Option<&mut T>;
 }
 
+/// A wrapper around arbitrary data with the specified bit length.
+pub struct Bitstring<'a> {
+    /// Underlying bytes (with or without termination bit).
+    pub bytes: &'a [u8],
+    /// Length of data in bits.
+    pub bit_len: u16,
+}
+
+impl std::fmt::Display for Bitstring<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        const CHUNK_LEN: usize = 16;
+
+        let bit_len = std::cmp::min(self.bit_len as usize, self.bytes.len() * 8) as u16;
+        let byte_len = ((bit_len + 7) / 8) as usize;
+        let bytes = &self.bytes[..byte_len];
+
+        let rem = bit_len % 8;
+        let (bytes, last_byte) = match bytes.split_last() {
+            Some((last_byte, bytes)) if rem != 0 => {
+                let tag_mask: u8 = 1 << (7 - rem);
+                let data_mask = !(tag_mask - 1);
+                let last_byte = (*last_byte & data_mask) | tag_mask;
+                (bytes, Some(last_byte))
+            }
+            _ => (bytes, None),
+        };
+
+        let mut chunk = [0u8; CHUNK_LEN * 2];
+        for data in bytes.chunks(CHUNK_LEN) {
+            let chunk = &mut chunk[..data.len() * 2];
+            hex::encode_to_slice(data, chunk).unwrap();
+
+            // SAFETY: result was constructed from valid ascii `HEX_CHARS_LOWER`
+            ok!(f.write_str(unsafe { std::str::from_utf8_unchecked(chunk) }));
+        }
+
+        if let Some(mut last_byte) = last_byte {
+            let tag = if rem % 4 != 0 { "_" } else { "" };
+            if rem <= 4 {
+                last_byte >>= 4;
+            }
+            ok!(write!(f, "{last_byte:x}{tag}"));
+        }
+
+        Ok(())
+    }
+}
+
 pub(crate) fn debug_tuple_field1_finish(
     f: &mut std::fmt::Formatter<'_>,
     name: &str,

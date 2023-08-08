@@ -9,7 +9,7 @@ use crate::cell::{
     MAX_REF_COUNT,
 };
 use crate::error::Error;
-use crate::util::ArrayVec;
+use crate::util::{ArrayVec, Bitstring};
 
 #[cfg(feature = "stats")]
 use super::CellTreeStats;
@@ -869,6 +869,26 @@ impl CellBuilder {
     /// [`default_finalizer`]: fn@DefaultFinalizer::default_finalizer
     pub fn build(self) -> Result<Cell, Error> {
         self.build_ext(&mut Cell::default_finalizer())
+    }
+
+    /// Returns an object which will display data as a bitstring
+    /// with a termination bit.
+    pub fn display_data(&self) -> impl std::fmt::Display + '_ {
+        struct DisplayData<'a>(&'a CellBuilder);
+
+        impl std::fmt::Display for DisplayData<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                std::fmt::Display::fmt(
+                    &Bitstring {
+                        bytes: &self.0.data,
+                        bit_len: self.0.bit_len,
+                    },
+                    f,
+                )
+            }
+        }
+
+        DisplayData(self)
     }
 }
 
