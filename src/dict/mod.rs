@@ -194,26 +194,7 @@ pub fn dict_remove_owned(
         return Ok((None, Some((root.clone(), removed))));
     };
 
-    // Rebuild the tree starting from leaves
-    while let Some(last) = stack.pop() {
-        // Load the opposite branch
-        let (left, right) = match last.next_branch {
-            Branch::Left => match last.data.reference_cloned(1) {
-                Some(cell) => (leaf, cell),
-                None => return Err(Error::CellUnderflow),
-            },
-            Branch::Right => match last.data.reference_cloned(0) {
-                Some(cell) => (cell, leaf),
-                None => return Err(Error::CellUnderflow),
-            },
-        };
-
-        let mut builder = CellBuilder::new();
-        ok!(builder.store_cell_data(last.data));
-        ok!(builder.store_reference(left));
-        ok!(builder.store_reference(right));
-        leaf = ok!(builder.build_ext(finalizer));
-    }
+    leaf = ok!(rebuild_dict_from_stack(stack, leaf, finalizer));
 
     Ok((Some(leaf), Some(removed)))
 }
@@ -358,26 +339,7 @@ pub fn dict_insert(
         }
     };
 
-    // Rebuild the tree starting from leaves
-    while let Some(last) = stack.pop() {
-        // Load the opposite branch
-        let (left, right) = match last.next_branch {
-            Branch::Left => match last.data.reference_cloned(1) {
-                Some(cell) => (leaf, cell),
-                None => return Err(Error::CellUnderflow),
-            },
-            Branch::Right => match last.data.reference_cloned(0) {
-                Some(cell) => (cell, leaf),
-                None => return Err(Error::CellUnderflow),
-            },
-        };
-
-        let mut builder = CellBuilder::new();
-        ok!(builder.store_cell_data(last.data));
-        ok!(builder.store_reference(left));
-        ok!(builder.store_reference(right));
-        leaf = ok!(builder.build_ext(finalizer));
-    }
+    leaf = ok!(rebuild_dict_from_stack(stack, leaf, finalizer));
 
     Ok(Some(leaf))
 }
@@ -485,6 +447,148 @@ pub fn dict_get_owned(
     } else {
         None
     })
+}
+
+/// Returns cell slice parts of the value corresponding to the key.
+pub fn dict_find_owned(
+    root: &Option<Cell>,
+    key_bit_len: u16,
+    mut key: CellSlice<'_>,
+    towards: DictBound,
+    inclusive: bool,
+    signed: bool,
+) -> Result<Option<DictOwnedEntry>, Error> {
+    if key.remaining_bits() != key_bit_len {
+        return Err(Error::CellUnderflow);
+    }
+
+    let Some(root) = root else {
+        return Ok(None);
+    };
+
+    let mut original_key_range = key.range();
+
+    let mut data = root.as_ref();
+    let mut stack = Vec::<(Segment, u16)>::new();
+
+    // Try to find the required leaf
+    let value_range = loop {
+        let mut remaining_data = ok!(data.as_slice());
+
+        // Read the next part of the key from the current data
+        let prefix = &mut ok!(read_label(&mut remaining_data, key.remaining_bits()));
+
+        // Remove this prefix from the key
+        match key.strip_data_prefix(prefix) {
+            Some(stripped_key) => {
+                if stripped_key.is_data_empty() {
+                    // All key parts were collected <=> value found
+                    break Some(remaining_data.range());
+                } else if data.reference_count() < 2 {
+                    // Reached leaf while key was not fully constructed
+                    return Err(Error::CellUnderflow);
+                } else {
+                    key = stripped_key;
+                }
+            }
+            None => break key.is_data_empty().then(|| remaining_data.range()),
+        }
+
+        // Load the next branch
+        let next_branch = match key.load_bit() {
+            Ok(false) => Branch::Left,
+            Ok(true) => Branch::Right,
+            Err(e) => return Err(e),
+        };
+
+        let child = match data.reference(next_branch as u8) {
+            Some(child) => {
+                // Handle pruned branch access
+                if unlikely(child.descriptor().is_pruned_branch()) {
+                    return Err(Error::PrunedBranchAccess);
+                }
+                child
+            }
+            None => return Err(Error::CellUnderflow),
+        };
+
+        // Push an intermediate edge to the stack
+        stack.push((Segment { data, next_branch }, key.remaining_bits()));
+        data = child;
+    };
+
+    // Return a value with the exact key
+    if inclusive {
+        if let Some(value_range) = value_range {
+            let cell = match stack.last() {
+                Some((Segment { data, next_branch }, _)) => {
+                    match data.reference_cloned(*next_branch as u8) {
+                        Some(cell) => cell,
+                        None => return Err(Error::CellUnderflow),
+                    }
+                }
+                None => root.clone(),
+            };
+
+            let original_key = ok!(original_key_range.apply(key.cell()));
+            let mut key = CellBuilder::new();
+            ok!(key.store_slice_data(original_key));
+
+            return Ok(Some((key, (cell, value_range))));
+        }
+    }
+
+    // Rewind back to the divergent branch
+    let target = towards.into_branch();
+    let (mut prev, mut next_branch, mut remaining_bits) = 'fork: {
+        while let Some((Segment { data, next_branch }, remaining_bits)) = stack.pop() {
+            let prefix_len = key_bit_len - remaining_bits;
+            if signed && stack.is_empty() && prefix_len == 1 && next_branch == target
+                || next_branch != target
+            {
+                original_key_range = original_key_range.get_prefix(prefix_len, 0);
+                break 'fork (data, next_branch.reversed(), remaining_bits);
+            }
+        }
+        // There is no next/prev element if rewind consumed all stack
+        return Ok(None);
+    };
+
+    let original_key = ok!(original_key_range.apply(key.cell()));
+    let mut key = CellBuilder::new();
+    ok!(key.store_slice_data(original_key));
+
+    // Try to find the required leaf
+    let value_range = loop {
+        let mut child = ok!(prev.get_reference_as_slice(next_branch as u8));
+
+        // Read the key part written in the current edge
+        let prefix = ok!(read_label(&mut child, remaining_bits));
+        #[allow(clippy::needless_borrow)]
+        if !prefix.is_data_empty() {
+            ok!(key.store_slice_data(&prefix));
+        }
+
+        match remaining_bits.checked_sub(prefix.remaining_bits()) {
+            Some(0) => break child.range(),
+            Some(remaining) => {
+                if child.remaining_refs() < 2 {
+                    return Err(Error::CellUnderflow);
+                }
+                remaining_bits = remaining - 1;
+            }
+            None => return Err(Error::CellUnderflow),
+        }
+
+        prev = child.cell();
+        next_branch = target;
+        ok!(key.store_bit(next_branch.into_bit()));
+    };
+
+    match prev.reference_cloned(next_branch as u8) {
+        Some(cell) => Ok(Some((key, (cell, value_range)))),
+        None => Err(Error::CellUnderflow),
+    }
 }
 
 /// Finds the specified dict bound and returns a key and a value corresponding to the key.
@@ -692,26 +796,7 @@ pub fn dict_remove_bound_owned(
         return Ok((None, Some((key, (root.clone(), removed)))));
     };
 
-    // Rebuild the tree starting from leaves
-    while let Some(last) = stack.pop() {
-        // Load the opposite branch
-        let (left, right) = match last.next_branch {
-            Branch::Left => match last.data.reference_cloned(1) {
-                Some(cell) => (leaf, cell),
-                None => return Err(Error::CellUnderflow),
-            },
-            Branch::Right => match last.data.reference_cloned(0) {
-                Some(cell) => (cell, leaf),
-                None => return Err(Error::CellUnderflow),
-            },
-        };
-
-        let mut builder = CellBuilder::new();
-        ok!(builder.store_cell_data(last.data));
-        ok!(builder.store_reference(left));
-        ok!(builder.store_reference(right));
-        leaf = ok!(builder.build_ext(finalizer));
-    }
+    leaf = ok!(rebuild_dict_from_stack(stack, leaf, finalizer));
 
     Ok((Some(leaf), Some((key, removed))))
 }
@@ -781,6 +866,35 @@ pub fn dict_load_from_root(
     let mut builder = CellBuilder::new();
     ok!(builder.store_slice(root));
     builder.build_ext(finalizer)
+}
+
+fn rebuild_dict_from_stack(
+    mut segments: Vec<Segment<'_>>,
+    mut leaf: Cell,
+    finalizer: &mut dyn Finalizer,
+) -> Result<Cell, Error> {
+    // Rebuild the tree starting from leaves
+    while let Some(last) = segments.pop() {
+        // Load the opposite branch
+        let (left, right) = match last.next_branch {
+            Branch::Left => match last.data.reference_cloned(1) {
+                Some(cell) => (leaf, cell),
+                None => return Err(Error::CellUnderflow),
+            },
+            Branch::Right => match last.data.reference_cloned(0) {
+                Some(cell) => (cell, leaf),
+                None => return Err(Error::CellUnderflow),
+            },
+        };
+
+        let mut builder = CellBuilder::new();
+        ok!(builder.store_cell_data(last.data));
+        ok!(builder.store_reference(left));
+        ok!(builder.store_reference(right));
+        leaf = ok!(builder.build_ext(finalizer));
+    }
+
+    Ok(leaf)
 }
 
 #[derive(Clone, Copy)]

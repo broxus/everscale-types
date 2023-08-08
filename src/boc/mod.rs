@@ -1,7 +1,5 @@
 //! BOC (Bag Of Cells) implementation.
 
-use std::borrow::Borrow;
-
 use crate::cell::{Cell, CellBuilder, DefaultFinalizer, DynCell, Finalizer, Load, Store};
 
 /// BOC decoder implementation.
@@ -55,7 +53,7 @@ impl Boc {
     #[cfg(any(feature = "base64", test))]
     pub fn encode_base64<T>(cell: T) -> String
     where
-        T: Borrow<DynCell>,
+        T: AsRef<DynCell>,
     {
         crate::util::encode_base64(Self::encode(cell))
     }
@@ -63,21 +61,21 @@ impl Boc {
     /// Encodes the specified cell tree as BOC.
     pub fn encode<T>(cell: T) -> Vec<u8>
     where
-        T: Borrow<DynCell>,
+        T: AsRef<DynCell>,
     {
         fn encode_impl(cell: &DynCell) -> Vec<u8> {
             let mut result = Vec::new();
             ser::BocHeader::<ahash::RandomState>::new(cell).encode(&mut result);
             result
         }
-        encode_impl(cell.borrow())
+        encode_impl(cell.as_ref())
     }
 
     /// Encodes a pair of cell trees as BOC.
     pub fn encode_pair<T1, T2>((cell1, cell2): (T1, T2)) -> Vec<u8>
     where
-        T1: Borrow<DynCell>,
-        T2: Borrow<DynCell>,
+        T1: AsRef<DynCell>,
+        T2: AsRef<DynCell>,
     {
         fn encode_pair_impl(cell1: &DynCell, cell2: &DynCell) -> Vec<u8> {
             let mut result = Vec::new();
@@ -86,7 +84,7 @@ impl Boc {
             encoder.encode(&mut result);
             result
         }
-        encode_pair_impl(cell1.borrow(), cell2.borrow())
+        encode_pair_impl(cell1.as_ref(), cell2.as_ref())
     }
 
     /// Decodes a `base64` encoded BOC into a cell tree

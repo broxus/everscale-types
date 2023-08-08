@@ -72,6 +72,20 @@ pub type DynCell = dyn CellImpl;
 #[cfg(feature = "sync")]
 pub type DynCell = dyn CellImpl + Send + Sync;
 
+impl AsRef<DynCell> for DynCell {
+    #[inline(always)]
+    fn as_ref(&self) -> &Self {
+        self
+    }
+}
+
+impl AsMut<DynCell> for DynCell {
+    #[inline(always)]
+    fn as_mut(&mut self) -> &mut Self {
+        self
+    }
+}
+
 /// Represents the interface of a well-formed cell.
 ///
 /// Since all basic operations are implements via dynamic dispatch,

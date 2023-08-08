@@ -21,7 +21,7 @@ impl Boc {
     pub fn serialize<S: Serializer, T>(cell: &T, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
-        T: AsRef<DynCell>,
+        T: AsRef<DynCell> + ?Sized,
     {
         cell.as_ref().serialize(serializer)
     }

@@ -7,8 +7,8 @@ use crate::error::Error;
 use crate::util::*;
 
 use super::{
-    dict_find_bound, dict_get, dict_insert, dict_load_from_root, serialize_entry, DictBound,
-    DictKey, SetMode,
+    dict_find_bound, dict_find_owned, dict_get, dict_insert, dict_load_from_root, serialize_entry,
+    DictBound, DictKey, SetMode,
 };
 use super::{dict_remove_bound_owned, raw::*};
 
@@ -320,6 +320,183 @@ where
     /// [`values`]: Dict::values
     pub fn keys(&'_ self) -> Keys<'_, K> {
         Keys::new(&self.root)
+    }
+
+    /// Computes the minimal key in dictionary that is lexicographically greater than `key`,
+    /// and returns it along with associated value as cell slice parts.
+    ///
+    /// Use [`get_next_ext`] if you need to use a custom finalizer.
+    ///
+    /// [`get_next_ext`]: Dict::get_next_ext
+    #[inline]
+    pub fn get_next<Q>(&self, key: Q, signed: bool) -> Result<Option<(K, V)>, Error>
+    where
+        Q: Borrow<K>,
+        for<'a> V: Load<'a>,
+    {
+        self.get_next_ext(key, signed, &mut Cell::default_finalizer())
+    }
+
+    /// Computes the maximal key in dictionary that is lexicographically smaller than `key`,
+    /// and returns it along with associated value as cell slice parts.
+    ///
+    /// Use [`get_prev_ext`] if you need to use a custom finalizer.
+    ///
+    /// [`get_prev_ext`]: Dict::get_prev_ext
+    #[inline]
+    pub fn get_prev<Q>(&self, key: Q, signed: bool) -> Result<Option<(K, V)>, Error>
+    where
+        Q: Borrow<K>,
+        for<'a> V: Load<'a>,
+    {
+        self.get_prev_ext(key, signed, &mut Cell::default_finalizer())
+    }
+
+    /// Computes the minimal key in dictionary that is lexicographically greater than `key`,
+    /// and returns it along with associated value as cell slice parts.
+    ///
+    /// Use [`get_or_next_ext`] if you need to use a custom finalizer.
+    ///
+    /// [`get_or_next_ext`]: Dict::get_or_next_ext
+    #[inline]
+    pub fn get_or_next<Q>(&self, key: Q, signed: bool) -> Result<Option<(K, V)>, Error>
+    where
+        Q: Borrow<K>,
+        for<'a> V: Load<'a>,
+    {
+        self.get_or_next_ext(key, signed, &mut Cell::default_finalizer())
+    }
+
+    /// Computes the maximal key in dictionary that is lexicographically smaller than `key`,
+    /// and returns it along with associated value as cell slice parts.
+    ///
+    /// Use [`get_or_prev_ext`] if you need to use a custom finalizer.
+    ///
+    /// [`get_or_prev_ext`]: Dict::get_or_prev_ext
+    #[inline]
+    pub fn get_or_prev<Q>(&self, key: Q, signed: bool) -> Result<Option<(K, V)>, Error>
+    where
+        Q: Borrow<K>,
+        for<'a> V: Load<'a>,
+    {
+        self.get_or_prev_ext(key, signed, &mut Cell::default_finalizer())
+    }
+
+    /// Computes the minimal key in dictionary that is lexicographically greater than `key`,
+    /// and returns it along with associated value as cell slice parts.
+    #[inline]
+    pub fn get_next_ext<Q>(
+        &self,
+        key: Q,
+        signed: bool,
+        finalizer: &mut dyn Finalizer,
+    ) -> Result<Option<(K, V)>, Error>
+    where
+        Q: Borrow<K>,
+        for<'a> V: Load<'a>,
+    {
+        self.find_ext(key, DictBound::Max, false, signed, finalizer)
+    }
+
+    /// Computes the maximal key in dictionary that is lexicographically smaller than `key`,
+    /// and returns it along with associated value as cell slice parts.
+    #[inline]
+    pub fn get_prev_ext<Q>(
+        &self,
+        key: Q,
+        signed: bool,
+        finalizer: &mut dyn Finalizer,
+    ) -> Result<Option<(K, V)>, Error>
+    where
+        Q: Borrow<K>,
+        for<'a> V: Load<'a>,
+    {
+        self.find_ext(key, DictBound::Min, false, signed, finalizer)
+    }
+
+    /// Computes the minimal key in dictionary that is lexicographically greater than `key`,
+    /// and returns it along with associated value as cell slice parts.
+    #[inline]
+    pub fn get_or_next_ext<Q>(
+        &self,
+        key: Q,
+        signed: bool,
+        finalizer: &mut dyn Finalizer,
+    ) -> Result<Option<(K, V)>, Error>
+    where
+        Q: Borrow<K>,
+        for<'a> V: Load<'a>,
+    {
+        self.find_ext(key, DictBound::Max, true, signed, finalizer)
+    }
+
+    /// Computes the maximal key in dictionary that is lexicographically smaller than `key`,
+    /// and returns it along with associated value as cell slice parts.
+    #[inline]
+    pub fn get_or_prev_ext<Q>(
+        &self,
+        key: Q,
+        signed: bool,
+        finalizer: &mut dyn Finalizer,
+    ) -> Result<Option<(K, V)>, Error>
+    where
+        Q: Borrow<K>,
+        for<'a> V: Load<'a>,
+    {
+        self.find_ext(key, DictBound::Min, true, signed, finalizer)
+    }
+
+    #[inline]
+    fn find_ext<Q>(
+        &self,
+        key: Q,
+        towards: DictBound,
+        inclusive: bool,
+        signed: bool,
+        finalizer: &mut dyn Finalizer,
+    ) -> Result<Option<(K, V)>, Error>
+    where
+        Q: Borrow<K>,
+        for<'a> V: Load<'a>,
+    {
+        fn find_ext_impl<K, V>(
+            root: &Option<Cell>,
+            key: &K,
+            towards: DictBound,
+            inclusive: bool,
+            signed: bool,
+            finalizer: &mut dyn Finalizer,
+        ) -> Result<Option<(K, V)>, Error>
+        where
+            K: DictKey + Store,
+            for<'a> V: Load<'a>,
+        {
+            let key = ok!(serialize_entry(key, finalizer));
+            let Some((key, (cell, range))) = ok!(dict_find_owned(
+                root,
+                K::BITS,
+                ok!(key.as_slice()),
+                towards,
+                inclusive,
+                signed
+            )) else {
+                return Ok(None);
+            };
+            let value = &mut ok!(range.apply(&cell));
+
+            match K::from_raw_data(key.raw_data()) {
+                Some(key) => Ok(Some((key, ok!(V::load_from(value))))),
+                None => Err(Error::CellUnderflow),
+            }
+        }
+        find_ext_impl(
+            &self.root,
+            key.borrow(),
+            towards,
+            inclusive,
+            signed,
+            finalizer,
+        )
     }
 }
 
@@ -956,6 +1133,37 @@ mod tests {
             let (key, _) = entry.unwrap();
             assert_eq!(key, i as u32);
         }
+    }
+
+    #[test]
+    fn dict_next_prev() {
+        let mut dict = Dict::<u32, u32>::new();
+
+        for i in 0..=10 {
+            dict.set(i, i).unwrap();
+        }
+
+        for i in 20..=30 {
+            dict.set(i, i).unwrap();
+        }
+
+        assert!(dict.get_prev(0, false).unwrap().is_none());
+        assert_eq!(dict.get_or_prev(0, false).unwrap(), Some((0, 0)));
+
+        assert!(dict.get_next(30, false).unwrap().is_none());
+        assert_eq!(dict.get_or_next(30, false).unwrap(), Some((30, 30)));
+
+        assert_eq!(dict.get_prev(15, false).unwrap(), Some((10, 10)));
+        assert_eq!(dict.get_or_prev(15, false).unwrap(), Some((10, 10)));
+
+        assert_eq!(dict.get_next(15, false).unwrap(), Some((20, 20)));
+        assert_eq!(dict.get_or_next(15, false).unwrap(), Some((20, 20)));
+
+        assert!(dict.get_next(100, false).unwrap().is_none());
+        assert!(dict.get_or_next(100, false).unwrap().is_none());
+
+        // assert_eq!(dict.get_prev(100, false).unwrap(), Some((9, 9)));
+        // assert_eq!(dict.get_or_prev(100, false).unwrap(), Some((9, 9)));
     }
 
     #[test]

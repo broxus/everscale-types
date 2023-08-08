@@ -3,7 +3,7 @@ use crate::error::Error;
 use crate::util::{unlikely, IterStatus};
 
 use super::{
-    dict_find_bound, dict_find_bound_owned, dict_get, dict_get_owned, dict_insert,
+    dict_find_bound, dict_find_bound_owned, dict_find_owned, dict_get, dict_get_owned, dict_insert,
     dict_load_from_root, dict_remove_bound_owned, dict_remove_owned, read_label, DictBound,
     DictOwnedEntry, SetMode,
 };
@@ -131,6 +131,46 @@ impl<const N: u16> RawDict<N> {
     /// Returns a `CellSlice` of the value corresponding to the key.
     pub fn get<'a>(&'a self, key: CellSlice<'_>) -> Result<Option<CellSlice<'a>>, Error> {
         dict_get(&self.0, N, key)
+    }
+
+    /// Computes the minimal key in dictionary that is lexicographically greater than `key`,
+    /// and returns it along with associated value as cell slice parts.
+    pub fn get_next_owned(
+        &self,
+        key: CellSlice<'_>,
+        signed: bool,
+    ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
+        dict_find_owned(&self.0, N, key, DictBound::Max, false, signed)
+    }
+
+    /// Computes the maximal key in dictionary that is lexicographically smaller than `key`,
+    /// and returns it along with associated value as cell slice parts.
+    pub fn get_prev_owned(
+        &self,
+        key: CellSlice<'_>,
+        signed: bool,
+    ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
+        dict_find_owned(&self.0, N, key, DictBound::Min, false, signed)
+    }
+
+    /// Computes the minimal key in dictionary that is lexicographically greater than `key`,
+    /// and returns it along with associated value as cell slice parts.
+    pub fn get_or_next_owned(
+        &self,
+        key: CellSlice<'_>,
+        signed: bool,
+    ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
+        dict_find_owned(&self.0, N, key, DictBound::Max, true, signed)
+    }
+
+    /// Computes the maximal key in dictionary that is lexicographically smaller than `key`,
+    /// and returns it along with associated value as cell slice parts.
+    pub fn get_or_prev_owned(
+        &self,
+        key: CellSlice<'_>,
+        signed: bool,
+    ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
+        dict_find_owned(&self.0, N, key, DictBound::Min, true, signed)
     }
 
     /// Returns cell slice parts of the value corresponding to the key.
