@@ -33,6 +33,24 @@ pub(crate) fn decode_base64<T: AsRef<[u8]>>(data: T) -> Result<Vec<u8>, base64::
     decode_base64_impl(data.as_ref())
 }
 
+#[cfg(any(feature = "base64", test))]
+#[inline]
+pub(crate) fn decode_base64_slice<T: AsRef<[u8]>>(
+    data: T,
+    target: &mut [u8],
+) -> Result<(), base64::DecodeSliceError> {
+    use base64::Engine;
+    fn decode_base64_slice_impl(
+        data: &[u8],
+        target: &mut [u8],
+    ) -> Result<(), base64::DecodeSliceError> {
+        base64::engine::general_purpose::STANDARD
+            .decode_slice(data, target)
+            .map(|_| ())
+    }
+    decode_base64_slice_impl(data.as_ref(), target)
+}
+
 /// Small on-stack vector of max length N.
 pub struct ArrayVec<T, const N: usize> {
     inner: [MaybeUninit<T>; N],

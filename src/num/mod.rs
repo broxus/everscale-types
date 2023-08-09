@@ -15,6 +15,20 @@ macro_rules! impl_ops {
             }
         }
 
+        impl TryFrom<$inner> for $ident {
+            type Error = ParseIntError;
+
+            #[inline]
+            fn try_from(inner: $inner) -> Result<Self, Self::Error> {
+                let result = Self::new(inner);
+                if result.is_valid() {
+                    Ok(result)
+                } else {
+                    Err(ParseIntError::Overflow)
+                }
+            }
+        }
+
         impl std::str::FromStr for $ident {
             type Err = ParseIntError;
 

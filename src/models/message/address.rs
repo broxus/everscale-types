@@ -2,6 +2,7 @@ use std::str::FromStr;
 
 use crate::cell::*;
 use crate::error::{Error, ParseAddrError};
+use crate::models::block::ShardIdent;
 use crate::num::*;
 use crate::util::*;
 
@@ -22,6 +23,50 @@ impl Default for IntAddr {
 }
 
 impl IntAddr {
+    /// Returns `true` if this address is for a masterchain block.
+    ///
+    /// See [`ShardIdent::MASTERCHAIN`]
+    #[inline]
+    pub const fn is_masterchain(&self) -> bool {
+        self.workchain() == ShardIdent::MASTERCHAIN.workchain()
+    }
+
+    /// Returns the workchain part of the address.
+    #[inline]
+    pub const fn workchain(&self) -> i32 {
+        match self {
+            Self::Std(addr) => addr.workchain as i32,
+            Self::Var(addr) => addr.workchain,
+        }
+    }
+
+    /// Returns the workchain part of the address.
+    #[inline]
+    pub const fn anycast(&self) -> &Option<Box<Anycast>> {
+        match self {
+            Self::Std(addr) => &addr.anycast,
+            Self::Var(addr) => &addr.anycast,
+        }
+    }
+
+    /// Returns the underlying standard address.
+    #[inline]
+    pub const fn as_std(&self) -> Option<&StdAddr> {
+        match self {
+            Self::Std(addr) => Some(addr),
+            Self::Var(_) => None,
+        }
+    }
+
+    /// Returns the underlying variable-length address.
+    #[inline]
+    pub const fn as_var(&self) -> Option<&VarAddr> {
+        match self {
+            Self::Std(_) => None,
+            Self::Var(addr) => Some(addr),
+        }
+    }
+
     /// Returns the number of data bits that this struct occupies.
     pub const fn bit_len(&self) -> u16 {
         match self {
@@ -126,6 +171,14 @@ impl StdAddr {
             workchain,
             address,
         }
+    }
+
+    /// Returns `true` if this address is for a masterchain block.
+    ///
+    /// See [`ShardIdent::MASTERCHAIN`]
+    #[inline]
+    pub const fn is_masterchain(&self) -> bool {
+        self.workchain as i32 == ShardIdent::MASTERCHAIN.workchain()
     }
 
     /// Returns the number of data bits that this struct occupies.
@@ -290,6 +343,14 @@ impl VarAddr {
     /// - `address_len` bits of address
     pub const BITS_MAX: u16 =
         2 + 1 + Anycast::BITS_MAX + Uint9::BITS + 32 + Uint9::MAX.into_inner();
+
+    /// Returns `true` if this address is for a masterchain block.
+    ///
+    /// See [`ShardIdent::MASTERCHAIN`]
+    #[inline]
+    pub const fn is_masterchain(&self) -> bool {
+        self.workchain == ShardIdent::MASTERCHAIN.workchain()
+    }
 
     /// Returns the number of data bits that this struct occupies.
     pub const fn bit_len(&self) -> u16 {

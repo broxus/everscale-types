@@ -129,6 +129,52 @@ pub struct OptionalAccount(pub Option<Account>);
 impl OptionalAccount {
     /// Non-existing account.
     pub const EMPTY: Self = Self(None);
+
+    /// Returns an optional account status.
+    pub fn status(&self) -> AccountStatus {
+        match &self.0 {
+            None => AccountStatus::NotExists,
+            Some(account) => account.state.status(),
+        }
+    }
+
+    /// Logical time after the last transaction execution if account exists
+    /// or zero otherwise.
+    pub fn last_trans_lt(&self) -> u64 {
+        match &self.0 {
+            None => 0,
+            Some(account) => account.last_trans_lt,
+        }
+    }
+
+    /// Account balance for all currencies.
+    pub fn balance(&self) -> &CurrencyCollection {
+        static DEFAULT_VALANCE: CurrencyCollection = CurrencyCollection::ZERO;
+
+        match &self.0 {
+            None => &DEFAULT_VALANCE,
+            Some(account) => &account.balance,
+        }
+    }
+
+    /// Returns an account state if it exists.
+    pub fn state(&self) -> Option<&AccountState> {
+        Some(&self.0.as_ref()?.state)
+    }
+}
+
+impl AsRef<Option<Account>> for OptionalAccount {
+    #[inline]
+    fn as_ref(&self) -> &Option<Account> {
+        &self.0
+    }
+}
+
+impl AsMut<Option<Account>> for OptionalAccount {
+    #[inline]
+    fn as_mut(&mut self) -> &mut Option<Account> {
+        &mut self.0
+    }
 }
 
 impl Store for OptionalAccount {
@@ -219,6 +265,17 @@ pub enum AccountState {
     Active(StateInit),
     /// Account exists but has been frozen. Contains a hash of the last known [`StateInit`].
     Frozen(HashBytes),
+}
+
+impl AccountState {
+    /// Returns an account status.
+    pub fn status(&self) -> AccountStatus {
+        match self {
+            Self::Uninit => AccountStatus::Uninit,
+            Self::Active(_) => AccountStatus::Active,
+            Self::Frozen(_) => AccountStatus::Frozen,
+        }
+    }
 }
 
 impl Store for AccountState {

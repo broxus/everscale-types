@@ -1,9 +1,10 @@
 //! Cell tree implementation.
 
 use std::ops::{BitOr, BitOrAssign};
+use std::str::FromStr;
 
-use crate::error::Error;
-use crate::util::Bitstring;
+use crate::error::{Error, ParseHashBytesError};
+use crate::util::{decode_base64_slice, Bitstring};
 
 pub use self::builder::{CellBuilder, CellRefsBuilder, Store};
 pub use self::cell_impl::{StaticCell, VirtualCellWrapper};
@@ -616,6 +617,33 @@ impl From<HashBytes> for [u8; 32] {
     #[inline(always)]
     fn from(value: HashBytes) -> Self {
         value.0
+    }
+}
+
+impl FromStr for HashBytes {
+    type Err = ParseHashBytesError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut result = Self::default();
+        match s.len() {
+            64 => {
+                if let Err(e) = hex::decode_to_slice(s, &mut result.0) {
+                    return Err(ParseHashBytesError::InvalidHex(e));
+                }
+            }
+            66 => {
+                if let Err(e) = hex::decode_to_slice(&s[2..], &mut result.0) {
+                    return Err(ParseHashBytesError::InvalidHex(e));
+                }
+            }
+            44 => {
+                if let Err(e) = decode_base64_slice(s, &mut result.0) {
+                    return Err(ParseHashBytesError::InvalidBase64(e));
+                }
+            }
+            _ => return Err(ParseHashBytesError::UnexpectedStringLength),
+        }
+        Ok(result)
     }
 }
 

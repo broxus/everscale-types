@@ -196,25 +196,66 @@ decl_global_capability! {
     }
 }
 
-impl std::ops::BitOr<GlobalCapability> for u64 {
-    type Output = u64;
+impl std::ops::BitOr<GlobalCapability> for GlobalCapability {
+    type Output = GlobalCapabilities;
 
     #[inline]
     fn bitor(self, rhs: GlobalCapability) -> Self::Output {
-        self | (rhs as u64)
+        GlobalCapabilities(self as u64 | rhs as u64)
     }
 }
 
-impl std::ops::BitOr<u64> for GlobalCapability {
-    type Output = u64;
+impl std::ops::BitOr<GlobalCapability> for u64 {
+    type Output = GlobalCapabilities;
 
     #[inline]
-    fn bitor(self, rhs: u64) -> Self::Output {
-        (self as u64) | rhs
+    fn bitor(self, rhs: GlobalCapability) -> Self::Output {
+        GlobalCapabilities(self | rhs as u64)
     }
 }
 
 impl std::ops::BitOrAssign<GlobalCapability> for u64 {
+    #[inline]
+    fn bitor_assign(&mut self, rhs: GlobalCapability) {
+        *self = (*self | rhs).0;
+    }
+}
+
+impl std::ops::BitOr<u64> for GlobalCapability {
+    type Output = GlobalCapabilities;
+
+    #[inline]
+    fn bitor(self, rhs: u64) -> Self::Output {
+        GlobalCapabilities(self as u64 | rhs)
+    }
+}
+
+impl std::ops::BitOr<GlobalCapability> for GlobalCapabilities {
+    type Output = GlobalCapabilities;
+
+    #[inline]
+    fn bitor(self, rhs: GlobalCapability) -> Self::Output {
+        GlobalCapabilities(self.0 | rhs as u64)
+    }
+}
+
+impl std::ops::BitOr<GlobalCapabilities> for GlobalCapability {
+    type Output = GlobalCapabilities;
+
+    #[inline]
+    fn bitor(self, rhs: GlobalCapabilities) -> Self::Output {
+        GlobalCapabilities(self as u64 | rhs.0)
+    }
+}
+
+impl std::ops::BitOrAssign<u64> for GlobalCapabilities {
+    #[inline]
+    fn bitor_assign(&mut self, rhs: u64) {
+        *self = GlobalCapabilities(self.0 | rhs);
+    }
+}
+
+impl std::ops::BitOrAssign<GlobalCapability> for GlobalCapabilities {
     #[inline]
     fn bitor_assign(&mut self, rhs: GlobalCapability) {
         *self = *self | rhs;
@@ -289,6 +330,13 @@ impl From<GlobalCapabilities> for u64 {
     }
 }
 
+impl PartialEq<u64> for GlobalCapabilities {
+    #[inline]
+    fn eq(&self, other: &u64) -> bool {
+        self.0 == *other
+    }
+}
+
 impl IntoIterator for GlobalCapabilities {
     type Item = GlobalCapability;
     type IntoIter = GlobalCapabilitiesIter;
@@ -341,7 +389,15 @@ mod tests {
 
     #[test]
     fn capabilities_iter() {
-        let capabilities = GlobalCapabilities::new(0x16ae);
+        let capabilities = GlobalCapability::CapCreateStatsEnabled
+            | GlobalCapability::CapBounceMsgBody
+            | GlobalCapability::CapReportVersion
+            | GlobalCapability::CapShortDequeue
+            | GlobalCapability::CapFastStorageStat
+            | GlobalCapability::CapOffHypercube
+            | GlobalCapability::CapMyCode
+            | GlobalCapability::CapFixTupleIndexBug;
+
         let capabilities = capabilities.into_iter().collect::<Vec<_>>();
         assert_eq!(
             capabilities,

@@ -43,6 +43,20 @@ pub enum ParseIntError {
     Overflow,
 }
 
+/// Error type for hash bytes parsing related errors.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum ParseHashBytesError {
+    /// Failed to parse base64 encoded bytes.
+    #[error("invalid base64 string")]
+    InvalidBase64(#[from] base64::DecodeSliceError),
+    /// Failed to parse hex encoded bytes.
+    #[error("invalid hex string")]
+    InvalidHex(#[from] hex::FromHexError),
+    /// Error for an unexpected string length.
+    #[error("expected string of 44, 64 or 66 bytes")]
+    UnexpectedStringLength,
+}
+
 /// Error type for address parsing related errors.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ParseAddrError {
