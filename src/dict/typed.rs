@@ -245,7 +245,7 @@ where
     /// Use [`set_ext`] if you need to use a custom finalizer.
     ///
     /// [`set_ext`]: Dict::set_ext
-    pub fn set<Q, T>(&mut self, key: Q, value: T) -> Result<(), Error>
+    pub fn set<Q, T>(&mut self, key: Q, value: T) -> Result<bool, Error>
     where
         Q: Borrow<K>,
         T: Borrow<V>,
@@ -259,7 +259,7 @@ where
     /// Use [`replace_ext`] if you need to use a custom finalizer.
     ///
     /// [`replace_ext`]: Dict::replace_ext
-    pub fn replace<Q, T>(&mut self, key: Q, value: T) -> Result<(), Error>
+    pub fn replace<Q, T>(&mut self, key: Q, value: T) -> Result<bool, Error>
     where
         Q: Borrow<K>,
         T: Borrow<V>,
@@ -273,7 +273,7 @@ where
     /// Use [`add_ext`] if you need to use a custom finalizer.
     ///
     /// [`add_ext`]: Dict::add_ext
-    pub fn add<Q, T>(&mut self, key: Q, value: T) -> Result<(), Error>
+    pub fn add<Q, T>(&mut self, key: Q, value: T) -> Result<bool, Error>
     where
         Q: Borrow<K>,
         T: Borrow<V>,
@@ -741,7 +741,7 @@ where
         key: Q,
         value: T,
         finalizer: &mut dyn Finalizer,
-    ) -> Result<(), Error>
+    ) -> Result<bool, Error>
     where
         Q: Borrow<K>,
         T: Borrow<V>,
@@ -756,7 +756,7 @@ where
         key: Q,
         value: T,
         finalizer: &mut dyn Finalizer,
-    ) -> Result<(), Error>
+    ) -> Result<bool, Error>
     where
         Q: Borrow<K>,
         T: Borrow<V>,
@@ -771,7 +771,7 @@ where
         key: Q,
         value: T,
         finalizer: &mut dyn Finalizer,
-    ) -> Result<(), Error>
+    ) -> Result<bool, Error>
     where
         Q: Borrow<K>,
         T: Borrow<V>,
@@ -785,14 +785,14 @@ where
         value: &V,
         mode: SetMode,
         finalizer: &mut dyn Finalizer,
-    ) -> Result<(), Error>
+    ) -> Result<bool, Error>
     where
         K: Store + DictKey,
         V: Store,
     {
         let key = ok!(serialize_entry(key, finalizer));
         let value = ok!(serialize_entry(value, finalizer));
-        self.root = ok!(dict_insert(
+        let (new_root, changed) = ok!(dict_insert(
             &self.root,
             &mut ok!(key.as_ref().as_slice()),
             K::BITS,
@@ -800,7 +800,8 @@ where
             mode,
             finalizer
         ));
-        Ok(())
+        self.root = new_root;
+        Ok(changed)
     }
 }
 
@@ -970,10 +971,10 @@ mod tests {
     #[test]
     fn dict_set() {
         let mut dict = Dict::<u32, u16>::new();
-        dict.set(123, 0xffff).unwrap();
+        assert!(dict.set(123, 0xffff).unwrap());
         assert_eq!(dict.get(123).unwrap(), Some(0xffff));
 
-        dict.set(123, 0xcafe).unwrap();
+        assert!(dict.set(123, 0xcafe).unwrap());
         assert_eq!(dict.get(123).unwrap(), Some(0xcafe));
     }
 
@@ -982,7 +983,7 @@ mod tests {
     fn dict_set_complex() {
         let mut dict = Dict::<u32, bool>::new();
         for i in 0..520 {
-            dict.set(i, true).unwrap();
+            assert!(dict.set(i, true).unwrap());
         }
     }
 
@@ -990,7 +991,7 @@ mod tests {
     fn dict_bounds() {
         let mut dict = Dict::<i32, bool>::new();
         for i in -10..=10 {
-            dict.set(i, i < 0).unwrap();
+            assert!(dict.set(i, i < 0).unwrap());
         }
 
         assert_eq!(dict.get_min(false).unwrap(), Some((0, false)));
@@ -1072,12 +1073,12 @@ mod tests {
     #[test]
     fn dict_replace() {
         let mut dict = Dict::<u32, bool>::new();
-        dict.replace(123, false).unwrap();
+        assert!(!dict.replace(123, false).unwrap());
         assert!(!dict.contains_key(123).unwrap());
 
-        dict.set(123, false).unwrap();
+        assert!(dict.set(123, false).unwrap());
         assert_eq!(dict.get(123).unwrap(), Some(false));
-        dict.replace(123, true).unwrap();
+        assert!(dict.replace(123, true).unwrap());
         assert_eq!(dict.get(123).unwrap(), Some(true));
     }
 
@@ -1085,10 +1086,10 @@ mod tests {
     fn dict_add() {
         let mut dict = Dict::<u32, bool>::new();
 
-        dict.add(123, false).unwrap();
+        assert!(dict.add(123, false).unwrap());
         assert_eq!(dict.get(123).unwrap(), Some(false));
 
-        dict.add(123, true).unwrap();
+        assert!(!dict.add(123, true).unwrap());
         assert_eq!(dict.get(123).unwrap(), Some(false));
     }
 
@@ -1097,7 +1098,7 @@ mod tests {
         let mut dict = Dict::<u32, u32>::new();
 
         for i in 0..10 {
-            dict.set(i, i).unwrap();
+            assert!(dict.set(i, i).unwrap());
         }
 
         let mut check_remove = |n: u32, expected: Option<u32>| -> anyhow::Result<()> {

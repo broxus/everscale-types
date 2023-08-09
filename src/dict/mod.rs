@@ -190,6 +190,8 @@ pub fn dict_remove_owned(
 
 /// Inserts the value associated with key in dictionary
 /// in accordance with the logic of the specified [`SetMode`].
+///
+/// Returns a tuple with a new dict root, and changed flag.
 pub fn dict_insert(
     root: &Option<Cell>,
     key: &mut CellSlice,
@@ -197,57 +199,7 @@ pub fn dict_insert(
     value: &CellSlice,
     mode: SetMode,
     finalizer: &mut dyn Finalizer,
-) -> Result<Option<Cell>, Error> {
-    // Creates a leaf node
-    fn make_leaf(
-        key: &CellSlice,
-        key_bit_len: u16,
-        value: &CellSlice,
-        finalizer: &mut dyn Finalizer,
-    ) -> Result<Cell, Error> {
-        let mut builder = CellBuilder::new();
-        ok!(write_label(key, key_bit_len, &mut builder));
-        ok!(builder.store_slice(value));
-        builder.build_ext(finalizer)
-    }
-
-    // Splits an edge or leaf
-    fn split(
-        data: &CellSlice,
-        prefix: &mut CellSlice,
-        lcp: &CellSlice,
-        key: &mut CellSlice,
-        value: &CellSlice,
-        finalizer: &mut dyn Finalizer,
-    ) -> Result<Cell, Error> {
-        // Advance the key
-        let prev_key_bit_len = key.remaining_bits();
-        if !key.try_advance(lcp.remaining_bits() + 1, 0) {
-            return Err(Error::CellUnderflow);
-        }
-
-        // Read the next bit from the data
-        prefix.try_advance(lcp.remaining_bits(), 0);
-        let old_to_right = ok!(prefix.load_bit());
-
-        // Create a leaf for the old value
-        let mut left = ok!(make_leaf(prefix, key.remaining_bits(), data, finalizer));
-        // Create a leaf for the right value
-        let mut right = ok!(make_leaf(key, key.remaining_bits(), value, finalizer));
-
-        // The part that starts with 1 goes to the right cell
-        if old_to_right {
-            std::mem::swap(&mut left, &mut right);
-        }
-
-        // Create fork
-        let mut builder = CellBuilder::new();
-        ok!(write_label(lcp, prev_key_bit_len, &mut builder));
-        ok!(builder.store_reference(left));
-        ok!(builder.store_reference(right));
-        builder.build_ext(finalizer)
-    }
-
+) -> Result<(Option<Cell>, bool), Error> {
     if key.remaining_bits() != key_bit_len {
         return Err(Error::CellUnderflow);
     }
@@ -256,9 +208,9 @@ pub fn dict_insert(
         Some(data) => data.as_ref(),
         None if mode.can_add() => {
             let data = ok!(make_leaf(key, key_bit_len, value, finalizer));
-            return Ok(Some(data));
+            return Ok((Some(data), true));
         }
-        None => return Ok(None),
+        None => return Ok((None, false)),
     };
 
     let mut stack = Vec::<Segment>::new();
@@ -276,7 +228,7 @@ pub fn dict_insert(
             std::cmp::Ordering::Equal => {
                 // Check if we can replace the value
                 if !mode.can_replace() {
-                    return Ok(root.clone());
+                    return Ok((root.clone(), false));
                 }
                 // Replace the existing value
                 break ok!(make_leaf(prefix, key.remaining_bits(), value, finalizer));
@@ -285,7 +237,7 @@ pub fn dict_insert(
             std::cmp::Ordering::Less if lcp.remaining_bits() < prefix.remaining_bits() => {
                 // Check if we can add a new value
                 if !mode.can_add() {
-                    return Ok(root.clone());
+                    return Ok((root.clone(), false));
                 }
                 break ok!(split(&remaining_data, prefix, &lcp, key, value, finalizer));
             }
@@ -323,7 +275,116 @@ pub fn dict_insert(
 
     leaf = ok!(rebuild_dict_from_stack(stack, leaf, finalizer));
 
-    Ok(Some(leaf))
+    Ok((Some(leaf), true))
+}
+
+/// Inserts the value associated with key in dictionary
+/// in accordance with the logic of the specified [`SetMode`].
+///
+/// Returns a tuple with a new dict root, changed flag and the previous value.
+pub fn dict_insert_owned(
+    root: &Option<Cell>,
+    key: &mut CellSlice,
+    key_bit_len: u16,
+    value: &CellSlice,
+    mode: SetMode,
+    finalizer: &mut dyn Finalizer,
+) -> Result<(Option<Cell>, bool, Option<CellSliceParts>), Error> {
+    if key.remaining_bits() != key_bit_len {
+        return Err(Error::CellUnderflow);
+    }
+
+    let root = match root.as_ref() {
+        Some(data) => data,
+        None if mode.can_add() => {
+            let data = ok!(make_leaf(key, key_bit_len, value, finalizer));
+            return Ok((Some(data), true, None));
+        }
+        None => return Ok((None, false, None)),
+    };
+    let mut data = root.as_ref();
+    let mut stack = Vec::<Segment>::new();
+
+    let (mut leaf, value_range) = loop {
+        let mut remaining_data = ok!(data.as_slice());
+
+        // Read the next part of the key from the current data
+        let prefix = &mut ok!(read_label(&mut remaining_data, key.remaining_bits()));
+
+        // Match the prefix with the key
+        let lcp = key.longest_common_data_prefix(prefix);
+        match lcp.remaining_bits().cmp(&key.remaining_bits()) {
+            // If all bits match, an existing value was found
+            std::cmp::Ordering::Equal => {
+                // Check if we can replace the value
+                if !mode.can_replace() {
+                    return Ok((Some(root.clone()), false, None));
+                }
+                // Replace the existing value
+                break (
+                    ok!(make_leaf(prefix, key.remaining_bits(), value, finalizer)),
+                    Some(remaining_data.range()),
+                );
+            }
+            // LCP is less than prefix, an edge to slice was found
+            std::cmp::Ordering::Less if lcp.remaining_bits() < prefix.remaining_bits() => {
+                // Check if we can add a new value
+                if !mode.can_add() {
+                    return Ok((Some(root.clone()), false, None));
+                }
+                break (
+                    ok!(split(&remaining_data, prefix, &lcp, key, value, finalizer)),
+                    None,
+                );
+            }
+            // The key contains the entire prefix, but there are still some bits left
+            std::cmp::Ordering::Less => {
+                // Fail fast if there are not enough references in the fork
+                if data.reference_count() != 2 {
+                    return Err(Error::CellUnderflow);
+                }
+
+                // Remove the LCP from the key
+                key.try_advance(lcp.remaining_bits(), 0);
+
+                // Load the next branch
+                let next_branch = match key.load_bit() {
+                    Ok(bit) => Branch::from(bit),
+                    Err(e) => return Err(e),
+                };
+
+                let child = match data.reference(next_branch as u8) {
+                    Some(child) => child,
+                    None => return Err(Error::CellUnderflow),
+                };
+
+                // Push an intermediate edge to the stack
+                stack.push(Segment { data, next_branch });
+                data = child;
+            }
+            std::cmp::Ordering::Greater => {
+                debug_assert!(false, "LCP of prefix and key can't be greater than key");
+                unsafe { std::hint::unreachable_unchecked() };
+            }
+        }
+    };
+
+    let value = match value_range {
+        Some(range) => match stack.last() {
+            Some(Segment { data, next_branch }) => {
+                match data.reference_cloned(*next_branch as u8) {
+                    Some(cell) => Some((cell, range)),
+                    None => return Err(Error::CellUnderflow),
+                }
+            }
+            None => Some((root.clone(), range)),
+        },
+        None => None,
+    };
+
+    leaf = ok!(rebuild_dict_from_stack(stack, leaf, finalizer));
+
+    Ok((Some(leaf), true, value))
 }
 
 /// Returns a `CellSlice` of the value corresponding to the key.
@@ -820,6 +881,56 @@ pub fn dict_remove_bound_owned(
     leaf = ok!(rebuild_dict_from_stack(stack, leaf, finalizer));
 
     Ok((Some(leaf), Some((key, removed))))
+}
+
+// Creates a leaf node
+fn make_leaf(
+    key: &CellSlice,
+    key_bit_len: u16,
+    value: &CellSlice,
+    finalizer: &mut dyn Finalizer,
+) -> Result<Cell, Error> {
+    let mut builder = CellBuilder::new();
+    ok!(write_label(key, key_bit_len, &mut builder));
+    ok!(builder.store_slice(value));
+    builder.build_ext(finalizer)
+}
+
+// Splits an edge or leaf
+fn split(
+    data: &CellSlice,
+    prefix: &mut CellSlice,
+    lcp: &CellSlice,
+    key: &mut CellSlice,
+    value: &CellSlice,
+    finalizer: &mut dyn Finalizer,
+) -> Result<Cell, Error> {
+    // Advance the key
+    let prev_key_bit_len = key.remaining_bits();
+    if !key.try_advance(lcp.remaining_bits() + 1, 0) {
+        return Err(Error::CellUnderflow);
+    }
+
+    // Read the next bit from the data
+    prefix.try_advance(lcp.remaining_bits(), 0);
+    let old_to_right = ok!(prefix.load_bit());
+
+    // Create a leaf for the old value
+    let mut left = ok!(make_leaf(prefix, key.remaining_bits(), data, finalizer));
+    // Create a leaf for the right value
+    let mut right = ok!(make_leaf(key, key.remaining_bits(), value, finalizer));
+
+    // The part that starts with 1 goes to the right cell
+    if old_to_right {
+        std::mem::swap(&mut left, &mut right);
+    }
+
+    // Create fork
+    let mut builder = CellBuilder::new();
+    ok!(write_label(lcp, prev_key_bit_len, &mut builder));
+    ok!(builder.store_reference(left));
+    ok!(builder.store_reference(right));
+    builder.build_ext(finalizer)
 }
 
 /// Type alias for a pair of key and value as cell slice parts.

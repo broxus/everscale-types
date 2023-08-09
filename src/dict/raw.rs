@@ -233,8 +233,8 @@ impl<const N: u16> RawDict<N> {
         mut key: CellSlice<'_>,
         value: CellSlice<'_>,
         finalizer: &mut dyn Finalizer,
-    ) -> Result<(), Error> {
-        self.0 = ok!(dict_insert(
+    ) -> Result<bool, Error> {
+        let (new_root, changed) = ok!(dict_insert(
             &self.0,
             &mut key,
             N,
@@ -242,7 +242,8 @@ impl<const N: u16> RawDict<N> {
             SetMode::Set,
             finalizer
         ));
-        Ok(())
+        self.0 = new_root;
+        Ok(changed)
     }
 
     /// Sets the value associated with the key in the dictionary
@@ -252,8 +253,8 @@ impl<const N: u16> RawDict<N> {
         mut key: CellSlice<'_>,
         value: CellSlice<'_>,
         finalizer: &mut dyn Finalizer,
-    ) -> Result<(), Error> {
-        self.0 = ok!(dict_insert(
+    ) -> Result<bool, Error> {
+        let (new_root, changed) = ok!(dict_insert(
             &self.0,
             &mut key,
             N,
@@ -261,7 +262,8 @@ impl<const N: u16> RawDict<N> {
             SetMode::Replace,
             finalizer
         ));
-        Ok(())
+        self.0 = new_root;
+        Ok(changed)
     }
 
     /// Sets the value associated with key in dictionary,
@@ -271,8 +273,8 @@ impl<const N: u16> RawDict<N> {
         mut key: CellSlice<'_>,
         value: CellSlice<'_>,
         finalizer: &mut dyn Finalizer,
-    ) -> Result<(), Error> {
-        self.0 = ok!(dict_insert(
+    ) -> Result<bool, Error> {
+        let (new_root, changed) = ok!(dict_insert(
             &self.0,
             &mut key,
             N,
@@ -280,7 +282,8 @@ impl<const N: u16> RawDict<N> {
             SetMode::Add,
             finalizer
         ));
-        Ok(())
+        self.0 = new_root;
+        Ok(changed)
     }
 
     /// Removes the value associated with key in dictionary.
@@ -356,7 +359,7 @@ impl<const N: u16> RawDict<N> {
     /// Use [`set_ext`] if you need to use a custom finalizer.
     ///
     /// [`set_ext`]: RawDict::set_ext
-    pub fn set(&mut self, key: CellSlice<'_>, value: CellSlice<'_>) -> Result<(), Error> {
+    pub fn set(&mut self, key: CellSlice<'_>, value: CellSlice<'_>) -> Result<bool, Error> {
         self.set_ext(key, value, &mut Cell::default_finalizer())
     }
 
@@ -366,7 +369,7 @@ impl<const N: u16> RawDict<N> {
     /// Use [`replace_ext`] if you need to use a custom finalizer.
     ///
     /// [`replace_ext`]: RawDict::replace_ext
-    pub fn replace(&mut self, key: CellSlice<'_>, value: CellSlice<'_>) -> Result<(), Error> {
+    pub fn replace(&mut self, key: CellSlice<'_>, value: CellSlice<'_>) -> Result<bool, Error> {
         self.replace_ext(key, value, &mut Cell::default_finalizer())
     }
 
@@ -376,7 +379,7 @@ impl<const N: u16> RawDict<N> {
     /// Use [`add_ext`] if you need to use a custom finalizer.
     ///
     /// [`add_ext`]: RawDict::add_ext
-    pub fn add(&mut self, key: CellSlice<'_>, value: CellSlice<'_>) -> Result<(), Error> {
+    pub fn add(&mut self, key: CellSlice<'_>, value: CellSlice<'_>) -> Result<bool, Error> {
         self.add_ext(key, value, &mut Cell::default_finalizer())
     }
 
