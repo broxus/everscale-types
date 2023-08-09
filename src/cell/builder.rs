@@ -1,4 +1,3 @@
-use std::borrow::Borrow;
 use std::mem::MaybeUninit;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -574,7 +573,7 @@ impl CellBuilder {
     #[inline]
     pub fn store_cell_data<T>(&mut self, value: T) -> Result<(), Error>
     where
-        T: Borrow<DynCell>,
+        T: AsRef<DynCell>,
     {
         fn store_cell_data_impl(builder: &mut CellBuilder, value: &DynCell) -> Result<(), Error> {
             store_raw(
@@ -584,7 +583,7 @@ impl CellBuilder {
                 value.bit_len(),
             )
         }
-        store_cell_data_impl(self, value.borrow())
+        store_cell_data_impl(self, value.as_ref())
     }
 
     /// Tries to store the remaining slice data in the cell,
@@ -592,7 +591,7 @@ impl CellBuilder {
     #[inline]
     pub fn store_slice_data<'a, T>(&mut self, value: T) -> Result<(), Error>
     where
-        T: Borrow<CellSlice<'a>>,
+        T: AsRef<CellSlice<'a>>,
     {
         fn store_slice_data_impl(
             builder: &mut CellBuilder,
@@ -609,7 +608,7 @@ impl CellBuilder {
                 Err(Error::CellOverflow)
             }
         }
-        store_slice_data_impl(self, value.borrow())
+        store_slice_data_impl(self, value.as_ref())
     }
 
     /// Tries to prepend bytes to the cell data (but only the specified number of bits),
@@ -764,7 +763,7 @@ impl CellBuilder {
     #[inline]
     pub fn store_slice<'a, T>(&mut self, value: T) -> Result<(), Error>
     where
-        T: Borrow<CellSlice<'a>>,
+        T: AsRef<CellSlice<'a>>,
     {
         fn store_slice_impl(builder: &mut CellBuilder, value: &CellSlice<'_>) -> Result<(), Error> {
             if builder.bit_len + value.remaining_bits() <= MAX_BIT_LEN
@@ -779,7 +778,7 @@ impl CellBuilder {
                 Err(Error::CellOverflow)
             }
         }
-        store_slice_impl(self, value.borrow())
+        store_slice_impl(self, value.as_ref())
     }
 
     /// Tries to build a new cell using the specified finalizer.
@@ -873,12 +872,24 @@ impl CellBuilder {
 
     /// Returns an object which will display data as a bitstring
     /// with a termination bit.
-    pub fn display_data(&self) -> impl std::fmt::Display + '_ {
+    pub fn display_data(&self) -> impl std::fmt::Display + std::fmt::Binary + '_ {
         struct DisplayData<'a>(&'a CellBuilder);
 
         impl std::fmt::Display for DisplayData<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 std::fmt::Display::fmt(
+                    &Bitstring {
+                        bytes: &self.0.data,
+                        bit_len: self.0.bit_len,
+                    },
+                    f,
+                )
+            }
+        }
+
+        impl std::fmt::Binary for DisplayData<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                std::fmt::Binary::fmt(
                     &Bitstring {
                         bytes: &self.0.data,
                         bit_len: self.0.bit_len,

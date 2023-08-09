@@ -218,6 +218,31 @@ impl std::fmt::Display for Bitstring<'_> {
     }
 }
 
+impl std::fmt::Binary for Bitstring<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let bit_len = std::cmp::min(self.bit_len as usize, self.bytes.len() * 8) as u16;
+        let byte_len = ((bit_len + 7) / 8) as usize;
+        let bytes = &self.bytes[..byte_len];
+
+        let rem = (bit_len % 8) as usize;
+        let (bytes, last_byte) = match bytes.split_last() {
+            Some((last_byte, bytes)) if rem != 0 => (bytes, Some(*last_byte)),
+            _ => (bytes, None),
+        };
+
+        for byte in bytes {
+            ok!(write!(f, "{byte:08b}"));
+        }
+
+        if let Some(mut last_byte) = last_byte {
+            last_byte >>= 8 - rem;
+            ok!(write!(f, "{last_byte:0rem$b}"))
+        }
+
+        Ok(())
+    }
+}
+
 pub(crate) fn debug_tuple_field1_finish(
     f: &mut std::fmt::Formatter<'_>,
     name: &str,
