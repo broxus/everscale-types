@@ -1433,25 +1433,31 @@ impl<'a> CellSlice<'a> {
 
     /// Returns an object which will display data as a bitstring
     /// with a termination bit.
-    pub fn display_data<'b: 'a>(&'b self) -> impl std::fmt::Display + 'b {
+    pub fn display_data<'b: 'a>(&'b self) -> impl std::fmt::Display + std::fmt::Binary + 'b {
+        fn make_bitstring<'b: 'a, 'a>(
+            s: &'b CellSlice<'a>,
+            bytes: &'b mut [u8; 128],
+        ) -> Result<Bitstring<'b>, std::fmt::Error> {
+            let bit_len = s.remaining_bits();
+            if s.get_raw(0, bytes, bit_len).is_err() {
+                return Err(std::fmt::Error);
+            }
+            Ok(Bitstring { bytes, bit_len })
+        }
+
         struct DisplayData<'b, 'a>(&'b CellSlice<'a>);
 
         impl<'b: 'a, 'a> std::fmt::Display for DisplayData<'b, 'a> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                let s = self.0;
-                let bit_len = s.remaining_bits();
                 let mut bytes = [0u8; 128];
-                if s.get_raw(0, &mut bytes, bit_len).is_err() {
-                    return Err(std::fmt::Error);
-                }
+                std::fmt::Display::fmt(&ok!(make_bitstring(self.0, &mut bytes)), f)
+            }
+        }
 
-                std::fmt::Display::fmt(
-                    &Bitstring {
-                        bytes: &bytes,
-                        bit_len,
-                    },
-                    f,
-                )
+        impl<'b: 'a, 'a> std::fmt::Binary for DisplayData<'b, 'a> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                let mut bytes = [0u8; 128];
+                std::fmt::Binary::fmt(&ok!(make_bitstring(self.0, &mut bytes)), f)
             }
         }
 

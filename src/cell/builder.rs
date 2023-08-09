@@ -872,12 +872,24 @@ impl CellBuilder {
 
     /// Returns an object which will display data as a bitstring
     /// with a termination bit.
-    pub fn display_data(&self) -> impl std::fmt::Display + '_ {
+    pub fn display_data(&self) -> impl std::fmt::Display + std::fmt::Binary + '_ {
         struct DisplayData<'a>(&'a CellBuilder);
 
         impl std::fmt::Display for DisplayData<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 std::fmt::Display::fmt(
+                    &Bitstring {
+                        bytes: &self.0.data,
+                        bit_len: self.0.bit_len,
+                    },
+                    f,
+                )
+            }
+        }
+
+        impl std::fmt::Binary for DisplayData<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                std::fmt::Binary::fmt(
                     &Bitstring {
                         bytes: &self.0.data,
                         bit_len: self.0.bit_len,

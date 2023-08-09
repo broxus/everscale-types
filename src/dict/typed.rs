@@ -998,6 +998,13 @@ mod tests {
 
         assert_eq!(dict.get_min(true).unwrap(), Some((-10, true)));
         assert_eq!(dict.get_max(true).unwrap(), Some((10, false)));
+
+        let mut dict = Dict::<u32, u8>::new();
+        for i in 1..=3 {
+            dict.set(i, 0xff).unwrap();
+        }
+        assert_eq!(dict.get_min(false).unwrap(), Some((1, 0xff)));
+        assert_eq!(dict.get_max(false).unwrap(), Some((3, 0xff)));
     }
 
     #[test]
@@ -1136,7 +1143,7 @@ mod tests {
     }
 
     #[test]
-    fn dict_next_prev() {
+    fn dict_next_prev_unsigned() {
         let mut dict = Dict::<u32, u32>::new();
 
         for i in 0..=10 {
@@ -1147,10 +1154,12 @@ mod tests {
             dict.set(i, i).unwrap();
         }
 
-        assert!(dict.get_prev(0, false).unwrap().is_none());
+        println!("{}", BocRepr::encode_base64(&dict).unwrap());
+
+        assert_eq!(dict.get_prev(0, false).unwrap(), None);
         assert_eq!(dict.get_or_prev(0, false).unwrap(), Some((0, 0)));
 
-        assert!(dict.get_next(30, false).unwrap().is_none());
+        assert_eq!(dict.get_next(30, false).unwrap(), None);
         assert_eq!(dict.get_or_next(30, false).unwrap(), Some((30, 30)));
 
         assert_eq!(dict.get_prev(15, false).unwrap(), Some((10, 10)));
@@ -1159,11 +1168,74 @@ mod tests {
         assert_eq!(dict.get_next(15, false).unwrap(), Some((20, 20)));
         assert_eq!(dict.get_or_next(15, false).unwrap(), Some((20, 20)));
 
-        assert!(dict.get_next(100, false).unwrap().is_none());
-        assert!(dict.get_or_next(100, false).unwrap().is_none());
+        assert_eq!(dict.get_next(19, false).unwrap(), Some((20, 20)));
+        assert_eq!(dict.get_or_next(19, false).unwrap(), Some((20, 20)));
 
-        // assert_eq!(dict.get_prev(100, false).unwrap(), Some((9, 9)));
-        // assert_eq!(dict.get_or_prev(100, false).unwrap(), Some((9, 9)));
+        assert_eq!(dict.get_prev(20, false).unwrap(), Some((10, 10)));
+        assert_eq!(dict.get_or_prev(20, false).unwrap(), Some((20, 20)));
+
+        assert_eq!(dict.get_next(100, false).unwrap(), None);
+        assert_eq!(dict.get_or_next(100, false).unwrap(), None);
+
+        assert_eq!(dict.get_prev(100, false).unwrap(), Some((30, 30)));
+        assert_eq!(dict.get_or_prev(100, false).unwrap(), Some((30, 30)));
+    }
+
+    #[test]
+    fn dict_next_prev_signed() {
+        let mut dict = Dict::<i32, i32>::new();
+
+        for i in -20..=-10 {
+            dict.set(i, i).unwrap();
+        }
+
+        assert_eq!(dict.get_prev(-20, true).unwrap(), None);
+        assert_eq!(dict.get_or_prev(-20, true).unwrap(), Some((-20, -20)));
+
+        assert_eq!(dict.get_next(-10, true).unwrap(), None);
+        assert_eq!(dict.get_or_next(-10, true).unwrap(), Some((-10, -10)));
+
+        for i in 10..=20 {
+            dict.set(i, i).unwrap();
+        }
+
+        println!("{}", BocRepr::encode_base64(&dict).unwrap());
+
+        assert_eq!(dict.get_next(-100, true).unwrap(), Some((-20, -20)));
+        assert_eq!(dict.get_or_next(-100, true).unwrap(), Some((-20, -20)));
+
+        assert_eq!(dict.get_prev(-100, true).unwrap(), None);
+        assert_eq!(dict.get_or_prev(-100, true).unwrap(), None);
+
+        assert_eq!(dict.get_prev(-20, true).unwrap(), None);
+        assert_eq!(dict.get_or_prev(-20, true).unwrap(), Some((-20, -20)));
+
+        assert_eq!(dict.get_next(20, true).unwrap(), None);
+        assert_eq!(dict.get_or_next(20, true).unwrap(), Some((20, 20)));
+
+        assert_eq!(dict.get_prev(-10, true).unwrap(), Some((-11, -11)));
+        assert_eq!(dict.get_or_prev(-10, true).unwrap(), Some((-10, -10)));
+
+        assert_eq!(dict.get_next(-10, true).unwrap(), Some((10, 10)));
+        assert_eq!(dict.get_or_next(-10, true).unwrap(), Some((-10, -10)));
+
+        assert_eq!(dict.get_prev(-9, true).unwrap(), Some((-10, -10)));
+        assert_eq!(dict.get_or_prev(-9, true).unwrap(), Some((-10, -10)));
+
+        assert_eq!(dict.get_prev(0, true).unwrap(), Some((-10, -10)));
+        assert_eq!(dict.get_or_prev(0, true).unwrap(), Some((-10, -10)));
+
+        assert_eq!(dict.get_next(0, true).unwrap(), Some((10, 10)));
+        assert_eq!(dict.get_or_next(0, true).unwrap(), Some((10, 10)));
+
+        assert_eq!(dict.get_prev(10, true).unwrap(), Some((-10, -10)));
+        assert_eq!(dict.get_or_prev(10, true).unwrap(), Some((10, 10)));
+
+        assert_eq!(dict.get_next(100, true).unwrap(), None);
+        assert_eq!(dict.get_or_next(100, true).unwrap(), None);
+
+        assert_eq!(dict.get_prev(100, true).unwrap(), Some((20, 20)));
+        assert_eq!(dict.get_or_prev(100, true).unwrap(), Some((20, 20)));
     }
 
     #[test]
