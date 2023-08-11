@@ -239,7 +239,14 @@ pub fn dict_insert(
                 if !mode.can_add() {
                     return Ok((root.clone(), false));
                 }
-                break ok!(split(&remaining_data, prefix, &lcp, key, value, finalizer));
+                break ok!(split_edge(
+                    &remaining_data,
+                    prefix,
+                    &lcp,
+                    key,
+                    value,
+                    finalizer
+                ));
             }
             // The key contains the entire prefix, but there are still some bits left
             std::cmp::Ordering::Less => {
@@ -333,7 +340,14 @@ pub fn dict_insert_owned(
                     return Ok((Some(root.clone()), false, None));
                 }
                 break (
-                    ok!(split(&remaining_data, prefix, &lcp, key, value, finalizer)),
+                    ok!(split_edge(
+                        &remaining_data,
+                        prefix,
+                        &lcp,
+                        key,
+                        value,
+                        finalizer
+                    )),
                     None,
                 );
             }
@@ -897,7 +911,7 @@ fn make_leaf(
 }
 
 // Splits an edge or leaf
-fn split(
+fn split_edge(
     data: &CellSlice,
     prefix: &mut CellSlice,
     lcp: &CellSlice,

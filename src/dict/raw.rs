@@ -491,88 +491,76 @@ impl<'a> Iterator for RawIter<'a> {
             };
         }
 
-        while let Some(mut segment) = self.segments.pop() {
-            // Load segment data
-            let mut data = match segment.data.as_slice() {
-                Ok(data) => data,
-                Err(e) => return Some(Err(self.finish(e))),
-            };
+        fn next_impl<'a>(
+            segments: &mut Vec<IterSegment<'a>>,
+        ) -> Result<Option<(CellBuilder, CellSlice<'a>)>, Error> {
+            while let Some(mut segment) = segments.pop() {
+                // Load segment data
+                let mut data = ok!(segment.data.as_slice());
 
-            // Read the next key part from the latest segment
-            let prefix = match read_label(&mut data, segment.remaining_bit_len) {
-                Ok(prefix) => prefix,
-                Err(e) => return Some(Err(self.finish(e))),
-            };
+                // Read the next key part from the latest segment
+                let prefix = ok!(read_label(&mut data, segment.remaining_bit_len));
 
-            // Check remaining bits
-            segment.remaining_bit_len = match segment
-                .remaining_bit_len
-                .checked_sub(prefix.remaining_bits())
-            {
-                // Well-formed `Dict` should have the required number of bits
-                // for each value
-                Some(remaining) => {
-                    // Try to store the next prefix into the segment key
-                    if let Err(e) = segment.key.store_slice_data(prefix) {
-                        return Some(Err(self.finish(e)));
-                    } else if remaining == 0 {
-                        // Return the next entry if there are no remaining bits to read
-                        return Some(Ok((segment.key, data)));
-                    } else {
-                        // Continue reading
-                        remaining
+                // Check remaining bits
+                segment.remaining_bit_len = match segment
+                    .remaining_bit_len
+                    .checked_sub(prefix.remaining_bits())
+                {
+                    // Well-formed `Dict` should have the required number of bits
+                    // for each value
+                    Some(remaining) => {
+                        // Try to store the next prefix into the segment key
+                        ok!(segment.key.store_slice_data(prefix));
+                        if remaining == 0 {
+                            // Return the next entry if there are no remaining bits to read
+                            return Ok(Some((segment.key, data)));
+                        } else {
+                            // Continue reading
+                            remaining
+                        }
                     }
-                }
-                None => return Some(Err(self.finish(Error::CellUnderflow))),
-            };
+                    None => return Err(Error::CellUnderflow),
+                };
 
-            // Trying to load the left child cell
-            let left_child = match data.cell().reference(0) {
-                Some(child) => {
-                    // Handle pruned branch access
-                    if unlikely(child.descriptor().is_pruned_branch()) {
-                        return Some(Err(self.finish(Error::PrunedBranchAccess)));
-                    }
-                    child
-                }
-                None => return Some(Err(self.finish(Error::CellUnderflow))),
-            };
+                // Trying to load the left child cell
+                let Some(left_child) = data.cell().reference(0) else {
+                    return Err(Error::CellUnderflow);
+                };
 
-            // Trying to load the right child cell
-            let right_child = match data.cell().reference(1) {
-                Some(child) => {
-                    // Handle pruned branch access
-                    if unlikely(child.descriptor().is_pruned_branch()) {
-                        return Some(Err(self.finish(Error::PrunedBranchAccess)));
-                    }
-                    child
-                }
-                None => return Some(Err(self.finish(Error::CellUnderflow))),
-            };
+                // Trying to load the right child cell
+                let Some(right_child) = data.cell().reference(1) else {
+                    return Err(Error::CellUnderflow);
+                };
 
-            // Push cells in reverse order
-            self.segments.reserve(2);
-            self.segments.push(IterSegment {
-                data: right_child,
-                remaining_bit_len: segment.remaining_bit_len - 1,
-                key: {
-                    let mut key = segment.key.clone();
-                    _ = key.store_bit_one();
-                    key
-                },
-            });
-            self.segments.push(IterSegment {
-                data: left_child,
-                remaining_bit_len: segment.remaining_bit_len - 1,
-                key: {
-                    _ = segment.key.store_bit_zero();
-                    segment.key
-                },
-            });
+                // Push cells in reverse order
+                segments.reserve(2);
+                segments.push(IterSegment {
+                    data: right_child,
+                    remaining_bit_len: segment.remaining_bit_len - 1,
+                    key: {
+                        let mut key = segment.key.clone();
+                        _ = key.store_bit_one();
+                        key
+                    },
+                });
+                segments.push(IterSegment {
+                    data: left_child,
+                    remaining_bit_len: segment.remaining_bit_len - 1,
+                    key: {
+                        _ = segment.key.store_bit_zero();
+                        segment.key
+                    },
+                });
+            }
+
+            // No segments left
+            Ok(None)
         }
 
-        // No segments left
-        None
+        match next_impl(&mut self.segments) {
+            Ok(res) => res.map(Ok),
+            Err(e) => Some(Err(self.finish(e))),
+        }
     }
 }
 
@@ -675,70 +663,60 @@ impl<'a> Iterator for RawValues<'a> {
             };
         }
 
-        while let Some(mut segment) = self.segments.pop() {
-            // Load segment data
-            let mut data = match segment.data.as_slice() {
-                Ok(data) => data,
-                Err(e) => return Some(Err(self.finish(e))),
-            };
+        fn next_impl<'a>(
+            segments: &mut Vec<ValuesSegment<'a>>,
+        ) -> Result<Option<CellSlice<'a>>, Error> {
+            while let Some(mut segment) = segments.pop() {
+                // Load segment data
+                let mut data = ok!(segment.data.as_slice());
 
-            // Read the next key part from the latest segment
-            let prefix = match read_label(&mut data, segment.remaining_bit_len) {
-                Ok(prefix) => prefix,
-                Err(e) => return Some(Err(self.finish(e))),
-            };
+                // Read the next key part from the latest segment
+                let prefix = ok!(read_label(&mut data, segment.remaining_bit_len));
 
-            // Check remaining bits
-            segment.remaining_bit_len = match segment
-                .remaining_bit_len
-                .checked_sub(prefix.remaining_bits())
-            {
-                // Return the next value if there are no remaining bits to read
-                Some(0) => return Some(Ok(data)),
-                // Continue reading
-                Some(bit_len) => bit_len,
-                // Well-formed `Dict` should have the required number of bits
-                // for each value
-                None => return Some(Err(self.finish(Error::CellUnderflow))),
-            };
+                // Check remaining bits
+                segment.remaining_bit_len = match segment
+                    .remaining_bit_len
+                    .checked_sub(prefix.remaining_bits())
+                {
+                    // Return the next value if there are no remaining bits to read
+                    Some(0) => return Ok(Some(data)),
+                    // Continue reading
+                    Some(bit_len) => bit_len,
+                    // Well-formed `Dict` should have the required number of bits
+                    // for each value
+                    None => return Err(Error::CellUnderflow),
+                };
 
-            // Trying to load the left child cell
-            let left_child = match data.cell().reference(0) {
-                Some(child) => {
-                    // Handle pruned branch access
-                    if unlikely(child.descriptor().is_pruned_branch()) {
-                        return Some(Err(self.finish(Error::PrunedBranchAccess)));
-                    }
-                    child
-                }
-                None => return Some(Err(self.finish(Error::CellUnderflow))),
-            };
+                // Trying to load the left child cell
+                let Some(left_child) = data.cell().reference(0) else {
+                    return Err(Error::CellUnderflow);
+                };
 
-            // Trying to load the right child cell
-            let right_child = match data.cell().reference(1) {
-                Some(child) => {
-                    // Handle pruned branch access
-                    if unlikely(child.descriptor().is_pruned_branch()) {
-                        return Some(Err(self.finish(Error::PrunedBranchAccess)));
-                    }
-                    child
-                }
-                None => return Some(Err(self.finish(Error::CellUnderflow))),
-            };
+                // Trying to load the right child cell
+                let Some(right_child) = data.cell().reference(1) else {
+                    return Err(Error::CellUnderflow);
+                };
 
-            // Push cells in reverse order
-            self.segments.reserve(2);
-            self.segments.push(ValuesSegment {
-                data: right_child,
-                remaining_bit_len: segment.remaining_bit_len - 1,
-            });
-            self.segments.push(ValuesSegment {
-                data: left_child,
-                remaining_bit_len: segment.remaining_bit_len - 1,
-            });
+                // Push cells in reverse order
+                segments.reserve(2);
+                segments.push(ValuesSegment {
+                    data: right_child,
+                    remaining_bit_len: segment.remaining_bit_len - 1,
+                });
+                segments.push(ValuesSegment {
+                    data: left_child,
+                    remaining_bit_len: segment.remaining_bit_len - 1,
+                });
+            }
+
+            // No segments left
+            Ok(None)
         }
 
-        None
+        match next_impl(&mut self.segments) {
+            Ok(res) => res.map(Ok),
+            Err(e) => Some(Err(self.finish(e))),
+        }
     }
 }
 
