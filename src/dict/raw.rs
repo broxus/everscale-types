@@ -329,6 +329,22 @@ impl<const N: u16> RawDict<N> {
         RawIter::new(&self.0, N)
     }
 
+    /// Gets an iterator over the owned entries of the dictionary, sorted by key.
+    /// The iterator element type is `Result<(CellBuilder, CellSliceParts)>`.
+    ///
+    /// If the dictionary is invalid, finishes after the first invalid element,
+    /// returning an error.
+    ///
+    /// # Performance
+    ///
+    /// In the current implementation, iterating over dictionary builds a key
+    /// for each element. Use [`values_owned`] if you don't need keys from an iterator.
+    ///
+    /// [`values_owned`]: RawDict::values_owned
+    pub fn iner_owned(&'_ self) -> RawOwnedIter<'_> {
+        RawOwnedIter::new(&self.0, N)
+    }
+
     /// Gets an iterator over the keys of the dictionary, in sorted order.
     /// The iterator element type is `Result<CellBuilder>`.
     ///
@@ -352,6 +368,15 @@ impl<const N: u16> RawDict<N> {
     /// returning an error.
     pub fn values(&'_ self) -> RawValues<'_> {
         RawValues::new(&self.0, N)
+    }
+
+    /// Gets an iterator over the owned values of the dictionary, in order by key.
+    /// The iterator element type is `Result<CellSliceParts>`.
+    ///
+    /// If the dictionary is invalid, finishes after the first invalid element,
+    /// returning an error.
+    pub fn values_owned(&'_ self) -> RawOwnedValues<'_> {
+        RawOwnedValues::new(&self.0, N)
     }
 
     /// Sets the value associated with the key in the dictionary.
@@ -428,6 +453,58 @@ impl<const N: u16> RawDict<N> {
     }
 }
 
+/// An iterator over the owned entries of a [`RawDict`].
+///
+/// This struct is created by the [`iter_owned`] method on [`RawDict`].
+/// See its documentation for more.
+///
+/// [`iter_owned`]: RawDict::iter_owned
+#[derive(Clone)]
+pub struct RawOwnedIter<'a> {
+    root: &'a Option<Cell>,
+    inner: RawIter<'a>,
+}
+
+impl<'a> RawOwnedIter<'a> {
+    /// Creates an iterator over the owned entries of a dictionary.
+    pub fn new(root: &'a Option<Cell>, bit_len: u16) -> Self {
+        Self {
+            inner: RawIter::new(root, bit_len),
+            root,
+        }
+    }
+}
+
+impl<'a> Iterator for RawOwnedIter<'a> {
+    type Item = Result<(CellBuilder, CellSliceParts), Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(match self.inner.next()? {
+            Ok((key, slice)) => {
+                let parent = match self.inner.segments.last() {
+                    Some(segment) => {
+                        let refs_offset = segment.data.refs_offset();
+                        debug_assert!(segment.prefix.is_some() && refs_offset > 0);
+                        match segment.data.cell().reference_cloned(refs_offset - 1) {
+                            Some(cell) => cell,
+                            None => return Some(Err(self.inner.finish(Error::CellUnderflow))),
+                        }
+                    }
+                    None => match self.root {
+                        Some(root) => root.clone(),
+                        None => {
+                            debug_assert!(false, "Non-empty iterator for empty dict");
+                            unsafe { std::hint::unreachable_unchecked() };
+                        }
+                    },
+                };
+                Ok((key, (parent, slice.range())))
+            }
+            Err(e) => Err(e),
+        })
+    }
+}
+
 /// An iterator over the entries of a [`RawDict`] or a [`Dict`].
 ///
 /// This struct is created by the [`iter`] method on [`RawDict`] or the [`raw_iter`] method on [`Dict`].
@@ -438,9 +515,9 @@ impl<const N: u16> RawDict<N> {
 /// [`raw_iter`]: crate::dict::Dict::raw_iter
 #[derive(Clone)]
 pub struct RawIter<'a> {
-    // TODO: replace `Vec` with on-stack stuff
     segments: Vec<IterSegment<'a>>,
     status: IterStatus,
+    builder: Box<CellBuilder>,
 }
 
 impl<'a> RawIter<'a> {
@@ -450,24 +527,25 @@ impl<'a> RawIter<'a> {
 
         // Push root segment if any
         if let Some(root) = root {
-            let data = root.as_ref();
-            if unlikely(data.descriptor().is_pruned_branch()) {
+            let Ok(data) = root.as_slice() else {
                 return Self {
                     segments: Vec::new(),
                     status: IterStatus::Pruned,
-                };
-            }
+                    builder: Box::default(),
+                }
+            };
 
             segments.push(IterSegment {
                 data,
                 remaining_bit_len: bit_len,
-                key: CellBuilder::new(),
+                prefix: None,
             });
         }
 
         Self {
             segments,
             status: IterStatus::Valid,
+            builder: Default::default(),
         }
     }
 
@@ -493,71 +571,92 @@ impl<'a> Iterator for RawIter<'a> {
 
         fn next_impl<'a>(
             segments: &mut Vec<IterSegment<'a>>,
+            builder: &mut CellBuilder,
         ) -> Result<Option<(CellBuilder, CellSlice<'a>)>, Error> {
-            while let Some(mut segment) = segments.pop() {
-                // Load segment data
-                let mut data = ok!(segment.data.as_slice());
+            #[allow(clippy::never_loop)]
+            loop {
+                let segment = 'segment: {
+                    let mut to_rewind = 0;
+
+                    // Find the latest slice which has not been loaded yet
+                    while let Some(segment) = segments.last_mut() {
+                        // Handle root case
+                        let Some(prefix) = &segment.prefix else {
+                            break 'segment segment;
+                        };
+
+                        let refs_offset = segment.data.refs_offset();
+                        if refs_offset < 2 {
+                            // Found the latest unprocessed slice
+                            let remaining_bit_len = segment.remaining_bit_len;
+                            let data = ok!(segment.data.load_reference_as_slice());
+
+                            ok!(builder.rewind(to_rewind));
+                            ok!(builder.store_bit(refs_offset != 0));
+                            segments.push(IterSegment {
+                                data,
+                                prefix: None,
+                                remaining_bit_len,
+                            });
+                            // SAFETY: we have just added a new element
+                            break 'segment (unsafe { segments.last_mut().unwrap_unchecked() });
+                        } else {
+                            // Rewind prefix
+                            to_rewind += prefix.remaining_bits();
+                            // Pop processed segments
+                            segments.pop();
+                            // Rewind reference bit (if any)
+                            to_rewind += !segments.is_empty() as u16;
+                        }
+                    }
+
+                    return Ok(None);
+                };
 
                 // Read the next key part from the latest segment
-                let prefix = ok!(read_label(&mut data, segment.remaining_bit_len));
+                let prefix = ok!(read_label(&mut segment.data, segment.remaining_bit_len));
 
                 // Check remaining bits
-                segment.remaining_bit_len = match segment
+                return match segment
                     .remaining_bit_len
                     .checked_sub(prefix.remaining_bits())
                 {
-                    // Well-formed `Dict` should have the required number of bits
-                    // for each value
-                    Some(remaining) => {
-                        // Try to store the next prefix into the segment key
-                        ok!(segment.key.store_slice_data(prefix));
-                        if remaining == 0 {
-                            // Return the next entry if there are no remaining bits to read
-                            return Ok(Some((segment.key, data)));
-                        } else {
-                            // Continue reading
-                            remaining
-                        }
+                    // Return value if there are no remaining bits to read
+                    Some(0) => {
+                        // Try to store the last prefix into the result key
+                        let mut key = builder.clone();
+                        ok!(key.store_slice_data(prefix));
+
+                        let data = segment.data;
+
+                        // Pop the current segment from the stack
+                        segments.pop();
+                        ok!(builder.rewind(!segments.is_empty() as u16));
+
+                        Ok(Some((key, data)))
                     }
-                    None => return Err(Error::CellUnderflow),
-                };
+                    // Append prefix to builder and proceed to the next segment
+                    Some(remaining) => {
+                        if segment.data.remaining_refs() < 2 {
+                            return Err(Error::CellUnderflow);
+                        }
 
-                // Trying to load the left child cell
-                let Some(left_child) = data.cell().reference(0) else {
-                    return Err(Error::CellUnderflow);
-                };
+                        // Try to store the next prefix into the buffer
+                        ok!(builder.store_slice_data(prefix));
 
-                // Trying to load the right child cell
-                let Some(right_child) = data.cell().reference(1) else {
-                    return Err(Error::CellUnderflow);
-                };
+                        // Update segment prefix
+                        segment.prefix = Some(prefix);
+                        segment.remaining_bit_len = remaining - 1;
 
-                // Push cells in reverse order
-                segments.reserve(2);
-                segments.push(IterSegment {
-                    data: right_child,
-                    remaining_bit_len: segment.remaining_bit_len - 1,
-                    key: {
-                        let mut key = segment.key.clone();
-                        _ = key.store_bit_one();
-                        key
-                    },
-                });
-                segments.push(IterSegment {
-                    data: left_child,
-                    remaining_bit_len: segment.remaining_bit_len - 1,
-                    key: {
-                        _ = segment.key.store_bit_zero();
-                        segment.key
-                    },
-                });
+                        // Handle next segment
+                        continue;
+                    }
+                    None => Err(Error::CellUnderflow),
+                };
             }
-
-            // No segments left
-            Ok(None)
         }
 
-        match next_impl(&mut self.segments) {
+        match next_impl(&mut self.segments, &mut self.builder) {
             Ok(res) => res.map(Ok),
             Err(e) => Some(Err(self.finish(e))),
         }
@@ -566,9 +665,9 @@ impl<'a> Iterator for RawIter<'a> {
 
 #[derive(Clone)]
 struct IterSegment<'a> {
-    data: &'a DynCell,
+    data: CellSlice<'a>,
     remaining_bit_len: u16,
-    key: CellBuilder,
+    prefix: Option<CellSlice<'a>>,
 }
 
 /// An iterator over the keys of a [`RawDict`] or a [`Dict`].
@@ -604,6 +703,58 @@ impl<'a> Iterator for RawKeys<'a> {
     }
 }
 
+/// An iterator over the owned values of a [`RawDict`].
+///
+/// This struct is created by the [`values_owned`] method on [`RawDict`].
+/// See its documentation for more.
+///
+/// [`values_owned`]: RawDict::values_owned
+#[derive(Clone)]
+pub struct RawOwnedValues<'a> {
+    root: &'a Option<Cell>,
+    inner: RawValues<'a>,
+}
+
+impl<'a> RawOwnedValues<'a> {
+    /// Creates an iterator over the owned entries of a dictionary.
+    pub fn new(root: &'a Option<Cell>, bit_len: u16) -> Self {
+        Self {
+            inner: RawValues::new(root, bit_len),
+            root,
+        }
+    }
+}
+
+impl<'a> Iterator for RawOwnedValues<'a> {
+    type Item = Result<CellSliceParts, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(match self.inner.next()? {
+            Ok(slice) => {
+                let parent = match self.inner.segments.last() {
+                    Some(segment) => {
+                        let refs_offset = segment.data.refs_offset();
+                        debug_assert!(refs_offset > 0);
+                        match segment.data.cell().reference_cloned(refs_offset - 1) {
+                            Some(cell) => cell,
+                            None => return Some(Err(self.inner.finish(Error::CellUnderflow))),
+                        }
+                    }
+                    None => match self.root {
+                        Some(root) => root.clone(),
+                        None => {
+                            debug_assert!(false, "Non-empty iterator for empty dict");
+                            unsafe { std::hint::unreachable_unchecked() };
+                        }
+                    },
+                };
+                Ok((parent, slice.range()))
+            }
+            Err(e) => Err(e),
+        })
+    }
+}
+
 /// An iterator over the values of a [`RawDict`] or a [`Dict`].
 ///
 /// This struct is created by the [`values`] method on [`RawDict`] or the [`raw_values`] method on [`Dict`].
@@ -624,13 +775,12 @@ impl<'a> RawValues<'a> {
     pub fn new(root: &'a Option<Cell>, bit_len: u16) -> Self {
         let mut segments = Vec::new();
         if let Some(root) = root {
-            let data = root.as_ref();
-            if unlikely(data.descriptor().is_pruned_branch()) {
+            let Ok(data) = root.as_slice() else {
                 return Self {
                     segments: Vec::new(),
                     status: IterStatus::Pruned,
                 };
-            }
+            };
 
             segments.push(ValuesSegment {
                 data,
@@ -666,51 +816,62 @@ impl<'a> Iterator for RawValues<'a> {
         fn next_impl<'a>(
             segments: &mut Vec<ValuesSegment<'a>>,
         ) -> Result<Option<CellSlice<'a>>, Error> {
-            while let Some(mut segment) = segments.pop() {
-                // Load segment data
-                let mut data = ok!(segment.data.as_slice());
+            #[allow(clippy::never_loop)]
+            loop {
+                // Find the latest slice which has not been loaded yet
+                let segment = 'segment: {
+                    while let Some(segment) = segments.last_mut() {
+                        if segment.data.bits_offset() == 0 {
+                            break 'segment segment;
+                        }
+
+                        let refs_offset = segment.data.refs_offset();
+                        if refs_offset < 2 {
+                            // Found the latest unprocessed slice
+                            let remaining_bit_len = segment.remaining_bit_len;
+                            let data = ok!(segment.data.load_reference_as_slice());
+
+                            segments.push(ValuesSegment {
+                                data,
+                                remaining_bit_len,
+                            });
+                            // SAFETY: we have just added a new element
+                            break 'segment (unsafe { segments.last_mut().unwrap_unchecked() });
+                        } else {
+                            segments.pop();
+                        }
+                    }
+
+                    return Ok(None);
+                };
 
                 // Read the next key part from the latest segment
-                let prefix = ok!(read_label(&mut data, segment.remaining_bit_len));
+                let prefix = ok!(read_label(&mut segment.data, segment.remaining_bit_len));
 
                 // Check remaining bits
-                segment.remaining_bit_len = match segment
+                return match segment
                     .remaining_bit_len
                     .checked_sub(prefix.remaining_bits())
                 {
-                    // Return the next value if there are no remaining bits to read
-                    Some(0) => return Ok(Some(data)),
-                    // Continue reading
-                    Some(bit_len) => bit_len,
-                    // Well-formed `Dict` should have the required number of bits
-                    // for each value
-                    None => return Err(Error::CellUnderflow),
+                    // Return value if there are no remaining bits to read
+                    Some(0) => {
+                        let data = segment.data;
+                        // Pop the current segment from the stack
+                        segments.pop();
+                        Ok(Some(data))
+                    }
+                    // Append prefix to builder and proceed to the next segment
+                    Some(remaining) => {
+                        if segment.data.remaining_refs() < 2 {
+                            return Err(Error::CellUnderflow);
+                        }
+                        segment.remaining_bit_len = remaining - 1;
+                        // Handle next segment
+                        continue;
+                    }
+                    None => Err(Error::CellUnderflow),
                 };
-
-                // Trying to load the left child cell
-                let Some(left_child) = data.cell().reference(0) else {
-                    return Err(Error::CellUnderflow);
-                };
-
-                // Trying to load the right child cell
-                let Some(right_child) = data.cell().reference(1) else {
-                    return Err(Error::CellUnderflow);
-                };
-
-                // Push cells in reverse order
-                segments.reserve(2);
-                segments.push(ValuesSegment {
-                    data: right_child,
-                    remaining_bit_len: segment.remaining_bit_len - 1,
-                });
-                segments.push(ValuesSegment {
-                    data: left_child,
-                    remaining_bit_len: segment.remaining_bit_len - 1,
-                });
             }
-
-            // No segments left
-            Ok(None)
         }
 
         match next_impl(&mut self.segments) {
@@ -722,7 +883,7 @@ impl<'a> Iterator for RawValues<'a> {
 
 #[derive(Copy, Clone)]
 struct ValuesSegment<'a> {
-    data: &'a DynCell,
+    data: CellSlice<'a>,
     remaining_bit_len: u16,
 }
 
@@ -897,6 +1058,39 @@ mod tests {
             };
             assert_eq!(key, i as u32);
         }
+
+        let mut last = None;
+        for (i, entry) in dict.iner_owned().enumerate() {
+            let (key, (cell, range)) = entry?;
+
+            {
+                let mut slice = range.apply(&cell).unwrap();
+                assert_eq!(slice.remaining_bits(), 32);
+                u32::load_from(&mut slice).unwrap();
+            }
+
+            let key = {
+                let key_cell = key.build()?;
+                key_cell.as_slice()?.load_u32()?
+            };
+            assert_eq!(key, i as u32);
+            last = Some(key);
+        }
+        assert_eq!(last, Some(9));
+
+        let mut values_ref = dict.values();
+        let mut values_owned = dict.values_owned();
+        for (value_ref, value_owned) in (&mut values_ref).zip(&mut values_owned) {
+            let value_ref = value_ref.unwrap();
+            let (cell, range) = value_owned.unwrap();
+            let value_owned = range.apply(&cell).unwrap();
+            assert_eq!(
+                value_ref.cmp_by_content(&value_owned),
+                Ok(std::cmp::Ordering::Equal)
+            );
+        }
+        assert!(values_ref.next().is_none());
+        assert!(values_owned.next().is_none());
 
         Ok(())
     }

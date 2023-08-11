@@ -1008,6 +1008,24 @@ mod tests {
         builder.rewind(27).unwrap();
         assert_eq!(builder.bit_len(), 0);
         assert_eq!(builder.data, [0u8; 128]);
+
+        builder.store_raw(&[0xff; 128], MAX_BIT_LEN).unwrap();
+        assert_eq!(builder.bit_len(), MAX_BIT_LEN);
+
+        let mut target = [0xff; 128];
+        target[127] = 0xfe;
+        assert_eq!(builder.data, target);
+
+        builder.rewind(3).unwrap();
+        assert_eq!(builder.bit_len(), MAX_BIT_LEN - 3);
+        target[127] = 0xf0;
+        assert_eq!(builder.data, target);
+
+        builder.rewind(8).unwrap();
+        assert_eq!(builder.bit_len(), MAX_BIT_LEN - 3 - 8);
+        target[126] = 0xf0;
+        target[127] = 0x00;
+        assert_eq!(builder.data, target);
     }
 
     #[test]
