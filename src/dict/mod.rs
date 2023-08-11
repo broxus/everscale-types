@@ -297,6 +297,18 @@ pub fn dict_insert_owned(
     mode: SetMode,
     finalizer: &mut dyn Finalizer,
 ) -> Result<(Option<Cell>, bool, Option<CellSliceParts>), Error> {
+    fn stack_or_last(stack: &[Segment], root: &Cell) -> Result<Cell, Error> {
+        Ok(match stack.last() {
+            Some(Segment { data, next_branch }) => {
+                match data.reference_cloned(*next_branch as u8) {
+                    Some(cell) => cell,
+                    None => return Err(Error::CellUnderflow),
+                }
+            }
+            None => root.clone(),
+        })
+    }
+
     if key.remaining_bits() != key_bit_len {
         return Err(Error::CellUnderflow);
     }
@@ -325,7 +337,8 @@ pub fn dict_insert_owned(
             std::cmp::Ordering::Equal => {
                 // Check if we can replace the value
                 if !mode.can_replace() {
-                    return Ok((Some(root.clone()), false, None));
+                    let value = (ok!(stack_or_last(&stack, root)), remaining_data.range());
+                    return Ok((Some(root.clone()), false, Some(value)));
                 }
                 // Replace the existing value
                 break (
@@ -384,15 +397,7 @@ pub fn dict_insert_owned(
     };
 
     let value = match value_range {
-        Some(range) => match stack.last() {
-            Some(Segment { data, next_branch }) => {
-                match data.reference_cloned(*next_branch as u8) {
-                    Some(cell) => Some((cell, range)),
-                    None => return Err(Error::CellUnderflow),
-                }
-            }
-            None => Some((root.clone(), range)),
-        },
+        Some(range) => Some((ok!(stack_or_last(&stack, root)), range)),
         None => None,
     };
 
