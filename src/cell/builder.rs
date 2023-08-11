@@ -314,6 +314,36 @@ impl CellBuilder {
         self.is_exotic = is_exotic;
     }
 
+    /// Removes the specified amount of bits from the end of the data.
+    pub fn rewind(&mut self, mut bits: u16) -> Result<(), Error> {
+        if bits == 0 {
+            return Ok(());
+        }
+        let Some(new_bit_len) = self.bit_len.checked_sub(bits) else {
+            return Err(Error::CellUnderflow);
+        };
+
+        let q = (new_bit_len / 8) as usize;
+        let r = new_bit_len % 8;
+
+        // SAFETY: q is in range 0..=127, r is in range 0..=7
+        unsafe {
+            let mut data_ptr = self.data.as_mut_ptr().add(q);
+
+            if r != 0 {
+                let shift = 8 - r;
+                *data_ptr &= 0xff << shift;
+                bits = bits.saturating_sub(shift);
+                data_ptr = data_ptr.add(1);
+            }
+
+            std::ptr::write_bytes(data_ptr, 0, ((bits + 7) / 8) as usize);
+        }
+
+        self.bit_len = new_bit_len;
+        Ok(())
+    }
+
     /// Tries to store the specified number of zero bits in the cell,
     /// returning `false` if there is not enough remaining capacity.
     pub fn store_zeros(&mut self, bits: u16) -> Result<(), Error> {
@@ -948,6 +978,36 @@ mod tests {
         builder.store_u32(0xb00b5).unwrap();
         let cell3 = builder.build().unwrap();
         assert_ne!(cell1.as_ref(), cell3.as_ref());
+    }
+
+    #[test]
+    fn rewind_builder() {
+        let mut builder = CellBuilder::new();
+        builder.store_u32(0xdeafbeaf).unwrap();
+        assert_eq!(builder.bit_len(), 32);
+        assert_eq!(builder.data[..4], 0xdeafbeaf_u32.to_be_bytes());
+
+        builder.rewind(5).unwrap();
+        assert_eq!(builder.bit_len(), 27);
+        assert_eq!(builder.data[..4], 0xdeafbea0_u32.to_be_bytes());
+
+        builder.store_u32(0xdeafbeaf).unwrap();
+        assert_eq!(builder.bit_len(), 32 + 27);
+        assert_eq!(
+            builder.data[..8],
+            [0xde, 0xaf, 0xbe, 0xbb, 0xd5, 0xf7, 0xd5, 0xe0]
+        );
+        builder.rewind(32).unwrap();
+        assert_eq!(
+            builder.data[..8],
+            [0xde, 0xaf, 0xbe, 0xa0, 0x00, 0x00, 0x00, 0x00]
+        );
+
+        assert_eq!(builder.rewind(32), Err(Error::CellUnderflow));
+
+        builder.rewind(27).unwrap();
+        assert_eq!(builder.bit_len(), 0);
+        assert_eq!(builder.data, [0u8; 128]);
     }
 
     #[test]
