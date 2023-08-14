@@ -341,7 +341,7 @@ impl<const N: u16> RawDict<N> {
     /// for each element. Use [`values_owned`] if you don't need keys from an iterator.
     ///
     /// [`values_owned`]: RawDict::values_owned
-    pub fn iner_owned(&'_ self) -> RawOwnedIter<'_> {
+    pub fn iter_owned(&'_ self) -> RawOwnedIter<'_> {
         RawOwnedIter::new(&self.0, N)
     }
 
@@ -473,35 +473,36 @@ impl<'a> RawOwnedIter<'a> {
             root,
         }
     }
+
+    /// Creates an iterator over the entries of a dictionary with explicit
+    /// direction and behavior.
+    pub fn new_ext(root: &'a Option<Cell>, bit_len: u16, reversed: bool, signed: bool) -> Self {
+        Self {
+            inner: RawIter::new_ext(root, bit_len, reversed, signed),
+            root,
+        }
+    }
+
+    /// Changes the direction of the iterator to descending.
+    #[inline]
+    pub fn reversed(mut self) -> Self {
+        self.inner.reversed = true;
+        self
+    }
+
+    /// Changes the behavior of the iterator to reverse the high bit.
+    #[inline]
+    pub fn signed(mut self) -> Self {
+        self.inner.signed = true;
+        self
+    }
 }
 
 impl<'a> Iterator for RawOwnedIter<'a> {
     type Item = Result<(CellBuilder, CellSliceParts), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        Some(match self.inner.next()? {
-            Ok((key, slice)) => {
-                let parent = match self.inner.segments.last() {
-                    Some(segment) => {
-                        let refs_offset = segment.data.refs_offset();
-                        debug_assert!(segment.prefix.is_some() && refs_offset > 0);
-                        match segment.data.cell().reference_cloned(refs_offset - 1) {
-                            Some(cell) => cell,
-                            None => return Some(Err(self.inner.finish(Error::CellUnderflow))),
-                        }
-                    }
-                    None => match self.root {
-                        Some(root) => root.clone(),
-                        None => {
-                            debug_assert!(false, "Non-empty iterator for empty dict");
-                            unsafe { std::hint::unreachable_unchecked() };
-                        }
-                    },
-                };
-                Ok((key, (parent, slice.range())))
-            }
-            Err(e) => Err(e),
-        })
+        self.inner.next_owned(self.root)
     }
 }
 
@@ -518,11 +519,19 @@ pub struct RawIter<'a> {
     segments: Vec<IterSegment<'a>>,
     status: IterStatus,
     builder: Box<CellBuilder>,
+    reversed: bool,
+    signed: bool,
 }
 
 impl<'a> RawIter<'a> {
     /// Creates an iterator over the entries of a dictionary.
     pub fn new(root: &'a Option<Cell>, bit_len: u16) -> Self {
+        Self::new_ext(root, bit_len, false, false)
+    }
+
+    /// Creates an iterator over the entries of a dictionary with explicit
+    /// direction and behavior.
+    pub fn new_ext(root: &'a Option<Cell>, bit_len: u16, reversed: bool, signed: bool) -> Self {
         let mut segments = Vec::new();
 
         // Push root segment if any
@@ -532,6 +541,8 @@ impl<'a> RawIter<'a> {
                     segments: Vec::new(),
                     status: IterStatus::Pruned,
                     builder: Box::default(),
+                    reversed,
+                    signed,
                 }
             };
 
@@ -546,7 +557,56 @@ impl<'a> RawIter<'a> {
             segments,
             status: IterStatus::Valid,
             builder: Default::default(),
+            reversed,
+            signed,
         }
+    }
+
+    /// Changes the direction of the iterator to descending.
+    #[inline]
+    pub fn reversed(mut self) -> Self {
+        self.reversed = true;
+        self
+    }
+
+    /// Changes the behavior of the iterator to reverse the high bit.
+    #[inline]
+    pub fn signed(mut self) -> Self {
+        self.signed = true;
+        self
+    }
+
+    /// Advances the iterator and returns the next value as owned cell slice parts.
+    pub fn next_owned(
+        &mut self,
+        root: &Option<Cell>,
+    ) -> Option<Result<(CellBuilder, CellSliceParts), Error>> {
+        Some(match self.next()? {
+            Ok((key, slice)) => {
+                let parent = match self.segments.last() {
+                    Some(segment) => {
+                        let refs_offset = segment.data.refs_offset();
+                        debug_assert!(
+                            segment.prefix.is_some() && (refs_offset == 1 || refs_offset == 2)
+                        );
+                        let next_bit = (refs_offset != 1) ^ self.reversed;
+                        match segment.data.cell().reference_cloned(next_bit as u8) {
+                            Some(cell) => cell,
+                            None => return Some(Err(self.finish(Error::CellUnderflow))),
+                        }
+                    }
+                    None => match root {
+                        Some(root) => root.clone(),
+                        None => {
+                            debug_assert!(false, "Non-empty iterator for empty dict");
+                            unsafe { std::hint::unreachable_unchecked() };
+                        }
+                    },
+                };
+                Ok((key, (parent, slice.range())))
+            }
+            Err(e) => Err(e),
+        })
     }
 
     #[inline]
@@ -570,47 +630,53 @@ impl<'a> Iterator for RawIter<'a> {
         }
 
         fn next_impl<'a>(
+            reverse: bool,
+            signed: bool,
             segments: &mut Vec<IterSegment<'a>>,
             builder: &mut CellBuilder,
         ) -> Result<Option<(CellBuilder, CellSlice<'a>)>, Error> {
             #[allow(clippy::never_loop)]
             loop {
-                let segment = 'segment: {
-                    let mut to_rewind = 0;
+                let mut to_rewind = 0;
+                let segment = loop {
+                    let is_root = segments.len() == 1;
+                    let Some(segment) = segments.last_mut() else {
+                        return Ok(None);
+                    };
 
-                    // Find the latest slice which has not been loaded yet
-                    while let Some(segment) = segments.last_mut() {
-                        // Handle root case
-                        let Some(prefix) = &segment.prefix else {
-                            break 'segment segment;
-                        };
+                    // Handle root case
+                    let Some(prefix) = &segment.prefix else {
+                        break segment;
+                    };
 
-                        let refs_offset = segment.data.refs_offset();
-                        if refs_offset < 2 {
-                            // Found the latest unprocessed slice
-                            let remaining_bit_len = segment.remaining_bit_len;
-                            let data = ok!(segment.data.load_reference_as_slice());
+                    let refs_offset = segment.data.refs_offset();
+                    if refs_offset < 2 {
+                        // Found the latest unprocessed slice
+                        let remaining_bit_len = segment.remaining_bit_len;
+                        let next_bit = (refs_offset != 0)
+                            ^ reverse
+                            ^ (signed && is_root && prefix.is_data_empty());
 
-                            ok!(builder.rewind(to_rewind));
-                            ok!(builder.store_bit(refs_offset != 0));
-                            segments.push(IterSegment {
-                                data,
-                                prefix: None,
-                                remaining_bit_len,
-                            });
-                            // SAFETY: we have just added a new element
-                            break 'segment (unsafe { segments.last_mut().unwrap_unchecked() });
-                        } else {
-                            // Rewind prefix
-                            to_rewind += prefix.remaining_bits();
-                            // Pop processed segments
-                            segments.pop();
-                            // Rewind reference bit (if any)
-                            to_rewind += !segments.is_empty() as u16;
-                        }
+                        let data = ok!(segment.data.cell().get_reference_as_slice(next_bit as u8));
+                        segment.data.try_advance(0, 1);
+
+                        ok!(builder.rewind(to_rewind));
+                        ok!(builder.store_bit(next_bit));
+                        segments.push(IterSegment {
+                            data,
+                            prefix: None,
+                            remaining_bit_len,
+                        });
+                        // SAFETY: we have just added a new element
+                        break (unsafe { segments.last_mut().unwrap_unchecked() });
+                    } else {
+                        // Rewind prefix
+                        to_rewind += prefix.remaining_bits();
+                        // Pop processed segments
+                        segments.pop();
+                        // Rewind reference bit (if any)
+                        to_rewind += !segments.is_empty() as u16;
                     }
-
-                    return Ok(None);
                 };
 
                 // Read the next key part from the latest segment
@@ -656,7 +722,12 @@ impl<'a> Iterator for RawIter<'a> {
             }
         }
 
-        match next_impl(&mut self.segments, &mut self.builder) {
+        match next_impl(
+            self.reversed,
+            self.signed,
+            &mut self.segments,
+            &mut self.builder,
+        ) {
             Ok(res) => res.map(Ok),
             Err(e) => Some(Err(self.finish(e))),
         }
@@ -690,6 +761,28 @@ impl<'a> RawKeys<'a> {
             inner: RawIter::new(root, bit_len),
         }
     }
+
+    /// Creates an iterator over the keys of a dictionary with explicit
+    /// direction and behavior.
+    pub fn new_ext(root: &'a Option<Cell>, bit_len: u16, reversed: bool, signed: bool) -> Self {
+        Self {
+            inner: RawIter::new_ext(root, bit_len, reversed, signed),
+        }
+    }
+
+    /// Changes the direction of the iterator to descending.
+    #[inline]
+    pub fn reversed(mut self) -> Self {
+        self.inner.reversed = true;
+        self
+    }
+
+    /// Changes the behavior of the iterator to reverse the high bit.
+    #[inline]
+    pub fn signed(mut self) -> Self {
+        self.inner.signed = true;
+        self
+    }
 }
 
 impl<'a> Iterator for RawKeys<'a> {
@@ -722,6 +815,29 @@ impl<'a> RawOwnedValues<'a> {
             inner: RawValues::new(root, bit_len),
             root,
         }
+    }
+
+    /// Creates an iterator over the values of a dictionary with explicit
+    /// direction and behavior.
+    pub fn new_ext(root: &'a Option<Cell>, bit_len: u16, reversed: bool, signed: bool) -> Self {
+        Self {
+            inner: RawValues::new_ext(root, bit_len, reversed, signed),
+            root,
+        }
+    }
+
+    /// Changes the direction of the iterator to descending.
+    #[inline]
+    pub fn reversed(mut self) -> Self {
+        self.inner.reversed = true;
+        self
+    }
+
+    /// Changes the behavior of the iterator to reverse the high bit.
+    #[inline]
+    pub fn signed(mut self) -> Self {
+        self.inner.signed = true;
+        self
     }
 }
 
@@ -765,22 +881,31 @@ impl<'a> Iterator for RawOwnedValues<'a> {
 /// [`raw_values`]: crate::dict::Dict::raw_values
 #[derive(Clone)]
 pub struct RawValues<'a> {
-    // TODO: replace `Vec` with on-stack stuff
     segments: Vec<ValuesSegment<'a>>,
     status: IterStatus,
+    reversed: bool,
+    signed: bool,
 }
 
 impl<'a> RawValues<'a> {
     /// Creates an iterator over the values of a dictionary.
     pub fn new(root: &'a Option<Cell>, bit_len: u16) -> Self {
+        Self::new_ext(root, bit_len, false, false)
+    }
+
+    /// Creates an iterator over the values of a dictionary with explicit
+    /// direction and behavior.
+    pub fn new_ext(root: &'a Option<Cell>, bit_len: u16, reversed: bool, signed: bool) -> Self {
         let mut segments = Vec::new();
         if let Some(root) = root {
             let Ok(data) = root.as_slice() else {
-                return Self {
-                    segments: Vec::new(),
-                    status: IterStatus::Pruned,
+                    return Self {
+                        segments: Vec::new(),
+                        status: IterStatus::Pruned,
+                        reversed,
+                        signed,
+                    };
                 };
-            };
 
             segments.push(ValuesSegment {
                 data,
@@ -790,7 +915,23 @@ impl<'a> RawValues<'a> {
         Self {
             segments,
             status: IterStatus::Valid,
+            reversed,
+            signed,
         }
+    }
+
+    /// Changes the direction of the iterator to descending.
+    #[inline]
+    pub fn reversed(mut self) -> Self {
+        self.reversed = true;
+        self
+    }
+
+    /// Changes the behavior of the iterator to reverse the high bit.
+    #[inline]
+    pub fn signed(mut self) -> Self {
+        self.signed = true;
+        self
     }
 
     #[inline]
@@ -814,35 +955,42 @@ impl<'a> Iterator for RawValues<'a> {
         }
 
         fn next_impl<'a>(
+            reverse: bool,
+            signed: bool,
             segments: &mut Vec<ValuesSegment<'a>>,
         ) -> Result<Option<CellSlice<'a>>, Error> {
             #[allow(clippy::never_loop)]
             loop {
                 // Find the latest slice which has not been loaded yet
-                let segment = 'segment: {
-                    while let Some(segment) = segments.last_mut() {
-                        if segment.data.bits_offset() == 0 {
-                            break 'segment segment;
-                        }
+                let segment = loop {
+                    let is_root = segments.len() == 1;
+                    let Some(segment) = segments.last_mut() else {
+                        return Ok(None);
+                    };
 
-                        let refs_offset = segment.data.refs_offset();
-                        if refs_offset < 2 {
-                            // Found the latest unprocessed slice
-                            let remaining_bit_len = segment.remaining_bit_len;
-                            let data = ok!(segment.data.load_reference_as_slice());
-
-                            segments.push(ValuesSegment {
-                                data,
-                                remaining_bit_len,
-                            });
-                            // SAFETY: we have just added a new element
-                            break 'segment (unsafe { segments.last_mut().unwrap_unchecked() });
-                        } else {
-                            segments.pop();
-                        }
+                    if segment.data.bits_offset() == 0 {
+                        break segment;
                     }
 
-                    return Ok(None);
+                    let refs_offset = segment.data.refs_offset();
+                    if refs_offset < 2 {
+                        // Found the latest unprocessed slice
+                        let remaining_bit_len = segment.remaining_bit_len;
+                        let next_bit = (refs_offset != 0)
+                            ^ reverse
+                            ^ (signed && is_root && segment.data.is_data_empty());
+                        let data = ok!(segment.data.cell().get_reference_as_slice(next_bit as u8));
+                        segment.data.try_advance(0, 1);
+
+                        segments.push(ValuesSegment {
+                            data,
+                            remaining_bit_len,
+                        });
+                        // SAFETY: we have just added a new element
+                        break (unsafe { segments.last_mut().unwrap_unchecked() });
+                    } else {
+                        segments.pop();
+                    }
                 };
 
                 // Read the next key part from the latest segment
@@ -874,7 +1022,7 @@ impl<'a> Iterator for RawValues<'a> {
             }
         }
 
-        match next_impl(&mut self.segments) {
+        match next_impl(self.reversed, self.signed, &mut self.segments) {
             Ok(res) => res.map(Ok),
             Err(e) => Some(Err(self.finish(e))),
         }
@@ -1049,8 +1197,19 @@ mod tests {
         let size = dict.values().count();
         assert_eq!(size, 10);
 
+        let mut rev_iter_items = dict.iter().reversed().collect::<Vec<_>>();
+        rev_iter_items.reverse();
+        let mut rev_iter_items = rev_iter_items.into_iter();
+
         for (i, entry) in dict.iter().enumerate() {
-            let (key, _) = entry?;
+            let (key, value) = entry?;
+
+            let (rev_key, rev_value) = rev_iter_items.next().unwrap().unwrap();
+            assert_eq!(key, rev_key);
+            assert_eq!(
+                value.cmp_by_content(&rev_value),
+                Ok(std::cmp::Ordering::Equal)
+            );
 
             let key = {
                 let key_cell = key.build()?;
@@ -1058,9 +1217,10 @@ mod tests {
             };
             assert_eq!(key, i as u32);
         }
+        assert!(rev_iter_items.next().is_none());
 
         let mut last = None;
-        for (i, entry) in dict.iner_owned().enumerate() {
+        for (i, entry) in dict.iter_owned().enumerate() {
             let (key, (cell, range)) = entry?;
 
             {

@@ -528,6 +528,20 @@ where
             inner: Iter::new(root),
         }
     }
+
+    /// Changes the direction of the iterator to descending.
+    #[inline]
+    pub fn reversed(mut self) -> Self {
+        self.inner = self.inner.reversed();
+        self
+    }
+
+    /// Changes the behavior of the iterator to reverse the high bit.
+    #[inline]
+    pub fn signed(mut self) -> Self {
+        self.inner = self.inner.signed();
+        self
+    }
 }
 
 impl<'a, K, A, V> Iterator for AugIter<'a, K, A, V>

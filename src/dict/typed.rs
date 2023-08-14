@@ -838,6 +838,20 @@ where
             _value: PhantomData,
         }
     }
+
+    /// Changes the direction of the iterator to descending.
+    #[inline]
+    pub fn reversed(mut self) -> Self {
+        self.inner = self.inner.reversed();
+        self
+    }
+
+    /// Changes the behavior of the iterator to reverse the high bit.
+    #[inline]
+    pub fn signed(mut self) -> Self {
+        self.inner = self.inner.signed();
+        self
+    }
 }
 
 impl<'a, K, V> Iterator for Iter<'a, K, V>
@@ -896,6 +910,20 @@ where
             _key: PhantomData,
         }
     }
+
+    /// Changes the direction of the iterator to descending.
+    #[inline]
+    pub fn reversed(mut self) -> Self {
+        self.inner = self.inner.reversed();
+        self
+    }
+
+    /// Changes the behavior of the iterator to reverse the high bit.
+    #[inline]
+    pub fn signed(mut self) -> Self {
+        self.inner = self.inner.signed();
+        self
+    }
 }
 
 impl<'a, K> Iterator for Keys<'a, K>
@@ -941,6 +969,20 @@ impl<'a, V> Values<'a, V> {
             inner: RawValues::new(root, bit_len),
             _value: PhantomData,
         }
+    }
+
+    /// Changes the direction of the iterator to descending.
+    #[inline]
+    pub fn reversed(mut self) -> Self {
+        self.inner = self.inner.reversed();
+        self
+    }
+
+    /// Changes the behavior of the iterator to reverse the high bit.
+    #[inline]
+    pub fn signed(mut self) -> Self {
+        self.inner = self.inner.signed();
+        self
     }
 }
 
@@ -1141,6 +1183,29 @@ mod tests {
             let (key, _) = entry.unwrap();
             assert_eq!(key, i as u32);
         }
+
+        let signed_range = -10..10;
+
+        let mut dict = Dict::<i32, i32>::new();
+        for i in signed_range.clone() {
+            assert!(dict.set(i, i).unwrap());
+        }
+
+        let mut signed_range_iter = signed_range.clone();
+        for (entry, i) in dict.iter().signed().zip(&mut signed_range_iter) {
+            let (key, value) = entry.unwrap();
+            assert_eq!(key, i);
+            assert_eq!(value, i);
+        }
+        assert_eq!(signed_range_iter.next(), None);
+
+        let mut signed_range_iter = signed_range.rev();
+        for (entry, i) in dict.iter().reversed().signed().zip(&mut signed_range_iter) {
+            let (key, value) = entry.unwrap();
+            assert_eq!(key, i);
+            assert_eq!(value, i);
+        }
+        assert_eq!(signed_range_iter.next(), None);
     }
 
     #[test]

@@ -196,6 +196,26 @@ impl PartialEq for CellBuilder {
     }
 }
 
+impl std::fmt::Debug for CellBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        #[repr(transparent)]
+        struct Data<'a, T>(&'a T);
+
+        impl<T: std::fmt::Display> std::fmt::Debug for Data<'_, T> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                std::fmt::Display::fmt(self.0, f)
+            }
+        }
+
+        f.debug_struct("CellBuilder")
+            .field("data", &Data(&self.display_data()))
+            .field("bit_len", &self.bit_len)
+            .field("is_exotic", &self.is_exotic)
+            .field("references", &self.references.as_ref())
+            .finish()
+    }
+}
+
 macro_rules! impl_store_uint {
     ($self:ident, $value:ident, bytes: $bytes:literal, bits: $bits:literal) => {
         if $self.bit_len + $bits <= MAX_BIT_LEN {
