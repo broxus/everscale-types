@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::mem::MaybeUninit;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -193,6 +194,37 @@ impl PartialEq for CellBuilder {
         self.bit_len == other.bit_len
             && self.data == other.data
             && self.references.as_ref() == other.references.as_ref()
+    }
+}
+
+impl Ord for CellBuilder {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self.bit_len, self.references.len()).cmp(&(other.bit_len, other.references.len())) {
+            Ordering::Equal => {}
+            ord => return ord,
+        }
+
+        // TODO: compare subslices of len {(bits + 7) / 8} ?
+        match self.data.cmp(&other.data) {
+            Ordering::Equal => {}
+            ord => return ord,
+        }
+
+        for (a, b) in self.references().iter().zip(other.references().iter()) {
+            match a.repr_hash().cmp(b.repr_hash()) {
+                Ordering::Equal => {}
+                ord => return ord,
+            }
+        }
+
+        Ordering::Equal
+    }
+}
+
+impl PartialOrd for CellBuilder {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -1153,6 +1185,39 @@ mod tests {
         builder.store_u32(0xb00b5).unwrap();
         let cell3 = builder.build().unwrap();
         assert_ne!(cell1.as_ref(), cell3.as_ref());
+    }
+
+    #[test]
+    fn compare_builders() {
+        let mut a = CellBuilder::new();
+        a.store_u32(0xdeafbeaf).unwrap();
+
+        let mut b = CellBuilder::new();
+        b.store_u32(0xdeafbeaf).unwrap();
+
+        assert_eq!(a, b);
+
+        b.store_u8(1).unwrap();
+        assert!(a < b);
+        a.store_u8(2).unwrap();
+        assert!(a > b);
+
+        a.rewind(8).unwrap();
+        a.store_u8(1).unwrap();
+        assert_eq!(a, b);
+
+        let child_a = a.clone().build().unwrap();
+        a.store_reference(child_a.clone()).unwrap();
+        assert!(a > b);
+
+        let child_b = b.clone().build().unwrap();
+        b.store_reference(child_b).unwrap();
+        assert_eq!(a, b);
+
+        let child_b2 = b.clone().build().unwrap();
+        a.store_reference(child_a).unwrap();
+        b.store_reference(child_b2).unwrap();
+        assert_ne!(a, b);
     }
 
     #[test]
