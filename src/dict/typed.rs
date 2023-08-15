@@ -141,7 +141,7 @@ where
         {
             let mut builder = CellBuilder::new();
             ok!(key.store_into(&mut builder, &mut Cell::default_finalizer()));
-            Ok(ok!(dict_get(root, K::BITS, builder.as_data_slice())).is_some())
+            Ok(ok!(dict_get(root.as_ref(), K::BITS, builder.as_data_slice())).is_some())
         }
         contains_key_impl(&self.root, key.borrow())
     }
@@ -168,7 +168,7 @@ where
             let Some(mut value) = ({
                 let mut builder = CellBuilder::new();
                 ok!(key.store_into(&mut builder, &mut Cell::default_finalizer()));
-                ok!(dict_get(root, K::BITS, builder.as_data_slice()))
+                ok!(dict_get(root.as_ref(), K::BITS, builder.as_data_slice()))
             }) else {
                 return Ok(None);
             };
@@ -196,7 +196,7 @@ where
         {
             let mut builder = CellBuilder::new();
             ok!(key.store_into(&mut builder, &mut Cell::default_finalizer()));
-            dict_get(root, K::BITS, builder.as_data_slice())
+            dict_get(root.as_ref(), K::BITS, builder.as_data_slice())
         }
 
         get_raw_impl(&self.root, key.borrow())
@@ -424,7 +424,7 @@ where
                 let mut builder = CellBuilder::new();
                 ok!(key.store_into(&mut builder, &mut Cell::default_finalizer()));
                 ok!(dict_find_owned(
-                    root,
+                    root.as_ref(),
                     K::BITS,
                     builder.as_data_slice(),
                     towards,
@@ -490,7 +490,7 @@ where
         bound: DictBound,
         signed: bool,
     ) -> Result<Option<(K, CellSlice<'_>)>, Error> {
-        let Some((key, value)) = ok!(dict_find_bound(&self.root, K::BITS, bound, signed)) else {
+        let Some((key, value)) = ok!(dict_find_bound(self.root.as_ref(), K::BITS, bound, signed)) else {
             return Ok(None);
         };
         match K::from_raw_data(key.raw_data()) {
@@ -510,7 +510,7 @@ where
         finalizer: &mut dyn Finalizer,
     ) -> Result<Option<(K, CellSliceParts)>, Error> {
         let (dict, removed) = ok!(dict_remove_bound_owned(
-            &self.root,
+            self.root.as_ref(),
             K::BITS,
             bound,
             signed,
@@ -554,7 +554,7 @@ where
             let mut builder = CellBuilder::new();
             ok!(key.store_into(&mut builder, &mut Cell::default_finalizer()));
             dict_remove_owned(
-                root,
+                root.as_ref(),
                 &mut builder.as_data_slice(),
                 K::BITS,
                 false,
@@ -680,7 +680,7 @@ where
             let mut key_builder = CellBuilder::new();
             ok!(key.store_into(&mut key_builder, &mut Cell::default_finalizer()));
             ok!(dict_insert(
-                &self.root,
+                self.root.as_ref(),
                 &mut key_builder.as_data_slice(),
                 K::BITS,
                 value,

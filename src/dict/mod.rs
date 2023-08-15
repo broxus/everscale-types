@@ -81,7 +81,7 @@ impl SetMode {
 /// Removes the value associated with key in dictionary.
 /// Returns a tuple with a new dictionary cell and an optional removed value.
 pub fn dict_remove_owned(
-    root: &Option<Cell>,
+    root: Option<&Cell>,
     key: &mut CellSlice,
     key_bit_len: u16,
     allow_subtree: bool,
@@ -193,7 +193,7 @@ pub fn dict_remove_owned(
 ///
 /// Returns a tuple with a new dict root, and changed flag.
 pub fn dict_insert(
-    root: &Option<Cell>,
+    root: Option<&Cell>,
     key: &mut CellSlice,
     key_bit_len: u16,
     value: &dyn Store,
@@ -228,7 +228,7 @@ pub fn dict_insert(
             std::cmp::Ordering::Equal => {
                 // Check if we can replace the value
                 if !mode.can_replace() {
-                    return Ok((root.clone(), false));
+                    return Ok((root.cloned(), false));
                 }
                 // Replace the existing value
                 break ok!(make_leaf(prefix, key.remaining_bits(), value, finalizer));
@@ -237,7 +237,7 @@ pub fn dict_insert(
             std::cmp::Ordering::Less if lcp.remaining_bits() < prefix.remaining_bits() => {
                 // Check if we can add a new value
                 if !mode.can_add() {
-                    return Ok((root.clone(), false));
+                    return Ok((root.cloned(), false));
                 }
                 break ok!(split_edge(
                     &remaining_data,
@@ -290,7 +290,7 @@ pub fn dict_insert(
 ///
 /// Returns a tuple with a new dict root, changed flag and the previous value.
 pub fn dict_insert_owned(
-    root: &Option<Cell>,
+    root: Option<&Cell>,
     key: &mut CellSlice,
     key_bit_len: u16,
     value: &dyn Store,
@@ -313,7 +313,7 @@ pub fn dict_insert_owned(
         return Err(Error::CellUnderflow);
     }
 
-    let root = match root.as_ref() {
+    let root = match root {
         Some(data) => data,
         None if mode.can_add() => {
             let data = ok!(make_leaf(key, key_bit_len, value, finalizer));
@@ -408,7 +408,7 @@ pub fn dict_insert_owned(
 
 /// Returns a `CellSlice` of the value corresponding to the key.
 pub fn dict_get<'a: 'b, 'b>(
-    root: &'a Option<Cell>,
+    root: Option<&'a Cell>,
     key_bit_len: u16,
     mut key: CellSlice<'b>,
 ) -> Result<Option<CellSlice<'a>>, Error> {
@@ -453,7 +453,7 @@ pub fn dict_get<'a: 'b, 'b>(
 
 /// Returns cell slice parts of the value corresponding to the key.
 pub fn dict_get_owned(
-    root: &Option<Cell>,
+    root: Option<&Cell>,
     key_bit_len: u16,
     mut key: CellSlice<'_>,
 ) -> Result<Option<CellSliceParts>, Error> {
@@ -513,7 +513,7 @@ pub fn dict_get_owned(
 
 /// Returns cell slice parts of the value corresponding to the key.
 pub fn dict_find_owned(
-    root: &Option<Cell>,
+    root: Option<&Cell>,
     key_bit_len: u16,
     mut key: CellSlice<'_>,
     towards: DictBound,
@@ -702,7 +702,7 @@ pub fn dict_find_owned(
 
 /// Finds the specified dict bound and returns a key and a value corresponding to the key.
 pub fn dict_find_bound<'a: 'b, 'b>(
-    root: &'a Option<Cell>,
+    root: Option<&'a Cell>,
     mut key_bit_len: u16,
     bound: DictBound,
     signed: bool,
@@ -748,7 +748,7 @@ pub fn dict_find_bound<'a: 'b, 'b>(
 
 /// Finds the specified dict bound and returns a key and cell slice parts corresponding to the key.
 pub fn dict_find_bound_owned(
-    root: &Option<Cell>,
+    root: Option<&Cell>,
     mut key_bit_len: u16,
     bound: DictBound,
     signed: bool,
@@ -808,7 +808,7 @@ pub fn dict_find_bound_owned(
 
 /// Removes the specified dict bound and returns a removed key and cell slice parts.
 pub fn dict_remove_bound_owned(
-    root: &Option<Cell>,
+    root: Option<&Cell>,
     mut key_bit_len: u16,
     bound: DictBound,
     signed: bool,

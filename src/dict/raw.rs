@@ -130,7 +130,7 @@ impl<const N: u16> RawDict<N> {
 
     /// Returns a `CellSlice` of the value corresponding to the key.
     pub fn get<'a>(&'a self, key: CellSlice<'_>) -> Result<Option<CellSlice<'a>>, Error> {
-        dict_get(&self.0, N, key)
+        dict_get(self.0.as_ref(), N, key)
     }
 
     /// Computes the minimal key in dictionary that is lexicographically greater than `key`,
@@ -140,7 +140,7 @@ impl<const N: u16> RawDict<N> {
         key: CellSlice<'_>,
         signed: bool,
     ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
-        dict_find_owned(&self.0, N, key, DictBound::Max, false, signed)
+        dict_find_owned(self.0.as_ref(), N, key, DictBound::Max, false, signed)
     }
 
     /// Computes the maximal key in dictionary that is lexicographically smaller than `key`,
@@ -150,7 +150,7 @@ impl<const N: u16> RawDict<N> {
         key: CellSlice<'_>,
         signed: bool,
     ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
-        dict_find_owned(&self.0, N, key, DictBound::Min, false, signed)
+        dict_find_owned(self.0.as_ref(), N, key, DictBound::Min, false, signed)
     }
 
     /// Computes the minimal key in dictionary that is lexicographically greater than `key`,
@@ -160,7 +160,7 @@ impl<const N: u16> RawDict<N> {
         key: CellSlice<'_>,
         signed: bool,
     ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
-        dict_find_owned(&self.0, N, key, DictBound::Max, true, signed)
+        dict_find_owned(self.0.as_ref(), N, key, DictBound::Max, true, signed)
     }
 
     /// Computes the maximal key in dictionary that is lexicographically smaller than `key`,
@@ -170,22 +170,22 @@ impl<const N: u16> RawDict<N> {
         key: CellSlice<'_>,
         signed: bool,
     ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
-        dict_find_owned(&self.0, N, key, DictBound::Min, true, signed)
+        dict_find_owned(self.0.as_ref(), N, key, DictBound::Min, true, signed)
     }
 
     /// Returns cell slice parts of the value corresponding to the key.
     pub fn get_owned(&self, key: CellSlice<'_>) -> Result<Option<CellSliceParts>, Error> {
-        dict_get_owned(&self.0, N, key)
+        dict_get_owned(self.0.as_ref(), N, key)
     }
 
     /// Returns the lowest key and a value corresponding to the key.
     pub fn get_min(&self, signed: bool) -> Result<Option<(CellBuilder, CellSlice<'_>)>, Error> {
-        dict_find_bound(&self.0, N, DictBound::Min, signed)
+        dict_find_bound(self.0.as_ref(), N, DictBound::Min, signed)
     }
 
     /// Returns the largest key and a value corresponding to the key.
     pub fn get_max(&self, signed: bool) -> Result<Option<(CellBuilder, CellSlice<'_>)>, Error> {
-        dict_find_bound(&self.0, N, DictBound::Max, signed)
+        dict_find_bound(self.0.as_ref(), N, DictBound::Max, signed)
     }
 
     /// Finds the specified dict bound and returns a key and a value corresponding to the key.
@@ -194,7 +194,7 @@ impl<const N: u16> RawDict<N> {
         bound: DictBound,
         signed: bool,
     ) -> Result<Option<(CellBuilder, CellSlice<'_>)>, Error> {
-        dict_find_bound(&self.0, N, bound, signed)
+        dict_find_bound(self.0.as_ref(), N, bound, signed)
     }
 
     /// Returns the lowest key and cell slice parts corresponding to the key.
@@ -202,7 +202,7 @@ impl<const N: u16> RawDict<N> {
         &self,
         signed: bool,
     ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
-        dict_find_bound_owned(&self.0, N, DictBound::Min, signed)
+        dict_find_bound_owned(self.0.as_ref(), N, DictBound::Min, signed)
     }
 
     /// Returns the largest key and cell slice parts corresponding to the key.
@@ -210,7 +210,7 @@ impl<const N: u16> RawDict<N> {
         &self,
         signed: bool,
     ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
-        dict_find_bound_owned(&self.0, N, DictBound::Max, signed)
+        dict_find_bound_owned(self.0.as_ref(), N, DictBound::Max, signed)
     }
 
     /// Finds the specified dict bound and returns a key and cell slice parts corresponding to the key.
@@ -219,12 +219,12 @@ impl<const N: u16> RawDict<N> {
         bound: DictBound,
         signed: bool,
     ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
-        dict_find_bound_owned(&self.0, N, bound, signed)
+        dict_find_bound_owned(self.0.as_ref(), N, bound, signed)
     }
 
     /// Returns `true` if the dictionary contains a value for the specified key.
     pub fn contains_key(&self, key: CellSlice<'_>) -> Result<bool, Error> {
-        Ok(ok!(dict_get(&self.0, N, key)).is_some())
+        Ok(ok!(dict_get(self.0.as_ref(), N, key)).is_some())
     }
 
     /// Sets the value associated with the key in the dictionary.
@@ -235,7 +235,7 @@ impl<const N: u16> RawDict<N> {
         finalizer: &mut dyn Finalizer,
     ) -> Result<bool, Error> {
         let (new_root, changed) = ok!(dict_insert(
-            &self.0,
+            self.0.as_ref(),
             &mut key,
             N,
             &value,
@@ -255,7 +255,7 @@ impl<const N: u16> RawDict<N> {
         finalizer: &mut dyn Finalizer,
     ) -> Result<bool, Error> {
         let (new_root, changed) = ok!(dict_insert(
-            &self.0,
+            self.0.as_ref(),
             &mut key,
             N,
             value,
@@ -275,7 +275,7 @@ impl<const N: u16> RawDict<N> {
         finalizer: &mut dyn Finalizer,
     ) -> Result<bool, Error> {
         let (new_root, changed) = ok!(dict_insert(
-            &self.0,
+            self.0.as_ref(),
             &mut key,
             N,
             value,
@@ -293,7 +293,13 @@ impl<const N: u16> RawDict<N> {
         mut key: CellSlice<'_>,
         finalizer: &mut dyn Finalizer,
     ) -> Result<Option<CellSliceParts>, Error> {
-        let (dict, removed) = ok!(dict_remove_owned(&self.0, &mut key, N, false, finalizer));
+        let (dict, removed) = ok!(dict_remove_owned(
+            self.0.as_ref(),
+            &mut key,
+            N,
+            false,
+            finalizer
+        ));
         self.0 = dict;
         Ok(removed)
     }
@@ -307,7 +313,11 @@ impl<const N: u16> RawDict<N> {
         finalizer: &mut dyn Finalizer,
     ) -> Result<Option<DictOwnedEntry>, Error> {
         let (dict, removed) = ok!(dict_remove_bound_owned(
-            &self.0, N, bound, signed, finalizer
+            self.0.as_ref(),
+            N,
+            bound,
+            signed,
+            finalizer
         ));
         self.0 = dict;
         Ok(removed)
