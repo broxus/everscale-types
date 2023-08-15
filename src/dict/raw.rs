@@ -231,7 +231,7 @@ impl<const N: u16> RawDict<N> {
     pub fn set_ext(
         &mut self,
         mut key: CellSlice<'_>,
-        value: CellSlice<'_>,
+        value: &dyn Store,
         finalizer: &mut dyn Finalizer,
     ) -> Result<bool, Error> {
         let (new_root, changed) = ok!(dict_insert(
@@ -251,14 +251,14 @@ impl<const N: u16> RawDict<N> {
     pub fn replace_ext(
         &mut self,
         mut key: CellSlice<'_>,
-        value: CellSlice<'_>,
+        value: &dyn Store,
         finalizer: &mut dyn Finalizer,
     ) -> Result<bool, Error> {
         let (new_root, changed) = ok!(dict_insert(
             &self.0,
             &mut key,
             N,
-            &value,
+            value,
             SetMode::Replace,
             finalizer
         ));
@@ -271,14 +271,14 @@ impl<const N: u16> RawDict<N> {
     pub fn add_ext(
         &mut self,
         mut key: CellSlice<'_>,
-        value: CellSlice<'_>,
+        value: &dyn Store,
         finalizer: &mut dyn Finalizer,
     ) -> Result<bool, Error> {
         let (new_root, changed) = ok!(dict_insert(
             &self.0,
             &mut key,
             N,
-            &value,
+            value,
             SetMode::Add,
             finalizer
         ));
@@ -384,8 +384,8 @@ impl<const N: u16> RawDict<N> {
     /// Use [`set_ext`] if you need to use a custom finalizer.
     ///
     /// [`set_ext`]: RawDict::set_ext
-    pub fn set(&mut self, key: CellSlice<'_>, value: CellSlice<'_>) -> Result<bool, Error> {
-        self.set_ext(key, value, &mut Cell::default_finalizer())
+    pub fn set<T: Store>(&mut self, key: CellSlice<'_>, value: T) -> Result<bool, Error> {
+        self.set_ext(key, &value, &mut Cell::default_finalizer())
     }
 
     /// Sets the value associated with the key in the dictionary
@@ -394,8 +394,8 @@ impl<const N: u16> RawDict<N> {
     /// Use [`replace_ext`] if you need to use a custom finalizer.
     ///
     /// [`replace_ext`]: RawDict::replace_ext
-    pub fn replace(&mut self, key: CellSlice<'_>, value: CellSlice<'_>) -> Result<bool, Error> {
-        self.replace_ext(key, value, &mut Cell::default_finalizer())
+    pub fn replace<T: Store>(&mut self, key: CellSlice<'_>, value: T) -> Result<bool, Error> {
+        self.replace_ext(key, &value, &mut Cell::default_finalizer())
     }
 
     /// Sets the value associated with key in dictionary,
@@ -404,8 +404,8 @@ impl<const N: u16> RawDict<N> {
     /// Use [`add_ext`] if you need to use a custom finalizer.
     ///
     /// [`add_ext`]: RawDict::add_ext
-    pub fn add(&mut self, key: CellSlice<'_>, value: CellSlice<'_>) -> Result<bool, Error> {
-        self.add_ext(key, value, &mut Cell::default_finalizer())
+    pub fn add<T: Store>(&mut self, key: CellSlice<'_>, value: T) -> Result<bool, Error> {
+        self.add_ext(key, &value, &mut Cell::default_finalizer())
     }
 
     /// Removes the value associated with key in dictionary.
@@ -1112,10 +1112,7 @@ mod tests {
 
         let key = CellBuilder::build_from(123u32)?;
 
-        let empty_value = Cell::empty_cell();
-        let not_empty_value = CellBuilder::build_from(0xffffu16)?;
-
-        dict.set(key.as_slice()?, empty_value.as_slice()?)?;
+        dict.set(key.as_slice()?, ())?;
         {
             let mut values = dict.values();
             let value = values.next().unwrap().unwrap();
@@ -1123,7 +1120,7 @@ mod tests {
             assert!(values.next().is_none());
         }
 
-        dict.set(key.as_slice()?, not_empty_value.as_slice()?)?;
+        dict.set(key.as_slice()?, 0xffffu16)?;
         {
             let mut values = dict.values();
             let mut value = values.next().unwrap()?;
@@ -1138,12 +1135,10 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)] // takes too long to execute on miri
     fn dict_set_complex() -> anyhow::Result<()> {
-        let value = build_cell(|b| b.store_bit_one());
-
         let mut dict = RawDict::<32>::new();
         for i in 0..520 {
             let key = build_cell(|b| b.store_u32(i));
-            dict.set(key.as_slice()?, value.as_slice()?)?;
+            dict.set(key.as_slice()?, true)?;
 
             let mut total = 0;
             for (i, item) in dict.iter().enumerate() {
@@ -1166,26 +1161,17 @@ mod tests {
         let mut dict = RawDict::<32>::new();
 
         //
-        dict.replace(
-            build_cell(|b| b.store_u32(123)).as_slice()?,
-            build_cell(|b| b.store_bit_zero()).as_slice()?,
-        )
-        .unwrap();
+        dict.replace(build_cell(|b| b.store_u32(123)).as_slice()?, false)
+            .unwrap();
         assert!(!dict
             .contains_key(build_cell(|b| b.store_u32(123)).as_slice()?)
             .unwrap());
 
         //
-        dict.set(
-            build_cell(|b| b.store_u32(123)).as_slice()?,
-            build_cell(|b| b.store_bit_zero()).as_slice()?,
-        )
-        .unwrap();
-        dict.replace(
-            build_cell(|b| b.store_u32(123)).as_slice()?,
-            build_cell(|b| b.store_bit_one()).as_slice()?,
-        )
-        .unwrap();
+        dict.set(build_cell(|b| b.store_u32(123)).as_slice()?, false)
+            .unwrap();
+        dict.replace(build_cell(|b| b.store_u32(123)).as_slice()?, true)
+            .unwrap();
 
         let mut value = dict
             .get(build_cell(|b| b.store_u32(123)).as_slice()?)
@@ -1204,19 +1190,13 @@ mod tests {
         let key = build_cell(|b| b.store_u32(123));
 
         //
-        dict.add(
-            key.as_slice()?,
-            build_cell(|b| b.store_bit_zero()).as_slice()?,
-        )?;
+        dict.add(key.as_slice()?, false)?;
         let mut value = dict.get(key.as_slice()?)?.unwrap();
         assert_eq!(value.remaining_bits(), 1);
         assert_eq!(value.load_bit(), Ok(false));
 
         //
-        dict.add(
-            key.as_slice()?,
-            build_cell(|b| b.store_bit_one()).as_slice()?,
-        )?;
+        dict.add(key.as_slice()?, true)?;
         let mut value = dict.get(key.as_slice()?)?.unwrap();
         assert_eq!(value.remaining_bits(), 1);
         assert_eq!(value.load_bit(), Ok(false));
