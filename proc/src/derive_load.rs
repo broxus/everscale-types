@@ -12,7 +12,7 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Erro
     };
     cx.check()?;
 
-    let tlb_lifetime: syn::LifetimeDef = syn::parse_quote!('tlb);
+    let tlb_lifetime: syn::LifetimeParam = syn::parse_quote!('tlb);
 
     let ident = &container.ident;
     let generics = bound::without_default(container.generics);
@@ -66,7 +66,7 @@ fn build_enum(_: &[ast::Variant<'_>]) -> TokenStream {
 
 fn build_struct(
     container: &ast::Container<'_>,
-    lifetime_def: &syn::LifetimeDef,
+    lifetime_def: &syn::LifetimeParam,
     style: ast::Style,
     fields: &[ast::Field<'_>],
 ) -> TokenStream {
@@ -147,7 +147,7 @@ fn load_tag_op(tag: attr::TlbTag) -> Option<TokenStream> {
     })
 }
 
-fn load_op(lifetime_def: &syn::LifetimeDef, ty: &syn::Type) -> TokenStream {
+fn load_op(lifetime_def: &syn::LifetimeParam, ty: &syn::Type) -> TokenStream {
     #[allow(clippy::unnecessary_operation)]
     'fallback: {
         match ty {

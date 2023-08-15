@@ -3,7 +3,7 @@ name = "everscale-types-proc"
 description = "Proc-macro helpers for everscale-types"
 authors = ["Ivan Kalinin <i.kalinin@dexpa.io>"]
 repository = "https://github.com/broxus/everscale-types"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 include = ["src/**/*.rs", "../LICENSE-*", "../README.md"]
 license = "MIT OR Apache-2.0"
@@ -14,4 +14,4 @@ proc-macro = true
 [dependencies]
 proc-macro2 = "1.0"
 quote = "1.0"
-syn = { version = "1.0", features = ["visit"] }
+syn = { version = "2.0", features = ["visit"] }

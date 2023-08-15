@@ -1,9 +1,6 @@
-use std::fmt::Formatter;
-
 use proc_macro2::{Group, Span, TokenStream, TokenTree};
 use quote::ToTokens;
-use syn::Meta::{List, NameValue};
-use syn::NestedMeta::{Lit, Meta};
+use syn::meta::ParseNestedMeta;
 
 use super::ctxt::*;
 use super::symbol::*;
@@ -18,39 +15,37 @@ impl Container {
         let mut tlb_tag = Attr::none(cx, TAG);
         let mut tlb_validate_with = Attr::none(cx, VALIDATE_WITH);
 
-        for meta_item in item
-            .attrs
-            .iter()
-            .flat_map(|attr| get_meta_items(cx, attr))
-            .flatten()
-        {
-            match &meta_item {
-                // Parse `#[tlb(tag = "#ab"]`
-                (MetaContext::Tlb, Meta(NameValue(m))) if m.path == TAG => {
-                    if let Ok(value) = parse_lit_into_tlb_tag(cx, TAG, &m.lit) {
-                        tlb_tag.set(&m.path, value);
-                    }
+        for attr in &item.attrs {
+            if attr.path() != TLB {
+                continue;
+            }
+
+            if let syn::Meta::List(meta) = &attr.meta {
+                if meta.tokens.is_empty() {
+                    continue;
                 }
-                // Parse `#[tlb(validate_with = "some_module"]`
-                (MetaContext::Tlb, Meta(NameValue(m))) if m.path == VALIDATE_WITH => {
-                    if let Ok(expr) = parse_lit_into_expr(cx, VALIDATE_WITH, &m.lit) {
-                        tlb_validate_with.set(&m.path, expr);
+            }
+
+            if let Err(e) = attr.parse_nested_meta(|meta| {
+                if meta.path == TAG {
+                    // Parse `#[tlb(tag = "#ab"]`
+                    if let Some(value) = parse_lit_into_tlb_tag(cx, TAG, &meta)? {
+                        tlb_tag.set(&meta.path, value);
                     }
-                }
-                (_, Meta(meta_item)) => {
-                    let path = meta_item
-                        .path()
-                        .into_token_stream()
-                        .to_string()
-                        .replace(' ', "");
-                    cx.error_spanned_by(
-                        meta_item.path(),
-                        format!("unknown container attribute `{path}`"),
+                } else if meta.path == VALIDATE_WITH {
+                    // Parse `#[tlb(validate_with = "some_module"]`
+                    if let Some(expr) = parse_lit_into_expr(cx, VALIDATE_WITH, &meta)? {
+                        tlb_validate_with.set(&meta.path, expr);
+                    }
+                } else {
+                    let path = meta.path.to_token_stream().to_string().replace(' ', "");
+                    return Err(
+                        meta.error(format_args!("unknown TLB container attribute `{}`", path))
                     );
                 }
-                (_, Lit(lit)) => {
-                    cx.error_spanned_by(lit, "unexpected literal in container attribute");
-                }
+                Ok(())
+            }) {
+                cx.syn_error(e);
             }
         }
 
@@ -65,27 +60,22 @@ pub struct Variant;
 
 impl Variant {
     pub fn from_ast(cx: &Ctxt, item: &syn::Variant) -> Self {
-        for meta_item in item
-            .attrs
-            .iter()
-            .flat_map(|attr| get_meta_items(cx, attr))
-            .flatten()
-        {
-            match &meta_item {
-                (_, Meta(meta_item)) => {
-                    let path = meta_item
-                        .path()
-                        .into_token_stream()
-                        .to_string()
-                        .replace(' ', "");
-                    cx.error_spanned_by(
-                        meta_item.path(),
-                        format!("unknown variant attribute `{path}`"),
-                    );
+        for attr in &item.attrs {
+            if attr.path() != TLB {
+                continue;
+            }
+
+            if let syn::Meta::List(meta) = &attr.meta {
+                if meta.tokens.is_empty() {
+                    continue;
                 }
-                (_, Lit(lit)) => {
-                    cx.error_spanned_by(lit, "unexpected literal in variant attribute");
-                }
+            }
+
+            if let Err(e) = attr.parse_nested_meta(|meta| {
+                let path = meta.path.to_token_stream().to_string().replace(' ', "");
+                Err(meta.error(format_args!("unknown tl variant attribute `{}`", path)))
+            }) {
+                cx.syn_error(e);
             }
         }
 
@@ -93,48 +83,30 @@ impl Variant {
     }
 }
 
-pub struct Field {
-    pub debug_with: Option<syn::Expr>,
-}
+pub struct Field;
 
 impl Field {
     pub fn from_ast(cx: &Ctxt, field: &syn::Field) -> Self {
-        let mut debug_with = Attr::none(cx, WITH);
+        for attr in &field.attrs {
+            if attr.path() != TLB {
+                continue;
+            }
 
-        for meta_item in field
-            .attrs
-            .iter()
-            .flat_map(|attr| get_meta_items(cx, attr))
-            .flatten()
-        {
-            match &meta_item {
-                // Parse `#[debug(with = "some_module"]`
-                (MetaContext::Debug, Meta(NameValue(m))) if m.path == WITH => {
-                    if let Ok(expr) = parse_lit_into_expr(cx, WITH, &m.lit) {
-                        debug_with.set(&m.path, expr);
-                    }
+            if let syn::Meta::List(meta) = &attr.meta {
+                if meta.tokens.is_empty() {
+                    continue;
                 }
-                // Other
-                (_, Meta(meta_item)) => {
-                    let path = meta_item
-                        .path()
-                        .into_token_stream()
-                        .to_string()
-                        .replace(' ', "");
-                    cx.error_spanned_by(
-                        meta_item.path(),
-                        format!("unknown field attribute `{path}`"),
-                    );
-                }
-                (_, Lit(lit)) => {
-                    cx.error_spanned_by(lit, "unexpected literal in field attribute");
-                }
+            }
+
+            if let Err(e) = attr.parse_nested_meta(|meta| {
+                let path = meta.path.to_token_stream().to_string().replace(' ', "");
+                Err(meta.error(format_args!("unknown tl field attribute `{}`", path)))
+            }) {
+                cx.syn_error(e);
             }
         }
 
-        let debug_with = debug_with.get();
-
-        Self { debug_with }
+        Self
     }
 }
 
@@ -144,43 +116,53 @@ pub struct TlbTag {
     pub bits: u8,
 }
 
-fn parse_lit_into_tlb_tag(cx: &Ctxt, attr_name: Symbol, lit: &syn::Lit) -> Result<TlbTag, ()> {
-    let string = get_lit_str(cx, attr_name, lit)?.value();
+fn parse_lit_into_tlb_tag(
+    cx: &Ctxt,
+    attr_name: Symbol,
+    meta: &ParseNestedMeta,
+) -> syn::Result<Option<TlbTag>> {
+    let Some(lit) = get_lit_str(cx, attr_name, meta)? else {
+        return Ok(None);
+    };
+    let string = lit.value();
     let string = string.trim();
     if let Some(hex_tag) = string.strip_prefix('#') {
-        let value = u32::from_str_radix(hex_tag, 16)
-            .map_err(|_| cx.error_spanned_by(lit, format!("failed to parse hex tag: {string}")))?;
-        Ok(TlbTag {
-            value,
-            bits: (hex_tag.len() * 4) as u8,
-        })
+        if let Ok(value) = u32::from_str_radix(hex_tag, 16) {
+            return Ok(Some(TlbTag {
+                value,
+                bits: (hex_tag.len() * 4) as u8,
+            }));
+        }
+
+        cx.error_spanned_by(lit, format!("failed to parse hex TLB tag: {string}"));
     } else if let Some(binary_tag) = string.strip_prefix('$') {
-        let value = u32::from_str_radix(binary_tag, 2).map_err(|_| {
-            cx.error_spanned_by(lit, format!("failed to parse binary tag: {string}"))
-        })?;
-        Ok(TlbTag {
-            value,
-            bits: binary_tag.len() as u8,
-        })
+        if let Ok(value) = u32::from_str_radix(binary_tag, 2) {
+            return Ok(Some(TlbTag {
+                value,
+                bits: binary_tag.len() as u8,
+            }));
+        }
+
+        cx.error_spanned_by(lit, format!("failed to parse binary TLB tag: {string}"));
     } else {
-        cx.error_spanned_by(lit, format!("failed to parse tag: {string}"));
-        Err(())
+        cx.error_spanned_by(lit, format!("failed to parse TLB tag: {string}"));
     }
+
+    Ok(None)
 }
 
-fn parse_lit_into_expr(cx: &Ctxt, attr_name: Symbol, lit: &syn::Lit) -> Result<syn::Expr, ()> {
-    let string = get_lit_str(cx, attr_name, lit)?;
+fn parse_lit_into_expr(
+    cx: &Ctxt,
+    attr_name: Symbol,
+    meta: &ParseNestedMeta,
+) -> syn::Result<Option<syn::Expr>> {
+    let Some(s) = get_lit_str(cx, attr_name, meta)? else {
+        return Ok(None);
+    };
 
-    parse_lit_str(string)
-        .map_err(|_| cx.error_spanned_by(lit, format!("failed to parse expr: {}", string.value())))
-}
-
-fn parse_lit_str<T>(s: &syn::LitStr) -> syn::parse::Result<T>
-where
-    T: syn::parse::Parse,
-{
-    let tokens = spanned_tokens(s)?;
-    syn::parse2(tokens)
+    let tokens = spanned_tokens(&s)?;
+    let expr: syn::Expr = syn::parse2(tokens)?;
+    Ok(Some(expr))
 }
 
 fn spanned_tokens(s: &syn::LitStr) -> syn::parse::Result<TokenStream> {
@@ -203,59 +185,47 @@ fn respan_token_tree(mut token: TokenTree, span: Span) -> TokenTree {
     token
 }
 
-fn get_lit_str<'a>(cx: &Ctxt, attr_name: Symbol, lit: &'a syn::Lit) -> Result<&'a syn::LitStr, ()> {
-    if let syn::Lit::Str(lit) = lit {
-        Ok(lit)
+fn get_lit_str(
+    cx: &Ctxt,
+    attr_name: Symbol,
+    meta: &ParseNestedMeta,
+) -> syn::Result<Option<syn::LitStr>> {
+    get_lit_str2(cx, attr_name, attr_name, meta)
+}
+
+fn get_lit_str2(
+    cx: &Ctxt,
+    attr_name: Symbol,
+    meta_item_name: Symbol,
+    meta: &ParseNestedMeta,
+) -> syn::Result<Option<syn::LitStr>> {
+    let expr: syn::Expr = meta.value()?.parse()?;
+    let mut value = &expr;
+    while let syn::Expr::Group(e) = value {
+        value = &e.expr;
+    }
+    if let syn::Expr::Lit(syn::ExprLit {
+        lit: syn::Lit::Str(lit),
+        ..
+    }) = value
+    {
+        let suffix = lit.suffix();
+        if !suffix.is_empty() {
+            cx.error_spanned_by(
+                lit,
+                format!("unexpected suffix `{}` on string literal", suffix),
+            );
+        }
+        Ok(Some(lit.clone()))
     } else {
         cx.error_spanned_by(
-            lit,
-            format!("expected {attr_name} attribute to be a string: `{attr_name} = \"...\"`",),
+            expr,
+            format!(
+                "expected {} attribute to be a string: `{} = \"...\"`",
+                attr_name, meta_item_name
+            ),
         );
-        Err(())
-    }
-}
-
-fn get_meta_items(
-    cx: &Ctxt,
-    attr: &syn::Attribute,
-) -> Result<Vec<(MetaContext, syn::NestedMeta)>, ()> {
-    let meta_context = if attr.path == DEBUG {
-        MetaContext::Debug
-    } else if attr.path == TLB {
-        MetaContext::Tlb
-    } else {
-        return Ok(Vec::new());
-    };
-
-    match attr.parse_meta() {
-        Ok(List(meta)) => Ok(meta
-            .nested
-            .into_iter()
-            .map(|item| (meta_context, item))
-            .collect()),
-        Ok(other) => {
-            cx.error_spanned_by(other, format!("expected #[{meta_context}(...)]"));
-            Err(())
-        }
-        Err(err) => {
-            cx.syn_error(err);
-            Err(())
-        }
-    }
-}
-
-#[derive(Copy, Clone)]
-enum MetaContext {
-    Debug,
-    Tlb,
-}
-
-impl std::fmt::Display for MetaContext {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Debug => std::fmt::Display::fmt(&DEBUG, f),
-            Self::Tlb => std::fmt::Display::fmt(&TLB, f),
-        }
+        Ok(None)
     }
 }
 
