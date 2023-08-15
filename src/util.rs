@@ -34,6 +34,7 @@ pub(crate) fn decode_base64<T: AsRef<[u8]>>(data: T) -> Result<Vec<u8>, base64::
 }
 
 #[cfg(any(feature = "base64", test))]
+#[allow(unused)]
 #[inline]
 pub(crate) fn decode_base64_slice<T: AsRef<[u8]>>(
     data: T,
@@ -254,6 +255,7 @@ impl std::fmt::Binary for Bitstring<'_> {
     }
 }
 
+#[allow(unused)]
 pub(crate) fn debug_tuple_field1_finish(
     f: &mut std::fmt::Formatter<'_>,
     name: &str,

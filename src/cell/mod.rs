@@ -4,7 +4,7 @@ use std::ops::{BitOr, BitOrAssign};
 use std::str::FromStr;
 
 use crate::error::{Error, ParseHashBytesError};
-use crate::util::{decode_base64_slice, Bitstring};
+use crate::util::Bitstring;
 
 pub use self::builder::{CellBuilder, CellRefsBuilder, Store};
 pub use self::cell_impl::{StaticCell, VirtualCellWrapper};
@@ -662,8 +662,9 @@ impl FromStr for HashBytes {
                     return Err(ParseHashBytesError::InvalidHex(e));
                 }
             }
+            #[cfg(feature = "base64")]
             44 => {
-                if let Err(e) = decode_base64_slice(s, &mut result.0) {
+                if let Err(e) = crate::util::decode_base64_slice(s, &mut result.0) {
                     return Err(ParseHashBytesError::InvalidBase64(e));
                 }
             }

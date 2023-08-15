@@ -47,6 +47,7 @@ pub enum ParseIntError {
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ParseHashBytesError {
     /// Failed to parse base64 encoded bytes.
+    #[cfg(feature = "base64")]
     #[error("invalid base64 string")]
     InvalidBase64(#[from] base64::DecodeSliceError),
     /// Failed to parse hex encoded bytes.

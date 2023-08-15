@@ -68,7 +68,10 @@ impl From<Rc<DynCell>> for Cell {
 
 impl CellFamily for Cell {
     fn empty_cell() -> Cell {
-        Cell(Rc::new(EmptyOrdinaryCell))
+        thread_local! {
+            static EMPTY_CELL: Cell = Cell(Rc::new(EmptyOrdinaryCell));
+        }
+        EMPTY_CELL.with(Cell::clone)
     }
 
     fn empty_cell_ref() -> &'static DynCell {

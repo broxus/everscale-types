@@ -69,7 +69,12 @@ impl From<Arc<DynCell>> for Cell {
 
 impl CellFamily for Cell {
     fn empty_cell() -> Cell {
-        Cell(Arc::new(EmptyOrdinaryCell))
+        use once_cell::sync::OnceCell;
+
+        static EMPTY_CELL: OnceCell<Cell> = OnceCell::new();
+        EMPTY_CELL
+            .get_or_init(|| Cell(Arc::new(EmptyOrdinaryCell)))
+            .clone()
     }
 
     fn empty_cell_ref() -> &'static DynCell {
