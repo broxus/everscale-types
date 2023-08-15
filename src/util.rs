@@ -87,6 +87,17 @@ impl<T, const N: usize> ArrayVec<T, N> {
         self.len += 1;
     }
 
+    /// Returns a reference to an element.
+    pub fn get(&self, n: u8) -> Option<&T> {
+        if n < self.len {
+            let references = self.inner.as_ptr() as *const T;
+            // SAFETY: {len} elements were initialized, n < len
+            Some(unsafe { &*references.add(n as usize) })
+        } else {
+            None
+        }
+    }
+
     /// Returns the inner data without dropping its elements.
     ///
     /// # Safety

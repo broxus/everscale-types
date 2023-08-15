@@ -677,14 +677,13 @@ where
         V: Store,
     {
         let (new_root, changed) = {
-            let mut builder = CellBuilder::new();
-            ok!(key.store_into(&mut builder, &mut Cell::default_finalizer()));
-            let value = ok!(CellBuilder::build_from_ext(value, finalizer));
+            let mut key_builder = CellBuilder::new();
+            ok!(key.store_into(&mut key_builder, &mut Cell::default_finalizer()));
             ok!(dict_insert(
                 &self.root,
-                &mut builder.as_data_slice(),
+                &mut key_builder.as_data_slice(),
                 K::BITS,
-                &ok!(value.as_ref().as_slice()),
+                value,
                 mode,
                 finalizer
             ))

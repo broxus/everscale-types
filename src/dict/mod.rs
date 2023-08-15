@@ -196,7 +196,7 @@ pub fn dict_insert(
     root: &Option<Cell>,
     key: &mut CellSlice,
     key_bit_len: u16,
-    value: &CellSlice,
+    value: &dyn Store,
     mode: SetMode,
     finalizer: &mut dyn Finalizer,
 ) -> Result<(Option<Cell>, bool), Error> {
@@ -293,7 +293,7 @@ pub fn dict_insert_owned(
     root: &Option<Cell>,
     key: &mut CellSlice,
     key_bit_len: u16,
-    value: &CellSlice,
+    value: &dyn Store,
     mode: SetMode,
     finalizer: &mut dyn Finalizer,
 ) -> Result<(Option<Cell>, bool, Option<CellSliceParts>), Error> {
@@ -906,12 +906,12 @@ pub fn dict_remove_bound_owned(
 fn make_leaf(
     key: &CellSlice,
     key_bit_len: u16,
-    value: &CellSlice,
+    value: &dyn Store,
     finalizer: &mut dyn Finalizer,
 ) -> Result<Cell, Error> {
     let mut builder = CellBuilder::new();
     ok!(write_label(key, key_bit_len, &mut builder));
-    ok!(builder.store_slice(value));
+    ok!(value.store_into(&mut builder, finalizer));
     builder.build_ext(finalizer)
 }
 
@@ -921,7 +921,7 @@ fn split_edge(
     prefix: &mut CellSlice,
     lcp: &CellSlice,
     key: &mut CellSlice,
-    value: &CellSlice,
+    value: &dyn Store,
     finalizer: &mut dyn Finalizer,
 ) -> Result<Cell, Error> {
     // Advance the key
