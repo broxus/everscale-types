@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 use crate::cell::{
-    Cell, CellDescriptor, CellSlice, CellType, DynCell, HashBytes, LevelMask, MAX_BIT_LEN,
-    MAX_REF_COUNT,
+    Cell, CellDescriptor, CellImpl, CellSlice, CellType, DynCell, HashBytes, LevelMask,
+    MAX_BIT_LEN, MAX_REF_COUNT,
 };
 use crate::error::Error;
 use crate::util::{ArrayVec, Bitstring};
@@ -290,6 +290,14 @@ impl CellBuilder {
         let mut res = Self::new();
         ok!(res.store_raw(value, bits));
         Ok(res)
+    }
+
+    /// Returns a slice which contains only builder data bits and no references.
+    ///
+    /// NOTE: intermediate cell hash is undefined.
+    pub fn as_data_slice(&self) -> CellSlice<'_> {
+        // SAFETY: we interpret cell builder data as ordinary cell
+        unsafe { CellSlice::new_unchecked(IntermediateDataCell::wrap(self)) }
     }
 
     /// Returns an underlying cell data.
@@ -980,6 +988,74 @@ impl CellRefsBuilder {
             result |= child.as_ref().level_mask();
         }
         result
+    }
+}
+
+#[repr(transparent)]
+struct IntermediateDataCell(CellBuilder);
+
+impl IntermediateDataCell {
+    #[inline(always)]
+    const fn wrap(value: &CellBuilder) -> &Self {
+        // SAFETY: IntermediateDataCell is #[repr(transparent)]
+        unsafe { &*(value as *const CellBuilder as *const Self) }
+    }
+}
+
+impl CellImpl for IntermediateDataCell {
+    fn descriptor(&self) -> CellDescriptor {
+        CellDescriptor {
+            d1: 0,
+            d2: CellDescriptor::compute_d2(self.0.bit_len),
+        }
+    }
+
+    fn data(&self) -> &[u8] {
+        self.0.raw_data()
+    }
+
+    fn bit_len(&self) -> u16 {
+        self.0.bit_len
+    }
+
+    fn reference(&self, _: u8) -> Option<&DynCell> {
+        None
+    }
+
+    fn reference_cloned(&self, _: u8) -> Option<Cell> {
+        None
+    }
+
+    fn virtualize(&self) -> &DynCell {
+        self
+    }
+
+    fn hash(&self, _: u8) -> &HashBytes {
+        panic!("Hash for an intermediate data cell is not defined");
+    }
+
+    fn depth(&self, _: u8) -> u16 {
+        0
+    }
+
+    fn take_first_child(&mut self) -> Option<Cell> {
+        None
+    }
+
+    fn replace_first_child(&mut self, parent: Cell) -> Result<Cell, Cell> {
+        Err(parent)
+    }
+
+    fn take_next_child(&mut self) -> Option<Cell> {
+        None
+    }
+
+    #[cfg(feature = "stats")]
+    fn stats(&self) -> CellTreeStats {
+        CellTreeStats {
+            bit_count: self.0.bit_len as u64,
+            cell_count: 1,
+        }
     }
 }
 

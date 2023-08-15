@@ -7,8 +7,8 @@ use crate::error::Error;
 use crate::util::*;
 
 use super::{
-    dict_find_bound, dict_find_owned, dict_get, dict_insert, dict_load_from_root, serialize_entry,
-    DictBound, DictKey, SetMode,
+    dict_find_bound, dict_find_owned, dict_get, dict_insert, dict_load_from_root, DictBound,
+    DictKey, SetMode,
 };
 use super::{dict_remove_bound_owned, raw::*};
 
@@ -139,8 +139,9 @@ where
         where
             K: Store + DictKey,
         {
-            let key = ok!(serialize_entry(key, &mut Cell::default_finalizer()));
-            Ok(ok!(dict_get(root, K::BITS, ok!(key.as_ref().as_slice()))).is_some())
+            let mut builder = CellBuilder::new();
+            ok!(key.store_into(&mut builder, &mut Cell::default_finalizer()));
+            Ok(ok!(dict_get(root, K::BITS, builder.as_data_slice())).is_some())
         }
         contains_key_impl(&self.root, key.borrow())
     }
@@ -151,30 +152,60 @@ where
     K: Store + DictKey,
 {
     /// Returns the value corresponding to the key.
-    ///
-    /// Key is serialized using the default finalizer.
     pub fn get<'a: 'b, 'b, Q>(&'a self, key: Q) -> Result<Option<V>, Error>
     where
         Q: Borrow<K> + 'b,
         V: Load<'a>,
     {
-        self.get_ext(key, &mut Cell::default_finalizer())
+        pub fn get_impl<'a: 'b, 'b, K, V>(
+            root: &'a Option<Cell>,
+            key: &'b K,
+        ) -> Result<Option<V>, Error>
+        where
+            K: Store + DictKey,
+            V: Load<'a>,
+        {
+            let Some(mut value) = ({
+                let mut builder = CellBuilder::new();
+                ok!(key.store_into(&mut builder, &mut Cell::default_finalizer()));
+                ok!(dict_get(root, K::BITS, builder.as_data_slice()))
+            }) else {
+                return Ok(None);
+            };
+
+            match V::load_from(&mut value) {
+                Ok(value) => Ok(Some(value)),
+                Err(e) => Err(e),
+            }
+        }
+
+        get_impl(&self.root, key.borrow())
     }
 
     /// Returns the raw value corresponding to the key.
-    ///
-    /// Key is serialized using the default finalizer.
     pub fn get_raw<'a: 'b, 'b, Q>(&'a self, key: Q) -> Result<Option<CellSlice<'a>>, Error>
     where
         Q: Borrow<K> + 'b,
     {
-        self.get_raw_ext(key, &mut Cell::default_finalizer())
+        pub fn get_raw_impl<'a: 'b, 'b, K>(
+            root: &'a Option<Cell>,
+            key: &'b K,
+        ) -> Result<Option<CellSlice<'a>>, Error>
+        where
+            K: Store + DictKey,
+        {
+            let mut builder = CellBuilder::new();
+            ok!(key.store_into(&mut builder, &mut Cell::default_finalizer()));
+            dict_get(root, K::BITS, builder.as_data_slice())
+        }
+
+        get_raw_impl(&self.root, key.borrow())
     }
 
     /// Removes the value associated with key in dictionary.
     /// Returns an optional removed value.
     ///
-    /// Key is serialized using the default finalizer.
+    /// The dict is rebuilt using the default finalizer.
     pub fn remove<Q>(&mut self, key: Q) -> Result<Option<V>, Error>
     where
         Q: Borrow<K>,
@@ -192,7 +223,7 @@ where
     /// Removes the value associated with key in dictionary.
     /// Returns an optional removed value as cell slice parts.
     ///
-    /// Key is serialized using the default finalizer.
+    /// The dict is rebuilt using the default finalizer.
     pub fn remove_raw<Q>(&mut self, key: Q) -> Result<Option<CellSliceParts>, Error>
     where
         Q: Borrow<K>,
@@ -324,126 +355,46 @@ where
 
     /// Computes the minimal key in dictionary that is lexicographically greater than `key`,
     /// and returns it along with associated value as cell slice parts.
-    ///
-    /// Use [`get_next_ext`] if you need to use a custom finalizer.
-    ///
-    /// [`get_next_ext`]: Dict::get_next_ext
     #[inline]
     pub fn get_next<Q>(&self, key: Q, signed: bool) -> Result<Option<(K, V)>, Error>
     where
         Q: Borrow<K>,
         for<'a> V: Load<'a>,
     {
-        self.get_next_ext(key, signed, &mut Cell::default_finalizer())
+        self.find_ext(key, DictBound::Max, false, signed)
     }
 
     /// Computes the maximal key in dictionary that is lexicographically smaller than `key`,
     /// and returns it along with associated value as cell slice parts.
-    ///
-    /// Use [`get_prev_ext`] if you need to use a custom finalizer.
-    ///
-    /// [`get_prev_ext`]: Dict::get_prev_ext
     #[inline]
     pub fn get_prev<Q>(&self, key: Q, signed: bool) -> Result<Option<(K, V)>, Error>
     where
         Q: Borrow<K>,
         for<'a> V: Load<'a>,
     {
-        self.get_prev_ext(key, signed, &mut Cell::default_finalizer())
+        self.find_ext(key, DictBound::Min, false, signed)
     }
 
     /// Computes the minimal key in dictionary that is lexicographically greater than `key`,
     /// and returns it along with associated value as cell slice parts.
-    ///
-    /// Use [`get_or_next_ext`] if you need to use a custom finalizer.
-    ///
-    /// [`get_or_next_ext`]: Dict::get_or_next_ext
     #[inline]
     pub fn get_or_next<Q>(&self, key: Q, signed: bool) -> Result<Option<(K, V)>, Error>
     where
         Q: Borrow<K>,
         for<'a> V: Load<'a>,
     {
-        self.get_or_next_ext(key, signed, &mut Cell::default_finalizer())
+        self.find_ext(key, DictBound::Max, true, signed)
     }
 
     /// Computes the maximal key in dictionary that is lexicographically smaller than `key`,
     /// and returns it along with associated value as cell slice parts.
-    ///
-    /// Use [`get_or_prev_ext`] if you need to use a custom finalizer.
-    ///
-    /// [`get_or_prev_ext`]: Dict::get_or_prev_ext
     #[inline]
     pub fn get_or_prev<Q>(&self, key: Q, signed: bool) -> Result<Option<(K, V)>, Error>
     where
         Q: Borrow<K>,
         for<'a> V: Load<'a>,
     {
-        self.get_or_prev_ext(key, signed, &mut Cell::default_finalizer())
-    }
-
-    /// Computes the minimal key in dictionary that is lexicographically greater than `key`,
-    /// and returns it along with associated value as cell slice parts.
-    #[inline]
-    pub fn get_next_ext<Q>(
-        &self,
-        key: Q,
-        signed: bool,
-        finalizer: &mut dyn Finalizer,
-    ) -> Result<Option<(K, V)>, Error>
-    where
-        Q: Borrow<K>,
-        for<'a> V: Load<'a>,
-    {
-        self.find_ext(key, DictBound::Max, false, signed, finalizer)
-    }
-
-    /// Computes the maximal key in dictionary that is lexicographically smaller than `key`,
-    /// and returns it along with associated value as cell slice parts.
-    #[inline]
-    pub fn get_prev_ext<Q>(
-        &self,
-        key: Q,
-        signed: bool,
-        finalizer: &mut dyn Finalizer,
-    ) -> Result<Option<(K, V)>, Error>
-    where
-        Q: Borrow<K>,
-        for<'a> V: Load<'a>,
-    {
-        self.find_ext(key, DictBound::Min, false, signed, finalizer)
-    }
-
-    /// Computes the minimal key in dictionary that is lexicographically greater than `key`,
-    /// and returns it along with associated value as cell slice parts.
-    #[inline]
-    pub fn get_or_next_ext<Q>(
-        &self,
-        key: Q,
-        signed: bool,
-        finalizer: &mut dyn Finalizer,
-    ) -> Result<Option<(K, V)>, Error>
-    where
-        Q: Borrow<K>,
-        for<'a> V: Load<'a>,
-    {
-        self.find_ext(key, DictBound::Max, true, signed, finalizer)
-    }
-
-    /// Computes the maximal key in dictionary that is lexicographically smaller than `key`,
-    /// and returns it along with associated value as cell slice parts.
-    #[inline]
-    pub fn get_or_prev_ext<Q>(
-        &self,
-        key: Q,
-        signed: bool,
-        finalizer: &mut dyn Finalizer,
-    ) -> Result<Option<(K, V)>, Error>
-    where
-        Q: Borrow<K>,
-        for<'a> V: Load<'a>,
-    {
-        self.find_ext(key, DictBound::Min, true, signed, finalizer)
+        self.find_ext(key, DictBound::Min, true, signed)
     }
 
     #[inline]
@@ -453,33 +404,34 @@ where
         towards: DictBound,
         inclusive: bool,
         signed: bool,
-        finalizer: &mut dyn Finalizer,
     ) -> Result<Option<(K, V)>, Error>
     where
         Q: Borrow<K>,
         for<'a> V: Load<'a>,
     {
-        fn find_ext_impl<K, V>(
+        fn find_impl<K, V>(
             root: &Option<Cell>,
             key: &K,
             towards: DictBound,
             inclusive: bool,
             signed: bool,
-            finalizer: &mut dyn Finalizer,
         ) -> Result<Option<(K, V)>, Error>
         where
             K: DictKey + Store,
             for<'a> V: Load<'a>,
         {
-            let key = ok!(serialize_entry(key, finalizer));
-            let Some((key, (cell, range))) = ok!(dict_find_owned(
-                root,
-                K::BITS,
-                ok!(key.as_slice()),
-                towards,
-                inclusive,
-                signed
-            )) else {
+            let Some((key, (cell, range))) = ({
+                let mut builder = CellBuilder::new();
+                ok!(key.store_into(&mut builder, &mut Cell::default_finalizer()));
+                ok!(dict_find_owned(
+                    root,
+                    K::BITS,
+                    builder.as_data_slice(),
+                    towards,
+                    inclusive,
+                    signed
+                ))
+            }) else {
                 return Ok(None);
             };
             let value = &mut ok!(range.apply(&cell));
@@ -489,14 +441,8 @@ where
                 None => Err(Error::CellUnderflow),
             }
         }
-        find_ext_impl(
-            &self.root,
-            key.borrow(),
-            towards,
-            inclusive,
-            signed,
-            finalizer,
-        )
+
+        find_impl(&self.root, key.borrow(), towards, inclusive, signed)
     }
 }
 
@@ -585,71 +531,10 @@ impl<K, V> Dict<K, V>
 where
     K: Store + DictKey,
 {
-    /// Returns the value corresponding to the key.
-    ///
-    /// Key is serialized using the provided finalizer.
-    pub fn get_ext<'a: 'b, 'b, Q>(
-        &'a self,
-        key: Q,
-        finalizer: &mut dyn Finalizer,
-    ) -> Result<Option<V>, Error>
-    where
-        Q: Borrow<K> + 'b,
-        V: Load<'a>,
-    {
-        pub fn get_ext_impl<'a: 'b, 'b, K, V>(
-            root: &'a Option<Cell>,
-            key: &'b K,
-            finalizer: &mut dyn Finalizer,
-        ) -> Result<Option<V>, Error>
-        where
-            K: Store + DictKey,
-            V: Load<'a>,
-        {
-            let key = ok!(serialize_entry(key, finalizer));
-            let Some(mut value) = ok!(dict_get(root, K::BITS, ok!(key.as_ref().as_slice()))) else {
-                return Ok(None);
-            };
-
-            match V::load_from(&mut value) {
-                Ok(value) => Ok(Some(value)),
-                Err(e) => Err(e),
-            }
-        }
-
-        get_ext_impl(&self.root, key.borrow(), finalizer)
-    }
-
-    /// Returns the value corresponding to the key.
-    ///
-    /// Key is serialized using the provided finalizer.
-    pub fn get_raw_ext<'a: 'b, 'b, Q>(
-        &'a self,
-        key: Q,
-        finalizer: &mut dyn Finalizer,
-    ) -> Result<Option<CellSlice<'a>>, Error>
-    where
-        Q: Borrow<K> + 'b,
-    {
-        pub fn get_raw_ext_impl<'a: 'b, 'b, K>(
-            root: &'a Option<Cell>,
-            key: &'b K,
-            finalizer: &mut dyn Finalizer,
-        ) -> Result<Option<CellSlice<'a>>, Error>
-        where
-            K: Store + DictKey,
-        {
-            let key = ok!(serialize_entry(key, finalizer));
-            dict_get(root, K::BITS, ok!(key.as_ref().as_slice()))
-        }
-
-        get_raw_ext_impl(&self.root, key.borrow(), finalizer)
-    }
-
     /// Removes the value associated with key in dictionary.
     /// Returns an optional removed value as cell slice parts.
     ///
-    /// Key is serialized using the provided finalizer.
+    /// Dict is rebuild using the provided finalizer.
     pub fn remove_raw_ext<Q>(
         &mut self,
         key: Q,
@@ -666,10 +551,11 @@ where
         where
             K: Store + DictKey,
         {
-            let key = ok!(serialize_entry(key, finalizer));
+            let mut builder = CellBuilder::new();
+            ok!(key.store_into(&mut builder, &mut Cell::default_finalizer()));
             dict_remove_owned(
                 root,
-                &mut ok!(key.as_ref().as_slice()),
+                &mut builder.as_data_slice(),
                 K::BITS,
                 false,
                 finalizer,
@@ -790,16 +676,19 @@ where
         K: Store + DictKey,
         V: Store,
     {
-        let key = ok!(serialize_entry(key, finalizer));
-        let value = ok!(serialize_entry(value, finalizer));
-        let (new_root, changed) = ok!(dict_insert(
-            &self.root,
-            &mut ok!(key.as_ref().as_slice()),
-            K::BITS,
-            &ok!(value.as_ref().as_slice()),
-            mode,
-            finalizer
-        ));
+        let (new_root, changed) = {
+            let mut builder = CellBuilder::new();
+            ok!(key.store_into(&mut builder, &mut Cell::default_finalizer()));
+            let value = ok!(CellBuilder::build_from_ext(value, finalizer));
+            ok!(dict_insert(
+                &self.root,
+                &mut builder.as_data_slice(),
+                K::BITS,
+                &ok!(value.as_ref().as_slice()),
+                mode,
+                finalizer
+            ))
+        };
         self.root = new_root;
         Ok(changed)
     }

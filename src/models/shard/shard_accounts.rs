@@ -13,32 +13,12 @@ pub struct ShardAccounts(AugDict<HashBytes, DepthBalanceInfo, ShardAccount>);
 
 impl ShardAccounts {
     /// Returns the account state corresponding to the key.
-    ///
-    /// Key is serialized using the default finalizer.
     pub fn get<'a: 'b, 'b, Q>(&'a self, key: Q) -> Result<Option<ShardAccount>, Error>
     where
         Q: Borrow<HashBytes> + 'b,
     {
-        self.get_ext(key, &mut Cell::default_finalizer())
-    }
-
-    /// Returns the account state corresponding to the key.
-    ///
-    /// Key is serialized using the provided finalizer.
-    pub fn get_ext<'a: 'b, 'b, Q>(
-        &'a self,
-        key: Q,
-        finalizer: &mut dyn Finalizer,
-    ) -> Result<Option<ShardAccount>, Error>
-    where
-        Q: Borrow<HashBytes> + 'b,
-    {
-        fn get_ext_impl(
-            dict: &ShardAccounts,
-            key: &HashBytes,
-            finalizer: &mut dyn Finalizer,
-        ) -> Result<Option<ShardAccount>, Error> {
-            match dict.get_raw_ext(key, finalizer) {
+        fn get_impl(dict: &ShardAccounts, key: &HashBytes) -> Result<Option<ShardAccount>, Error> {
+            match dict.get_raw(key) {
                 Ok(Some(mut value)) => {
                     if DepthBalanceInfo::skip_value(&mut value) {
                         match ShardAccount::load_from(&mut value) {
@@ -54,33 +34,15 @@ impl ShardAccounts {
             }
         }
 
-        get_ext_impl(self, key.borrow(), finalizer)
+        get_impl(self, key.borrow())
     }
 
     /// Returns the raw value (with augmentation) corresponding to the key.
-    ///
-    /// Key is serialized using the default finalizer.
     pub fn get_raw<'a: 'b, 'b, Q>(&'a self, key: Q) -> Result<Option<CellSlice<'a>>, Error>
     where
         Q: Borrow<HashBytes> + 'b,
     {
-        self.0
-            .dict()
-            .get_raw_ext(key, &mut Cell::default_finalizer())
-    }
-
-    /// Returns the raw value (with augmentation) corresponding to the key.
-    ///
-    /// Key is serialized using the provided finalizer.
-    pub fn get_raw_ext<'a: 'b, 'b, Q>(
-        &'a self,
-        key: Q,
-        finalizer: &mut dyn Finalizer,
-    ) -> Result<Option<CellSlice<'a>>, Error>
-    where
-        Q: Borrow<HashBytes>,
-    {
-        self.0.dict().get_raw_ext(key, finalizer)
+        self.0.dict().get_raw(key)
     }
 
     /// Returns `true` if the dictionary contains a state for the specified account id.

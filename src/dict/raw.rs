@@ -496,6 +496,18 @@ impl<'a> RawOwnedIter<'a> {
         self.inner.signed = true;
         self
     }
+
+    /// Returns whether the iterator direction was reversed.
+    #[inline]
+    pub fn is_reversed(&self) -> bool {
+        self.inner.reversed
+    }
+
+    /// Returns whether the iterator treats keys as signed integers.
+    #[inline]
+    pub fn is_signed(&self) -> bool {
+        self.inner.signed
+    }
 }
 
 impl<'a> Iterator for RawOwnedIter<'a> {
@@ -574,6 +586,18 @@ impl<'a> RawIter<'a> {
     pub fn signed(mut self) -> Self {
         self.signed = true;
         self
+    }
+
+    /// Returns whether the iterator direction was reversed.
+    #[inline]
+    pub fn is_reversed(&self) -> bool {
+        self.reversed
+    }
+
+    /// Returns whether the iterator treats keys as signed integers.
+    #[inline]
+    pub fn is_signed(&self) -> bool {
+        self.signed
     }
 
     /// Advances the iterator and returns the next value as owned cell slice parts.
@@ -783,6 +807,18 @@ impl<'a> RawKeys<'a> {
         self.inner.signed = true;
         self
     }
+
+    /// Returns whether the iterator direction was reversed.
+    #[inline]
+    pub fn is_reversed(&self) -> bool {
+        self.inner.reversed
+    }
+
+    /// Returns whether the iterator treats keys as signed integers.
+    #[inline]
+    pub fn is_signed(&self) -> bool {
+        self.inner.signed
+    }
 }
 
 impl<'a> Iterator for RawKeys<'a> {
@@ -838,6 +874,18 @@ impl<'a> RawOwnedValues<'a> {
     pub fn signed(mut self) -> Self {
         self.inner.signed = true;
         self
+    }
+
+    /// Returns whether the iterator direction was reversed.
+    #[inline]
+    pub fn is_reversed(&self) -> bool {
+        self.inner.reversed
+    }
+
+    /// Returns whether the iterator treats keys as signed integers.
+    #[inline]
+    pub fn is_signed(&self) -> bool {
+        self.inner.signed
     }
 }
 
@@ -932,6 +980,18 @@ impl<'a> RawValues<'a> {
     pub fn signed(mut self) -> Self {
         self.signed = true;
         self
+    }
+
+    /// Returns whether the iterator direction was reversed.
+    #[inline]
+    pub fn is_reversed(&self) -> bool {
+        self.reversed
+    }
+
+    /// Returns whether the iterator treats keys as signed integers.
+    #[inline]
+    pub fn is_signed(&self) -> bool {
+        self.signed
     }
 
     #[inline]

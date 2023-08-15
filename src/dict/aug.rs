@@ -209,14 +209,12 @@ where
     K: Store + DictKey,
 {
     /// Returns the value corresponding to the key.
-    ///
-    /// Key is serialized using the default finalizer.
     pub fn get<'a: 'b, 'b, Q>(&'a self, key: Q) -> Result<Option<(A, V)>, Error>
     where
         Q: Borrow<K> + 'b,
         (A, V): Load<'a>,
     {
-        self.dict.get_ext(key, &mut Cell::default_finalizer())
+        self.dict.get(key)
     }
 }
 
@@ -335,22 +333,6 @@ impl<K, A, V> AugDict<K, A, V>
 where
     K: Store + DictKey,
 {
-    /// Returns the augmented value corresponding to the key.
-    ///
-    /// Key is serialized using the provided finalizer.
-    pub fn get_ext<'a: 'b, 'b, Q>(
-        &'a self,
-        key: Q,
-        finalizer: &mut dyn Finalizer,
-    ) -> Result<Option<(A, V)>, Error>
-    where
-        Q: Borrow<K> + 'b,
-        A: Load<'a>,
-        V: Load<'a>,
-    {
-        self.dict.get_ext(key, finalizer)
-    }
-
     /// Gets an iterator over the raw entries of the dictionary, sorted by key.
     /// The iterator element type is `Result<(CellBuilder, CellSlice)>`.
     ///

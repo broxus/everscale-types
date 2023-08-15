@@ -1209,12 +1209,6 @@ fn read_hml_same<'a>(label: &mut CellSlice<'a>, bits_for_len: u16) -> Result<Cel
     Ok(slice.get_prefix(len, 0))
 }
 
-fn serialize_entry<T: Store>(entry: &T, finalizer: &mut dyn Finalizer) -> Result<Cell, Error> {
-    let mut builder = CellBuilder::new();
-    ok!(entry.store_into(&mut builder, finalizer));
-    builder.build_ext(finalizer)
-}
-
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum Branch {
     // Branch for a key part that starts with bit 0
