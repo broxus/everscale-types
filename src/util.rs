@@ -222,8 +222,10 @@ impl std::fmt::Display for Bitstring<'_> {
             let tag = if rem % 4 != 0 { "_" } else { "" };
             if rem <= 4 {
                 last_byte >>= 4;
+                ok!(write!(f, "{last_byte:x}{tag}"));
+            } else {
+                ok!(write!(f, "{last_byte:02x}{tag}"));
             }
-            ok!(write!(f, "{last_byte:x}{tag}"));
         }
 
         Ok(())
@@ -289,4 +291,24 @@ pub(crate) fn debug_struct_field2_finish(
     builder.field(name1, value1);
     builder.field(name2, value2);
     builder.finish()
+}
+
+#[test]
+fn bitstring_zero_char_with_completion_tag() {
+    assert_eq!(
+        format!("{}", Bitstring { bytes: &[0b_0100_0000], bit_len: 2 }),
+        format!("{:x}_", 0b_0110)
+    );
+    assert_eq!(
+        format!("{}", Bitstring { bytes: &[0b_0000_1000], bit_len: 5 }),
+        format!("{:x}{:x}_", 0b_0000, 0b_1100)
+    );
+    assert_eq!(
+        format!("{}", Bitstring { bytes: &[0b_0000_1000, 0b_0100_0000], bit_len: 8 + 2 }),
+        format!("{:x}{:x}{:x}_", 0b_0000, 0b_1000, 0b_0110)
+    );
+    assert_eq!(
+        format!("{}", Bitstring { bytes: &[0b_0100_0000, 0b_0000_1000], bit_len: 8 + 5 }),
+        format!("{:x}{:x}{:x}{:x}_", 0b_0100, 0b_0000, 0b_0000, 0b_1100)
+    );
 }
