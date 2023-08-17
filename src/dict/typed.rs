@@ -73,11 +73,7 @@ impl<K, V> PartialEq for Dict<K, V> {
 impl<K, V> From<Option<Cell>> for Dict<K, V> {
     #[inline]
     fn from(dict: Option<Cell>) -> Self {
-        Self {
-            root: dict,
-            _key: PhantomData,
-            _value: PhantomData,
-        }
+        Self::from_raw(dict)
     }
 }
 
@@ -92,6 +88,15 @@ impl<K, V> Dict<K, V> {
     pub const fn new() -> Self {
         Self {
             root: None,
+            _key: PhantomData,
+            _value: PhantomData,
+        }
+    }
+
+    /// Creates a dictionary from a raw cell.
+    pub const fn from_raw(dict: Option<Cell>) -> Self {
+        Self {
+            root: dict,
             _key: PhantomData,
             _value: PhantomData,
         }

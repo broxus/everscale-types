@@ -68,14 +68,31 @@ impl ExtraCurrencyCollection {
         Self(Dict::new())
     }
 
+    /// Creates a currency collection from a raw cell.
+    pub const fn from_raw(dict: Option<Cell>) -> Self {
+        Self(Dict::from_raw(dict))
+    }
+
     /// Returns `true` if the dictionary contains no elements.
     pub const fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
-    /// Returns the underlying dictionary.
+    /// Returns a reference to the underlying dictionary.
     pub const fn as_dict(&self) -> &Dict<HashBytes, VarUint248> {
         &self.0
+    }
+
+    /// Returns a mutable reference to the underlying dictionary.
+    pub fn as_dict_mut(&mut self) -> &mut Dict<HashBytes, VarUint248> {
+        &mut self.0
+    }
+}
+
+impl From<Dict<HashBytes, VarUint248>> for ExtraCurrencyCollection {
+    #[inline]
+    fn from(value: Dict<HashBytes, VarUint248>) -> Self {
+        Self(value)
     }
 }
 
