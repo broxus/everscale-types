@@ -108,30 +108,37 @@ impl<'a> Load<'a> for ReserveCurrencyFlags {
     }
 }
 
-bitflags! {
-    /// Mode flags for `ChangeLibrary` output action.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-    pub struct ChangeLibraryFlags: u8 {
-        /// Output action will reserve all but x nanograms.
-        const REMOVE = 1;
-        /// Adds library as private.
-        const PRIVATE = 2 + 1;
-        /// Adds library as public.
-        const PUBLIC = 4 + 1;
+/// Mode flags for `ChangeLibrary` output action.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum ChangeLibraryMode {
+    /// Remove library.
+    Remove = 0,
+    /// Add private library.
+    AddPrivate = 1,
+    /// Add public library.
+    AddPublic = 2,
+}
+
+impl TryFrom<u8> for ChangeLibraryMode {
+    type Error = Error;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        Ok(match value {
+            0 => Self::Remove,
+            1 => Self::AddPrivate,
+            2 => Self::AddPublic,
+            _ => return Err(Error::InvalidData),
+        })
     }
 }
 
-impl Store for ChangeLibraryFlags {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
-        builder.store_u8(self.bits())
-    }
-}
-
-impl<'a> Load<'a> for ChangeLibraryFlags {
-    #[inline]
-    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        Ok(Self::from_bits_retain(ok!(slice.load_u8())))
-    }
+/// Library reference.
+pub enum LibRef {
+    /// Hash of the root cell of the library code.
+    Hash(HashBytes),
+    /// Library code itself.
+    Cell(Cell),
 }
 
 /// Output action.
@@ -160,11 +167,9 @@ pub enum OutAction {
     /// smart contract libraries by adding or removing library with code given in cell.
     ChangeLibrary {
         /// Behavior flags.
-        mode: ChangeLibraryFlags,
-        /// Cell library hash.
-        hash: Option<HashBytes>,
-        /// Cell library code.
-        code: Option<Cell>,
+        mode: ChangeLibraryMode,
+        /// Library reference.
+        lib: LibRef,
     },
     /// Copyleft action.
     CopyLeft {
@@ -204,16 +209,18 @@ impl Store for OutAction {
                 ok!(builder.store_u8(mode.bits()));
                 value.store_into(builder, finalizer)
             }
-            Self::ChangeLibrary { mode, code, hash } => {
+            Self::ChangeLibrary { mode, lib } => {
                 ok!(builder.store_u32(Self::TAG_CHANGE_LIB));
-                ok!(builder.store_u8(mode.bits()));
-                if let Some(hash) = hash {
-                    ok!(builder.store_u256(hash));
+                match lib {
+                    LibRef::Hash(hash) => {
+                        ok!(builder.store_u8((*mode as u8) << 1));
+                        builder.store_u256(hash)
+                    }
+                    LibRef::Cell(cell) => {
+                        ok!(builder.store_u8(((*mode as u8) << 1) | 1));
+                        builder.store_reference(cell.clone())
+                    }
                 }
-                if let Some(code) = code {
-                    ok!(builder.store_reference(code.clone()))
-                }
-                Ok(())
             }
             Self::CopyLeft { license, address } => {
                 ok!(builder.store_u32(Self::TAG_COPYLEFT));
@@ -240,19 +247,14 @@ impl<'a> Load<'a> for OutAction {
                 value: ok!(CurrencyCollection::load_from(slice)),
             },
             Self::TAG_CHANGE_LIB => {
-                let mode = ok!(ChangeLibraryFlags::load_from(slice));
-                let load_hash = mode.is_empty();
+                let flags = ok!(slice.load_u8());
+                let mode = ok!(ChangeLibraryMode::try_from(flags >> 1));
                 Self::ChangeLibrary {
                     mode,
-                    hash: if load_hash {
-                        Some(ok!(slice.load_u256()))
+                    lib: if flags & 1 == 0 {
+                        LibRef::Hash(ok!(slice.load_u256()))
                     } else {
-                        None
-                    },
-                    code: if !load_hash {
-                        Some(ok!(slice.load_reference_cloned()))
-                    } else {
-                        None
+                        LibRef::Cell(ok!(slice.load_reference_cloned()))
                     },
                 }
             }
