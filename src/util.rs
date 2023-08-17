@@ -219,8 +219,8 @@ impl std::fmt::Display for Bitstring<'_> {
         }
 
         if let Some(mut last_byte) = last_byte {
-            let tag = if rem % 4 != 0 { "_" } else { "" };
-            let rem = 1 + (rem >> 2) as usize;
+            let tag = if rem != 4 { "_" } else { "" };
+            let rem = 1 + (rem > 4) as usize;
             if rem == 1 {
                 last_byte >>= 4;
             }
@@ -298,6 +298,16 @@ mod tests {
 
     #[test]
     fn bitstring_zero_char_with_completion_tag() {
+        assert_eq!(
+            format!(
+                "{}",
+                Bitstring {
+                    bytes: &[0b_0011_0000],
+                    bit_len: 4
+                }
+            ),
+            format!("{:x}", 0b_0011)
+        );
         assert_eq!(
             format!(
                 "{}",
