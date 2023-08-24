@@ -697,10 +697,19 @@ impl CellBuilder {
         ) -> Result<(), Error> {
             let bits = value.remaining_bits();
             if builder.bit_len + bits <= MAX_BIT_LEN {
-                let mut slice_data = MaybeUninit::<[u8; 128]>::uninit();
-                let slice_data = unsafe { &mut *(slice_data.as_mut_ptr() as *mut [u8; 128]) };
-                let slice_data = ok!(value.get_raw(0, slice_data, bits));
+                // SAFETY: An uninitialized `[MaybeUninit<_>; LEN]` is valid.
+                let mut slice_data =
+                    unsafe { MaybeUninit::<[MaybeUninit<u8>; 128]>::uninit().assume_init() };
 
+                // SAFETY: casting `slice_data` to a `*const [u8]` is safe since `MaybeUninit`
+                // is guaranteed to have the same layout as `u8`.
+                // The pointer obtained is valid since it refers to memory owned by `slice_data`
+                // which is a reference and thus guaranteed to be valid for reads.
+                let slice_data = unsafe {
+                    &mut *(&mut slice_data as *mut [MaybeUninit<u8>; 128] as *mut [u8; 128])
+                };
+
+                let slice_data = ok!(value.get_raw(0, slice_data, bits));
                 builder.store_raw(slice_data, bits)
             } else {
                 Err(Error::CellOverflow)

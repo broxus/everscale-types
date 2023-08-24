@@ -495,7 +495,8 @@ where
         bound: DictBound,
         signed: bool,
     ) -> Result<Option<(K, CellSlice<'_>)>, Error> {
-        let Some((key, value)) = ok!(dict_find_bound(self.root.as_ref(), K::BITS, bound, signed)) else {
+        let Some((key, value)) = ok!(dict_find_bound(self.root.as_ref(), K::BITS, bound, signed))
+        else {
             return Ok(None);
         };
         match K::from_raw_data(key.raw_data()) {

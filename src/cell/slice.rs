@@ -306,23 +306,11 @@ impl CellSliceRange {
 }
 
 /// A read-only view for a subrange of a cell.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CellSlice<'a> {
     cell: &'a DynCell,
     range: CellSliceRange,
 }
-
-impl<'a> Clone for CellSlice<'a> {
-    #[inline]
-    fn clone(&self) -> Self {
-        Self {
-            cell: self.cell,
-            range: self.range,
-        }
-    }
-}
-
-impl<'a> Copy for CellSlice<'a> {}
 
 impl<'a> AsRef<CellSlice<'a>> for CellSlice<'a> {
     #[inline]

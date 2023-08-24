@@ -565,7 +565,7 @@ impl<'a> RawIter<'a> {
                     builder: Box::default(),
                     reversed,
                     signed,
-                }
+                };
             };
 
             segments.push(IterSegment {
@@ -957,13 +957,13 @@ impl<'a> RawValues<'a> {
         let mut segments = Vec::new();
         if let Some(root) = root {
             let Ok(data) = root.as_slice() else {
-                    return Self {
-                        segments: Vec::new(),
-                        status: IterStatus::Pruned,
-                        reversed,
-                        signed,
-                    };
+                return Self {
+                    segments: Vec::new(),
+                    status: IterStatus::Pruned,
+                    reversed,
+                    signed,
                 };
+            };
 
             segments.push(ValuesSegment {
                 data,
