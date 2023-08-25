@@ -4,7 +4,7 @@ use smallvec::SmallVec;
 
 use super::BocTag;
 use crate::cell::{Cell, CellDescriptor, CellParts, Finalizer, LevelMask, MAX_REF_COUNT};
-use crate::util::{unlikely, ArrayVec};
+use crate::util::{read_be_u32_fast, read_be_u64_fast, unlikely, ArrayVec};
 
 #[cfg(feature = "stats")]
 use crate::cell::CellTreeStats;
@@ -199,55 +199,20 @@ impl<'a> BocHeader<'a> {
             reader.advance(cell_count * offset_size);
         }
 
+        #[cfg(not(fuzzing))]
         let cells_start_offset = reader.offset;
 
         let mut cells = SmallVec::with_capacity(cell_count);
 
         let data_ptr = data.as_ptr();
         for _ in 0..cell_count {
-            if unlikely(!reader.require(2)) {
-                return Err(Error::UnexpectedEof);
-            }
-
             // SAFETY: there are manual bounds checks for bytes offset
             let start_ptr = unsafe { data_ptr.add(reader.offset) };
-
-            // SAFETY: we have already checked the reader has 2 bytes
-            let descriptor = unsafe { reader.read_cell_descriptor(data) };
-            if unlikely(descriptor.is_absent()) {
-                return Err(Error::AbsentCellsNotSupported);
-            }
-
-            // 0b11111111 -> 0b01111111 + 1 = 0b10000000 = byte len 128, max bit len = 1023
-            // 0b11111110 -> 0b01111111 = byte len 127, bit len = 1016
-            let data_len = descriptor.byte_len() as usize;
-            let ref_count = descriptor.reference_count() as usize;
-            if unlikely(ref_count > MAX_REF_COUNT) {
-                return Err(Error::InvalidRef);
-            }
-
-            let mut data_offset = 0;
-            if unlikely(descriptor.store_hashes()) {
-                let level = descriptor.level_mask().level();
-                if descriptor.is_exotic() && ref_count == 0 && level > 0 {
-                    // Pruned branch with `store_hashes` is invalid
-                    return Err(Error::UnnormalizedCell);
-                }
-                data_offset = (32 + 2) * (level as usize + 1);
-            }
-
-            let total_len = 2 + data_offset + data_len + ref_count * ref_size;
-            if unlikely(!reader.require(total_len)) {
-                return Err(Error::UnexpectedEof);
-            }
-
-            if data_len > 0 && !descriptor.is_aligned() {
-                // SAFETY: we have already requested 2+{data_len} bytes
-                let byte_with_tag = unsafe { reader.read_cell_tag(data, data_offset, data_len) };
-                if unlikely(byte_with_tag & 0x7f == 0) {
-                    return Err(Error::UnnormalizedCell);
-                }
-            }
+            let total_len = ok!(CellParts::read_raw_cell_from_ptr(
+                start_ptr,
+                reader.len - reader.offset,
+                ref_size
+            ));
             reader.advance(total_len);
 
             // SAFETY: We have already requested {total_len} bytes
@@ -293,80 +258,19 @@ impl<'a> BocHeader<'a> {
             return Err(Error::InvalidTotalSize);
         }
 
-        for cell in self.cells().iter().rev() {
-            // SAFETY: cell data structure was already validated before
-            unsafe {
-                let cell_ptr = cell.as_ptr();
+        for raw_cell in self.cells().iter().rev() {
+            // SAFETY: it is safe to construct `CellParts` from a `read_raw_cell_from_ptr` output
+            let ctx = unsafe {
+                ok!(CellParts::from_raw_cell(
+                    raw_cell, &res, cell_count, ref_size
+                ))
+            };
 
-                let descriptor = CellDescriptor::new(*(cell_ptr as *const [u8; 2]));
-                let byte_len = descriptor.byte_len() as usize;
-
-                let mut data_ptr = cell_ptr.add(2);
-                if unlikely(descriptor.store_hashes()) {
-                    let level = descriptor.level_mask().level();
-                    debug_assert!(!descriptor.cell_type().is_pruned_branch());
-                    data_ptr = data_ptr.add((32 + 2) * (level as usize + 1));
-                }
-
-                let data = std::slice::from_raw_parts(data_ptr, byte_len);
-                data_ptr = data_ptr.add(byte_len);
-
-                let bit_len = if descriptor.is_aligned() {
-                    (byte_len * 8) as u16
-                } else if let Some(data) = data.last() {
-                    byte_len as u16 * 8 - data.trailing_zeros() as u16 - 1
-                } else {
-                    0
-                };
-
-                let mut references = ArrayVec::<Cell, MAX_REF_COUNT>::default();
-                let mut children_mask = LevelMask::EMPTY;
-
-                #[cfg(feature = "stats")]
-                let mut stats = CellTreeStats {
-                    bit_count: bit_len as u64,
-                    cell_count: 1,
-                };
-
-                for _ in 0..descriptor.reference_count() {
-                    let child_index = read_be_uint_fast(data_ptr, ref_size);
-                    if child_index >= cell_count {
-                        return Err(Error::InvalidRef);
-                    }
-
-                    let child = match res.get((cell_count - child_index - 1) as usize) {
-                        Some(child) => child.clone(),
-                        None => return Err(Error::InvalidRefOrder),
-                    };
-
-                    {
-                        let child = child.as_ref();
-                        children_mask |= child.descriptor().level_mask();
-                        #[cfg(feature = "stats")]
-                        {
-                            stats += child.stats();
-                        }
-                    }
-                    references.push(child);
-
-                    data_ptr = data_ptr.add(ref_size);
-                }
-
-                let ctx = CellParts {
-                    #[cfg(feature = "stats")]
-                    stats,
-                    bit_len,
-                    descriptor,
-                    children_mask,
-                    references,
-                    data,
-                };
-                let cell = match finalizer.finalize_cell(ctx) {
-                    Ok(cell) => cell,
-                    Err(_) => return Err(Error::InvalidCell),
-                };
-                res.push(cell);
-            }
+            let cell = match finalizer.finalize_cell(ctx) {
+                Ok(cell) => cell,
+                Err(_) => return Err(Error::InvalidCell),
+            };
+            res.push(cell);
         }
 
         Ok(ProcessedCells(res))
@@ -433,7 +337,7 @@ impl BocReader {
     /// - data must be at least `self.offset + size` bytes long.
     #[inline(always)]
     unsafe fn read_next_be_uint_fast(&mut self, data: &[u8], size: usize) -> usize {
-        let res = read_be_uint_fast(data.as_ptr().add(self.offset), size) as usize;
+        let res = read_be_u32_fast(data.as_ptr().add(self.offset), size) as usize;
         self.advance(size);
         res
     }
@@ -445,33 +349,12 @@ impl BocReader {
     /// - data must be at least `self.offset + size` bytes long.
     #[inline(always)]
     unsafe fn read_next_be_uint_full(&mut self, data: &[u8], size: usize) -> u64 {
-        let data_ptr = data.as_ptr().add(self.offset);
-        let res = match size {
-            1..=4 => read_be_uint_fast(data_ptr, size) as u64,
-            5..=8 => {
-                let mut bytes = [0u8; 8];
-                std::ptr::copy_nonoverlapping(data_ptr, bytes.as_mut_ptr().add(8 - size), size);
-                u64::from_be_bytes(bytes)
-            }
-            _ => std::hint::unreachable_unchecked(),
-        };
+        let res = read_be_u64_fast(data.as_ptr().add(self.offset), size);
         self.advance(size);
         res
     }
 
-    #[inline(always)]
-    unsafe fn read_cell_descriptor(&self, data: &[u8]) -> CellDescriptor {
-        const _: () = assert!(std::mem::size_of::<CellDescriptor>() == 2);
-        *(data.as_ptr().add(self.offset) as *const CellDescriptor)
-    }
-
-    #[inline(always)]
-    unsafe fn read_cell_tag(&self, data: &[u8], data_offset: usize, data_len: usize) -> u8 {
-        *data
-            .as_ptr()
-            .add(self.offset + 2 + data_offset + data_len - 1)
-    }
-
+    #[cfg(not(fuzzing))]
     #[inline(always)]
     unsafe fn check_crc(&self, data: &[u8]) -> bool {
         let data_ptr = data.as_ptr();
@@ -493,18 +376,152 @@ impl Deref for BocReader {
     }
 }
 
-#[inline(always)]
-unsafe fn read_be_uint_fast(data_ptr: *const u8, size: usize) -> u32 {
-    match size {
-        1 => *data_ptr as u32,
-        2 => u16::from_be_bytes(*(data_ptr as *const [u8; 2])) as u32,
-        3 => {
-            let mut bytes = [0u8; 4];
-            std::ptr::copy_nonoverlapping(data_ptr, bytes.as_mut_ptr().add(1), 3);
-            u32::from_be_bytes(bytes)
+impl<'a> CellParts<'a> {
+    /// Reads cell parts from the raw cell slice.
+    ///
+    /// # Safety
+    ///
+    /// The following must be true:
+    /// - `bytes` must be a correct bytes representation of cell.
+    ///
+    /// NOTE: It is safe to use an unmodified output from `CellParts::read_raw_cell`.
+    pub unsafe fn from_raw_cell(
+        raw_cell: &'a [u8],
+        cells: &[Cell],
+        cell_count: u32,
+        ref_size: usize,
+    ) -> Result<Self, Error> {
+        let raw_cell_ptr = raw_cell.as_ptr();
+
+        let descriptor = CellDescriptor::new(*(raw_cell_ptr as *const [u8; 2]));
+        let data_len = descriptor.byte_len() as usize;
+
+        let mut data_ptr = raw_cell_ptr.add(2);
+        if unlikely(descriptor.store_hashes()) {
+            let level = descriptor.level_mask().level();
+            debug_assert!(!descriptor.cell_type().is_pruned_branch());
+            data_ptr = data_ptr.add((32 + 2) * (level as usize + 1));
         }
-        4 => u32::from_be_bytes(*(data_ptr as *const [u8; 4])),
-        _ => std::hint::unreachable_unchecked(),
+
+        let data = std::slice::from_raw_parts(data_ptr, data_len);
+        data_ptr = data_ptr.add(data_len);
+
+        let bit_len = if descriptor.is_aligned() {
+            (data_len * 8) as u16
+        } else if let Some(data) = data.last() {
+            data_len as u16 * 8 - data.trailing_zeros() as u16 - 1
+        } else {
+            0
+        };
+
+        let mut references = ArrayVec::<Cell, MAX_REF_COUNT>::default();
+        let mut children_mask = LevelMask::EMPTY;
+
+        #[cfg(feature = "stats")]
+        let mut stats = CellTreeStats {
+            bit_count: bit_len as u64,
+            cell_count: 1,
+        };
+
+        for _ in 0..descriptor.reference_count() {
+            let child_index = read_be_u32_fast(data_ptr, ref_size);
+            if child_index >= cell_count {
+                return Err(Error::InvalidRef);
+            }
+
+            let child = match cells.get((cell_count - child_index - 1) as usize) {
+                Some(child) => child.clone(),
+                None => return Err(Error::InvalidRefOrder),
+            };
+
+            {
+                let child = child.as_ref();
+                children_mask |= child.descriptor().level_mask();
+                #[cfg(feature = "stats")]
+                {
+                    stats += child.stats();
+                }
+            }
+            references.push(child);
+
+            data_ptr = data_ptr.add(ref_size);
+        }
+
+        Ok(CellParts {
+            #[cfg(feature = "stats")]
+            stats,
+            bit_len,
+            descriptor,
+            children_mask,
+            references,
+            data,
+        })
+    }
+
+    /// Reads a raw cell from the specified slice.
+    /// The returned slice is guaranteed to be a correct bytes representation of cell.
+    pub fn read_raw_cell<'b>(bytes: &mut &'b [u8], ref_size: usize) -> Result<&'b [u8], Error> {
+        let total_len = ok!(Self::read_raw_cell_from_ptr(
+            bytes.as_ptr(),
+            bytes.len(),
+            ref_size
+        ));
+        let (cell, rest) = bytes.split_at(total_len);
+        *bytes = rest;
+        Ok(cell)
+    }
+
+    fn read_raw_cell_from_ptr(
+        bytes_ptr: *const u8,
+        bytes_len: usize,
+        ref_size: usize,
+    ) -> Result<usize, Error> {
+        const _: () = assert!(std::mem::size_of::<CellDescriptor>() == 2);
+
+        if unlikely(bytes_len < 2) {
+            return Err(Error::UnexpectedEof);
+        }
+
+        // SAFETY: we have already checked the reader has 2 bytes
+        // and the `CellDescriptor` layout is fixed by `repr(C)`
+        let descriptor = CellDescriptor::new(unsafe { *(bytes_ptr as *const [u8; 2]) });
+
+        if unlikely(descriptor.is_absent()) {
+            return Err(Error::AbsentCellsNotSupported);
+        }
+
+        // 0b11111111 -> 0b01111111 + 1 = 0b10000000 = byte len 128, max bit len = 1023
+        // 0b11111110 -> 0b01111111 = byte len 127, bit len = 1016
+        let data_len = descriptor.byte_len() as usize;
+        let ref_count = descriptor.reference_count() as usize;
+        if unlikely(ref_count > MAX_REF_COUNT) {
+            return Err(Error::InvalidRef);
+        }
+
+        let mut data_offset = 0;
+        if unlikely(descriptor.store_hashes()) {
+            let level = descriptor.level_mask().level();
+            if descriptor.is_exotic() && ref_count == 0 && level > 0 {
+                // Pruned branch with `store_hashes` is invalid
+                return Err(Error::UnnormalizedCell);
+            }
+            data_offset = (32 + 2) * (level as usize + 1);
+        }
+
+        let total_len = 2 + data_offset + data_len + ref_count * ref_size;
+        if unlikely(bytes_len < total_len) {
+            return Err(Error::UnexpectedEof);
+        }
+
+        if data_len > 0 && !descriptor.is_aligned() {
+            // SAFETY: we have already requested 2+{data_len} bytes
+            let byte_with_tag = unsafe { *bytes_ptr.add(2 + data_offset + data_len - 1) };
+            if unlikely(byte_with_tag & 0x7f == 0) {
+                return Err(Error::UnnormalizedCell);
+            }
+        }
+
+        Ok(total_len)
     }
 }
 
