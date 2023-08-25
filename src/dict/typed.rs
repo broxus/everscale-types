@@ -2,7 +2,7 @@ use std::borrow::Borrow;
 use std::marker::PhantomData;
 
 use crate::cell::*;
-use crate::dict::dict_remove_owned;
+use crate::dict::{dict_remove_owned, CellContext};
 use crate::error::Error;
 use crate::util::*;
 
@@ -146,7 +146,13 @@ where
         {
             let mut builder = CellBuilder::new();
             ok!(key.store_into(&mut builder, &mut Cell::default_finalizer()));
-            Ok(ok!(dict_get(root.as_ref(), K::BITS, builder.as_data_slice())).is_some())
+            Ok(ok!(dict_get(
+                root.as_ref(),
+                K::BITS,
+                builder.as_data_slice(),
+                &mut ()
+            ))
+            .is_some())
         }
         contains_key_impl(&self.root, key.borrow())
     }
@@ -173,7 +179,12 @@ where
             let Some(mut value) = ({
                 let mut builder = CellBuilder::new();
                 ok!(key.store_into(&mut builder, &mut Cell::default_finalizer()));
-                ok!(dict_get(root.as_ref(), K::BITS, builder.as_data_slice()))
+                ok!(dict_get(
+                    root.as_ref(),
+                    K::BITS,
+                    builder.as_data_slice(),
+                    &mut ()
+                ))
             }) else {
                 return Ok(None);
             };
@@ -201,7 +212,7 @@ where
         {
             let mut builder = CellBuilder::new();
             ok!(key.store_into(&mut builder, &mut Cell::default_finalizer()));
-            dict_get(root.as_ref(), K::BITS, builder.as_data_slice())
+            dict_get(root.as_ref(), K::BITS, builder.as_data_slice(), &mut ())
         }
 
         get_raw_impl(&self.root, key.borrow())
@@ -216,7 +227,7 @@ where
         Q: Borrow<K>,
         for<'a> V: Load<'a> + 'static,
     {
-        match ok!(self.remove_raw_ext(key, &mut Cell::default_finalizer())) {
+        match ok!(self.remove_raw_ext(key, &mut ())) {
             Some((cell, range)) => {
                 let mut slice = ok!(range.apply(&cell));
                 Ok(Some(ok!(V::load_from(&mut slice))))
@@ -233,7 +244,7 @@ where
     where
         Q: Borrow<K>,
     {
-        self.remove_raw_ext(key, &mut Cell::default_finalizer())
+        self.remove_raw_ext(key, &mut ())
     }
 
     /// Removes the lowest key from the dict.
@@ -243,7 +254,7 @@ where
     ///
     /// [`remove_bound_ext`]: RawDict::remove_bound_ext
     pub fn remove_min_raw(&mut self, signed: bool) -> Result<Option<(K, CellSliceParts)>, Error> {
-        self.remove_bound_raw_ext(DictBound::Min, signed, &mut Cell::default_finalizer())
+        self.remove_bound_raw_ext(DictBound::Min, signed, &mut ())
     }
 
     /// Removes the largest key from the dict.
@@ -434,7 +445,8 @@ where
                     builder.as_data_slice(),
                     towards,
                     inclusive,
-                    signed
+                    signed,
+                    &mut ()
                 ))
             }) else {
                 return Ok(None);
@@ -540,34 +552,34 @@ where
     /// Returns an optional removed value as cell slice parts.
     ///
     /// Dict is rebuild using the provided finalizer.
-    pub fn remove_raw_ext<Q>(
+    pub fn remove_raw_ext<Q, G: CellContext>(
         &mut self,
         key: Q,
-        finalizer: &mut dyn Finalizer,
-    ) -> Result<Option<CellSliceParts>, Error>
+        cell_context: &mut G,
+    ) -> Result<Option<CellSliceParts>, G::Error>
     where
         Q: Borrow<K>,
     {
-        pub fn remove_raw_ext_impl<K>(
+        pub fn remove_raw_ext_impl<K, G: CellContext>(
             root: &Option<Cell>,
             key: &K,
-            finalizer: &mut dyn Finalizer,
-        ) -> Result<(Option<Cell>, Option<CellSliceParts>), Error>
+            cell_context: &mut G,
+        ) -> Result<(Option<Cell>, Option<CellSliceParts>), G::Error>
         where
             K: Store + DictKey,
         {
             let mut builder = CellBuilder::new();
-            ok!(key.store_into(&mut builder, &mut Cell::default_finalizer()));
+            key.store_into(&mut builder, &mut Cell::default_finalizer())?;
             dict_remove_owned(
                 root.as_ref(),
                 &mut builder.as_data_slice(),
                 K::BITS,
                 false,
-                finalizer,
+                cell_context,
             )
         }
 
-        let (dict, removed) = ok!(remove_raw_ext_impl(&self.root, key.borrow(), finalizer));
+        let (dict, removed) = ok!(remove_raw_ext_impl(&self.root, key.borrow(), cell_context));
         self.root = dict;
         Ok(removed)
     }

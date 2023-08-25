@@ -1,4 +1,5 @@
 use crate::cell::*;
+use crate::dict::CellContext;
 use crate::error::Error;
 use crate::util::{unlikely, IterStatus};
 
@@ -129,8 +130,12 @@ impl<const N: u16> RawDict<N> {
     }
 
     /// Returns a `CellSlice` of the value corresponding to the key.
-    pub fn get<'a>(&'a self, key: CellSlice<'_>) -> Result<Option<CellSlice<'a>>, Error> {
-        dict_get(self.0.as_ref(), N, key)
+    pub fn get<'a, G: CellContext>(
+        &'a self,
+        key: CellSlice<'_>,
+        cell_context: &mut G,
+    ) -> Result<Option<CellSlice<'a>>, G::Error> {
+        dict_get(self.0.as_ref(), N, key, cell_context)
     }
 
     /// Computes the minimal key in dictionary that is lexicographically greater than `key`,
@@ -140,7 +145,15 @@ impl<const N: u16> RawDict<N> {
         key: CellSlice<'_>,
         signed: bool,
     ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
-        dict_find_owned(self.0.as_ref(), N, key, DictBound::Max, false, signed)
+        dict_find_owned(
+            self.0.as_ref(),
+            N,
+            key,
+            DictBound::Max,
+            false,
+            signed,
+            &mut (),
+        )
     }
 
     /// Computes the maximal key in dictionary that is lexicographically smaller than `key`,
@@ -150,7 +163,15 @@ impl<const N: u16> RawDict<N> {
         key: CellSlice<'_>,
         signed: bool,
     ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
-        dict_find_owned(self.0.as_ref(), N, key, DictBound::Min, false, signed)
+        dict_find_owned(
+            self.0.as_ref(),
+            N,
+            key,
+            DictBound::Min,
+            false,
+            signed,
+            &mut (),
+        )
     }
 
     /// Computes the minimal key in dictionary that is lexicographically greater than `key`,
@@ -160,7 +181,15 @@ impl<const N: u16> RawDict<N> {
         key: CellSlice<'_>,
         signed: bool,
     ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
-        dict_find_owned(self.0.as_ref(), N, key, DictBound::Max, true, signed)
+        dict_find_owned(
+            self.0.as_ref(),
+            N,
+            key,
+            DictBound::Max,
+            true,
+            signed,
+            &mut (),
+        )
     }
 
     /// Computes the maximal key in dictionary that is lexicographically smaller than `key`,
@@ -170,12 +199,20 @@ impl<const N: u16> RawDict<N> {
         key: CellSlice<'_>,
         signed: bool,
     ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
-        dict_find_owned(self.0.as_ref(), N, key, DictBound::Min, true, signed)
+        dict_find_owned(
+            self.0.as_ref(),
+            N,
+            key,
+            DictBound::Min,
+            true,
+            signed,
+            &mut (),
+        )
     }
 
     /// Returns cell slice parts of the value corresponding to the key.
     pub fn get_owned(&self, key: CellSlice<'_>) -> Result<Option<CellSliceParts>, Error> {
-        dict_get_owned(self.0.as_ref(), N, key)
+        dict_get_owned(self.0.as_ref(), N, key, &mut ())
     }
 
     /// Returns the lowest key and a value corresponding to the key.
@@ -202,7 +239,7 @@ impl<const N: u16> RawDict<N> {
         &self,
         signed: bool,
     ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
-        dict_find_bound_owned(self.0.as_ref(), N, DictBound::Min, signed)
+        dict_find_bound_owned(self.0.as_ref(), N, DictBound::Min, signed, &mut ())
     }
 
     /// Returns the largest key and cell slice parts corresponding to the key.
@@ -210,7 +247,7 @@ impl<const N: u16> RawDict<N> {
         &self,
         signed: bool,
     ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
-        dict_find_bound_owned(self.0.as_ref(), N, DictBound::Max, signed)
+        dict_find_bound_owned(self.0.as_ref(), N, DictBound::Max, signed, &mut ())
     }
 
     /// Finds the specified dict bound and returns a key and cell slice parts corresponding to the key.
@@ -219,12 +256,12 @@ impl<const N: u16> RawDict<N> {
         bound: DictBound,
         signed: bool,
     ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
-        dict_find_bound_owned(self.0.as_ref(), N, bound, signed)
+        dict_find_bound_owned(self.0.as_ref(), N, bound, signed, &mut ())
     }
 
     /// Returns `true` if the dictionary contains a value for the specified key.
     pub fn contains_key(&self, key: CellSlice<'_>) -> Result<bool, Error> {
-        Ok(ok!(dict_get(self.0.as_ref(), N, key)).is_some())
+        Ok(ok!(dict_get(self.0.as_ref(), N, key, &mut ())).is_some())
     }
 
     /// Sets the value associated with the key in the dictionary.
@@ -288,17 +325,17 @@ impl<const N: u16> RawDict<N> {
 
     /// Removes the value associated with key in dictionary.
     /// Returns an optional removed value as cell slice parts.
-    pub fn remove_ext(
+    pub fn remove_ext<G: CellContext>(
         &mut self,
         mut key: CellSlice<'_>,
-        finalizer: &mut dyn Finalizer,
-    ) -> Result<Option<CellSliceParts>, Error> {
+        cell_context: &mut G,
+    ) -> Result<Option<CellSliceParts>, G::Error> {
         let (dict, removed) = ok!(dict_remove_owned(
             self.0.as_ref(),
             &mut key,
             N,
             false,
-            finalizer
+            cell_context
         ));
         self.0 = dict;
         Ok(removed)
@@ -425,7 +462,7 @@ impl<const N: u16> RawDict<N> {
     ///
     /// [`remove_ext`]: RawDict::remove_ext
     pub fn remove(&mut self, key: CellSlice<'_>) -> Result<Option<CellSliceParts>, Error> {
-        self.remove_ext(key, &mut Cell::default_finalizer())
+        self.remove_ext(key, &mut ())
     }
 
     /// Removes the lowest key from the dict.
@@ -565,7 +602,7 @@ impl<'a> RawIter<'a> {
                     builder: Box::default(),
                     reversed,
                     signed,
-                }
+                };
             };
 
             segments.push(IterSegment {
@@ -957,13 +994,13 @@ impl<'a> RawValues<'a> {
         let mut segments = Vec::new();
         if let Some(root) = root {
             let Ok(data) = root.as_slice() else {
-                    return Self {
-                        segments: Vec::new(),
-                        status: IterStatus::Pruned,
-                        reversed,
-                        signed,
-                    };
+                return Self {
+                    segments: Vec::new(),
+                    status: IterStatus::Pruned,
+                    reversed,
+                    signed,
                 };
+            };
 
             segments.push(ValuesSegment {
                 data,
@@ -1184,7 +1221,7 @@ mod tests {
             .unwrap();
 
         let mut value = dict
-            .get(build_cell(|b| b.store_u32(123)).as_slice()?)
+            .get(build_cell(|b| b.store_u32(123)).as_slice()?, &mut ())
             .unwrap()
             .unwrap();
         assert_eq!(value.remaining_bits(), 1);
@@ -1201,13 +1238,13 @@ mod tests {
 
         //
         dict.add(key.as_slice()?, false)?;
-        let mut value = dict.get(key.as_slice()?)?.unwrap();
+        let mut value = dict.get(key.as_slice()?, &mut ())?.unwrap();
         assert_eq!(value.remaining_bits(), 1);
         assert_eq!(value.load_bit(), Ok(false));
 
         //
         dict.add(key.as_slice()?, true)?;
-        let mut value = dict.get(key.as_slice()?)?.unwrap();
+        let mut value = dict.get(key.as_slice()?, &mut ())?.unwrap();
         assert_eq!(value.remaining_bits(), 1);
         assert_eq!(value.load_bit(), Ok(false));
 
@@ -1222,7 +1259,7 @@ mod tests {
         let dict = boc.parse::<RawDict<32>>()?;
 
         let key = CellBuilder::build_from(u32::from_be_bytes(123u32.to_le_bytes()))?;
-        let value = dict.get(key.as_slice()?)?.unwrap();
+        let value = dict.get(key.as_slice()?, &mut ())?.unwrap();
 
         {
             let (cell, range) = dict.get_owned(key.as_slice()?)?.unwrap();
