@@ -882,19 +882,19 @@ pub fn dict_remove_bound_owned(
             Some(0) => break remaining_data.range(),
             Some(remaining) => {
                 if remaining_data.remaining_refs() < 2 {
-                    return Err(Error::CellUnderflow.into());
+                    return Err(Error::CellUnderflow);
                 }
                 prev_key_bit_len = key_bit_len;
                 key_bit_len = remaining - 1;
             }
-            None => return Err(Error::CellUnderflow.into()),
+            None => return Err(Error::CellUnderflow),
         };
 
         let next_branch = bound.update_direction(prefix, signed, &mut direction);
         key.store_bit(next_branch.into_bit())?;
 
         let Some(child) = data.reference(next_branch as u8) else {
-            return Err(Error::CellUnderflow.into());
+            return Err(Error::CellUnderflow);
         };
 
         // Push an intermediate edge to the stack
@@ -909,7 +909,7 @@ pub fn dict_remove_bound_owned(
         // Load value branch
         let value = match last.data.reference_cloned(index) {
             Some(cell) => cell,
-            None => return Err(Error::CellUnderflow.into()),
+            None => return Err(Error::CellUnderflow),
         };
 
         // Load parent label
@@ -922,7 +922,7 @@ pub fn dict_remove_bound_owned(
         // Load the opposite branch
         let mut opposite = match last.data.reference(1 - index) {
             Some(cell) => cell.as_slice()?,
-            None => return Err(Error::CellUnderflow.into()),
+            None => return Err(Error::CellUnderflow),
         };
         let rem = read_label(&mut opposite, key_bit_len)?;
 
