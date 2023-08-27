@@ -240,7 +240,9 @@ impl BlockchainConfig {
 
     /// Tries to get a parameter from the blockchain config.
     pub fn get<'a, T: KnownConfigParam<'a>>(&'a self) -> Result<Option<T::Value>, Error> {
-        let Some(mut slice) = ok!(self.get_raw(T::ID)) else { return Ok(None); };
+        let Some(mut slice) = ok!(self.get_raw(T::ID)) else {
+            return Ok(None);
+        };
         match <T::Wrapper as Load<'a>>::load_from(&mut slice) {
             Ok(wrapped) => Ok(Some(wrapped.into_inner())),
             Err(e) => Err(e),

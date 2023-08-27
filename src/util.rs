@@ -13,6 +13,46 @@ pub(crate) const fn unlikely(b: bool) -> bool {
     }
 }
 
+/// Reads n-byte integer as `u32` from the bytes pointer.
+///
+/// # Safety
+///
+/// The following must be true:
+/// - size must be in range 1..=4.
+/// - data must be at least `size` bytes long.
+pub(crate) unsafe fn read_be_u32_fast(data_ptr: *const u8, size: usize) -> u32 {
+    match size {
+        1 => *data_ptr as u32,
+        2 => u16::from_be_bytes(*(data_ptr as *const [u8; 2])) as u32,
+        3 => {
+            let mut bytes = [0u8; 4];
+            std::ptr::copy_nonoverlapping(data_ptr, bytes.as_mut_ptr().add(1), 3);
+            u32::from_be_bytes(bytes)
+        }
+        4 => u32::from_be_bytes(*(data_ptr as *const [u8; 4])),
+        _ => std::hint::unreachable_unchecked(),
+    }
+}
+
+/// Reads n-byte integer as `u64` from the bytes pointer.
+///
+/// # Safety
+///
+/// The following must be true:
+/// - size must be in range 1..=8.
+/// - data must be at least `size` bytes long.
+pub(crate) unsafe fn read_be_u64_fast(data_ptr: *const u8, size: usize) -> u64 {
+    match size {
+        1..=4 => read_be_u32_fast(data_ptr, size) as u64,
+        5..=8 => {
+            let mut bytes = [0u8; 8];
+            std::ptr::copy_nonoverlapping(data_ptr, bytes.as_mut_ptr().add(8 - size), size);
+            u64::from_be_bytes(bytes)
+        }
+        _ => std::hint::unreachable_unchecked(),
+    }
+}
+
 #[cfg(any(feature = "base64", test))]
 #[inline]
 pub(crate) fn encode_base64<T: AsRef<[u8]>>(data: T) -> String {
