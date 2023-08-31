@@ -1,5 +1,16 @@
 //! ABI related error types.
 
+/// Error type for ABI version parsing related errors.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum ParseAbiVersionError {
+    /// Expected a dot separated major and minor components.
+    #[error("invalid format")]
+    InvalidFormat,
+    /// Failed to parse version component as number.
+    #[error("invalid component")]
+    InvalidComponent(#[source] std::num::ParseIntError),
+}
+
 /// Error type for ABI type parsing related errors.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ParseAbiTypeError {

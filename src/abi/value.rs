@@ -6,7 +6,9 @@ use everscale_crypto::ed25519;
 use num_bigint::{BigInt, BigUint};
 
 use super::ty::*;
-use crate::cell::Cell;
+use super::AbiVersion;
+use crate::cell::{Cell, CellBuilder, DefaultFinalizer, Store};
+use crate::error::Error;
 use crate::models::IntAddr;
 use crate::num::Tokens;
 
@@ -133,6 +135,19 @@ impl AbiValue {
             AbiValue::Ref(value) => AbiType::Ref(Box::new(value.get_type())),
         }
     }
+
+    fn store_into_part(&self, version: AbiVersion) -> Result<SerializedValue, Error> {
+        // TODO: use stack from builders and reuse the top item when possible
+        match self {
+            Self::Uint(bits, value) => write_int(*bits, num_bigint::Sign::Plus, value),
+            Self::Int(bits, value) => write_int(*bits, value.sign(), value.magnitude()),
+            Self::Bool(value) => write_simple(value, 1, 0),
+            Self::Cell(value) => write_simple(value, 0, 1),
+            Self::Address(value) => write_simple(value, IntAddr::BITS_MAX as usize, 0),
+            Self::Token(value) => write_simple(value, Tokens::MAX_BITS as usize, 0),
+            _ => todo!(),
+        }
+    }
 }
 
 /// ABI value which has a fixed bits representation
@@ -195,4 +210,97 @@ impl AbiHeader {
                 | (Self::PublicKey(_), AbiHeaderType::PublicKey)
         )
     }
+}
+
+struct SerializedValue {
+    pub data: CellBuilder,
+    pub max_bits: usize,
+    pub max_refs: usize,
+}
+
+fn write_int(bits: u16, sign: num_bigint::Sign, value: &BigUint) -> Result<SerializedValue, Error> {
+    #[inline]
+    fn is_zero(value: &u8) -> bool {
+        *value == 0
+    }
+
+    #[inline]
+    pub fn twos_complement_le(digits: &mut [u8]) {
+        let mut carry = true;
+        for digit in digits {
+            *digit = !*digit;
+            if carry {
+                let (d, c) = digit.overflowing_add(1);
+                *digit = d;
+                carry = c;
+            }
+        }
+    }
+
+    fn to_signed_bytes_be(value: &BigUint) -> Vec<u8> {
+        let mut bytes = value.to_bytes_le();
+        let last_byte = bytes.last().cloned().unwrap_or(0);
+        if last_byte > 0x7f && !(last_byte == 0x80 && bytes.iter().rev().skip(1).all(is_zero)) {
+            // msb used by magnitude, extend by 1 byte
+            bytes.push(0);
+        }
+        twos_complement_le(&mut bytes);
+        bytes.reverse();
+        bytes
+    }
+
+    let mut result = CellBuilder::new();
+
+    let is_negative = sign == num_bigint::Sign::Minus;
+
+    let bytes = if is_negative {
+        to_signed_bytes_be(value)
+    } else {
+        value.to_bytes_be()
+    };
+    let value_bits = (bytes.len() * 8) as u16;
+
+    if bytes.is_empty() {
+        ok!(result.store_zeros(bits));
+    } else if bits > value_bits {
+        let diff = bits - value_bits;
+        ok!(if is_negative {
+            result.store_ones(diff)
+        } else {
+            result.store_zeros(diff)
+        });
+        ok!(result.store_raw(&bytes, value_bits));
+    } else {
+        let bits_offset = value_bits - bits;
+        let bytes_offset = (bits_offset / 8) as usize;
+        let rem = bits_offset % 8;
+
+        let (left, right) = bytes.split_at(bytes_offset + 1);
+        if let Some(left) = left.last() {
+            ok!(result.store_small_uint(*left << rem, 8 - rem));
+        }
+        if !right.is_empty() {
+            ok!(result.store_raw(right, right.len() as u16));
+        }
+    }
+
+    Ok(SerializedValue {
+        data: result,
+        max_bits: bits as usize,
+        max_refs: 0,
+    })
+}
+
+fn write_simple(
+    value: &dyn Store,
+    max_bits: usize,
+    max_refs: usize,
+) -> Result<SerializedValue, Error> {
+    let mut data = CellBuilder::new();
+    ok!(value.store_into(&mut data, &mut Cell::default_finalizer()));
+    Ok(SerializedValue {
+        data,
+        max_bits,
+        max_refs,
+    })
 }

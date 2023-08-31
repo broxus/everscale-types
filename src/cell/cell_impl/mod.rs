@@ -189,7 +189,7 @@ impl CellImpl for StaticCell {
     }
 }
 
-static ALL_ZEROS_CELL: StaticCell = StaticCell {
+pub(crate) static ALL_ZEROS_CELL: StaticCell = StaticCell {
     descriptor: CellDescriptor::new([0, 0xff]),
     data: &ALL_ZEROS_CELL_DATA,
     bit_len: 1023,
@@ -212,7 +212,7 @@ const ALL_ZEROS_CELL_HASH: [u8; 32] = [
     0x88, 0x9e, 0xbd, 0xf9, 0xd3, 0xb2, 0xf0, 0x1d, 0xbf, 0x94, 0x2c, 0x29, 0xbc, 0x48, 0x98, 0x71,
 ];
 
-static ALL_ONES_CELL: StaticCell = StaticCell {
+pub(crate) static ALL_ONES_CELL: StaticCell = StaticCell {
     descriptor: CellDescriptor::new([0, 0xff]),
     data: &ALL_ONES_CELL_DATA,
     bit_len: 1023,

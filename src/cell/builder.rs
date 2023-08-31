@@ -423,6 +423,12 @@ impl CellBuilder {
         }
     }
 
+    /// Tries to store the specified number of set bits in the cell,
+    /// returning `false` if there is not enough remaining capacity.
+    pub fn store_ones(&mut self, bits: u16) -> Result<(), Error> {
+        self.store_raw(crate::cell::cell_impl::ALL_ONES_CELL.data(), bits)
+    }
+
     /// Tries to store one zero bit in the cell,
     /// returning `false` if there is not enough remaining capacity.
     pub fn store_bit_zero(&mut self) -> Result<(), Error> {
