@@ -23,6 +23,9 @@ impl Default for IntAddr {
 }
 
 impl IntAddr {
+    /// The maximum number of bits that address occupies.
+    pub const BITS_MAX: u16 = 1 + VarAddr::BITS_MAX;
+
     /// Returns `true` if this address is for a masterchain block.
     ///
     /// See [`ShardIdent::MASTERCHAIN`]

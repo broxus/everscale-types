@@ -142,6 +142,9 @@ pub mod util;
 #[cfg(feature = "models")]
 pub mod models;
 
+#[cfg(feature = "abi")]
+pub mod abi;
+
 #[cfg(feature = "serde")]
 mod serde;
 
