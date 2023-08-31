@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::num::NonZeroU8;
+use std::rc::Rc;
+use std::sync::Arc;
 
 use bytes::Bytes;
 
@@ -55,10 +57,41 @@ impl_with_abi_type! {
 
     Bytes => Bytes,
     String => String,
+    str => String,
 
     IntAddr => Address,
     StdAddr => Address,
     VarAddr => Address,
+}
+
+impl<T: WithAbiType> WithAbiType for &T {
+    fn abi_type() -> AbiType {
+        T::abi_type()
+    }
+}
+
+impl<T: WithAbiType> WithAbiType for &mut T {
+    fn abi_type() -> AbiType {
+        T::abi_type()
+    }
+}
+
+impl<T: WithAbiType> WithAbiType for Box<T> {
+    fn abi_type() -> AbiType {
+        T::abi_type()
+    }
+}
+
+impl<T: WithAbiType> WithAbiType for Arc<T> {
+    fn abi_type() -> AbiType {
+        T::abi_type()
+    }
+}
+
+impl<T: WithAbiType> WithAbiType for Rc<T> {
+    fn abi_type() -> AbiType {
+        T::abi_type()
+    }
 }
 
 impl<T: WithAbiType> WithAbiType for Option<T> {
