@@ -205,66 +205,44 @@ impl AbiType {
         })
     }
 
+    /// Returns the maximum number of bits and refs that this type can occupy.
+    pub fn max_size(&self) -> (usize, usize) {
+        match self {
+            Self::Uint(n) | Self::Int(n) => (*n as usize, 0),
+            Self::VarUint(n) | Self::VarInt(n) => {
+                let value_bytes: u8 = n.get() - 1;
+                let bits = (8 - value_bytes.leading_zeros()) as usize + (value_bytes as usize * 8);
+                (bits, 0)
+            }
+            Self::Bool => (1, 0),
+            Self::Cell | Self::Bytes | Self::FixedBytes(_) | Self::String | Self::Ref(_) => (0, 1),
+            Self::Address => (IntAddr::BITS_MAX as usize, 0),
+            Self::Token => (Tokens::MAX_BITS as usize, 0),
+            Self::Array(_) => (33, 1),
+            Self::FixedArray(..) | Self::Map(..) => (1, 1),
+            Self::Optional(ty) => {
+                let (max_ty_bits, max_ty_refs) = ty.max_size();
+                if max_ty_bits < MAX_BIT_LEN as usize && max_ty_refs < MAX_REF_COUNT {
+                    (1 + max_ty_bits, max_ty_refs)
+                } else {
+                    (1, 1)
+                }
+            }
+            Self::Tuple(items) => items.iter().fold((0, 0), |(bits, refs), item| {
+                let (item_bits, item_refs) = item.ty.max_size();
+                (bits + item_bits, refs + item_refs)
+            }),
+        }
+    }
+
     /// Returns the maximum number of bits that this type can occupy.
     pub fn max_bits(&self) -> usize {
-        match self {
-            Self::Uint(n) | Self::Int(n) => *n as usize,
-            Self::VarUint(n) | Self::VarInt(n) => {
-                let rest_bytes: u8 = n.get() - 1;
-                (8 - rest_bytes.leading_zeros()) as usize + (rest_bytes as usize * 8)
-            }
-            Self::Bool | Self::FixedArray(..) | Self::Map(..) => 1,
-            Self::Cell | Self::Ref(_) | Self::Bytes | Self::FixedBytes(_) | Self::String => 0,
-            Self::Address => IntAddr::BITS_MAX as usize,
-            Self::Token => Tokens::MAX_BITS as usize,
-            Self::Array(_) => 33,
-            Self::Optional(ty) => {
-                let max_ty_bits = ty.max_bits();
-                if max_ty_bits < MAX_BIT_LEN as usize {
-                    let max_ty_refs = ty.max_refs();
-                    if max_ty_refs < MAX_REF_COUNT {
-                        return 1 + max_ty_bits;
-                    }
-                }
-                1
-            }
-            Self::Tuple(items) => items.iter().map(|item| item.ty.max_bits()).sum(),
-        }
+        self.max_size().0
     }
 
     /// Returns the maximum number of cells that this type can occupy.
     pub fn max_refs(&self) -> usize {
-        match self {
-            Self::Uint(_)
-            | Self::Int(_)
-            | Self::VarUint(_)
-            | Self::VarInt(_)
-            | Self::Bool
-            | Self::Address
-            | Self::Token => 0,
-
-            Self::Cell
-            | Self::Bytes
-            | Self::FixedBytes(_)
-            | Self::String
-            | Self::Array(_)
-            | Self::FixedArray(..)
-            | Self::Map(..)
-            | Self::Ref(_) => 1,
-
-            Self::Optional(ty) => {
-                let max_ty_bits = ty.max_bits();
-                if max_ty_bits < MAX_BIT_LEN as usize {
-                    let max_ty_refs = ty.max_refs();
-                    if max_ty_refs < MAX_REF_COUNT {
-                        return max_ty_refs;
-                    }
-                }
-                1
-            }
-
-            Self::Tuple(items) => items.iter().map(|item| item.ty.max_refs()).sum(),
-        }
+        self.max_size().1
     }
 
     fn components(&self) -> Option<&[NamedAbiType]> {
@@ -449,6 +427,17 @@ pub enum PlainAbiType {
     ///
     /// [`IntAddr`]: crate::models::message::IntAddr
     Address,
+}
+
+impl PlainAbiType {
+    /// Returns the maximum number of bits that this type can occupy.
+    pub fn max_bits(&self) -> u16 {
+        match self {
+            Self::Uint(n) | Self::Int(n) => *n,
+            Self::Bool => 1,
+            Self::Address => IntAddr::BITS_MAX,
+        }
+    }
 }
 
 impl From<PlainAbiType> for AbiType {
