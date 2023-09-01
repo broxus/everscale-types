@@ -2,7 +2,7 @@
 
 use std::str::FromStr;
 
-pub use self::traits::{WithAbiType, WithPlainAbiType};
+pub use self::traits::{IntoAbi, IntoPlainAbi, WithAbiType, WithPlainAbiType};
 pub use self::ty::{AbiHeaderType, AbiType, NamedAbiType, PlainAbiType};
 pub use self::value::{AbiHeader, AbiValue, NamedAbiValue, PlainAbiValue};
 

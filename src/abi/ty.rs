@@ -76,12 +76,16 @@ impl<'de> Deserialize<'de> for NamedAbiType {
             type Error = ParseNamedAbiTypeError;
 
             fn try_from(value: Helper<'_>) -> Result<Self, Self::Error> {
-                let mut ty = ok!(AbiType::from_simple_str(&value.ty).map_err(|error| {
-                    ParseNamedAbiTypeError::InvalidType {
-                        ty: value.ty.to_string(),
-                        error,
+                let mut ty = match AbiType::from_simple_str(&value.ty) {
+                    Ok(ty) => ty,
+                    Err(error) => {
+                        return Err(ParseNamedAbiTypeError::InvalidType {
+                            ty: value.ty.into(),
+                            error,
+                        });
                     }
-                }));
+                };
+
                 match (ty.components_mut(), value.components) {
                     (Some(ty), Some(components)) => {
                         *ty = ok!(components
@@ -91,12 +95,12 @@ impl<'de> Deserialize<'de> for NamedAbiType {
                     }
                     (Some(_), None) => {
                         return Err(ParseNamedAbiTypeError::ExpectedComponents {
-                            ty: value.ty.to_string(),
+                            ty: value.ty.into(),
                         })
                     }
                     (None, Some(_)) => {
                         return Err(ParseNamedAbiTypeError::UnexpectedComponents {
-                            ty: value.ty.to_string(),
+                            ty: value.ty.into(),
                         });
                     }
                     (None, None) => {}

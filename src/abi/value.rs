@@ -25,6 +25,32 @@ pub struct NamedAbiValue {
 }
 
 impl NamedAbiValue {
+    /// Tries to store multiple values into a new builder according to the specified ABI version.
+    pub fn tuple_to_builder(items: &[Self], version: AbiVersion) -> Result<CellBuilder, Error> {
+        let mut parts = Vec::new();
+        for item in items {
+            ok!(item.value.store_as_parts(version, &mut parts));
+        }
+        SerializedPart::pack(parts, version)
+    }
+
+    /// Builds a new cell from multiple values according to the specified ABI version.
+    pub fn tuple_to_cell(items: &[Self], version: AbiVersion) -> Result<Cell, Error> {
+        Self::tuple_to_builder(items, version).and_then(CellBuilder::build)
+    }
+
+    /// Tries to store this value into a new builder according to the specified ABI version.
+    pub fn make_builder(&self, version: AbiVersion) -> Result<CellBuilder, Error> {
+        let mut parts = Vec::new();
+        ok!(self.value.store_as_parts(version, &mut parts));
+        SerializedPart::pack(parts, version)
+    }
+
+    /// Builds a new cell from this value according to the specified ABI version.
+    pub fn make_cell(&self, version: AbiVersion) -> Result<Cell, Error> {
+        self.make_builder(version).and_then(CellBuilder::build)
+    }
+
     /// Returns whether all values satisfy the provided types.
     pub fn have_types(items: &[Self], types: &[NamedAbiType]) -> bool {
         items.len() == types.len()
@@ -32,6 +58,38 @@ impl NamedAbiValue {
                 .iter()
                 .zip(types.iter())
                 .all(|(item, t)| item.value.has_type(&t.ty))
+    }
+
+    /// Creates a named ABI value with an index name (e.g. `value123`).
+    pub fn from_index(index: usize, value: AbiValue) -> Self {
+        Self {
+            name: format!("value{index}"),
+            value,
+        }
+    }
+}
+
+impl From<(String, AbiValue)> for NamedAbiValue {
+    #[inline]
+    fn from((name, value): (String, AbiValue)) -> Self {
+        Self { name, value }
+    }
+}
+
+impl<'a> From<(&'a str, AbiValue)> for NamedAbiValue {
+    #[inline]
+    fn from((name, value): (&'a str, AbiValue)) -> Self {
+        Self {
+            name: name.to_owned(),
+            value,
+        }
+    }
+}
+
+impl From<(usize, AbiValue)> for NamedAbiValue {
+    #[inline]
+    fn from((index, value): (usize, AbiValue)) -> Self {
+        Self::from_index(index, value)
     }
 }
 
@@ -94,11 +152,21 @@ impl AbiValue {
         SerializedPart::pack(parts, version)
     }
 
+    /// Builds a new cell from multiple values according to the specified ABI version.
+    pub fn tuple_to_cell(values: &[Self], version: AbiVersion) -> Result<Cell, Error> {
+        Self::tuple_to_builder(values, version).and_then(CellBuilder::build)
+    }
+
     /// Tries to store this value into a new builder according to the specified ABI version.
     pub fn make_builder(&self, version: AbiVersion) -> Result<CellBuilder, Error> {
         let mut parts = Vec::new();
         ok!(self.store_as_parts(version, &mut parts));
         SerializedPart::pack(parts, version)
+    }
+
+    /// Builds a new cell from this value according to the specified ABI version.
+    pub fn make_cell(&self, version: AbiVersion) -> Result<Cell, Error> {
+        self.make_builder(version).and_then(CellBuilder::build)
     }
 
     /// Returns whether this value has the same type as the provided one.
@@ -193,6 +261,80 @@ impl AbiValue {
             max_refs,
         });
         Ok(())
+    }
+}
+
+// === impl AbiValue constructors ===
+
+impl AbiValue {
+    /// Simple `uintN` constructor.
+    #[inline]
+    pub fn uint<T>(bits: u16, value: T) -> Self
+    where
+        BigUint: From<T>,
+    {
+        Self::Uint(bits, BigUint::from(value))
+    }
+
+    /// Simple `intN` constructor.
+    #[inline]
+    pub fn int<T>(bits: u16, value: T) -> Self
+    where
+        BigInt: From<T>,
+    {
+        Self::Int(bits, BigInt::from(value))
+    }
+
+    /// Simple `address` constructor.
+    #[inline]
+    pub fn address<T>(value: T) -> Self
+    where
+        IntAddr: From<T>,
+    {
+        Self::Address(Box::new(IntAddr::from(value)))
+    }
+
+    /// Simple `bytes` constructor.
+    #[inline]
+    pub fn bytes<T>(value: T) -> Self
+    where
+        Bytes: From<T>,
+    {
+        Self::Bytes(Bytes::from(value))
+    }
+
+    /// Simple `bytes` constructor.
+    #[inline]
+    pub fn fixedbytes<T>(value: T) -> Self
+    where
+        Bytes: From<T>,
+    {
+        Self::FixedBytes(Bytes::from(value))
+    }
+
+    /// Simple `tuple` constructor.
+    #[inline]
+    pub fn tuple<I, T>(values: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        NamedAbiValue: From<T>,
+    {
+        Self::Tuple(values.into_iter().map(NamedAbiValue::from).collect())
+    }
+
+    /// Simple `tuple` constructor.
+    #[inline]
+    pub fn unnamed_tuple<I>(values: I) -> Self
+    where
+        I: IntoIterator<Item = AbiValue>,
+    {
+        Self::Tuple(
+            values
+                .into_iter()
+                .enumerate()
+                .map(|(i, value)| NamedAbiValue::from_index(i, value))
+                .collect(),
+        )
     }
 }
 
@@ -371,6 +513,10 @@ fn write_int(
     value: &BigUint,
     target: &mut CellBuilder,
 ) -> Result<(u16, u8), Error> {
+    if value.bits() > bits as u64 {
+        return Err(Error::IntOverflow);
+    }
+
     let is_negative = sign == Sign::Minus;
     let bytes = to_signed_bytes_be(is_negative, value);
     let value_bits = (bytes.len() * 8) as u16;
@@ -413,7 +559,7 @@ fn write_varint(
 
     let value_size = size.get() - 1;
     if bytes.len() > value_size as usize {
-        return Err(Error::InvalidData);
+        return Err(Error::IntOverflow);
     }
 
     let len_bits = (8 - value_size.leading_zeros()) as u16;
@@ -647,5 +793,23 @@ impl Store for InlineOrRef<'_> {
             Self::Inline(slice) => builder.store_slice(slice),
             Self::Ref(cell) => builder.store_reference(cell.clone()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn int_overflow() {
+        assert_eq!(
+            AbiValue::Uint(16, BigUint::from(u32::MAX)).make_cell(AbiVersion::V2_2),
+            Err(Error::IntOverflow)
+        );
+
+        assert_eq!(
+            AbiValue::Uint(16, BigUint::from(u16::MAX as u32 + 1)).make_cell(AbiVersion::V2_2),
+            Err(Error::IntOverflow)
+        );
     }
 }

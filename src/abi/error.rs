@@ -44,7 +44,7 @@ pub enum ParseNamedAbiTypeError {
     #[error("invalid type `{ty}`: {error}")]
     InvalidType {
         /// Parsed ABI type.
-        ty: String,
+        ty: Box<str>,
         /// ABI type parsing error.
         #[source]
         error: ParseAbiTypeError,
@@ -53,12 +53,25 @@ pub enum ParseNamedAbiTypeError {
     #[error("unexpected components for `{ty}`")]
     UnexpectedComponents {
         /// Parsed ABI type.
-        ty: String,
+        ty: Box<str>,
     },
     /// Expected components array for tuple.
     #[error("expected components for `{ty}`")]
     ExpectedComponents {
         /// Parsed ABI type.
-        ty: String,
+        ty: Box<str>,
+    },
+}
+
+/// Error type for ABI values unpacking related errors.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum AbiError {
+    /// Expected a different value type.
+    #[error("expected ABI type `{expected}`, got `{ty}`")]
+    TypeMismatch {
+        /// A full signature of the expected type.
+        expected: Box<str>,
+        /// A full signature of the received type.
+        ty: Box<str>,
     },
 }

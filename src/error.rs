@@ -30,6 +30,9 @@ pub enum Error {
     /// Signature check failed.
     #[error("invalid signature")]
     InvalidSignature,
+    /// Underlying integer type does not fit into the target type.
+    #[error("underlying integer is too large to fit in target type")]
+    IntOverflow,
 }
 
 /// Error type for integer parsing related errors.
@@ -39,7 +42,7 @@ pub enum ParseIntError {
     #[error("cannot parse underlying integer")]
     InvalidString(#[source] std::num::ParseIntError),
     /// Underlying integer type does not fit into the target type.
-    #[error("underlying integer is too large to fin in target type")]
+    #[error("underlying integer is too large to fit in target type")]
     Overflow,
 }
 

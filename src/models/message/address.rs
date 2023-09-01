@@ -79,6 +79,13 @@ impl IntAddr {
     }
 }
 
+impl From<(i8, HashBytes)> for IntAddr {
+    #[inline]
+    fn from((workchain, address): (i8, HashBytes)) -> Self {
+        IntAddr::Std(StdAddr::new(workchain, address))
+    }
+}
+
 impl FromStr for IntAddr {
     type Err = ParseAddrError;
 
@@ -201,6 +208,13 @@ impl std::fmt::Display for StdAddr {
         }
 
         f.write_fmt(format_args!("{}:{}", self.workchain, self.address))
+    }
+}
+
+impl From<(i8, HashBytes)> for StdAddr {
+    #[inline]
+    fn from((workchain, address): (i8, HashBytes)) -> Self {
+        Self::new(workchain, address)
     }
 }
 

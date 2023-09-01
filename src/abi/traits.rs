@@ -4,8 +4,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use num_bigint::{BigInt, BigUint};
 
-use super::{AbiType, NamedAbiType, PlainAbiType};
+use super::{AbiType, AbiValue, NamedAbiType, NamedAbiValue, PlainAbiType, PlainAbiValue};
 use crate::cell::{Cell, HashBytes};
 use crate::num::*;
 
@@ -202,4 +203,456 @@ impl_with_plain_abi_type! {
     IntAddr => Address,
     StdAddr => Address,
     VarAddr => Address,
+}
+
+/// A type with can be converted into a plain ABI value.
+pub trait IntoPlainAbi: IntoAbi {
+    /// Returns a corresponding plain ABI value.
+    ///
+    /// NOTE: use [`IntoPlainAbi::into_abi`] when building ABI from a temp value.
+    fn as_plain_abi(&self) -> PlainAbiValue;
+
+    /// Converts into a corresponding plain ABI value.
+    fn into_plain_abi(self) -> PlainAbiValue
+    where
+        Self: Sized;
+}
+
+macro_rules! impl_into_plain_abi {
+    ($($int:ty => |$n:ident| { $expr1:expr, $expr2:expr $(,)? }),*$(,)?) => {$(
+        impl IntoPlainAbi for $int {
+            #[inline]
+            fn as_plain_abi(&self) -> PlainAbiValue {
+                let $n = self;
+                $expr1
+            }
+
+            #[inline]
+            fn into_plain_abi(self) -> PlainAbiValue
+            where
+                Self: Sized
+            {
+                let $n = self;
+                $expr2
+            }
+        }
+    )*};
+}
+
+impl_into_plain_abi! {
+    PlainAbiValue => |v| { v.clone(), v },
+
+    u8 => |v| {
+        PlainAbiValue::Uint(8, BigUint::from(*v)),
+        PlainAbiValue::Uint(8, BigUint::from(v)),
+    },
+    u16 => |v| {
+        PlainAbiValue::Uint(16, BigUint::from(*v)),
+        PlainAbiValue::Uint(16, BigUint::from(v)),
+    },
+    u32 => |v| {
+        PlainAbiValue::Uint(32, BigUint::from(*v)),
+        PlainAbiValue::Uint(32, BigUint::from(v)),
+    },
+    u64 => |v| {
+        PlainAbiValue::Uint(64, BigUint::from(*v)),
+        PlainAbiValue::Uint(64, BigUint::from(v)),
+    },
+    u128 => |v| {
+        PlainAbiValue::Uint(128, BigUint::from(*v)),
+        PlainAbiValue::Uint(128, BigUint::from(v)),
+    },
+    HashBytes => |v| {
+        PlainAbiValue::Uint(256, BigUint::from_bytes_be(v.as_array())),
+        PlainAbiValue::Uint(256, BigUint::from_bytes_be(v.as_array())),
+    },
+    SplitDepth => |v| {
+        PlainAbiValue::Uint(5, BigUint::from(v.into_bit_len())),
+        PlainAbiValue::Uint(5, BigUint::from(v.into_bit_len())),
+    },
+    Uint9 => |v| {
+        PlainAbiValue::Uint(9, BigUint::from(v.into_inner())),
+        PlainAbiValue::Uint(9, BigUint::from(v.into_inner())),
+    },
+    Uint12 => |v| {
+        PlainAbiValue::Uint(12, BigUint::from(v.into_inner())),
+        PlainAbiValue::Uint(12, BigUint::from(v.into_inner())),
+    },
+    Uint15 => |v| {
+        PlainAbiValue::Uint(15, BigUint::from(v.into_inner())),
+        PlainAbiValue::Uint(15, BigUint::from(v.into_inner())),
+    },
+
+    i8 => |v| {
+        PlainAbiValue::Int(8, BigInt::from(*v)),
+        PlainAbiValue::Int(8, BigInt::from(v)),
+    },
+    i16 => |v| {
+        PlainAbiValue::Int(16, BigInt::from(*v)),
+        PlainAbiValue::Int(16, BigInt::from(v)),
+    },
+    i32 => |v| {
+        PlainAbiValue::Int(32, BigInt::from(*v)),
+        PlainAbiValue::Int(32, BigInt::from(v)),
+    },
+    i64 => |v| {
+        PlainAbiValue::Int(64, BigInt::from(*v)),
+        PlainAbiValue::Int(64, BigInt::from(v)),
+    },
+    i128 => |v| {
+        PlainAbiValue::Int(128, BigInt::from(*v)),
+        PlainAbiValue::Int(128, BigInt::from(v)),
+    },
+
+    bool => |v| {
+        PlainAbiValue::Bool(*v),
+        PlainAbiValue::Bool(v),
+    },
+
+    IntAddr => |v| {
+        PlainAbiValue::Address(Box::new(v.clone())),
+        PlainAbiValue::Address(Box::new(v)),
+    },
+    StdAddr => |v| {
+        PlainAbiValue::Address(Box::new(v.clone().into())),
+        PlainAbiValue::Address(Box::new(v.into())),
+    },
+    VarAddr => |v| {
+        PlainAbiValue::Address(Box::new(v.clone().into())),
+        PlainAbiValue::Address(Box::new(v.into())),
+    },
+}
+
+/// A type with can be converted into ABI value.
+pub trait IntoAbi {
+    /// Returns a corresponding ABI value.
+    ///
+    /// NOTE: use [`IntoAbi::into_abi`] when building ABI from a temp value.
+    fn as_abi(&self) -> AbiValue;
+
+    /// Converts into a corresponding ABI value.
+    fn into_abi(self) -> AbiValue
+    where
+        Self: Sized;
+}
+
+macro_rules! impl_into_abi {
+    ($($int:ty => |$n:ident| { $expr1:expr, $expr2:expr $(,)? }),*$(,)?) => {$(
+        impl IntoAbi for $int {
+            #[inline]
+            fn as_abi(&self) -> AbiValue {
+                let $n = self;
+                $expr1
+            }
+
+            #[inline]
+            fn into_abi(self) -> AbiValue
+            where
+                Self: Sized
+            {
+                let $n = self;
+                $expr2
+            }
+        }
+    )*};
+}
+
+impl_into_abi! {
+    AbiValue => |v| { v.clone(), v },
+    PlainAbiValue => |v| { v.clone().into(), v.into() },
+
+    u8 => |v| {
+        AbiValue::Uint(8, BigUint::from(*v)),
+        AbiValue::Uint(8, BigUint::from(v)),
+    },
+    u16 => |v| {
+        AbiValue::Uint(16, BigUint::from(*v)),
+        AbiValue::Uint(16, BigUint::from(v)),
+    },
+    u32 => |v| {
+        AbiValue::Uint(32, BigUint::from(*v)),
+        AbiValue::Uint(32, BigUint::from(v)),
+    },
+    u64 => |v| {
+        AbiValue::Uint(64, BigUint::from(*v)),
+        AbiValue::Uint(64, BigUint::from(v)),
+    },
+    u128 => |v| {
+        AbiValue::Uint(128, BigUint::from(*v)),
+        AbiValue::Uint(128, BigUint::from(v)),
+    },
+    HashBytes => |v| {
+        AbiValue::Uint(256, BigUint::from_bytes_be(v.as_array())),
+        AbiValue::Uint(256, BigUint::from_bytes_be(v.as_array())),
+    },
+    SplitDepth => |v| {
+        AbiValue::Uint(5, BigUint::from(v.into_bit_len())),
+        AbiValue::Uint(5, BigUint::from(v.into_bit_len())),
+    },
+    Uint9 => |v| {
+        AbiValue::Uint(9, BigUint::from(v.into_inner())),
+        AbiValue::Uint(9, BigUint::from(v.into_inner())),
+    },
+    Uint12 => |v| {
+        AbiValue::Uint(12, BigUint::from(v.into_inner())),
+        AbiValue::Uint(12, BigUint::from(v.into_inner())),
+    },
+    Uint15 => |v| {
+        AbiValue::Uint(15, BigUint::from(v.into_inner())),
+        AbiValue::Uint(15, BigUint::from(v.into_inner())),
+    },
+
+    i8 => |v| {
+        AbiValue::Int(8, BigInt::from(*v)),
+        AbiValue::Int(8, BigInt::from(v)),
+    },
+    i16 => |v| {
+        AbiValue::Int(16, BigInt::from(*v)),
+        AbiValue::Int(16, BigInt::from(v)),
+    },
+    i32 => |v| {
+        AbiValue::Int(32, BigInt::from(*v)),
+        AbiValue::Int(32, BigInt::from(v)),
+    },
+    i64 => |v| {
+        AbiValue::Int(64, BigInt::from(*v)),
+        AbiValue::Int(64, BigInt::from(v)),
+    },
+    i128 => |v| {
+        AbiValue::Int(128, BigInt::from(*v)),
+        AbiValue::Int(128, BigInt::from(v)),
+    },
+
+    bool => |v| {
+        AbiValue::Bool(*v),
+        AbiValue::Bool(v),
+    },
+
+    VarUint24 => |v| {
+        AbiValue::VarUint(NonZeroU8::new(4).unwrap(), BigUint::from(v.into_inner())),
+        AbiValue::VarUint(NonZeroU8::new(4).unwrap(), BigUint::from(v.into_inner())),
+    },
+    VarUint56 => |v| {
+        AbiValue::VarUint(NonZeroU8::new(8).unwrap(), BigUint::from(v.into_inner())),
+        AbiValue::VarUint(NonZeroU8::new(8).unwrap(), BigUint::from(v.into_inner())),
+    },
+
+    Tokens => |v| {
+        AbiValue::Token(*v),
+        AbiValue::Token(v),
+    },
+
+    Cell => |v| {
+        AbiValue::Cell(v.clone()),
+        AbiValue::Cell(v),
+    },
+
+    Bytes => |v| {
+        AbiValue::Bytes(v.clone()),
+        AbiValue::Bytes(v),
+    },
+    String => |v| {
+        AbiValue::String(v.clone()),
+        AbiValue::String(v),
+    },
+
+    IntAddr => |v| {
+        AbiValue::Address(Box::new(v.clone())),
+        AbiValue::Address(Box::new(v)),
+    },
+    StdAddr => |v| {
+        AbiValue::Address(Box::new(v.clone().into())),
+        AbiValue::Address(Box::new(v.into())),
+    },
+    VarAddr => |v| {
+        AbiValue::Address(Box::new(v.clone().into())),
+        AbiValue::Address(Box::new(v.into())),
+    },
+}
+
+impl IntoAbi for str {
+    #[inline]
+    fn as_abi(&self) -> AbiValue {
+        AbiValue::String(self.to_owned())
+    }
+
+    #[inline]
+    fn into_abi(self) -> AbiValue
+    where
+        for<'a> str: Sized,
+    {
+        unreachable!()
+    }
+}
+
+impl<T: WithAbiType + IntoAbi> IntoAbi for [T] {
+    fn as_abi(&self) -> AbiValue {
+        AbiValue::Array(
+            Box::new(T::abi_type()),
+            self.iter().map(T::as_abi).collect(),
+        )
+    }
+
+    #[inline]
+    fn into_abi(self) -> AbiValue
+    where
+        for<'a> [T]: Sized,
+    {
+        unreachable!()
+    }
+}
+
+impl<T: WithAbiType + IntoAbi> IntoAbi for Vec<T> {
+    fn as_abi(&self) -> AbiValue {
+        AbiValue::Array(
+            Box::new(T::abi_type()),
+            self.iter().map(T::as_abi).collect(),
+        )
+    }
+
+    fn into_abi(self) -> AbiValue
+    where
+        Self: Sized,
+    {
+        AbiValue::Array(
+            Box::new(T::abi_type()),
+            self.into_iter().map(T::into_abi).collect(),
+        )
+    }
+}
+
+impl<K: WithPlainAbiType + IntoPlainAbi, V: WithAbiType + IntoAbi> IntoAbi for BTreeMap<K, V> {
+    fn as_abi(&self) -> AbiValue {
+        AbiValue::Map(
+            K::plain_abi_type(),
+            Box::new(V::abi_type()),
+            self.iter()
+                .map(|(key, value)| (K::as_plain_abi(key), V::as_abi(value)))
+                .collect(),
+        )
+    }
+
+    fn into_abi(self) -> AbiValue
+    where
+        Self: Sized,
+    {
+        AbiValue::Map(
+            K::plain_abi_type(),
+            Box::new(V::abi_type()),
+            self.into_iter()
+                .map(|(key, value)| (K::into_plain_abi(key), V::into_abi(value)))
+                .collect(),
+        )
+    }
+}
+
+impl<K: WithPlainAbiType + IntoPlainAbi, V: WithAbiType + IntoAbi, S> IntoAbi for HashMap<K, V, S> {
+    fn as_abi(&self) -> AbiValue {
+        AbiValue::Map(
+            K::plain_abi_type(),
+            Box::new(V::abi_type()),
+            self.iter()
+                .map(|(key, value)| (K::as_plain_abi(key), V::as_abi(value)))
+                .collect(),
+        )
+    }
+
+    fn into_abi(self) -> AbiValue
+    where
+        Self: Sized,
+    {
+        AbiValue::Map(
+            K::plain_abi_type(),
+            Box::new(V::abi_type()),
+            self.into_iter()
+                .map(|(key, value)| (K::into_plain_abi(key), V::into_abi(value)))
+                .collect(),
+        )
+    }
+}
+
+impl<T: WithAbiType + IntoAbi> IntoAbi for Option<T> {
+    #[inline]
+    fn as_abi(&self) -> AbiValue {
+        AbiValue::Optional(
+            Box::new(T::abi_type()),
+            self.as_ref().map(T::as_abi).map(Box::new),
+        )
+    }
+
+    #[inline]
+    fn into_abi(self) -> AbiValue
+    where
+        Self: Sized,
+    {
+        AbiValue::Optional(Box::new(T::abi_type()), self.map(T::into_abi).map(Box::new))
+    }
+}
+
+impl IntoAbi for () {
+    #[inline]
+    fn as_abi(&self) -> AbiValue {
+        AbiValue::Tuple(Vec::new())
+    }
+
+    #[inline]
+    fn into_abi(self) -> AbiValue
+    where
+        Self: Sized,
+    {
+        self.as_abi()
+    }
+}
+
+macro_rules! impl_into_abi_for_tuple {
+    ($($i:tt: $t:ident),+$(,)?) => {
+        impl<$($t: IntoAbi),*> IntoAbi for ($($t),+,) {
+            fn as_abi(&self) -> AbiValue {
+                AbiValue::Tuple(vec![
+                    $(NamedAbiValue::from_index($i, <$t as IntoAbi>::as_abi(&self.$i))),*
+                ])
+            }
+
+            fn into_abi(self) -> AbiValue
+            where
+                Self: Sized,
+            {
+                AbiValue::Tuple(vec![
+                    $(NamedAbiValue::from_index($i, <$t as IntoAbi>::into_abi(self.$i))),*
+                ])
+            }
+        }
+    };
+}
+
+impl_into_abi_for_tuple! { 0: T0 }
+impl_into_abi_for_tuple! { 0: T0, 1: T1 }
+impl_into_abi_for_tuple! { 0: T0, 1: T1, 2: T2 }
+impl_into_abi_for_tuple! { 0: T0, 1: T1, 2: T2, 3: T3 }
+impl_into_abi_for_tuple! { 0: T0, 1: T1, 2: T2, 3: T3, 4: T4 }
+impl_into_abi_for_tuple! { 0: T0, 1: T1, 2: T2, 3: T3, 4: T4, 5: T5 }
+impl_into_abi_for_tuple! { 0: T0, 1: T1, 2: T2, 3: T3, 4: T4, 5: T5, 6: T6 }
+
+#[cfg(test)]
+mod tests {
+    use crate::prelude::CellFamily;
+
+    use super::*;
+
+    #[test]
+    fn tuple_to_abi() {
+        let target_abi = AbiValue::unnamed_tuple([
+            AbiValue::uint(32, 123u32),
+            AbiValue::uint(32, 321u32),
+            AbiValue::Bool(true),
+            AbiValue::unnamed_tuple([
+                AbiValue::Cell(Cell::empty_cell()),
+                AbiValue::Optional(Box::new(AbiType::Bool), None),
+            ]),
+        ]);
+
+        let abi = (123u32, 321u32, true, (Cell::empty_cell(), None::<bool>));
+
+        assert_eq!(abi.into_abi(), target_abi);
+    }
 }
