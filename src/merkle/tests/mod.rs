@@ -1,5 +1,5 @@
 use super::*;
-use crate::cell::EMPTY_CELL_HASH;
+use crate::cell::{CellTreeStats, EMPTY_CELL_HASH};
 use crate::error::Error;
 use crate::prelude::*;
 
@@ -38,6 +38,15 @@ fn create_proof_for_deep_cell() {
         builder.store_reference(cell).unwrap();
         cell = builder.build().unwrap();
     }
+
+    let stats = cell.compute_unique_stats(1 << 22).unwrap();
+    assert_eq!(
+        stats,
+        CellTreeStats {
+            bit_count: 65000 * 32,
+            cell_count: 65001
+        }
+    );
 
     {
         let encoded = Boc::encode_base64(cell.as_ref());

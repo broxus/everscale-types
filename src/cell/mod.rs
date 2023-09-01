@@ -144,6 +144,8 @@ pub trait CellImpl {
 
     /// Returns the sum of all bits and cells of all elements in the cell tree
     /// (including this cell).
+    ///
+    /// NOTE: identical cells are counted each time they occur in the tree.
     #[cfg(feature = "stats")]
     fn stats(&self) -> CellTreeStats;
 }
@@ -233,6 +235,44 @@ impl DynCell {
     #[inline]
     pub unsafe fn as_slice_unchecked(&'_ self) -> CellSlice<'_> {
         CellSlice::new_unchecked(self)
+    }
+
+    /// Recursively computes the count of distinct cells returning
+    /// the total storage used by this dag taking into account the
+    /// identification of equal cells.
+    pub fn compute_unique_stats(&self, limit: usize) -> Option<CellTreeStats> {
+        let mut visited = ahash::HashSet::<&HashBytes>::default();
+        let mut stack = vec![self.references()];
+
+        let mut stats = CellTreeStats {
+            bit_count: self.bit_len() as u64,
+            cell_count: 1,
+        };
+
+        'outer: while let Some(item) = stack.last_mut() {
+            for cell in item.by_ref() {
+                if !visited.insert(cell.repr_hash()) {
+                    continue;
+                }
+
+                if stats.cell_count >= limit as u64 {
+                    return None;
+                }
+
+                stats.bit_count += cell.bit_len() as u64;
+                stats.cell_count += 1;
+
+                let next = cell.references();
+                if next.max > 0 {
+                    stack.push(next);
+                    continue 'outer;
+                }
+            }
+
+            stack.pop();
+        }
+
+        Some(stats)
     }
 
     /// Returns an object that implements [`Debug`] for printing only
@@ -1062,10 +1102,7 @@ impl Iterator for LevelMaskIter {
 }
 
 /// Cell tree storage stats.
-///
-/// NOTE: identical cells are counted each time they occur in the tree.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg(feature = "stats")]
 pub struct CellTreeStats {
     /// Total number of bits in tree.
     pub bit_count: u64,
@@ -1073,7 +1110,6 @@ pub struct CellTreeStats {
     pub cell_count: u64,
 }
 
-#[cfg(feature = "stats")]
 impl std::ops::Add for CellTreeStats {
     type Output = Self;
 
@@ -1086,7 +1122,6 @@ impl std::ops::Add for CellTreeStats {
     }
 }
 
-#[cfg(feature = "stats")]
 impl std::ops::AddAssign for CellTreeStats {
     #[inline]
     fn add_assign(&mut self, rhs: Self) {
