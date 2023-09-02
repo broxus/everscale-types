@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::num::NonZeroU8;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -186,15 +187,15 @@ pub enum AbiType {
     /// Product type.
     Tuple(Vec<NamedAbiType>),
     /// Array of elements of the specified ABI type.
-    Array(Box<Self>),
+    Array(Arc<Self>),
     /// Fixed-length array of elements of the specified ABI type.
-    FixedArray(Box<Self>, usize),
+    FixedArray(Arc<Self>, usize),
     /// Dictionary with the specified key and value ABI types.
-    Map(PlainAbiType, Box<Self>),
+    Map(PlainAbiType, Arc<Self>),
     /// Optional type.
-    Optional(Box<Self>),
+    Optional(Arc<Self>),
     /// Type stored in a new cell.
-    Ref(Box<Self>),
+    Ref(Arc<Self>),
 }
 
 impl AbiType {
@@ -264,11 +265,11 @@ impl AbiType {
     fn components_mut(&mut self) -> Option<&mut Vec<NamedAbiType>> {
         match self {
             Self::Tuple(types) => Some(types),
-            Self::Array(ty) => ty.components_mut(),
-            Self::FixedArray(ty, _) => ty.components_mut(),
-            Self::Map(_, value_ty) => value_ty.components_mut(),
-            Self::Optional(ty) => ty.components_mut(),
-            Self::Ref(ty) => ty.components_mut(),
+            Self::Array(ty) => Arc::make_mut(ty).components_mut(),
+            Self::FixedArray(ty, _) => Arc::make_mut(ty).components_mut(),
+            Self::Map(_, value_ty) => Arc::make_mut(value_ty).components_mut(),
+            Self::Optional(ty) => Arc::make_mut(ty).components_mut(),
+            Self::Ref(ty) => Arc::make_mut(ty).components_mut(),
             _ => None,
         }
     }
@@ -287,7 +288,7 @@ impl AbiType {
                     .map_err(ParseAbiTypeError::InvalidArrayLength)))
             };
 
-            let ty = ok!(Self::from_simple_str(ty).map(Box::new));
+            let ty = ok!(Self::from_simple_str(ty).map(Arc::new));
             return Ok(match len {
                 None => Self::Array(ty),
                 Some(len) => Self::FixedArray(ty, len),
@@ -333,20 +334,20 @@ impl AbiType {
 
                     Self::Map(
                         ok!(PlainAbiType::from_str(key_ty)),
-                        ok!(Self::from_simple_str(value_ty).map(Box::new)),
+                        ok!(Self::from_simple_str(value_ty).map(Arc::new)),
                     )
                 } else if let Some(s) = s.strip_prefix("optional(") {
                     let s = ok!(s
                         .strip_suffix(')')
                         .ok_or(ParseAbiTypeError::UnterminatedInnerType));
 
-                    Self::Optional(ok!(Self::from_simple_str(s).map(Box::new)))
+                    Self::Optional(ok!(Self::from_simple_str(s).map(Arc::new)))
                 } else if let Some(s) = s.strip_prefix("ref(") {
                     let s = ok!(s
                         .strip_suffix(')')
                         .ok_or(ParseAbiTypeError::UnterminatedInnerType));
 
-                    Self::Ref(ok!(Self::from_simple_str(s).map(Box::new)))
+                    Self::Ref(ok!(Self::from_simple_str(s).map(Arc::new)))
                 } else {
                     return Err(ParseAbiTypeError::UnknownType);
                 }

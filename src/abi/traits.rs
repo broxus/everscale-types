@@ -97,44 +97,44 @@ impl<T: WithAbiType> WithAbiType for Rc<T> {
 
 impl<T: WithAbiType> WithAbiType for Option<T> {
     fn abi_type() -> AbiType {
-        AbiType::Optional(Box::new(T::abi_type()))
+        AbiType::Optional(Arc::new(T::abi_type()))
     }
 }
 
 impl<T: WithAbiType> WithAbiType for Vec<T> {
     fn abi_type() -> AbiType {
-        AbiType::Array(Box::new(T::abi_type()))
+        AbiType::Array(Arc::new(T::abi_type()))
     }
 }
 
 impl<T: WithAbiType> WithAbiType for [T] {
     fn abi_type() -> AbiType {
-        AbiType::Array(Box::new(T::abi_type()))
+        AbiType::Array(Arc::new(T::abi_type()))
     }
 }
 
 impl<T: WithAbiType, const N: usize> WithAbiType for [T; N] {
     fn abi_type() -> AbiType {
-        AbiType::FixedArray(Box::new(T::abi_type()), N)
+        AbiType::FixedArray(Arc::new(T::abi_type()), N)
     }
 }
 
 impl<K: WithPlainAbiType, V: WithAbiType> WithAbiType for BTreeMap<K, V> {
     fn abi_type() -> AbiType {
-        AbiType::Map(K::plain_abi_type(), Box::new(V::abi_type()))
+        AbiType::Map(K::plain_abi_type(), Arc::new(V::abi_type()))
     }
 }
 
 impl<K: WithPlainAbiType, V: WithAbiType, S> WithAbiType for HashMap<K, V, S> {
     fn abi_type() -> AbiType {
-        AbiType::Map(K::plain_abi_type(), Box::new(V::abi_type()))
+        AbiType::Map(K::plain_abi_type(), Arc::new(V::abi_type()))
     }
 }
 
 #[cfg(feature = "models")]
 impl<T: WithAbiType> WithAbiType for crate::models::Lazy<T> {
     fn abi_type() -> AbiType {
-        AbiType::Ref(Box::new(T::abi_type()))
+        AbiType::Ref(Arc::new(T::abi_type()))
     }
 }
 
@@ -209,7 +209,7 @@ impl_with_plain_abi_type! {
 pub trait IntoPlainAbi: IntoAbi {
     /// Returns a corresponding plain ABI value.
     ///
-    /// NOTE: use [`IntoPlainAbi::into_abi`] when building ABI from a temp value.
+    /// NOTE: use [`IntoPlainAbi::into_plain_abi`] when building ABI from a temp value.
     fn as_plain_abi(&self) -> PlainAbiValue;
 
     /// Converts into a corresponding plain ABI value.
@@ -488,7 +488,7 @@ impl IntoAbi for str {
 impl<T: WithAbiType + IntoAbi> IntoAbi for [T] {
     fn as_abi(&self) -> AbiValue {
         AbiValue::Array(
-            Box::new(T::abi_type()),
+            Arc::new(T::abi_type()),
             self.iter().map(T::as_abi).collect(),
         )
     }
@@ -505,7 +505,7 @@ impl<T: WithAbiType + IntoAbi> IntoAbi for [T] {
 impl<T: WithAbiType + IntoAbi> IntoAbi for Vec<T> {
     fn as_abi(&self) -> AbiValue {
         AbiValue::Array(
-            Box::new(T::abi_type()),
+            Arc::new(T::abi_type()),
             self.iter().map(T::as_abi).collect(),
         )
     }
@@ -515,7 +515,7 @@ impl<T: WithAbiType + IntoAbi> IntoAbi for Vec<T> {
         Self: Sized,
     {
         AbiValue::Array(
-            Box::new(T::abi_type()),
+            Arc::new(T::abi_type()),
             self.into_iter().map(T::into_abi).collect(),
         )
     }
@@ -525,7 +525,7 @@ impl<K: WithPlainAbiType + IntoPlainAbi, V: WithAbiType + IntoAbi> IntoAbi for B
     fn as_abi(&self) -> AbiValue {
         AbiValue::Map(
             K::plain_abi_type(),
-            Box::new(V::abi_type()),
+            Arc::new(V::abi_type()),
             self.iter()
                 .map(|(key, value)| (K::as_plain_abi(key), V::as_abi(value)))
                 .collect(),
@@ -538,7 +538,7 @@ impl<K: WithPlainAbiType + IntoPlainAbi, V: WithAbiType + IntoAbi> IntoAbi for B
     {
         AbiValue::Map(
             K::plain_abi_type(),
-            Box::new(V::abi_type()),
+            Arc::new(V::abi_type()),
             self.into_iter()
                 .map(|(key, value)| (K::into_plain_abi(key), V::into_abi(value)))
                 .collect(),
@@ -550,7 +550,7 @@ impl<K: WithPlainAbiType + IntoPlainAbi, V: WithAbiType + IntoAbi, S> IntoAbi fo
     fn as_abi(&self) -> AbiValue {
         AbiValue::Map(
             K::plain_abi_type(),
-            Box::new(V::abi_type()),
+            Arc::new(V::abi_type()),
             self.iter()
                 .map(|(key, value)| (K::as_plain_abi(key), V::as_abi(value)))
                 .collect(),
@@ -563,7 +563,7 @@ impl<K: WithPlainAbiType + IntoPlainAbi, V: WithAbiType + IntoAbi, S> IntoAbi fo
     {
         AbiValue::Map(
             K::plain_abi_type(),
-            Box::new(V::abi_type()),
+            Arc::new(V::abi_type()),
             self.into_iter()
                 .map(|(key, value)| (K::into_plain_abi(key), V::into_abi(value)))
                 .collect(),
@@ -575,7 +575,7 @@ impl<T: WithAbiType + IntoAbi> IntoAbi for Option<T> {
     #[inline]
     fn as_abi(&self) -> AbiValue {
         AbiValue::Optional(
-            Box::new(T::abi_type()),
+            Arc::new(T::abi_type()),
             self.as_ref().map(T::as_abi).map(Box::new),
         )
     }
@@ -585,7 +585,7 @@ impl<T: WithAbiType + IntoAbi> IntoAbi for Option<T> {
     where
         Self: Sized,
     {
-        AbiValue::Optional(Box::new(T::abi_type()), self.map(T::into_abi).map(Box::new))
+        AbiValue::Optional(Arc::new(T::abi_type()), self.map(T::into_abi).map(Box::new))
     }
 }
 
@@ -647,7 +647,7 @@ mod tests {
             AbiValue::Bool(true),
             AbiValue::unnamed_tuple([
                 AbiValue::Cell(Cell::empty_cell()),
-                AbiValue::Optional(Box::new(AbiType::Bool), None),
+                AbiValue::Optional(Arc::new(AbiType::Bool), None),
             ]),
         ]);
 
