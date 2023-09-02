@@ -130,12 +130,12 @@ impl<const N: u16> RawDict<N> {
     }
 
     /// Returns a `CellSlice` of the value corresponding to the key.
-    pub fn get<'a, G: CellContext>(
-        &'a self,
-        key: CellSlice<'_>,
-        cell_context: &mut G,
-    ) -> Result<Option<CellSlice<'a>>, G::Error> {
-        dict_get(self.0.as_ref(), N, key, cell_context)
+    ///
+    /// Use [`get_ext`] if you need to use a custom finalizer.
+    ///
+    /// [`get_ext`]: RawDict::get_ext
+    pub fn get<'a>(&'a self, key: CellSlice<'_>) -> Result<Option<CellSlice<'a>>, Error> {
+        dict_get(self.0.as_ref(), N, key, &mut ())
     }
 
     /// Computes the minimal key in dictionary that is lexicographically greater than `key`,
@@ -262,6 +262,15 @@ impl<const N: u16> RawDict<N> {
     /// Returns `true` if the dictionary contains a value for the specified key.
     pub fn contains_key(&self, key: CellSlice<'_>) -> Result<bool, Error> {
         Ok(ok!(dict_get(self.0.as_ref(), N, key, &mut ())).is_some())
+    }
+
+    /// Returns a `CellSlice` of the value corresponding to the key.
+    pub fn get_ext<'a, G: CellContext>(
+        &'a self,
+        key: CellSlice<'_>,
+        cell_context: &mut G,
+    ) -> Result<Option<CellSlice<'a>>, G::Error> {
+        dict_get(self.0.as_ref(), N, key, cell_context)
     }
 
     /// Sets the value associated with the key in the dictionary.
@@ -1221,7 +1230,7 @@ mod tests {
             .unwrap();
 
         let mut value = dict
-            .get(build_cell(|b| b.store_u32(123)).as_slice()?, &mut ())
+            .get(build_cell(|b| b.store_u32(123)).as_slice()?)
             .unwrap()
             .unwrap();
         assert_eq!(value.remaining_bits(), 1);
@@ -1238,13 +1247,13 @@ mod tests {
 
         //
         dict.add(key.as_slice()?, false)?;
-        let mut value = dict.get(key.as_slice()?, &mut ())?.unwrap();
+        let mut value = dict.get(key.as_slice()?)?.unwrap();
         assert_eq!(value.remaining_bits(), 1);
         assert_eq!(value.load_bit(), Ok(false));
 
         //
         dict.add(key.as_slice()?, true)?;
-        let mut value = dict.get(key.as_slice()?, &mut ())?.unwrap();
+        let mut value = dict.get(key.as_slice()?)?.unwrap();
         assert_eq!(value.remaining_bits(), 1);
         assert_eq!(value.load_bit(), Ok(false));
 
@@ -1259,7 +1268,7 @@ mod tests {
         let dict = boc.parse::<RawDict<32>>()?;
 
         let key = CellBuilder::build_from(u32::from_be_bytes(123u32.to_le_bytes()))?;
-        let value = dict.get(key.as_slice()?, &mut ())?.unwrap();
+        let value = dict.get(key.as_slice()?)?.unwrap();
 
         {
             let (cell, range) = dict.get_owned(key.as_slice()?)?.unwrap();
