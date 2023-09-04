@@ -188,6 +188,24 @@ impl AbiValue {
         Self::Int(bits, BigInt::from(value))
     }
 
+    /// Simple `varuintN` constructor.
+    #[inline]
+    pub fn varuint<T>(size: u8, value: T) -> Self
+    where
+        BigUint: From<T>,
+    {
+        Self::VarUint(NonZeroU8::new(size).unwrap(), BigUint::from(value))
+    }
+
+    /// Simple `varintN` constructor.
+    #[inline]
+    pub fn varint<T>(size: u8, value: T) -> Self
+    where
+        BigInt: From<T>,
+    {
+        Self::VarInt(NonZeroU8::new(size).unwrap(), BigInt::from(value))
+    }
+
     /// Simple `address` constructor.
     #[inline]
     pub fn address<T>(value: T) -> Self

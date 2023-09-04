@@ -64,7 +64,7 @@ pub enum ParseNamedAbiTypeError {
 }
 
 /// Error type for ABI values unpacking related errors.
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, Clone, Eq, PartialEq, thiserror::Error)]
 pub enum AbiError {
     /// Expected a different value type.
     #[error("expected ABI type `{expected}`, got `{ty}`")]
@@ -73,5 +73,30 @@ pub enum AbiError {
         expected: Box<str>,
         /// A full signature of the received type.
         ty: Box<str>,
+    },
+    /// There are still some unconsumed bits or refs and we did not expect this.
+    #[error("slice was not fully consumed during parsing")]
+    IncompleteDeserialization,
+    /// All cells for `bytes` or `fixedbytes` must have data multiple of 8.
+    #[error("number of bits in a cell is not a multiple of 8")]
+    ExpectedCellWithBytes,
+    /// Expected a valid utf8-encoded string.
+    #[error("invalid string")]
+    InvalidString(#[from] std::str::Utf8Error),
+    /// Invalid length for a fixedarrayN.
+    #[error("expected array of len {expected}, got {len}")]
+    ArraySizeMismatch {
+        /// `N` in `fixedarrayN`.
+        expected: usize,
+        /// Length of the parsed array.
+        len: usize,
+    },
+    /// Invalid length for a fixedbytes{n}.
+    #[error("expected bytes of len {expected}, got {len}")]
+    BytesSizeMismatch {
+        /// `N` in `fixedbytesN`.
+        expected: usize,
+        /// Length of the parsed bytes.
+        len: usize,
     },
 }
