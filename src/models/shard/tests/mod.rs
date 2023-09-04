@@ -14,6 +14,15 @@ fn check_state(data: Cell) {
         println!("{id}: {account:#?}");
     }
 
+    for (i, entry) in data.libraries.iter().enumerate() {
+        let (hash, descr) = entry.unwrap();
+        println!("lib#{i} hash={hash}");
+        for entry in descr.publishers.keys() {
+            let address = entry.unwrap();
+            println!("lib#{i} publisher={address}")
+        }
+    }
+
     let _elector = shard_accounts.get([0x33; 32]).unwrap().unwrap();
     assert!(shard_accounts.contains_account([0x55; 32]).unwrap());
 
