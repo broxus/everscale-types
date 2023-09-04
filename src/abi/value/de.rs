@@ -527,28 +527,29 @@ fn load_ref(
 #[cfg(test)]
 mod tests {
     use crate::boc::Boc;
-    use crate::num::{VarUint24, VarUint56};
-    use crate::prelude::{CellBuilder, Store};
+    use crate::models::{StdAddr, VarAddr};
+    use crate::num::{Uint9, VarUint24, VarUint56};
+    use crate::prelude::{CellBuilder, CellFamily, Store};
 
     use super::*;
 
     trait BuildCell {
-        fn build_cell(&self) -> anyhow::Result<Cell>;
+        fn build_cell(&self) -> Result<Cell>;
     }
 
     impl<T: Store> BuildCell for T {
-        fn build_cell(&self) -> anyhow::Result<Cell> {
+        fn build_cell(&self) -> Result<Cell> {
             CellBuilder::build_from(self).map_err(From::from)
         }
     }
 
     impl BuildCell for &str {
-        fn build_cell(&self) -> anyhow::Result<Cell> {
+        fn build_cell(&self) -> Result<Cell> {
             Boc::decode_base64(self).map_err(From::from)
         }
     }
 
-    fn decode<T>(version: AbiVersion, boc: T, expected: AbiValue) -> anyhow::Result<()>
+    fn load_simple<T>(version: AbiVersion, boc: T, expected: AbiValue) -> Result<()>
     where
         T: BuildCell,
     {
@@ -561,7 +562,7 @@ mod tests {
         Ok(())
     }
 
-    fn decode_tuple<T>(version: AbiVersion, boc: T, expected: &[AbiValue]) -> anyhow::Result<()>
+    fn load_tuple<T>(version: AbiVersion, boc: T, expected: &[AbiValue]) -> Result<()>
     where
         T: BuildCell,
     {
@@ -577,7 +578,7 @@ mod tests {
     macro_rules! assert_basic_err {
         ($expr:expr, $err:expr) => {{
             match $expr {
-                Ok(()) => panic!("Expected basic error: {:?}, got success", $err),
+                Ok(_) => panic!("Expected basic error: {:?}, got success", $err),
                 Err(e) => {
                     if let Some(e) = e.downcast_ref::<Error>() {
                         assert_eq!(e, &($err));
@@ -592,7 +593,7 @@ mod tests {
     macro_rules! assert_abi_err {
         ($expr:expr, $err:expr) => {{
             match $expr {
-                Ok(()) => panic!("Expected ABI error: {:?}, got success", $err),
+                Ok(_) => panic!("Expected ABI error: {:?}, got success", $err),
                 Err(e) => {
                     if let Some(e) = e.downcast_ref::<AbiError>() {
                         assert_eq!(e, &($err));
@@ -604,8 +605,14 @@ mod tests {
         }};
     }
 
-    const ALL_VERSIONS: &[AbiVersion] = &[
+    const VX_X: [AbiVersion; 5] = [
         AbiVersion::V1_0,
+        AbiVersion::V2_0,
+        AbiVersion::V2_1,
+        AbiVersion::V2_2,
+        AbiVersion::V2_3,
+    ];
+    const V2_X: [AbiVersion; 4] = [
         AbiVersion::V2_0,
         AbiVersion::V2_1,
         AbiVersion::V2_2,
@@ -613,20 +620,20 @@ mod tests {
     ];
 
     #[test]
-    fn failed_decode() -> anyhow::Result<()> {
-        for &v in ALL_VERSIONS {
+    fn failed_decode() -> Result<()> {
+        for v in VX_X {
             assert_basic_err!(
-                decode(v, false, AbiValue::uint(32, 0u32)),
+                load_simple(v, false, AbiValue::uint(32, 0u32)),
                 Error::CellUnderflow
             );
 
             assert_abi_err!(
-                decode(v, u64::MAX, AbiValue::uint(32, 0u32)),
+                load_simple(v, u64::MAX, AbiValue::uint(32, 0u32)),
                 AbiError::IncompleteDeserialization
             );
 
             assert_abi_err!(
-                decode_tuple(v, u64::MAX, &[AbiValue::uint(32, u32::MAX)]),
+                load_tuple(v, u64::MAX, &[AbiValue::uint(32, u32::MAX)]),
                 AbiError::IncompleteDeserialization
             );
         }
@@ -635,14 +642,14 @@ mod tests {
     }
 
     #[test]
-    fn decode_int() -> anyhow::Result<()> {
+    fn decode_int() -> Result<()> {
         macro_rules! define_tests {
             ($v:ident, { $($abi:ident($bits:literal) => [$($expr:expr),*$(,)?]),*$(,)? }) => {$(
-                $(decode($v, $expr, AbiValue::$abi($bits, $expr))?;)*
+                $(load_simple($v, $expr, AbiValue::$abi($bits, $expr))?;)*
             )*};
         }
 
-        for &v in ALL_VERSIONS {
+        for v in VX_X {
             define_tests!(v, {
                 uint(8) => [0u8, 123u8, u8::MAX],
                 uint(16) => [0u16, 1234u16, u16::MAX],
@@ -662,37 +669,315 @@ mod tests {
     }
 
     #[test]
-    fn decode_varint() -> anyhow::Result<()> {
-        for &v in ALL_VERSIONS {
-            decode(v, VarUint24::ZERO, AbiValue::varuint(4, 0u32))?;
-            decode(v, VarUint24::MAX, AbiValue::varuint(4, u32::MAX >> 8))?;
-            decode(v, VarUint24::new(123321), AbiValue::varuint(4, 123321u32))?;
+    fn decode_varint() -> Result<()> {
+        for v in VX_X {
+            load_simple(v, VarUint24::ZERO, AbiValue::varuint(4, 0u32))?;
+            load_simple(v, VarUint24::MAX, AbiValue::varuint(4, u32::MAX >> 8))?;
+            load_simple(v, VarUint24::new(123321), AbiValue::varuint(4, 123321u32))?;
 
-            decode(v, VarUint56::ZERO, AbiValue::varuint(8, 0u32))?;
-            decode(v, VarUint56::MAX, AbiValue::varuint(8, u64::MAX >> 8))?;
-            decode(
+            load_simple(v, VarUint56::ZERO, AbiValue::varuint(8, 0u32))?;
+            load_simple(v, VarUint56::MAX, AbiValue::varuint(8, u64::MAX >> 8))?;
+            load_simple(
                 v,
                 VarUint56::new(1233213213123123),
                 AbiValue::varuint(8, 1233213213123123u64),
             )?;
 
-            decode(
+            load_simple(
                 v,
                 "te6ccgEBAQEABgAABzAeG5g=",
                 AbiValue::varuint(16, 123321u32),
             )?;
-            decode(v, "te6ccgEBAQEABgAABzAeG5g=", AbiValue::varint(16, 123321))?;
+            load_simple(v, "te6ccgEBAQEABgAABzAeG5g=", AbiValue::varint(16, 123321))?;
 
-            decode(v, Tokens::ZERO, AbiValue::varuint(16, 0u32))?;
-            decode(v, Tokens::ZERO, AbiValue::Token(Tokens::ZERO))?;
+            load_simple(v, Tokens::ZERO, AbiValue::varuint(16, 0u32))?;
+            load_simple(v, Tokens::ZERO, AbiValue::Token(Tokens::ZERO))?;
 
             let mut prev_value = 0;
             for byte in 0..15 {
                 let value = (0xffu128 << (byte * 8)) | prev_value;
                 prev_value = value;
-                decode(v, Tokens::new(value), AbiValue::varuint(16, value))?;
-                decode(v, Tokens::new(value), AbiValue::Token(Tokens::new(value)))?;
+                load_simple(v, Tokens::new(value), AbiValue::varuint(16, value))?;
+                load_simple(v, Tokens::new(value), AbiValue::Token(Tokens::new(value)))?;
             }
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn decode_bool() -> Result<()> {
+        for v in VX_X {
+            load_simple(v, false, AbiValue::Bool(false))?;
+            load_simple(v, true, AbiValue::Bool(true))?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn decode_cell() -> Result<()> {
+        // ABI v1
+        {
+            load_simple(
+                AbiVersion::V1_0,
+                "te6ccgEBAgEABQABAAEAAA==", // one ref with empty cell
+                AbiValue::Cell(Cell::empty_cell()),
+            )?;
+
+            // 4 refs with empty cells
+            let cell = Boc::decode_base64("te6ccgEBAgEACAAEAAEBAQEAAA==")?;
+            let slice = &mut cell.as_slice()?;
+            slice.try_advance(0, 3);
+
+            assert_basic_err!(
+                AbiValue::load(&AbiType::Cell, AbiVersion::V1_0, slice),
+                Error::CellUnderflow
+            );
+
+            // 3 refs with empty cells + last ref with a cell with 1 ref
+            let cell = Boc::decode_base64("te6ccgEBAwEACwAEAAICAgEBAAIAAA==")?;
+            let slice = &mut cell.as_slice()?;
+            slice.try_advance(0, 3);
+
+            assert_eq!(
+                AbiValue::load(&AbiType::Cell, AbiVersion::V1_0, slice)?,
+                AbiValue::Cell(Cell::empty_cell())
+            );
+        }
+
+        for v in V2_X {
+            load_simple(
+                v,
+                "te6ccgEBAgEABQABAAEAAA==", // one ref with empty cell
+                AbiValue::Cell(Cell::empty_cell()),
+            )?;
+
+            // 4 refs with empty cells
+            let cell = Boc::decode_base64("te6ccgEBAgEACAAEAAEBAQEAAA==")?;
+            let slice = &mut cell.as_slice()?;
+            slice.try_advance(0, 3);
+
+            assert_eq!(
+                AbiValue::load(&AbiType::Cell, v, slice)?,
+                AbiValue::Cell(Cell::empty_cell())
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn decode_address() -> Result<()> {
+        for v in VX_X {
+            let addr: StdAddr = StdAddr::from((0i8, [0xffu8; 32]));
+            load_simple(
+                v,
+                addr.clone(),
+                AbiValue::Address(Box::new(IntAddr::Std(addr))),
+            )?;
+
+            let addr: VarAddr = VarAddr {
+                address_len: Uint9::new(10 * 8),
+                anycast: None,
+                workchain: 123456,
+                address: vec![0xffu8; 10],
+            };
+            load_simple(
+                v,
+                addr.clone(),
+                AbiValue::Address(Box::new(IntAddr::Var(addr))),
+            )?;
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn decode_bytes() -> Result<()> {
+        for v in VX_X {
+            for len in 0..20 {
+                let mut bytes = vec![0xffu8; 1usize << len];
+                bytes[0] = 0x55; // mark start
+                let bytes = Bytes::from(bytes);
+                let serialized = AbiValue::Bytes(bytes.clone()).make_cell(v)?;
+
+                load_simple(v, serialized.clone(), AbiValue::Bytes(bytes.clone()))?;
+                load_simple(v, serialized.clone(), AbiValue::FixedBytes(bytes.clone()))?;
+
+                let original = bytes.len();
+                assert_abi_err!(
+                    load_simple(
+                        v,
+                        serialized.clone(),
+                        AbiValue::FixedBytes(bytes.slice(..original / 2))
+                    ),
+                    AbiError::BytesSizeMismatch {
+                        expected: original / 2,
+                        len: original
+                    }
+                )
+            }
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn decode_string() -> Result<()> {
+        for v in VX_X {
+            for len in 0..20 {
+                let mut bytes = vec![b'a'; 1usize << len];
+                bytes[0] = b'f'; // mark start
+                let string = String::from_utf8(bytes)?;
+
+                let serialized = AbiValue::String(string.clone()).make_cell(v)?;
+                load_simple(v, serialized.clone(), AbiValue::String(string))?;
+            }
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn decode_nested_simple_tuple() -> Result<()> {
+        let cell = {
+            let mut builder = CellBuilder::new();
+            builder.store_u32(0)?;
+            builder.store_reference(Cell::empty_cell())?;
+            builder.store_bit_zero()?;
+            builder.store_u8(-15_i8 as _)?;
+            builder.store_u16(-9845_i16 as _)?;
+            builder.store_u32(-1_i32 as _)?;
+            builder.store_u64(12345678_i64 as _)?;
+            builder.store_u128(-12345678_i128 as _)?;
+            builder.store_u8(255)?;
+            builder.store_u16(0)?;
+            builder.store_u32(256)?;
+            builder.store_u64(123)?;
+            builder.store_u128(1234567890)?;
+            builder.build()?
+        };
+
+        let value = AbiValue::unnamed_tuple([
+            AbiValue::uint(32, 0u32),
+            AbiValue::Cell(Cell::empty_cell()),
+            AbiValue::Bool(false),
+            AbiValue::unnamed_tuple([
+                AbiValue::int(8, -15),
+                AbiValue::int(16, -9845),
+                AbiValue::unnamed_tuple([
+                    AbiValue::int(32, -1),
+                    AbiValue::int(64, 12345678),
+                    AbiValue::int(128, -12345678),
+                ]),
+            ]),
+            AbiValue::unnamed_tuple([
+                AbiValue::uint(8, 255_u8),
+                AbiValue::uint(16, 0_u16),
+                AbiValue::unnamed_tuple([
+                    AbiValue::uint(32, 256_u32),
+                    AbiValue::uint(64, 123_u64),
+                    AbiValue::uint(128, 1234567890_u128),
+                ]),
+            ]),
+        ]);
+
+        for v in VX_X {
+            load_simple(v, cell.clone(), value.clone())?;
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn decode_tuple_four_refs_and_four_uint256() -> Result<()> {
+        let bytes = Bytes::from(vec![0xff; 32]);
+        let mut bytes_builder = CellBuilder::new();
+        bytes_builder.store_raw(&bytes, 256)?;
+
+        let cell = {
+            let mut builder = CellBuilder::new();
+            builder.store_u32(0)?;
+            builder.store_reference(Cell::empty_cell())?;
+
+            builder.store_reference(bytes_builder.clone().build()?)?;
+            builder.store_reference(bytes_builder.clone().build()?)?;
+
+            let mut second_builder = CellBuilder::new();
+            second_builder.store_reference(bytes_builder.clone().build()?)?;
+            second_builder.store_builder(&bytes_builder)?;
+            second_builder.store_builder(&bytes_builder)?;
+            second_builder.store_builder(&bytes_builder)?;
+
+            let mut third_builder = CellBuilder::new();
+            third_builder.store_builder(&bytes_builder)?;
+
+            second_builder.store_reference(third_builder.build()?)?;
+            builder.store_reference(second_builder.build()?)?;
+
+            builder.build()?
+        };
+
+        let value = AbiValue::unnamed_tuple([
+            AbiValue::uint(32, 0_u32),
+            AbiValue::Cell(Cell::empty_cell()),
+            AbiValue::Cell(bytes_builder.clone().build()?),
+            AbiValue::Bytes(bytes.clone()),
+            AbiValue::Cell(bytes_builder.build()?),
+            AbiValue::uint(256, BigUint::from_bytes_be(&bytes)),
+            AbiValue::uint(256, BigUint::from_bytes_be(&bytes)),
+            AbiValue::uint(256, BigUint::from_bytes_be(&bytes)),
+            AbiValue::uint(256, BigUint::from_bytes_be(&bytes)),
+        ]);
+
+        for v in VX_X {
+            load_simple(v, cell.clone(), value.clone())?;
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn decode_tuple_four_refs_and_one_uint256() -> Result<()> {
+        let bytes = Bytes::from(vec![0xff; 32]);
+        let mut bytes_builder = CellBuilder::new();
+        bytes_builder.store_raw(&bytes, 256)?;
+
+        let mut builder = CellBuilder::new();
+        builder.store_u32(0)?;
+        builder.store_reference(Cell::empty_cell())?;
+
+        builder.store_reference(bytes_builder.clone().build()?)?;
+        builder.store_reference(bytes_builder.clone().build()?)?;
+
+        let cell_v2 = {
+            let mut builder = builder.clone();
+            builder.store_reference(bytes_builder.clone().build()?)?;
+            builder.store_builder(&bytes_builder)?;
+            builder.build()?
+        };
+
+        let cell_v1 = {
+            let mut second_builder = CellBuilder::new();
+            second_builder.store_reference(bytes_builder.clone().build()?)?;
+            second_builder.store_builder(&bytes_builder)?;
+
+            builder.store_reference(second_builder.build()?)?;
+            builder.build()?
+        };
+
+        let value = AbiValue::unnamed_tuple([
+            AbiValue::uint(32, 0_u32),
+            AbiValue::Cell(Cell::empty_cell()),
+            AbiValue::Cell(bytes_builder.clone().build()?),
+            AbiValue::Bytes(bytes.clone()),
+            AbiValue::Cell(bytes_builder.build()?),
+            AbiValue::uint(256, BigUint::from_bytes_be(&bytes)),
+        ]);
+
+        load_simple(AbiVersion::V1_0, cell_v1, value.clone())?;
+        for v in V2_X {
+            load_simple(v, cell_v2.clone(), value.clone())?;
         }
 
         Ok(())

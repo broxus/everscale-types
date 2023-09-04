@@ -6,7 +6,7 @@ use bytes::Bytes;
 use everscale_crypto::ed25519;
 use num_bigint::{BigInt, BigUint};
 
-use super::ty::*;
+use super::{ty::*, IntoAbi, IntoPlainAbi, WithAbiType, WithPlainAbiType};
 use crate::cell::Cell;
 use crate::models::IntAddr;
 use crate::num::Tokens;
@@ -259,6 +259,71 @@ impl AbiValue {
                 .map(|(i, value)| NamedAbiValue::from_index(i, value))
                 .collect(),
         )
+    }
+
+    /// Simple `array` constructor.
+    #[inline]
+    pub fn array<T, I>(values: I) -> Self
+    where
+        T: WithAbiType + IntoAbi,
+        I: IntoIterator<Item = T>,
+    {
+        Self::Array(
+            Arc::new(T::abi_type()),
+            values.into_iter().map(IntoAbi::into_abi).collect(),
+        )
+    }
+
+    /// Simple `fixedarray` constructor.
+    #[inline]
+    pub fn fixedarray<T, I>(values: I) -> Self
+    where
+        T: WithAbiType + IntoAbi,
+        I: IntoIterator<Item = T>,
+    {
+        Self::FixedArray(
+            Arc::new(T::abi_type()),
+            values.into_iter().map(IntoAbi::into_abi).collect(),
+        )
+    }
+
+    /// Simple `map` constructor.
+    #[inline]
+    pub fn map<K, V, I>(entries: I) -> Self
+    where
+        K: WithPlainAbiType + IntoPlainAbi,
+        V: WithAbiType + IntoAbi,
+        I: IntoIterator<Item = (K, V)>,
+    {
+        Self::Map(
+            K::plain_abi_type(),
+            Arc::new(V::abi_type()),
+            entries
+                .into_iter()
+                .map(|(key, value)| (key.into_plain_abi(), value.into_abi()))
+                .collect(),
+        )
+    }
+
+    /// Simple `optional` constructor.
+    #[inline]
+    pub fn optional<T>(value: Option<T>) -> Self
+    where
+        T: WithAbiType + IntoAbi,
+    {
+        Self::Optional(
+            Arc::new(T::abi_type()),
+            value.map(T::into_abi).map(Box::new),
+        )
+    }
+
+    /// Simple `optional` constructor.
+    #[inline]
+    pub fn reference<T>(value: T) -> Self
+    where
+        T: IntoAbi,
+    {
+        Self::Ref(Box::new(value.into_abi()))
     }
 }
 

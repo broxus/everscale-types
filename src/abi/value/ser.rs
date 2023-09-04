@@ -280,13 +280,13 @@ fn write_bytes(
     const MAX_BYTES_PER_BUILDER: usize = (MAX_BIT_LEN / 8) as usize;
     let mut len = data.len();
 
-    let mut bytes_per_builder = if version.major == 1 {
-        std::cmp::min(MAX_BYTES_PER_BUILDER, len)
-    } else {
+    let mut bytes_per_builder = if version.major > 1 {
         match len % MAX_BYTES_PER_BUILDER {
             0 => MAX_BYTES_PER_BUILDER,
             x => x,
         }
+    } else {
+        std::cmp::min(MAX_BYTES_PER_BUILDER, len)
     };
 
     let mut result = CellBuilder::new();

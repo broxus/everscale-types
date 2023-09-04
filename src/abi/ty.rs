@@ -855,7 +855,7 @@ mod tests {
 
     #[test]
     fn from_to_json() {
-        const RAW: &str = r###"{
+        const RAW: &str = r#"{
             "name":"info",
             "type":"tuple",
             "components": [
@@ -869,7 +869,7 @@ mod tests {
                 {"name":"vestingDonor","type":"address"},
                 {"name":"lockDonor","type":"address"}
             ]
-        }"###;
+        }"#;
 
         let ty = serde_json::from_str::<NamedAbiType>(RAW).unwrap();
 

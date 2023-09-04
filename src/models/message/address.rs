@@ -218,6 +218,13 @@ impl From<(i8, HashBytes)> for StdAddr {
     }
 }
 
+impl From<(i8, [u8; 32])> for StdAddr {
+    #[inline]
+    fn from((workchain, address): (i8, [u8; 32])) -> Self {
+        Self::new(workchain, HashBytes(address))
+    }
+}
+
 impl From<StdAddr> for IntAddr {
     #[inline]
     fn from(value: StdAddr) -> Self {
