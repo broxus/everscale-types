@@ -1,7 +1,7 @@
 //! Shard state models.
 
 use crate::cell::*;
-use crate::dict::RawDict;
+use crate::dict::Dict;
 use crate::error::*;
 
 use crate::models::block::{BlockRef, ShardIdent};
@@ -94,7 +94,7 @@ pub struct ShardStateUnsplit {
     /// Total pending validator fees.
     pub total_validator_fees: CurrencyCollection,
     /// Dictionary with all libraries and its providers.
-    pub libraries: RawDict<256>,
+    pub libraries: Dict<HashBytes, LibDescr>,
     /// Optional reference to the masterchain block.
     pub master_ref: Option<BlockRef>,
     /// Shard state additional info.
@@ -220,7 +220,7 @@ impl<'a> Load<'a> for ShardStateUnsplit {
             underload_history: ok!(child_slice.load_u64()),
             total_balance: ok!(CurrencyCollection::load_from(child_slice)),
             total_validator_fees: ok!(CurrencyCollection::load_from(child_slice)),
-            libraries: ok!(RawDict::load_from(child_slice)),
+            libraries: ok!(Dict::load_from(child_slice)),
             master_ref: ok!(Option::<BlockRef>::load_from(child_slice)),
             #[allow(unused_labels)]
             custom: 'custom: {
@@ -248,4 +248,39 @@ pub struct ShardStateSplit {
     pub left: Lazy<ShardStateUnsplit>,
     /// Reference to the state of the right shard.
     pub right: Lazy<ShardStateUnsplit>,
+}
+
+/// Shared libraries currently can be present only in masterchain blocks.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct LibDescr {
+    /// Library code.
+    pub lib: Cell,
+    /// Accounts in the masterchain that store this library.
+    pub publishers: Dict<HashBytes, ()>,
+}
+
+impl Store for LibDescr {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
+        ok!(builder.store_small_uint(0, 2));
+        ok!(builder.store_reference(self.lib.clone()));
+        match self.publishers.root() {
+            Some(root) => builder.store_reference(root.clone()),
+            None => Err(Error::InvalidData),
+        }
+    }
+}
+
+impl<'a> Load<'a> for LibDescr {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
+        if ok!(slice.load_small_uint(2)) != 0 {
+            return Err(Error::InvalidTag);
+        }
+        Ok(Self {
+            lib: ok!(slice.load_reference_cloned()),
+            publishers: ok!(Dict::load_from_root_ext(
+                slice,
+                &mut Cell::default_finalizer()
+            )),
+        })
+    }
 }

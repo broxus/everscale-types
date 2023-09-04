@@ -394,6 +394,6 @@ impl<'a> Load<'a> for SpecialFlags {
 pub struct SimpleLib {
     /// Whether this library is accessible from other accounts.
     pub public: bool,
-    /// Reference to the library cell.
+    /// Library code.
     pub root: Cell,
 }
