@@ -14,23 +14,27 @@ use crate::num::Tokens;
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct NamedAbiType {
     /// Item name.
-    pub name: String,
+    pub name: Arc<str>,
     /// ABI value type.
     pub ty: AbiType,
 }
 
 impl NamedAbiType {
     /// Creates a named ABI type.
-    pub fn new(name: String, ty: AbiType) -> Self {
-        Self { name, ty }
+    #[inline]
+    pub fn new<T>(name: T, ty: AbiType) -> Self
+    where
+        T: Into<Arc<str>>,
+    {
+        Self {
+            name: name.into(),
+            ty,
+        }
     }
 
     /// Creates a named ABI type with an index name (e.g. `value123`).
     pub fn from_index(index: usize, ty: AbiType) -> Self {
-        Self {
-            name: format!("value{index}"),
-            ty,
-        }
+        Self::new(format!("value{index}"), ty)
     }
 }
 
@@ -92,7 +96,7 @@ impl<'de> Deserialize<'de> for NamedAbiType {
                         *ty = ok!(components
                             .into_iter()
                             .map(Self::try_from)
-                            .collect::<Result<Vec<_>, _>>());
+                            .collect::<Result<Arc<[_]>, _>>());
                     }
                     (Some(_), None) => {
                         return Err(ParseNamedAbiTypeError::ExpectedComponents {
@@ -108,7 +112,7 @@ impl<'de> Deserialize<'de> for NamedAbiType {
                 }
 
                 Ok(Self {
-                    name: value.name,
+                    name: value.name.into(),
                     ty,
                 })
             }
@@ -116,6 +120,33 @@ impl<'de> Deserialize<'de> for NamedAbiType {
 
         let helper = ok!(<Helper as Deserialize>::deserialize(deserializer));
         helper.try_into().map_err(Error::custom)
+    }
+}
+
+impl From<(String, AbiType)> for NamedAbiType {
+    #[inline]
+    fn from((name, ty): (String, AbiType)) -> Self {
+        Self {
+            name: name.into(),
+            ty,
+        }
+    }
+}
+
+impl<'a> From<(&'a str, AbiType)> for NamedAbiType {
+    #[inline]
+    fn from((name, ty): (&'a str, AbiType)) -> Self {
+        Self {
+            name: Arc::from(name),
+            ty,
+        }
+    }
+}
+
+impl From<(usize, AbiType)> for NamedAbiType {
+    #[inline]
+    fn from((index, ty): (usize, AbiType)) -> Self {
+        Self::from_index(index, ty)
     }
 }
 
@@ -185,7 +216,7 @@ pub enum AbiType {
     /// [`Tokens`]: crate::num::Tokens
     Token,
     /// Product type.
-    Tuple(Vec<NamedAbiType>),
+    Tuple(Arc<[NamedAbiType]>),
     /// Array of elements of the specified ABI type.
     Array(Arc<Self>),
     /// Fixed-length array of elements of the specified ABI type.
@@ -262,7 +293,7 @@ impl AbiType {
         }
     }
 
-    fn components_mut(&mut self) -> Option<&mut Vec<NamedAbiType>> {
+    fn components_mut(&mut self) -> Option<&mut Arc<[NamedAbiType]>> {
         match self {
             Self::Tuple(types) => Some(types),
             Self::Array(ty) => Arc::make_mut(ty).components_mut(),
@@ -272,6 +303,88 @@ impl AbiType {
             Self::Ref(ty) => Arc::make_mut(ty).components_mut(),
             _ => None,
         }
+    }
+
+    /// Simple `varuintN` type constructor.
+    #[inline]
+    pub fn varuint(size: u8) -> Self {
+        Self::VarUint(NonZeroU8::new(size).unwrap())
+    }
+
+    /// Simple `varintN` type constructor.
+    #[inline]
+    pub fn varint(size: u8) -> Self {
+        Self::VarInt(NonZeroU8::new(size).unwrap())
+    }
+
+    /// Simple `tuple` type constructor.
+    #[inline]
+    pub fn tuple<I, T>(values: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        NamedAbiType: From<T>,
+    {
+        Self::Tuple(values.into_iter().map(NamedAbiType::from).collect())
+    }
+
+    /// Simple `tuple` type constructor.
+    #[inline]
+    pub fn unnamed_tuple<I>(values: I) -> Self
+    where
+        I: IntoIterator<Item = AbiType>,
+    {
+        Self::Tuple(
+            values
+                .into_iter()
+                .enumerate()
+                .map(|(i, ty)| NamedAbiType::from_index(i, ty))
+                .collect(),
+        )
+    }
+
+    /// Simple `array` type constructor.
+    #[inline]
+    pub fn array<T>(ty: T) -> Self
+    where
+        Arc<AbiType>: From<T>,
+    {
+        Self::Array(Arc::<AbiType>::from(ty))
+    }
+
+    /// Simple `fixedarrayN` type constructor.
+    #[inline]
+    pub fn fixedarray<T>(ty: T, len: usize) -> Self
+    where
+        Arc<AbiType>: From<T>,
+    {
+        Self::FixedArray(Arc::<AbiType>::from(ty), len)
+    }
+
+    /// Simple `tuple` type constructor.
+    #[inline]
+    pub fn map<V>(key_ty: PlainAbiType, value_ty: V) -> Self
+    where
+        Arc<AbiType>: From<V>,
+    {
+        Self::Map(key_ty, Arc::<AbiType>::from(value_ty))
+    }
+
+    /// Simple `optional` type constructor.
+    #[inline]
+    pub fn optional<T>(ty: T) -> Self
+    where
+        Arc<AbiType>: From<T>,
+    {
+        Self::Optional(Arc::<AbiType>::from(ty))
+    }
+
+    /// Simple `ref` type constructor.
+    #[inline]
+    pub fn reference<T>(ty: T) -> Self
+    where
+        Arc<AbiType>: From<T>,
+    {
+        Self::Ref(Arc::<AbiType>::from(ty))
     }
 
     fn from_simple_str(s: &str) -> Result<Self, ParseAbiTypeError> {
@@ -302,7 +415,7 @@ impl AbiType {
             "bytes" => Self::Bytes,
             "string" => Self::String,
             "gram" | "token" => Self::Token,
-            "tuple" => Self::Tuple(Default::default()),
+            "tuple" => Self::Tuple(Arc::from([].as_slice())),
             _ => {
                 if let Some(s) = s.strip_prefix("uint") {
                     Self::Uint(ok!(s
@@ -380,7 +493,7 @@ impl std::fmt::Display for AbiType {
                 } else {
                     let mut first = true;
                     ok!(f.write_str("("));
-                    for item in items {
+                    for item in items.as_ref() {
                         if !std::mem::take(&mut first) {
                             ok!(f.write_str(","));
                         }
@@ -499,4 +612,301 @@ where
     S: serde::ser::Serializer,
 {
     serializer.collect_str(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+    use crate::abi::traits::{WithAbiType, WithPlainAbiType};
+
+    #[test]
+    fn correct_full_signature() {
+        macro_rules! assert_eq_sig {
+            ($expr:expr, $signature:literal) => {
+                assert_eq!(($expr).to_string(), $signature)
+            };
+        }
+
+        assert_eq_sig!(AbiType::Uint(100), "uint100");
+        assert_eq_sig!(AbiType::Int(100), "int100");
+        assert_eq_sig!(AbiType::varuint(16), "varuint16");
+        assert_eq_sig!(AbiType::varint(16), "varint16");
+        assert_eq_sig!(AbiType::Bool, "bool");
+        assert_eq_sig!(AbiType::Cell, "cell");
+        assert_eq_sig!(AbiType::Address, "address");
+        assert_eq_sig!(AbiType::Bytes, "bytes");
+        assert_eq_sig!(AbiType::FixedBytes(123), "fixedbytes123");
+        assert_eq_sig!(AbiType::String, "string");
+        assert_eq_sig!(AbiType::Token, "gram");
+
+        assert_eq_sig!(AbiType::unnamed_tuple([]), "()");
+        assert_eq_sig!(AbiType::unnamed_tuple([AbiType::Uint(321)]), "(uint321)");
+        assert_eq_sig!(
+            AbiType::unnamed_tuple([AbiType::Uint(123), AbiType::Address]),
+            "(uint123,address)"
+        );
+
+        assert_eq_sig!(AbiType::array(AbiType::Address), "address[]");
+        assert_eq_sig!(
+            AbiType::array(AbiType::array(AbiType::Address)),
+            "address[][]"
+        );
+        assert_eq_sig!(AbiType::array(AbiType::unnamed_tuple([])), "()[]");
+        assert_eq_sig!(
+            AbiType::array(AbiType::unnamed_tuple([AbiType::Address, AbiType::Bool])),
+            "(address,bool)[]"
+        );
+
+        assert_eq_sig!(AbiType::fixedarray(AbiType::Address, 10), "address[10]");
+        assert_eq_sig!(
+            AbiType::fixedarray(AbiType::fixedarray(AbiType::Address, 123), 321),
+            "address[123][321]"
+        );
+        assert_eq_sig!(
+            AbiType::fixedarray(AbiType::unnamed_tuple([]), 100),
+            "()[100]"
+        );
+        assert_eq_sig!(
+            AbiType::fixedarray(
+                AbiType::unnamed_tuple([AbiType::Address, AbiType::Bool]),
+                1000
+            ),
+            "(address,bool)[1000]"
+        );
+
+        assert_eq_sig!(
+            AbiType::map(PlainAbiType::Uint(123), AbiType::Address),
+            "map(uint123,address)"
+        );
+        assert_eq_sig!(
+            AbiType::map(PlainAbiType::Uint(123), AbiType::unnamed_tuple([])),
+            "map(uint123,())"
+        );
+        assert_eq_sig!(
+            AbiType::map(
+                PlainAbiType::Uint(123),
+                AbiType::unnamed_tuple([AbiType::Address, AbiType::Bool])
+            ),
+            "map(uint123,(address,bool))"
+        );
+        assert_eq_sig!(
+            AbiType::map(
+                PlainAbiType::Uint(123),
+                AbiType::fixedarray(AbiType::Address, 123)
+            ),
+            "map(uint123,address[123])"
+        );
+
+        assert_eq_sig!(AbiType::optional(AbiType::Address), "optional(address)");
+        assert_eq_sig!(
+            AbiType::optional(AbiType::unnamed_tuple([])),
+            "optional(())"
+        );
+        assert_eq_sig!(
+            AbiType::optional(AbiType::unnamed_tuple([AbiType::Address, AbiType::Bool])),
+            "optional((address,bool))"
+        );
+        assert_eq_sig!(
+            AbiType::optional(AbiType::fixedarray(AbiType::Address, 123)),
+            "optional(address[123])"
+        );
+
+        assert_eq_sig!(AbiType::reference(AbiType::Address), "ref(address)");
+        assert_eq_sig!(AbiType::reference(AbiType::unnamed_tuple([])), "ref(())");
+        assert_eq_sig!(
+            AbiType::reference(AbiType::unnamed_tuple([AbiType::Address, AbiType::Bool])),
+            "ref((address,bool))"
+        );
+        assert_eq_sig!(
+            AbiType::reference(AbiType::fixedarray(AbiType::Address, 123)),
+            "ref(address[123])"
+        );
+
+        assert_eq_sig!(
+            AbiType::array(AbiType::unnamed_tuple([
+                AbiType::Bool,
+                AbiType::Uint(123),
+                AbiType::array(AbiType::map(
+                    PlainAbiType::Address,
+                    AbiType::unnamed_tuple([AbiType::Uint(32), AbiType::String]),
+                )),
+            ])),
+            "(bool,uint123,map(address,(uint32,string))[])[]"
+        );
+    }
+
+    #[test]
+    fn correct_simple_signature() {
+        macro_rules! assert_eq_sig {
+            ($expr:expr, $signature:literal) => {
+                assert_eq!(format!("{}", ($expr).display_simple()), $signature)
+            };
+        }
+
+        assert_eq_sig!(AbiType::Uint(100), "uint100");
+        assert_eq_sig!(AbiType::Int(100), "int100");
+        assert_eq_sig!(AbiType::varuint(16), "varuint16");
+        assert_eq_sig!(AbiType::varint(16), "varint16");
+        assert_eq_sig!(AbiType::Bool, "bool");
+        assert_eq_sig!(AbiType::Cell, "cell");
+        assert_eq_sig!(AbiType::Address, "address");
+        assert_eq_sig!(AbiType::Bytes, "bytes");
+        assert_eq_sig!(AbiType::FixedBytes(123), "fixedbytes123");
+        assert_eq_sig!(AbiType::String, "string");
+        assert_eq_sig!(AbiType::Token, "gram");
+
+        assert_eq_sig!(AbiType::unnamed_tuple([]), "tuple");
+        assert_eq_sig!(AbiType::unnamed_tuple([AbiType::Uint(321)]), "tuple");
+        assert_eq_sig!(
+            AbiType::unnamed_tuple([AbiType::Uint(123), AbiType::Address]),
+            "tuple"
+        );
+
+        assert_eq_sig!(AbiType::array(AbiType::Address), "address[]");
+        assert_eq_sig!(
+            AbiType::array(AbiType::array(AbiType::Address)),
+            "address[][]"
+        );
+        assert_eq_sig!(AbiType::array(AbiType::unnamed_tuple([])), "tuple[]");
+        assert_eq_sig!(
+            AbiType::array(AbiType::unnamed_tuple([AbiType::Address, AbiType::Bool])),
+            "tuple[]"
+        );
+
+        assert_eq_sig!(AbiType::fixedarray(AbiType::Address, 10), "address[10]");
+        assert_eq_sig!(
+            AbiType::fixedarray(AbiType::fixedarray(AbiType::Address, 123), 321),
+            "address[123][321]"
+        );
+        assert_eq_sig!(
+            AbiType::fixedarray(AbiType::unnamed_tuple([]), 100),
+            "tuple[100]"
+        );
+        assert_eq_sig!(
+            AbiType::fixedarray(
+                AbiType::unnamed_tuple([AbiType::Address, AbiType::Bool]),
+                1000
+            ),
+            "tuple[1000]"
+        );
+
+        assert_eq_sig!(
+            AbiType::map(PlainAbiType::Uint(123), AbiType::Address),
+            "map(uint123,address)"
+        );
+        assert_eq_sig!(
+            AbiType::map(PlainAbiType::Uint(123), AbiType::unnamed_tuple([])),
+            "map(uint123,tuple)"
+        );
+        assert_eq_sig!(
+            AbiType::map(
+                PlainAbiType::Uint(123),
+                AbiType::unnamed_tuple([AbiType::Address, AbiType::Bool])
+            ),
+            "map(uint123,tuple)"
+        );
+        assert_eq_sig!(
+            AbiType::map(
+                PlainAbiType::Uint(123),
+                AbiType::fixedarray(AbiType::Address, 123)
+            ),
+            "map(uint123,address[123])"
+        );
+
+        assert_eq_sig!(AbiType::optional(AbiType::Address), "optional(address)");
+        assert_eq_sig!(
+            AbiType::optional(AbiType::unnamed_tuple([])),
+            "optional(tuple)"
+        );
+        assert_eq_sig!(
+            AbiType::optional(AbiType::unnamed_tuple([AbiType::Address, AbiType::Bool])),
+            "optional(tuple)"
+        );
+        assert_eq_sig!(
+            AbiType::optional(AbiType::fixedarray(AbiType::Address, 123)),
+            "optional(address[123])"
+        );
+
+        assert_eq_sig!(AbiType::reference(AbiType::Address), "ref(address)");
+        assert_eq_sig!(AbiType::reference(AbiType::unnamed_tuple([])), "ref(tuple)");
+        assert_eq_sig!(
+            AbiType::reference(AbiType::unnamed_tuple([AbiType::Address, AbiType::Bool])),
+            "ref(tuple)"
+        );
+        assert_eq_sig!(
+            AbiType::reference(AbiType::fixedarray(AbiType::Address, 123)),
+            "ref(address[123])"
+        );
+
+        assert_eq_sig!(
+            AbiType::array(AbiType::unnamed_tuple([
+                AbiType::Bool,
+                AbiType::Uint(123),
+                AbiType::array(AbiType::map(
+                    PlainAbiType::Address,
+                    AbiType::unnamed_tuple([AbiType::Uint(32), AbiType::String]),
+                )),
+            ])),
+            "tuple[]"
+        );
+    }
+
+    #[test]
+    fn from_to_json() {
+        const RAW: &str = r###"{
+            "name":"info",
+            "type":"tuple",
+            "components": [
+                {"name":"total","type":"uint64"},
+                {"name":"withdrawValue","type":"uint64"},
+                {"name":"reinvest","type":"bool"},
+                {"name":"reward","type":"uint64"},
+                {"name":"stakes","type":"map(uint64,uint64)"},
+                {"components":[{"name":"remainingAmount","type":"uint64"},{"name":"lastWithdrawalTime","type":"uint64"},{"name":"withdrawalPeriod","type":"uint32"},{"name":"withdrawalValue","type":"uint64"},{"name":"owner","type":"address"}],"name":"vestings","type":"map(uint64,tuple)"},
+                {"components":[{"name":"remainingAmount","type":"uint64"},{"name":"lastWithdrawalTime","type":"uint64"},{"name":"withdrawalPeriod","type":"uint32"},{"name":"withdrawalValue","type":"uint64"},{"name":"owner","type":"address"}],"name":"locks","type":"map(uint64,tuple)"},
+                {"name":"vestingDonor","type":"address"},
+                {"name":"lockDonor","type":"address"}
+            ]
+        }"###;
+
+        let ty = serde_json::from_str::<NamedAbiType>(RAW).unwrap();
+
+        let complex_item_ty = AbiType::tuple([
+            ("remainingAmount", u64::abi_type()),
+            ("lastWithdrawalTime", u64::abi_type()),
+            ("withdrawalPeriod", u32::abi_type()),
+            ("withdrawalValue", u64::abi_type()),
+            ("owner", IntAddr::abi_type()),
+        ]);
+
+        assert_eq!(
+            ty,
+            NamedAbiType::new(
+                "info",
+                AbiType::Tuple(Arc::from(vec![
+                    NamedAbiType::new("total", u64::abi_type()),
+                    NamedAbiType::new("withdrawValue", u64::abi_type()),
+                    NamedAbiType::new("reinvest", bool::abi_type()),
+                    NamedAbiType::new("reward", u64::abi_type()),
+                    NamedAbiType::new("stakes", BTreeMap::<u64, u64>::abi_type()),
+                    NamedAbiType::new(
+                        "vestings",
+                        AbiType::map(u64::plain_abi_type(), complex_item_ty.clone())
+                    ),
+                    NamedAbiType::new(
+                        "locks",
+                        AbiType::map(u64::plain_abi_type(), complex_item_ty)
+                    ),
+                    NamedAbiType::new("vestingDonor", IntAddr::abi_type()),
+                    NamedAbiType::new("lockDonor", IntAddr::abi_type()),
+                ]))
+            )
+        );
+
+        let normalized = serde_json::from_str::<serde_json::Value>(RAW).unwrap();
+        let serialized = serde_json::to_value(ty).unwrap();
+        assert_eq!(serialized, normalized);
+    }
 }

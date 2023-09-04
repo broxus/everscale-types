@@ -140,7 +140,7 @@ impl<T: WithAbiType> WithAbiType for crate::models::Lazy<T> {
 
 impl WithAbiType for () {
     fn abi_type() -> AbiType {
-        AbiType::Tuple(Vec::new())
+        AbiType::Tuple(Arc::from([].as_slice()))
     }
 }
 
@@ -148,9 +148,9 @@ macro_rules! impl_with_abi_type_for_tuple {
     ($($i:literal: $t:ident),+$(,)?) => {
         impl<$($t: WithAbiType),*> WithAbiType for ($($t),+,) {
             fn abi_type() -> AbiType {
-                AbiType::Tuple(vec![
+                AbiType::Tuple(Arc::from(vec![
                     $(NamedAbiType::from_index($i, <$t as WithAbiType>::abi_type())),*
-                ])
+                ]))
             }
         }
     };
@@ -323,7 +323,7 @@ impl_into_plain_abi! {
     },
 }
 
-/// A type with can be converted into ABI value.
+/// A type with can be converted into an ABI value.
 pub trait IntoAbi {
     /// Returns a corresponding ABI value.
     ///

@@ -18,7 +18,7 @@ mod ser;
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct NamedAbiValue {
     /// Item name.
-    pub name: String,
+    pub name: Arc<str>,
     /// ABI value.
     pub value: AbiValue,
 }
@@ -36,7 +36,7 @@ impl NamedAbiValue {
     /// Creates a named ABI value with an index name (e.g. `value123`).
     pub fn from_index(index: usize, value: AbiValue) -> Self {
         Self {
-            name: format!("value{index}"),
+            name: format!("value{index}").into(),
             value,
         }
     }
@@ -45,7 +45,10 @@ impl NamedAbiValue {
 impl From<(String, AbiValue)> for NamedAbiValue {
     #[inline]
     fn from((name, value): (String, AbiValue)) -> Self {
-        Self { name, value }
+        Self {
+            name: name.into(),
+            value,
+        }
     }
 }
 
@@ -53,7 +56,7 @@ impl<'a> From<(&'a str, AbiValue)> for NamedAbiValue {
     #[inline]
     fn from((name, value): (&'a str, AbiValue)) -> Self {
         Self {
-            name: name.to_owned(),
+            name: Arc::from(name),
             value,
         }
     }
@@ -298,7 +301,7 @@ impl From<PlainAbiValue> for AbiValue {
     }
 }
 
-/// ABI header value.
+/// Contract header value.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum AbiHeader {
     /// `time` header.
