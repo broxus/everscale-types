@@ -8,6 +8,7 @@ pub use self::value::{AbiHeader, AbiValue, NamedAbiValue, PlainAbiValue};
 
 pub mod error;
 
+mod contract;
 mod traits;
 mod ty;
 mod value;

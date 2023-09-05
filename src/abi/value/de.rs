@@ -25,7 +25,7 @@ impl NamedAbiValue {
         slice: &mut CellSlice,
     ) -> Result<Vec<Self>> {
         let result = ok!(Self::load_tuple_ext(items, version, true, false, slice));
-        ok!(ensure_slice_empty(slice, false));
+        ok!(AbiValue::check_remaining(slice, false));
         Ok(result)
     }
 
@@ -68,7 +68,7 @@ impl NamedAbiValue {
     /// Use [`NamedAbiValue::load_partial`] if you allow an ABI type to be a prefix.
     pub fn load(ty: &NamedAbiType, version: AbiVersion, slice: &mut CellSlice) -> Result<Self> {
         let res = ok!(Self::load_ext(ty, version, true, false, slice));
-        ok!(ensure_slice_empty(slice, false));
+        ok!(AbiValue::check_remaining(slice, false));
         Ok(res)
     }
 
@@ -105,6 +105,15 @@ impl NamedAbiValue {
 }
 
 impl AbiValue {
+    /// Checks whether the slice is empty and raises an error if we didn't expect it to be empty.
+    pub fn check_remaining(slice: &mut CellSlice, allow_partial: bool) -> Result<()> {
+        anyhow::ensure!(
+            allow_partial || slice.is_data_empty() && slice.is_refs_empty(),
+            AbiError::IncompleteDeserialization
+        );
+        Ok(())
+    }
+
     /// Loads exactly one unnamed tuple from the specified slice requiring it to be fully consumed.
     ///
     /// Use [`AbiValue::load_tuple_partial`] if you allow an ABI type to be a prefix.
@@ -114,7 +123,7 @@ impl AbiValue {
         slice: &mut CellSlice,
     ) -> Result<Vec<Self>> {
         let res = ok!(Self::load_tuple_ext(types, version, true, false, slice));
-        ok!(ensure_slice_empty(slice, false));
+        ok!(Self::check_remaining(slice, false));
         Ok(res)
     }
 
@@ -151,7 +160,7 @@ impl AbiValue {
     /// Use [`AbiValue::load_partial`] if you allow an ABI type to be a prefix.
     pub fn load(ty: &AbiType, version: AbiVersion, slice: &mut CellSlice) -> Result<Self> {
         let res = ok!(Self::load_ext(ty, version, true, false, slice));
-        ok!(ensure_slice_empty(slice, false));
+        ok!(Self::check_remaining(slice, false));
         Ok(res)
     }
 
@@ -257,14 +266,6 @@ fn preload_bits(bits: u16, slice: &mut CellSlice) -> Result<()> {
         anyhow::bail!(Error::CellUnderflow);
     }
 
-    Ok(())
-}
-
-fn ensure_slice_empty(slice: &mut CellSlice, allow_partial: bool) -> Result<()> {
-    anyhow::ensure!(
-        allow_partial || slice.is_data_empty() && slice.is_refs_empty(),
-        AbiError::IncompleteDeserialization
-    );
     Ok(())
 }
 
@@ -421,7 +422,7 @@ fn load_array_raw(
     for value in dict.values().take(len) {
         let slice = &mut value?;
         let value = ok!(AbiValue::load_ext(ty, version, true, allow_partial, slice));
-        ok!(ensure_slice_empty(slice, allow_partial));
+        ok!(AbiValue::check_remaining(slice, allow_partial));
         result.push(value);
     }
 
@@ -507,7 +508,7 @@ fn load_optional(
         let cell = ok!(load_cell(version, last, slice));
         let slice = &mut cell.as_slice()?;
         let value = ok!(AbiValue::load_ext(ty, version, true, allow_partial, slice));
-        ok!(ensure_slice_empty(slice, allow_partial));
+        ok!(AbiValue::check_remaining(slice, allow_partial));
         Ok(Some(Box::new(value)))
     }
 }
@@ -522,7 +523,7 @@ fn load_ref(
     let cell = ok!(load_cell(version, last, slice));
     let slice = &mut cell.as_slice()?;
     let value = ok!(AbiValue::load_ext(ty, version, true, allow_partial, slice));
-    ok!(ensure_slice_empty(slice, allow_partial));
+    ok!(AbiValue::check_remaining(slice, allow_partial));
     Ok(Box::new(value))
 }
 

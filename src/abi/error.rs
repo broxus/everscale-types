@@ -99,4 +99,20 @@ pub enum AbiError {
         /// Length of the parsed bytes.
         len: usize,
     },
+    /// Expected a different function id while decoding function input.
+    #[error("expected function input id 0x{expected:08x}, got 0x{id:08x}")]
+    InputIdMismatch {
+        /// Function input id.
+        expected: u32,
+        /// Id from parsed data.
+        id: u32,
+    },
+    /// Expected a different function id while decoding function output.
+    #[error("expected function output id 0x{expected:08x}, got 0x{id:08x}")]
+    OutputIdMismatch {
+        /// Function output id.
+        expected: u32,
+        /// Id from parsed data.
+        id: u32,
+    },
 }
