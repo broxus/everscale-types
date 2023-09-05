@@ -284,14 +284,15 @@ fn load_uint_plain(bits: u16, slice: &mut CellSlice) -> Result<BigUint, Error> {
         1..=64 => slice.load_uint(bits).map(BigUint::from),
         _ => {
             let rem = bits % 8;
-            let mut buffer = [0u8; 33];
-            slice.load_raw(&mut buffer, bits).map(|buffer| {
-                let mut int = BigUint::from_bytes_be(buffer);
-                if rem != 0 {
-                    int >>= 8 - rem;
-                }
-                int
-            })
+            let mut buffer = vec![0u8; ((bits + 7) / 8) as usize];
+            slice.load_raw(&mut buffer, bits)?;
+
+            buffer.reverse();
+            let mut int = BigUint::from_bytes_le(&mut buffer);
+            if rem != 0 {
+                int >>= 8 - rem;
+            }
+            Ok(int)
         }
     }
 }
@@ -308,14 +309,15 @@ fn load_int_plain(bits: u16, slice: &mut CellSlice) -> Result<BigInt, Error> {
         }),
         _ => {
             let rem = bits % 8;
-            let mut buffer = [0u8; 33];
-            slice.load_raw(&mut buffer, bits).map(|buffer| {
-                let mut int = BigInt::from_signed_bytes_be(buffer);
-                if rem != 0 {
-                    int >>= 8 - rem;
-                }
-                int
-            })
+            let mut buffer = vec![0u8; ((bits + 7) / 8) as usize];
+            slice.load_raw(&mut buffer, bits)?;
+
+            buffer.reverse();
+            let mut int = BigInt::from_signed_bytes_le(&buffer);
+            if rem != 0 {
+                int >>= 8 - rem;
+            }
+            Ok(int)
         }
     }
 }
@@ -464,7 +466,7 @@ fn load_map(
 ) -> Result<BTreeMap<PlainAbiValue, AbiValue>> {
     ok!(preload_bits(1, slice));
 
-    let key_bits = key_ty.max_bits();
+    let key_bits = key_ty.key_bits();
     let dict = Option::<Cell>::load_from(slice)?;
 
     let mut result = BTreeMap::new();
@@ -499,13 +501,13 @@ fn load_optional(
 
     let (max_ty_bits, max_ty_refs) = ty.max_size();
     if max_ty_bits < MAX_BIT_LEN as usize && max_ty_refs < MAX_REF_COUNT {
+        let value = ok!(AbiValue::load_ext(ty, version, last, allow_partial, slice));
+        Ok(Some(Box::new(value)))
+    } else {
         let cell = ok!(load_cell(version, last, slice));
         let slice = &mut cell.as_slice()?;
         let value = ok!(AbiValue::load_ext(ty, version, true, allow_partial, slice));
         ok!(ensure_slice_empty(slice, allow_partial));
-        Ok(Some(Box::new(value)))
-    } else {
-        let value = ok!(AbiValue::load_ext(ty, version, last, allow_partial, slice));
         Ok(Some(Box::new(value)))
     }
 }
@@ -526,10 +528,14 @@ fn load_ref(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use crate::boc::Boc;
+    use crate::cell::DefaultFinalizer;
+    use crate::dict::Dict;
     use crate::models::{StdAddr, VarAddr};
     use crate::num::{Uint9, VarUint24, VarUint56};
-    use crate::prelude::{CellBuilder, CellFamily, Store};
+    use crate::prelude::{CellBuilder, CellFamily, HashBytes, Store};
 
     use super::*;
 
@@ -891,26 +897,25 @@ mod tests {
 
     #[test]
     fn decode_tuple_four_refs_and_four_uint256() -> Result<()> {
-        let bytes = Bytes::from(vec![0xff; 32]);
-        let mut bytes_builder = CellBuilder::new();
-        bytes_builder.store_raw(&bytes, 256)?;
+        let bytes = HashBytes([0xff; 32]);
+        let bytes_cell = CellBuilder::build_from(&bytes)?;
 
         let cell = {
             let mut builder = CellBuilder::new();
             builder.store_u32(0)?;
             builder.store_reference(Cell::empty_cell())?;
 
-            builder.store_reference(bytes_builder.clone().build()?)?;
-            builder.store_reference(bytes_builder.clone().build()?)?;
+            builder.store_reference(bytes_cell.clone())?;
+            builder.store_reference(bytes_cell.clone())?;
 
             let mut second_builder = CellBuilder::new();
-            second_builder.store_reference(bytes_builder.clone().build()?)?;
-            second_builder.store_builder(&bytes_builder)?;
-            second_builder.store_builder(&bytes_builder)?;
-            second_builder.store_builder(&bytes_builder)?;
+            second_builder.store_reference(bytes_cell.clone())?;
+            second_builder.store_u256(&bytes)?;
+            second_builder.store_u256(&bytes)?;
+            second_builder.store_u256(&bytes)?;
 
             let mut third_builder = CellBuilder::new();
-            third_builder.store_builder(&bytes_builder)?;
+            third_builder.store_u256(&bytes)?;
 
             second_builder.store_reference(third_builder.build()?)?;
             builder.store_reference(second_builder.build()?)?;
@@ -921,13 +926,13 @@ mod tests {
         let value = AbiValue::unnamed_tuple([
             AbiValue::uint(32, 0_u32),
             AbiValue::Cell(Cell::empty_cell()),
-            AbiValue::Cell(bytes_builder.clone().build()?),
-            AbiValue::Bytes(bytes.clone()),
-            AbiValue::Cell(bytes_builder.build()?),
-            AbiValue::uint(256, BigUint::from_bytes_be(&bytes)),
-            AbiValue::uint(256, BigUint::from_bytes_be(&bytes)),
-            AbiValue::uint(256, BigUint::from_bytes_be(&bytes)),
-            AbiValue::uint(256, BigUint::from_bytes_be(&bytes)),
+            AbiValue::Cell(bytes_cell.clone()),
+            AbiValue::Bytes(Bytes::copy_from_slice(bytes.as_slice())),
+            AbiValue::Cell(bytes_cell),
+            AbiValue::uint(256, BigUint::from_bytes_be(bytes.as_slice())),
+            AbiValue::uint(256, BigUint::from_bytes_be(bytes.as_slice())),
+            AbiValue::uint(256, BigUint::from_bytes_be(bytes.as_slice())),
+            AbiValue::uint(256, BigUint::from_bytes_be(bytes.as_slice())),
         ]);
 
         for v in VX_X {
@@ -939,45 +944,343 @@ mod tests {
 
     #[test]
     fn decode_tuple_four_refs_and_one_uint256() -> Result<()> {
-        let bytes = Bytes::from(vec![0xff; 32]);
-        let mut bytes_builder = CellBuilder::new();
-        bytes_builder.store_raw(&bytes, 256)?;
+        let bytes = HashBytes([0x55; 32]);
+        let bytes_cell = CellBuilder::build_from(&bytes)?;
 
         let mut builder = CellBuilder::new();
         builder.store_u32(0)?;
         builder.store_reference(Cell::empty_cell())?;
 
-        builder.store_reference(bytes_builder.clone().build()?)?;
-        builder.store_reference(bytes_builder.clone().build()?)?;
+        builder.store_reference(bytes_cell.clone())?;
+        builder.store_reference(bytes_cell.clone())?;
 
         let cell_v2 = {
             let mut builder = builder.clone();
-            builder.store_reference(bytes_builder.clone().build()?)?;
-            builder.store_builder(&bytes_builder)?;
+            builder.store_reference(bytes_cell.clone())?;
+            builder.store_u256(&bytes)?;
             builder.build()?
         };
 
         let cell_v1 = {
-            let mut second_builder = CellBuilder::new();
-            second_builder.store_reference(bytes_builder.clone().build()?)?;
-            second_builder.store_builder(&bytes_builder)?;
+            let mut child_builder = CellBuilder::new();
+            child_builder.store_reference(bytes_cell.clone())?;
+            child_builder.store_u256(&bytes)?;
 
-            builder.store_reference(second_builder.build()?)?;
+            builder.store_reference(child_builder.build()?)?;
             builder.build()?
         };
 
         let value = AbiValue::unnamed_tuple([
             AbiValue::uint(32, 0_u32),
             AbiValue::Cell(Cell::empty_cell()),
-            AbiValue::Cell(bytes_builder.clone().build()?),
-            AbiValue::Bytes(bytes.clone()),
-            AbiValue::Cell(bytes_builder.build()?),
-            AbiValue::uint(256, BigUint::from_bytes_be(&bytes)),
+            AbiValue::Cell(bytes_cell.clone()),
+            AbiValue::Bytes(Bytes::copy_from_slice(bytes.as_slice())),
+            AbiValue::Cell(bytes_cell.clone()),
+            AbiValue::uint(256, BigUint::from_bytes_be(bytes.as_slice())),
         ]);
 
         load_simple(AbiVersion::V1_0, cell_v1, value.clone())?;
         for v in V2_X {
             load_simple(v, cell_v2.clone(), value.clone())?;
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn decode_map_simple() -> Result<()> {
+        let bytes = HashBytes([0x55; 32]);
+        let bytes_cell = CellBuilder::build_from(&bytes)?;
+
+        let mut bytes_map = Dict::<u8, Cell>::new();
+        for i in 1..=3 {
+            bytes_map.set(i, bytes_cell.clone())?;
+        }
+        let bytes_map_value = AbiValue::map([
+            (1u8, Bytes::copy_from_slice(bytes.as_slice())),
+            (2, Bytes::copy_from_slice(bytes.as_slice())),
+            (3, Bytes::copy_from_slice(bytes.as_slice())),
+        ]);
+
+        let mut int_map = Dict::<i16, i128>::new();
+        for i in -1..=1 {
+            int_map.set(i, i as i128)?;
+        }
+        let int_map_value = AbiValue::map([(-1i16, -1i128), (0, 0), (1, 1)]);
+
+        let mut tuples_map = Dict::<u128, (u32, bool)>::new();
+        for i in 1..=5 {
+            tuples_map.set(i as u128, (i, i % 2 != 0))?;
+        }
+        let tuples_map_value = AbiValue::map([
+            (1u128, (1u32, true)),
+            (2, (2, false)),
+            (3, (3, true)),
+            (4, (4, false)),
+            (5, (5, true)),
+        ]);
+
+        //
+        let finalizer = &mut Cell::default_finalizer();
+        let mut builder = CellBuilder::new();
+        builder.store_u32(0)?;
+        builder.store_reference(Cell::empty_cell())?;
+
+        bytes_map.store_into(&mut builder, finalizer)?;
+        int_map.store_into(&mut builder, finalizer)?;
+
+        let cell_v2 = {
+            let mut builder = builder.clone();
+            tuples_map.store_into(&mut builder, finalizer)?;
+            builder.store_bit_zero()?;
+            builder.build()?
+        };
+
+        let cell_v1 = {
+            let mut child_builder = CellBuilder::new();
+            tuples_map.store_into(&mut child_builder, finalizer)?;
+            child_builder.store_bit_zero()?;
+
+            builder.store_reference(child_builder.build()?)?;
+            builder.build()?
+        };
+
+        let value = AbiValue::unnamed_tuple([
+            AbiValue::uint(32, 0u32),
+            AbiValue::Cell(Cell::empty_cell()),
+            bytes_map_value,
+            int_map_value,
+            tuples_map_value,
+            AbiValue::map([] as [(HashBytes, bool); 0]),
+        ]);
+
+        for v in VX_X {
+            load_simple(v, cell_v1.clone(), value.clone())?;
+        }
+
+        for v in V2_X {
+            load_simple(v, cell_v2.clone(), value.clone())?;
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn decode_map_address() -> Result<()> {
+        let addr1 = StdAddr::new(0, HashBytes([0x11; 32]));
+        let addr2 = StdAddr::new(0, HashBytes([0x22; 32]));
+
+        let mut addr_map = Dict::<StdAddr, u32>::new();
+        addr_map.set(&addr1, 123)?;
+        addr_map.set(&addr2, 456)?;
+
+        let addr_map_value = AbiValue::map([(addr1, 123u32), (addr2, 456)]);
+
+        //
+        let cell = {
+            let mut builder = CellBuilder::new();
+            builder.store_u32(0)?;
+            builder.store_reference(Cell::empty_cell())?;
+            addr_map.store_into(&mut builder, &mut Cell::default_finalizer())?;
+            builder.build()?
+        };
+
+        let value = AbiValue::unnamed_tuple([
+            AbiValue::uint(32, 0u32),
+            AbiValue::Cell(Cell::empty_cell()),
+            addr_map_value,
+        ]);
+
+        for v in VX_X {
+            load_simple(v, cell.clone(), value.clone())?;
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn decode_map_big_value() -> Result<()> {
+        let mut map_value = CellBuilder::new();
+        map_value.store_u128(0)?;
+        map_value.store_u128(1)?;
+        map_value.store_u128(0)?;
+        map_value.store_u128(2)?;
+        map_value.store_u128(0)?;
+        map_value.store_u128(3)?;
+        map_value.store_reference(CellBuilder::build_from((0u128, 4u128))?)?;
+        let map_value = map_value.build()?;
+
+        let mut key = CellBuilder::new();
+        key.store_u128(0)?;
+        key.store_u128(123)?;
+
+        let mut map = RawDict::<256>::new();
+        map.set(key.as_data_slice(), &map_value)?;
+
+        //
+        let mut key = CellBuilder::new();
+        key.store_u32(0)?;
+
+        let mut array = RawDict::<32>::new();
+        array.set(key.as_data_slice(), &map_value)?;
+
+        //
+        let tuple_value = AbiValue::unnamed_tuple([
+            AbiValue::uint(256, 1_u32),
+            AbiValue::uint(256, 2_u32),
+            AbiValue::uint(256, 3_u32),
+            AbiValue::uint(256, 4_u32),
+        ]);
+
+        let value = AbiValue::unnamed_tuple([
+            AbiValue::uint(32, 0u32),
+            AbiValue::Cell(Cell::empty_cell()),
+            AbiValue::Map(
+                PlainAbiType::Uint(256),
+                Arc::new(tuple_value.get_type()),
+                BTreeMap::from([(
+                    PlainAbiValue::Uint(256, BigUint::from(123u32)),
+                    tuple_value.clone(),
+                )]),
+            ),
+            AbiValue::Array(Arc::new(tuple_value.get_type()), vec![tuple_value]),
+        ]);
+
+        //
+        let cell = {
+            let finalizer = &mut Cell::default_finalizer();
+            let mut builder = CellBuilder::new();
+            builder.store_u32(0)?;
+            builder.store_reference(Cell::empty_cell())?;
+
+            map.store_into(&mut builder, finalizer)?;
+
+            builder.store_u32(1)?;
+            array.store_into(&mut builder, finalizer)?;
+
+            builder.build()?
+        };
+
+        for v in V2_X {
+            load_simple(v, cell.clone(), value.clone())?;
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn decode_optional() -> Result<()> {
+        const STR: &str = "Some string";
+
+        let string_cell = {
+            let mut builder = CellBuilder::new();
+            builder.store_raw(STR.as_bytes(), (STR.len() * 8) as u16)?;
+            builder.build()?
+        };
+        let string_value = AbiValue::String(STR.to_owned());
+
+        let tuple_value = AbiValue::unnamed_tuple([
+            string_value.clone(),
+            string_value.clone(),
+            string_value.clone(),
+            string_value.clone(),
+        ]);
+
+        let value = AbiValue::unnamed_tuple([
+            AbiValue::uint(32, 0u32),
+            AbiValue::Cell(Cell::empty_cell()),
+            AbiValue::varint(16, -123),
+            AbiValue::varuint(32, 456u32),
+            AbiValue::optional(None::<bool>),
+            AbiValue::Optional(
+                Arc::new(AbiType::Uint(1022)),
+                Some(Box::new(AbiValue::uint(1022, 1u32))),
+            ),
+            AbiValue::Optional(
+                Arc::new(AbiType::varuint(128)),
+                Some(Box::new(AbiValue::varuint(128, 123u32))),
+            ),
+            AbiValue::Optional(
+                Arc::new(tuple_value.get_type()),
+                Some(Box::new(tuple_value)),
+            ),
+        ]);
+
+        let cell = {
+            let mut builder = CellBuilder::new();
+            builder.store_u32(0)?;
+            builder.store_reference(Cell::empty_cell())?;
+
+            builder.store_small_uint(1, 4)?;
+            builder.store_u8(-123i8 as _)?;
+
+            builder.store_small_uint(2, 5)?;
+            builder.store_u16(456)?;
+
+            builder.store_bit_zero()?;
+
+            builder.store_reference({
+                let mut builder = CellBuilder::new();
+                builder.store_bit_one()?;
+                builder.store_zeros(127 * 8)?;
+                builder.store_small_uint(1, 6)?;
+
+                builder.store_reference({
+                    let mut builder = CellBuilder::new();
+                    builder.store_bit_one()?;
+                    builder.store_reference({
+                        let mut builder = CellBuilder::new();
+                        builder.store_small_uint(1, 7)?;
+                        builder.store_u8(123)?;
+                        builder.build()?
+                    })?;
+
+                    builder.store_bit_one()?;
+                    builder.store_reference(CellBuilder::build_from((
+                        string_cell.clone(),
+                        string_cell.clone(),
+                        string_cell.clone(),
+                        string_cell.clone(),
+                    ))?)?;
+
+                    builder.build()?
+                })?;
+
+                builder.build()?
+            })?;
+
+            builder.build()?
+        };
+
+        for v in V2_X {
+            load_simple(v, cell.clone(), value.clone())?;
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn decode_ref() -> Result<()> {
+        let cell = {
+            let mut builder = CellBuilder::new();
+            builder.store_u32(0)?;
+            builder.store_reference(Cell::empty_cell())?;
+
+            builder.store_reference(CellBuilder::build_from(123u64)?)?;
+            builder.store_reference(CellBuilder::build_from((true, Cell::empty_cell()))?)?;
+
+            builder.build()?
+        };
+
+        let value = AbiValue::unnamed_tuple([
+            AbiValue::uint(32, 0u32),
+            AbiValue::Cell(Cell::empty_cell()),
+            AbiValue::reference(123u64),
+            AbiValue::reference((true, Cell::empty_cell())),
+        ]);
+
+        for v in V2_X {
+            load_simple(v, cell.clone(), value.clone())?;
         }
 
         Ok(())

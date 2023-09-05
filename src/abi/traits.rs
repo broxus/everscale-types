@@ -40,11 +40,11 @@ impl_with_abi_type! {
     Uint12 => Uint(12),
     Uint15 => Uint(15),
 
-    i8 => Uint(8),
-    i16 => Uint(16),
-    i32 => Uint(32),
-    i64 => Uint(64),
-    i128 => Uint(128),
+    i8 => Int(8),
+    i16 => Int(16),
+    i32 => Int(32),
+    i64 => Int(64),
+    i128 => Int(128),
 
     bool => Bool,
 
@@ -192,11 +192,11 @@ impl_with_plain_abi_type! {
     Uint12 => Uint(12),
     Uint15 => Uint(15),
 
-    i8 => Uint(8),
-    i16 => Uint(16),
-    i32 => Uint(32),
-    i64 => Uint(64),
-    i128 => Uint(128),
+    i8 => Int(8),
+    i16 => Int(16),
+    i32 => Int(32),
+    i64 => Int(64),
+    i128 => Int(128),
 
     bool => Bool,
 

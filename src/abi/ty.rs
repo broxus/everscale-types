@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::error::{ParseAbiTypeError, ParseNamedAbiTypeError};
 use crate::cell::{MAX_BIT_LEN, MAX_REF_COUNT};
-use crate::models::IntAddr;
+use crate::models::{IntAddr, StdAddr};
 use crate::num::Tokens;
 
 /// ABI value type with name.
@@ -549,11 +549,11 @@ pub enum PlainAbiType {
 
 impl PlainAbiType {
     /// Returns the maximum number of bits that this type can occupy.
-    pub fn max_bits(&self) -> u16 {
+    pub fn key_bits(&self) -> u16 {
         match self {
             Self::Uint(n) | Self::Int(n) => *n,
             Self::Bool => 1,
-            Self::Address => IntAddr::BITS_MAX,
+            Self::Address => StdAddr::BITS_WITHOUT_ANYCAST,
         }
     }
 }

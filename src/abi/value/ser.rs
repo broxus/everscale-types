@@ -351,7 +351,7 @@ fn write_map(
     version: AbiVersion,
     target: &mut CellBuilder,
 ) -> Result<(u16, u8), Error> {
-    let key_bits = key_ty.max_bits();
+    let key_bits = key_ty.key_bits();
     let inline_value = fits_into_dict_leaf(key_bits, value_ty.max_bits());
 
     let mut dict = None::<Cell>;
