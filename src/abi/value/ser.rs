@@ -508,8 +508,11 @@ impl Store for PlainAbiValue {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use bytes::Bytes;
 
+    use crate::dict::Dict;
     use crate::models::{StdAddr, VarAddr};
     use crate::num::Uint9;
     use crate::prelude::{CellFamily, HashBytes};
@@ -789,6 +792,413 @@ mod tests {
                         .join(" "),
                 ),
             );
+        }
+    }
+
+    #[test]
+    fn encode_nested_simple_tuple() {
+        let value = AbiValue::unnamed_tuple([
+            AbiValue::uint(32, 0u32),
+            AbiValue::Cell(Cell::empty_cell()),
+            AbiValue::Bool(false),
+            AbiValue::unnamed_tuple([
+                AbiValue::int(8, -15),
+                AbiValue::int(16, -9845),
+                AbiValue::unnamed_tuple([
+                    AbiValue::int(32, -1),
+                    AbiValue::int(64, 12345678),
+                    AbiValue::int(128, -12345678),
+                ]),
+            ]),
+            AbiValue::unnamed_tuple([
+                AbiValue::uint(8, 255_u8),
+                AbiValue::uint(16, 0_u16),
+                AbiValue::unnamed_tuple([
+                    AbiValue::uint(32, 256_u32),
+                    AbiValue::uint(64, 123_u64),
+                    AbiValue::uint(128, 1234567890_u128),
+                ]),
+            ]),
+        ]);
+
+        for v in VX_X {
+            println!("ABIv{v}");
+
+            let cell = value.make_cell(v).unwrap();
+            assert_eq!(
+                cell.bit_len(),
+                32 + 1 + 8 + 16 + 32 + 64 + 128 + 8 + 16 + 32 + 64 + 128
+            );
+            assert_eq!(cell.reference_count(), 1);
+
+            check_encoding(v, value.clone());
+        }
+    }
+
+    #[test]
+    fn encode_tuple_four_refs_and_four_uint256() {
+        let bytes = HashBytes([0xff; 32]);
+        let bytes_cell = CellBuilder::build_from(bytes).unwrap();
+
+        let cell = {
+            let mut builder = CellBuilder::new();
+            builder.store_u32(0).unwrap();
+            builder.store_reference(Cell::empty_cell()).unwrap();
+
+            builder.store_reference(bytes_cell.clone()).unwrap();
+            builder.store_reference(bytes_cell.clone()).unwrap();
+
+            let mut second_builder = CellBuilder::new();
+            second_builder.store_reference(bytes_cell.clone()).unwrap();
+            second_builder.store_u256(&bytes).unwrap();
+            second_builder.store_u256(&bytes).unwrap();
+            second_builder.store_u256(&bytes).unwrap();
+
+            let mut third_builder = CellBuilder::new();
+            third_builder.store_u256(&bytes).unwrap();
+
+            second_builder
+                .store_reference(third_builder.build().unwrap())
+                .unwrap();
+            builder
+                .store_reference(second_builder.build().unwrap())
+                .unwrap();
+
+            builder.build().unwrap()
+        };
+
+        let value = AbiValue::unnamed_tuple([
+            AbiValue::uint(32, 0_u32),
+            AbiValue::Cell(Cell::empty_cell()),
+            AbiValue::Cell(bytes_cell.clone()),
+            AbiValue::Bytes(Bytes::copy_from_slice(bytes.as_slice())),
+            AbiValue::Cell(bytes_cell),
+            AbiValue::uint(256, BigUint::from_bytes_be(bytes.as_slice())),
+            AbiValue::uint(256, BigUint::from_bytes_be(bytes.as_slice())),
+            AbiValue::uint(256, BigUint::from_bytes_be(bytes.as_slice())),
+            AbiValue::uint(256, BigUint::from_bytes_be(bytes.as_slice())),
+        ]);
+
+        for v in VX_X {
+            println!("ABIv{v}");
+
+            assert_eq!(value.make_cell(v).unwrap(), cell);
+            check_encoding(v, value.clone());
+        }
+    }
+
+    #[test]
+    fn encode_tuple_four_refs_and_one_uint256() {
+        let bytes = HashBytes([0x55; 32]);
+        let bytes_cell = CellBuilder::build_from(bytes).unwrap();
+
+        let mut builder = CellBuilder::new();
+        builder.store_u32(0).unwrap();
+        builder.store_reference(Cell::empty_cell()).unwrap();
+
+        builder.store_reference(bytes_cell.clone()).unwrap();
+        builder.store_reference(bytes_cell.clone()).unwrap();
+
+        let cell_v2 = {
+            let mut builder = builder.clone();
+            builder.store_reference(bytes_cell.clone()).unwrap();
+            builder.store_u256(&bytes).unwrap();
+            builder.build().unwrap()
+        };
+
+        let cell_v1 = {
+            let mut child_builder = CellBuilder::new();
+            child_builder.store_reference(bytes_cell.clone()).unwrap();
+            child_builder.store_u256(&bytes).unwrap();
+
+            builder
+                .store_reference(child_builder.build().unwrap())
+                .unwrap();
+            builder.build().unwrap()
+        };
+
+        let value = AbiValue::unnamed_tuple([
+            AbiValue::uint(32, 0_u32),
+            AbiValue::Cell(Cell::empty_cell()),
+            AbiValue::Cell(bytes_cell.clone()),
+            AbiValue::Bytes(Bytes::copy_from_slice(bytes.as_slice())),
+            AbiValue::Cell(bytes_cell.clone()),
+            AbiValue::uint(256, BigUint::from_bytes_be(bytes.as_slice())),
+        ]);
+
+        for v in VX_X {
+            println!("ABIv{v}");
+            check_encoding(v, value.clone());
+        }
+
+        assert_eq!(value.make_cell(AbiVersion::V1_0).unwrap(), cell_v1);
+
+        for v in V2_X {
+            println!("ABIv{v}");
+            assert_eq!(value.make_cell(v).unwrap(), cell_v2);
+        }
+    }
+
+    #[test]
+    fn encode_map_simple() {
+        let bytes = HashBytes([0x55; 32]);
+        let bytes_cell = CellBuilder::build_from(bytes).unwrap();
+
+        let mut bytes_map = Dict::<u8, Cell>::new();
+        for i in 1..=3 {
+            bytes_map.set(i, bytes_cell.clone()).unwrap();
+        }
+        let bytes_map_cell = CellBuilder::build_from(bytes_map).unwrap();
+        let bytes_map_value = AbiValue::map([
+            (1u8, Bytes::copy_from_slice(bytes.as_slice())),
+            (2, Bytes::copy_from_slice(bytes.as_slice())),
+            (3, Bytes::copy_from_slice(bytes.as_slice())),
+        ]);
+
+        for v in VX_X {
+            println!("ABIv{v}");
+
+            assert_eq!(bytes_map_value.make_cell(v).unwrap(), bytes_map_cell);
+            check_encoding(v, bytes_map_value.clone());
+        }
+
+        //
+        let mut int_map = Dict::<i16, i128>::new();
+        for i in -1..=1 {
+            int_map.set(i, i as i128).unwrap();
+        }
+        let int_map_cell = CellBuilder::build_from(int_map).unwrap();
+        let int_map_value = AbiValue::map([(-1i16, -1i128), (0, 0), (1, 1)]);
+
+        for v in VX_X {
+            println!("ABIv{v}");
+
+            assert_eq!(int_map_value.make_cell(v).unwrap(), int_map_cell);
+            check_encoding(v, int_map_value.clone());
+        }
+
+        //
+        let mut tuples_map = Dict::<u128, (u32, bool)>::new();
+        for i in 1..=5 {
+            tuples_map.set(i as u128, (i, i % 2 != 0)).unwrap();
+        }
+        let tuples_map_cell = CellBuilder::build_from(tuples_map).unwrap();
+        let tuples_map_value = AbiValue::map([
+            (1u128, (1u32, true)),
+            (2, (2, false)),
+            (3, (3, true)),
+            (4, (4, false)),
+            (5, (5, true)),
+        ]);
+
+        for v in VX_X {
+            println!("ABIv{v}");
+
+            assert_eq!(tuples_map_value.make_cell(v).unwrap(), tuples_map_cell);
+            check_encoding(v, tuples_map_value.clone());
+        }
+
+        //
+        let addr1 = StdAddr::new(0, HashBytes([0x11; 32]));
+        let addr2 = StdAddr::new(0, HashBytes([0x22; 32]));
+
+        let mut addr_map = Dict::<StdAddr, u32>::new();
+        addr_map.set(&addr1, 123).unwrap();
+        addr_map.set(&addr2, 456).unwrap();
+        let addr_map_cell = CellBuilder::build_from(addr_map).unwrap();
+        let addr_map_value = AbiValue::map([(addr1, 123u32), (addr2, 456)]);
+
+        for v in VX_X {
+            println!("ABIv{v}");
+
+            assert_eq!(addr_map_value.make_cell(v).unwrap(), addr_map_cell);
+            check_encoding(v, addr_map_value.clone());
+        }
+    }
+
+    #[test]
+    fn encode_map_big_value() {
+        //
+        let tuple_value = AbiValue::unnamed_tuple([
+            AbiValue::uint(256, 1_u32),
+            AbiValue::uint(256, 2_u32),
+            AbiValue::uint(256, 3_u32),
+            AbiValue::uint(256, 4_u32),
+        ]);
+
+        //
+        let mut map_value = CellBuilder::new();
+        map_value.store_u128(0).unwrap();
+        map_value.store_u128(1).unwrap();
+        map_value.store_u128(0).unwrap();
+        map_value.store_u128(2).unwrap();
+        map_value.store_u128(0).unwrap();
+        map_value.store_u128(3).unwrap();
+        map_value
+            .store_reference(CellBuilder::build_from((0u128, 4u128)).unwrap())
+            .unwrap();
+        let map_value = map_value.build().unwrap();
+
+        let mut key = CellBuilder::new();
+        key.store_u128(0).unwrap();
+        key.store_u128(123).unwrap();
+
+        let mut map = RawDict::<256>::new();
+        map.set(key.as_data_slice(), &map_value).unwrap();
+        let map_cell = CellBuilder::build_from(map).unwrap();
+        let map = AbiValue::Map(
+            PlainAbiType::Uint(256),
+            Arc::new(tuple_value.get_type()),
+            BTreeMap::from([(
+                PlainAbiValue::Uint(256, BigUint::from(123u32)),
+                tuple_value.clone(),
+            )]),
+        );
+
+        for v in VX_X {
+            println!("ABIv{v}");
+            assert_eq!(map.make_cell(v).unwrap(), map_cell);
+            check_encoding(v, map.clone());
+        }
+
+        //
+        let mut key = CellBuilder::new();
+        key.store_u32(0).unwrap();
+
+        let mut array = RawDict::<32>::new();
+        array.set(key.as_data_slice(), &map_value).unwrap();
+        let array_cell = CellBuilder::build_from((1u32, array)).unwrap();
+        let array = AbiValue::Array(Arc::new(tuple_value.get_type()), vec![tuple_value]);
+
+        for v in V2_X {
+            println!("ABIv{v}");
+            assert_eq!(array.make_cell(v).unwrap(), array_cell);
+            check_encoding(v, array.clone());
+        }
+    }
+
+    #[test]
+    fn encode_optional() {
+        const STR: &str = "Some string";
+
+        let string_cell = {
+            let mut builder = CellBuilder::new();
+            builder
+                .store_raw(STR.as_bytes(), (STR.len() * 8) as u16)
+                .unwrap();
+            builder.build().unwrap()
+        };
+        let string_value = AbiValue::String(STR.to_owned());
+
+        let tuple_value = AbiValue::unnamed_tuple([
+            string_value.clone(),
+            string_value.clone(),
+            string_value.clone(),
+            string_value.clone(),
+        ]);
+
+        let value = AbiValue::unnamed_tuple([
+            AbiValue::uint(32, 0u32),
+            AbiValue::Cell(Cell::empty_cell()),
+            AbiValue::varint(16, -123),
+            AbiValue::varuint(32, 456u32),
+            AbiValue::optional(None::<bool>),
+            AbiValue::Optional(
+                Arc::new(AbiType::Uint(1022)),
+                Some(Box::new(AbiValue::uint(1022, 1u32))),
+            ),
+            AbiValue::Optional(
+                Arc::new(AbiType::varuint(128)),
+                Some(Box::new(AbiValue::varuint(128, 123u32))),
+            ),
+            AbiValue::Optional(
+                Arc::new(tuple_value.get_type()),
+                Some(Box::new(tuple_value)),
+            ),
+        ]);
+
+        let cell = {
+            let mut builder = CellBuilder::new();
+            builder.store_u32(0).unwrap();
+            builder.store_reference(Cell::empty_cell()).unwrap();
+
+            builder.store_small_uint(1, 4).unwrap();
+            builder.store_u8(-123i8 as _).unwrap();
+
+            builder.store_small_uint(2, 5).unwrap();
+            builder.store_u16(456).unwrap();
+
+            builder.store_bit_zero().unwrap();
+
+            builder
+                .store_reference({
+                    let mut builder = CellBuilder::new();
+                    builder.store_bit_one().unwrap();
+                    builder.store_zeros(127 * 8).unwrap();
+                    builder.store_small_uint(1, 6).unwrap();
+
+                    builder
+                        .store_reference({
+                            let mut builder = CellBuilder::new();
+                            builder.store_bit_one().unwrap();
+                            builder
+                                .store_reference({
+                                    let mut builder = CellBuilder::new();
+                                    builder.store_small_uint(1, 7).unwrap();
+                                    builder.store_u8(123).unwrap();
+                                    builder.build().unwrap()
+                                })
+                                .unwrap();
+
+                            builder.store_bit_one().unwrap();
+                            builder
+                                .store_reference(
+                                    CellBuilder::build_from((
+                                        string_cell.clone(),
+                                        string_cell.clone(),
+                                        string_cell.clone(),
+                                        string_cell.clone(),
+                                    ))
+                                    .unwrap(),
+                                )
+                                .unwrap();
+
+                            builder.build().unwrap()
+                        })
+                        .unwrap();
+
+                    builder.build().unwrap()
+                })
+                .unwrap();
+
+            builder.build().unwrap()
+        };
+
+        for v in V2_X {
+            println!("ABIv{v}");
+
+            assert_eq!(value.make_cell(v).unwrap(), cell);
+            check_encoding(v, value.clone());
+        }
+    }
+
+    #[test]
+    fn encode_ref() {
+        let cell = CellBuilder::build_from((
+            CellBuilder::build_from(123u64).unwrap(),
+            CellBuilder::build_from((true, Cell::empty_cell())).unwrap(),
+        ))
+        .unwrap();
+
+        let value = AbiValue::unnamed_tuple([
+            AbiValue::reference(123u64),
+            AbiValue::reference((true, Cell::empty_cell())),
+        ]);
+
+        for v in V2_X {
+            println!("ABIv{v}");
+            assert_eq!(value.make_cell(v).unwrap(), cell);
+            check_encoding(v, value.clone());
         }
     }
 }
