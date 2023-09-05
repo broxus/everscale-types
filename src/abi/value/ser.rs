@@ -232,7 +232,7 @@ fn write_int(
             ok!(target.store_small_uint(*left << rem, 8 - rem));
         }
         if !right.is_empty() {
-            ok!(target.store_raw(right, right.len() as u16));
+            ok!(target.store_raw(right, (right.len() * 8) as u16));
         }
     }
 
@@ -295,10 +295,12 @@ fn write_bytes(
         let (head, tail) = data.split_at(len);
         data = head;
 
-        ok!(result.store_raw(tail, (bytes_per_builder * 8) as u16));
+        if result.bit_len() > 0 {
+            let child = ok!(std::mem::take(&mut result).build());
+            ok!(result.store_reference(child));
+        }
 
-        let child = ok!(std::mem::take(&mut result).build());
-        ok!(result.store_reference(child));
+        ok!(result.store_raw(tail, (bytes_per_builder * 8) as u16));
 
         bytes_per_builder = std::cmp::min(MAX_BYTES_PER_BUILDER, len);
     }
@@ -506,7 +508,34 @@ impl Store for PlainAbiValue {
 
 #[cfg(test)]
 mod tests {
+    use bytes::Bytes;
+
+    use crate::models::{StdAddr, VarAddr};
+    use crate::num::Uint9;
+    use crate::prelude::{CellFamily, HashBytes};
+
     use super::*;
+
+    const VX_X: [AbiVersion; 5] = [
+        AbiVersion::V1_0,
+        AbiVersion::V2_0,
+        AbiVersion::V2_1,
+        AbiVersion::V2_2,
+        AbiVersion::V2_3,
+    ];
+    const V2_X: [AbiVersion; 4] = [
+        AbiVersion::V2_0,
+        AbiVersion::V2_1,
+        AbiVersion::V2_2,
+        AbiVersion::V2_3,
+    ];
+
+    fn check_encoding(version: AbiVersion, value: AbiValue) {
+        let cell = value.make_cell(version).unwrap();
+        let parsed =
+            AbiValue::load(&value.get_type(), version, &mut cell.as_slice().unwrap()).unwrap();
+        assert_eq!(value, parsed);
+    }
 
     #[test]
     fn int_overflow() {
@@ -519,5 +548,247 @@ mod tests {
             AbiValue::Uint(16, BigUint::from(u16::MAX as u32 + 1)).make_cell(AbiVersion::V2_2),
             Err(Error::IntOverflow)
         );
+    }
+
+    #[test]
+    fn encode_int() {
+        macro_rules! define_tests {
+            ($v:ident, { $($abi:ident($bits:literal) => [$($expr:expr),*$(,)?]),*$(,)? }) => {$(
+                $(check_encoding($v, AbiValue::$abi($bits, $expr));)*
+            )*};
+        }
+
+        for v in VX_X {
+            println!("ABIv{v}");
+            define_tests!(v, {
+                uint(8) => [0u8, 123u8, u8::MAX],
+                uint(16) => [0u16, 1234u16, u16::MAX],
+                uint(32) => [0u32, 123456u32, u32::MAX],
+                uint(64) => [0u64, 123456789u64, u64::MAX],
+                uint(128) => [0u128, 123456789123123123123u128, u128::MAX],
+
+                int(8) => [0i8, 123i8, i8::MIN, i8::MAX],
+                int(16) => [0i16, 1234i16, i16::MIN, i16::MAX],
+                int(32) => [0i32, 123456i32, i32::MIN, i32::MAX],
+                int(64) => [0i64, 123456789i64, i64::MIN, i64::MAX],
+                int(128) => [0i128, 123456789123123123123i128, i128::MIN, i128::MAX],
+            });
+        }
+    }
+
+    #[test]
+    fn encode_varint() {
+        for v in V2_X {
+            println!("ABIv{v}");
+            check_encoding(v, AbiValue::varuint(4, 0u32));
+            check_encoding(v, AbiValue::varuint(4, u32::MAX >> 8));
+            check_encoding(v, AbiValue::varuint(4, 123321u32));
+
+            check_encoding(v, AbiValue::varuint(8, 0u32));
+            check_encoding(v, AbiValue::varuint(8, u64::MAX >> 8));
+            check_encoding(v, AbiValue::varuint(8, 1233213213123123u64));
+
+            check_encoding(v, AbiValue::varuint(16, 0u8));
+            check_encoding(v, AbiValue::Token(Tokens::ZERO));
+
+            let mut prev_value = 0;
+            for byte in 0..15 {
+                let value = (0xffu128 << (byte * 8)) | prev_value;
+                prev_value = value;
+                check_encoding(v, AbiValue::varuint(16, value));
+                check_encoding(v, AbiValue::Token(Tokens::new(value)));
+            }
+
+            check_encoding(v, AbiValue::varuint(128, 0u8));
+            check_encoding(v, AbiValue::varuint(128, BigUint::from(1u8) << (126 * 8)));
+        }
+    }
+
+    #[test]
+    fn encode_bool() {
+        for v in VX_X {
+            println!("ABIv{v}");
+            check_encoding(v, AbiValue::Bool(false));
+            check_encoding(v, AbiValue::Bool(true));
+        }
+    }
+
+    #[test]
+    fn encode_cell() {
+        // Simple cases
+        for v in VX_X {
+            check_encoding(v, AbiValue::Cell(Cell::empty_cell()));
+        }
+
+        // Complex case
+        let value = AbiValue::unnamed_tuple([
+            AbiValue::Cell(Cell::empty_cell()),
+            AbiValue::Cell(Cell::empty_cell()),
+            AbiValue::Cell(Cell::empty_cell()),
+            AbiValue::Cell(Cell::empty_cell()),
+        ]);
+
+        // ABI v1
+        let cell_v1 = {
+            let mut builder = CellBuilder::new();
+            builder.store_reference(Cell::empty_cell()).unwrap();
+            builder.store_reference(Cell::empty_cell()).unwrap();
+            builder.store_reference(Cell::empty_cell()).unwrap();
+            builder
+                .store_reference(CellBuilder::build_from(Cell::empty_cell()).unwrap())
+                .unwrap();
+            builder.build().unwrap()
+        };
+
+        assert_eq!(value.make_cell(AbiVersion::V1_0).unwrap(), cell_v1);
+
+        // ABI v2.x
+        let cell_v2 = CellBuilder::build_from((
+            Cell::empty_cell(),
+            Cell::empty_cell(),
+            Cell::empty_cell(),
+            Cell::empty_cell(),
+        ))
+        .unwrap();
+
+        for v in V2_X {
+            println!("ABIv{v}");
+            assert_eq!(value.make_cell(v).unwrap(), cell_v2);
+        }
+    }
+
+    #[test]
+    fn encode_address() {
+        for v in VX_X {
+            check_encoding(v, AbiValue::address(StdAddr::new(0, HashBytes([0xff; 32]))));
+            check_encoding(
+                v,
+                AbiValue::address(VarAddr {
+                    address_len: Uint9::new(10 * 8),
+                    anycast: None,
+                    workchain: 123456,
+                    address: vec![0xffu8; 10],
+                }),
+            );
+        }
+    }
+
+    #[test]
+    fn encode_bytes() {
+        let mut bytes = vec![0xffu8; 256];
+        bytes[0] = 0xff; // mark start
+        let bytes = Bytes::from(bytes);
+
+        let empty_bytes_cell = {
+            let mut builder = CellBuilder::new();
+            builder.store_reference(Cell::empty_cell()).unwrap();
+            builder.build().unwrap()
+        };
+
+        // Check simple encoding
+        for v in VX_X {
+            println!("ABIv{v}");
+
+            check_encoding(v, AbiValue::Bytes(bytes.clone()));
+
+            // Bytes must have the same encoding as fixedbytes
+            assert_eq!(
+                AbiValue::Bytes(bytes.clone()).make_cell(v),
+                AbiValue::FixedBytes(bytes.clone()).make_cell(v)
+            );
+
+            assert_eq!(
+                AbiValue::Bytes(Bytes::new()).make_cell(v).unwrap(),
+                empty_bytes_cell
+            );
+        }
+
+        // ABI v1
+        let cell_v1 = CellBuilder::build_from({
+            let mut builder = CellBuilder::new();
+            builder.store_raw(&[0xff; 2], 2 * 8).unwrap();
+
+            builder
+                .store_reference({
+                    let mut builder = CellBuilder::new();
+                    builder.store_raw(&[0xff; 127], 127 * 8).unwrap();
+
+                    builder
+                        .store_reference({
+                            let mut builder = CellBuilder::new();
+                            builder.store_raw(&[0xff; 127], 127 * 8).unwrap();
+                            builder.build().unwrap()
+                        })
+                        .unwrap();
+
+                    builder.build().unwrap()
+                })
+                .unwrap();
+
+            builder.build().unwrap()
+        })
+        .unwrap();
+
+        // ABI v2
+        let cell_v2 = CellBuilder::build_from({
+            let mut builder = CellBuilder::new();
+            builder.store_raw(&[0xff; 127], 127 * 8).unwrap();
+
+            builder
+                .store_reference({
+                    let mut builder = CellBuilder::new();
+                    builder.store_raw(&[0xff; 127], 127 * 8).unwrap();
+
+                    builder
+                        .store_reference({
+                            let mut builder = CellBuilder::new();
+                            builder.store_raw(&[0xff; 2], 2 * 8).unwrap();
+                            builder.build().unwrap()
+                        })
+                        .unwrap();
+
+                    builder.build().unwrap()
+                })
+                .unwrap();
+
+            builder.build().unwrap()
+        })
+        .unwrap();
+
+        //
+
+        assert_eq!(
+            AbiValue::Bytes(bytes.clone())
+                .make_cell(AbiVersion::V1_0)
+                .unwrap(),
+            cell_v1
+        );
+
+        for v in V2_X {
+            println!("ABIv{v}");
+
+            assert_eq!(
+                AbiValue::Bytes(bytes.clone()).make_cell(v).unwrap(),
+                cell_v2
+            );
+        }
+    }
+
+    #[test]
+    fn encode_string() {
+        for v in VX_X {
+            println!("ABIv{v}");
+            check_encoding(v, AbiValue::String(String::new()));
+            check_encoding(v, AbiValue::String("Hello".to_owned()));
+            check_encoding(
+                v,
+                AbiValue::String(
+                    std::iter::repeat_with(|| "HELLO".to_owned())
+                        .take(200)
+                        .collect::<Vec<String>>()
+                        .join(" "),
+                ),
+            );
+        }
     }
 }

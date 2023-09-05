@@ -677,6 +677,7 @@ mod tests {
     #[test]
     fn decode_varint() -> Result<()> {
         for v in VX_X {
+            println!("ABIv{v}");
             load_simple(v, VarUint24::ZERO, AbiValue::varuint(4, 0u32))?;
             load_simple(v, VarUint24::MAX, AbiValue::varuint(4, u32::MAX >> 8))?;
             load_simple(v, VarUint24::new(123321), AbiValue::varuint(4, 123321u32))?;
@@ -714,6 +715,7 @@ mod tests {
     #[test]
     fn decode_bool() -> Result<()> {
         for v in VX_X {
+            println!("ABIv{v}");
             load_simple(v, false, AbiValue::Bool(false))?;
             load_simple(v, true, AbiValue::Bool(true))?;
         }
@@ -752,6 +754,7 @@ mod tests {
         }
 
         for v in V2_X {
+            println!("ABIv{v}");
             load_simple(
                 v,
                 "te6ccgEBAgEABQABAAEAAA==", // one ref with empty cell
@@ -775,6 +778,7 @@ mod tests {
     #[test]
     fn decode_address() -> Result<()> {
         for v in VX_X {
+            println!("ABIv{v}");
             let addr: StdAddr = StdAddr::from((0i8, [0xffu8; 32]));
             load_simple(
                 v,
@@ -801,6 +805,7 @@ mod tests {
     #[test]
     fn decode_bytes() -> Result<()> {
         for v in VX_X {
+            println!("ABIv{v}");
             for len in 0..20 {
                 let mut bytes = vec![0xffu8; 1usize << len];
                 bytes[0] = 0x55; // mark start
@@ -831,6 +836,7 @@ mod tests {
     #[test]
     fn decode_string() -> Result<()> {
         for v in VX_X {
+            println!("ABIv{v}");
             for len in 0..20 {
                 let mut bytes = vec![b'a'; 1usize << len];
                 bytes[0] = b'f'; // mark start
@@ -889,6 +895,7 @@ mod tests {
         ]);
 
         for v in VX_X {
+            println!("ABIv{v}");
             load_simple(v, cell.clone(), value.clone())?;
         }
 
@@ -936,6 +943,7 @@ mod tests {
         ]);
 
         for v in VX_X {
+            println!("ABIv{v}");
             load_simple(v, cell.clone(), value.clone())?;
         }
 
@@ -981,6 +989,7 @@ mod tests {
 
         load_simple(AbiVersion::V1_0, cell_v1, value.clone())?;
         for v in V2_X {
+            println!("ABIv{v}");
             load_simple(v, cell_v2.clone(), value.clone())?;
         }
 
@@ -1055,10 +1064,12 @@ mod tests {
         ]);
 
         for v in VX_X {
+            println!("ABIv{v}");
             load_simple(v, cell_v1.clone(), value.clone())?;
         }
 
         for v in V2_X {
+            println!("ABIv{v}");
             load_simple(v, cell_v2.clone(), value.clone())?;
         }
 
@@ -1092,6 +1103,7 @@ mod tests {
         ]);
 
         for v in VX_X {
+            println!("ABIv{v}");
             load_simple(v, cell.clone(), value.clone())?;
         }
 
@@ -1162,6 +1174,7 @@ mod tests {
         };
 
         for v in V2_X {
+            println!("ABIv{v}");
             load_simple(v, cell.clone(), value.clone())?;
         }
 
@@ -1253,6 +1266,7 @@ mod tests {
         };
 
         for v in V2_X {
+            println!("ABIv{v}");
             load_simple(v, cell.clone(), value.clone())?;
         }
 
@@ -1280,6 +1294,7 @@ mod tests {
         ]);
 
         for v in V2_X {
+            println!("ABIv{v}");
             load_simple(v, cell.clone(), value.clone())?;
         }
 
