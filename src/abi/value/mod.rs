@@ -2,11 +2,13 @@ use std::collections::BTreeMap;
 use std::num::NonZeroU8;
 use std::sync::Arc;
 
+use anyhow::Result;
 use bytes::Bytes;
 use everscale_crypto::ed25519;
 use num_bigint::{BigInt, BigUint};
 
 use super::{ty::*, IntoAbi, IntoPlainAbi, WithAbiType, WithPlainAbiType};
+use crate::abi::error::AbiError;
 use crate::cell::Cell;
 use crate::models::IntAddr;
 use crate::num::Tokens;
@@ -24,6 +26,18 @@ pub struct NamedAbiValue {
 }
 
 impl NamedAbiValue {
+    /// Ensures that all values satisfy the provided types.
+    pub fn check_types(items: &[Self], types: &[NamedAbiType]) -> Result<()> {
+        anyhow::ensure!(
+            Self::have_types(items, types),
+            AbiError::TypeMismatch {
+                expected: format!("{}", DisplayTupleType(types)).into(),
+                ty: format!("{}", DisplayTupleValueType(items)).into(),
+            }
+        );
+        Ok(())
+    }
+
     /// Returns whether all values satisfy the provided types.
     pub fn have_types(items: &[Self], types: &[NamedAbiType]) -> bool {
         items.len() == types.len()
@@ -171,6 +185,12 @@ impl AbiValue {
             AbiValue::Optional(ty, _) => AbiType::Optional(ty.clone()),
             AbiValue::Ref(value) => AbiType::Ref(Arc::new(value.get_type())),
         }
+    }
+
+    /// Returns a printable object which will display a value type signature.
+    #[inline]
+    pub fn display_type(&self) -> impl std::fmt::Display + '_ {
+        DisplayValueType(self)
     }
 
     /// Simple `uintN` constructor.
@@ -386,5 +406,76 @@ impl AbiHeader {
                 | (Self::Expire(_), AbiHeaderType::Expire)
                 | (Self::PublicKey(_), AbiHeaderType::PublicKey)
         )
+    }
+}
+
+struct DisplayValueType<'a>(&'a AbiValue);
+
+impl std::fmt::Display for DisplayValueType<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match &self.0 {
+            AbiValue::Uint(n, _) => return write!(f, "uint{n}"),
+            AbiValue::Int(n, _) => return write!(f, "int{n}"),
+            AbiValue::VarUint(n, _) => return write!(f, "varuint{n}"),
+            AbiValue::VarInt(n, _) => return write!(f, "varint{n}"),
+            AbiValue::Bool(_) => "bool",
+            AbiValue::Cell(_) => "cell",
+            AbiValue::Address(_) => "address",
+            AbiValue::Bytes(_) => "bytes",
+            AbiValue::FixedBytes(bytes) => return write!(f, "fixedbytes{}", bytes.len()),
+            AbiValue::String(_) => "string",
+            AbiValue::Token(_) => "gram",
+            AbiValue::Tuple(items) => {
+                return std::fmt::Display::fmt(&DisplayTupleValueType(items), f)
+            }
+            AbiValue::Array(ty, _) => return write!(f, "{ty}[]"),
+            AbiValue::FixedArray(ty, items) => return write!(f, "{ty}[{}]", items.len()),
+            AbiValue::Map(key_ty, value_ty, _) => return write!(f, "map({key_ty},{value_ty})"),
+            AbiValue::Optional(ty, _) => return write!(f, "optional({ty})"),
+            AbiValue::Ref(val) => return write!(f, "ref({})", val.display_type()),
+        };
+        f.write_str(s)
+    }
+}
+
+struct DisplayTupleValueType<'a>(&'a [NamedAbiValue]);
+
+impl std::fmt::Display for DisplayTupleValueType<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = if self.0.is_empty() {
+            "()"
+        } else {
+            let mut first = true;
+            ok!(f.write_str("("));
+            for item in self.0 {
+                if !std::mem::take(&mut first) {
+                    ok!(f.write_str(","));
+                }
+                ok!(write!(f, "{}", item.value.display_type()));
+            }
+            ")"
+        };
+        f.write_str(s)
+    }
+}
+
+struct DisplayTupleType<'a>(&'a [NamedAbiType]);
+
+impl std::fmt::Display for DisplayTupleType<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = if self.0.is_empty() {
+            "()"
+        } else {
+            let mut first = true;
+            ok!(f.write_str("("));
+            for item in self.0 {
+                if !std::mem::take(&mut first) {
+                    ok!(f.write_str(","));
+                }
+                ok!(write!(f, "{}", item.ty));
+            }
+            ")"
+        };
+        f.write_str(s)
     }
 }

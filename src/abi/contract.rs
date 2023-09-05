@@ -3,10 +3,10 @@ use anyhow::Result;
 use sha2::Digest;
 
 use crate::abi::AbiValue;
-use crate::prelude::CellSlice;
+use crate::cell::{CellBuilder, CellSlice};
 
+use super::error::AbiError;
 use super::{AbiHeaderType, AbiVersion, NamedAbiType, NamedAbiValue};
-use crate::abi::error::AbiError;
 
 pub struct Contract {
     pub abi_version: AbiVersion,
