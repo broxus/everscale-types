@@ -288,7 +288,7 @@ fn load_uint_plain(bits: u16, slice: &mut CellSlice) -> Result<BigUint, Error> {
             slice.load_raw(&mut buffer, bits)?;
 
             buffer.reverse();
-            let mut int = BigUint::from_bytes_le(&mut buffer);
+            let mut int = BigUint::from_bytes_le(&buffer);
             if rem != 0 {
                 int >>= 8 - rem;
             }
@@ -898,7 +898,7 @@ mod tests {
     #[test]
     fn decode_tuple_four_refs_and_four_uint256() -> Result<()> {
         let bytes = HashBytes([0xff; 32]);
-        let bytes_cell = CellBuilder::build_from(&bytes)?;
+        let bytes_cell = CellBuilder::build_from(bytes)?;
 
         let cell = {
             let mut builder = CellBuilder::new();
@@ -945,7 +945,7 @@ mod tests {
     #[test]
     fn decode_tuple_four_refs_and_one_uint256() -> Result<()> {
         let bytes = HashBytes([0x55; 32]);
-        let bytes_cell = CellBuilder::build_from(&bytes)?;
+        let bytes_cell = CellBuilder::build_from(bytes)?;
 
         let mut builder = CellBuilder::new();
         builder.store_u32(0)?;
@@ -990,7 +990,7 @@ mod tests {
     #[test]
     fn decode_map_simple() -> Result<()> {
         let bytes = HashBytes([0x55; 32]);
-        let bytes_cell = CellBuilder::build_from(&bytes)?;
+        let bytes_cell = CellBuilder::build_from(bytes)?;
 
         let mut bytes_map = Dict::<u8, Cell>::new();
         for i in 1..=3 {
