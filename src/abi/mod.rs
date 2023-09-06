@@ -3,7 +3,9 @@
 use std::str::FromStr;
 
 pub use self::traits::{IntoAbi, IntoPlainAbi, WithAbiType, WithPlainAbiType};
-pub use self::ty::{AbiHeaderType, AbiType, NamedAbiType, PlainAbiType};
+pub use self::ty::{
+    AbiHeaderType, AbiType, FullAbiTypeSize, NamedAbiType, PlainAbiType, ShortAbiTypeSize,
+};
 pub use self::value::{AbiHeader, AbiValue, NamedAbiValue, PlainAbiValue};
 
 pub mod error;

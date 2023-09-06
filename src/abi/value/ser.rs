@@ -3,7 +3,10 @@ use std::num::NonZeroU8;
 
 use num_bigint::{BigUint, Sign};
 
-use crate::abi::{AbiType, AbiValue, AbiVersion, NamedAbiValue, PlainAbiType, PlainAbiValue};
+use crate::abi::{
+    AbiType, AbiValue, AbiVersion, FullAbiTypeSize, NamedAbiValue, PlainAbiType, PlainAbiValue,
+    ShortAbiTypeSize,
+};
 use crate::cell::{
     Cell, CellBuilder, CellSlice, DefaultFinalizer, Finalizer, Store, MAX_BIT_LEN, MAX_REF_COUNT,
 };
@@ -15,11 +18,15 @@ use crate::num::Tokens;
 impl NamedAbiValue {
     /// Tries to store multiple values into a new builder according to the specified ABI version.
     pub fn tuple_to_builder(items: &[Self], version: AbiVersion) -> Result<CellBuilder, Error> {
-        let mut parts = Vec::new();
+        let finalizer = &mut Cell::default_finalizer();
+        let mut serializer = AbiSerializer::new(version);
         for item in items {
-            ok!(item.value.store_as_parts(version, &mut parts));
+            serializer.reserve_value(&item.value);
         }
-        SerializedPart::pack(parts, version)
+        for item in items {
+            ok!(serializer.write_value(&item.value, finalizer));
+        }
+        serializer.finalize(finalizer)
     }
 
     /// Builds a new cell from multiple values according to the specified ABI version.
@@ -29,25 +36,27 @@ impl NamedAbiValue {
 
     /// Tries to store this value into a new builder according to the specified ABI version.
     pub fn make_builder(&self, version: AbiVersion) -> Result<CellBuilder, Error> {
-        let mut parts = Vec::new();
-        ok!(self.value.store_as_parts(version, &mut parts));
-        SerializedPart::pack(parts, version)
+        self.value.make_builder(version)
     }
 
     /// Builds a new cell from this value according to the specified ABI version.
     pub fn make_cell(&self, version: AbiVersion) -> Result<Cell, Error> {
-        self.make_builder(version).and_then(CellBuilder::build)
+        self.value.make_cell(version)
     }
 }
 
 impl AbiValue {
     /// Tries to store multiple values into a new builder according to the specified ABI version.
     pub fn tuple_to_builder(values: &[Self], version: AbiVersion) -> Result<CellBuilder, Error> {
-        let mut parts = Vec::new();
+        let finalizer = &mut Cell::default_finalizer();
+        let mut serializer = AbiSerializer::new(version);
         for value in values {
-            ok!(value.store_as_parts(version, &mut parts));
+            serializer.reserve_value(value);
         }
-        SerializedPart::pack(parts, version)
+        for value in values {
+            ok!(serializer.write_value(value, finalizer));
+        }
+        serializer.finalize(finalizer)
     }
 
     /// Builds a new cell from multiple values according to the specified ABI version.
@@ -57,9 +66,11 @@ impl AbiValue {
 
     /// Tries to store this value into a new builder according to the specified ABI version.
     pub fn make_builder(&self, version: AbiVersion) -> Result<CellBuilder, Error> {
-        let mut parts = Vec::new();
-        ok!(self.store_as_parts(version, &mut parts));
-        SerializedPart::pack(parts, version)
+        let finalizer = &mut Cell::default_finalizer();
+        let mut serializer = AbiSerializer::new(version);
+        serializer.reserve_value(self);
+        ok!(serializer.write_value(self, finalizer));
+        serializer.finalize(finalizer)
     }
 
     /// Builds a new cell from this value according to the specified ABI version.
@@ -67,366 +78,517 @@ impl AbiValue {
         self.make_builder(version).and_then(CellBuilder::build)
     }
 
-    fn store_as_parts(
-        &self,
-        version: AbiVersion,
-        parts: &mut Vec<SerializedPart>,
-    ) -> Result<(), Error> {
-        let mut b = CellBuilder::new();
-
-        let res = match self {
-            Self::Tuple(items) => {
-                for item in items {
-                    ok!(item.value.store_as_parts(version, parts));
-                }
-                return Ok(());
-            }
-            Self::Uint(n, value) => write_int(*n, Sign::Plus, value, &mut b),
-            Self::Int(n, value) => write_int(*n, value.sign(), value.magnitude(), &mut b),
-            Self::VarUint(n, value) => write_varint(*n, Sign::Plus, value, &mut b),
-            Self::VarInt(n, value) => write_varint(*n, value.sign(), value.magnitude(), &mut b),
-            Self::Bool(value) => write_simple(value, 1, 0, &mut b),
-            Self::Cell(value) => write_simple(value, 0, 1, &mut b),
-            Self::Address(value) => write_simple(value, IntAddr::BITS_MAX, 0, &mut b),
-            Self::Bytes(value) | Self::FixedBytes(value) => write_bytes(value, version, &mut b),
-            Self::String(value) => write_bytes(value.as_bytes(), version, &mut b),
-            Self::Token(value) => write_simple(value, Tokens::MAX_BITS, 0, &mut b),
-            Self::Array(ty, values) => write_array(ty, values, false, version, &mut b),
-            Self::FixedArray(ty, values) => write_array(ty, values, true, version, &mut b),
-            Self::Map(k, v, values) => write_map(k, v, values, version, &mut b),
-            Self::Optional(ty, value) => write_optional(ty, value.as_deref(), version, &mut b),
-            Self::Ref(value) => write_ref(value, version, &mut b),
-        };
-        let (max_bits, max_refs) = ok!(res);
-
-        parts.push(SerializedPart {
-            data: b,
-            max_bits,
-            max_refs,
-        });
-        Ok(())
-    }
-}
-
-struct SerializedPart {
-    data: CellBuilder,
-    max_bits: u16,
-    max_refs: u8,
-}
-
-impl SerializedPart {
-    fn pack(mut values: Vec<Self>, version: AbiVersion) -> Result<CellBuilder, Error> {
-        // NOTE: this algorithm was copied from `ever-abi` but it is highly
-        // inefficient. So, TODO: rewrite
-
-        let use_max = version >= AbiVersion::V2_2;
-
-        values.reverse();
-
-        let mut packed_cells = match values.pop() {
-            Some(cell) => vec![cell],
-            None => return Err(Error::InvalidData),
-        };
-        while let Some(value) = values.pop() {
-            let last_cell = packed_cells.last_mut().unwrap();
-
-            let (remaining_bits, remaining_refs) = if use_max {
-                (
-                    MAX_BIT_LEN - last_cell.max_bits,
-                    MAX_REF_COUNT as u8 - last_cell.max_refs,
-                )
-            } else {
-                (
-                    last_cell.data.spare_bits_capacity(),
-                    last_cell.data.spare_refs_capacity(),
-                )
-            };
-            let (value_bits, value_refs) = if use_max {
-                (value.max_bits, value.max_refs)
-            } else {
-                (value.data.bit_len(), value.data.references().len() as u8)
-            };
-
-            let store_inline = if remaining_bits < value_bits || remaining_refs < value_refs {
-                false
-            } else if value_refs > 0 && value_refs == remaining_refs {
-                let (bits, refs) = Self::compute_total_size(&values, version);
-                version.major != 1
-                    && (refs == 0 && value_bits as usize + bits <= remaining_bits as usize)
-            } else {
-                true
-            };
-
-            if store_inline {
-                ok!(last_cell.data.store_builder(&value.data));
-                last_cell.max_bits += value.max_bits;
-                last_cell.max_refs += value.max_refs;
-            } else {
-                packed_cells.push(value);
-            }
-        }
-
-        let mut last_cell = match packed_cells.pop() {
-            Some(last_cell) => last_cell.data,
-            None => return Err(Error::InvalidData),
-        };
-
-        while let Some(child) = packed_cells.pop() {
-            let child = ok!(std::mem::replace(&mut last_cell, child.data).build());
-            ok!(last_cell.store_reference(child));
-        }
-
-        Ok(last_cell)
-    }
-
-    fn compute_total_size(values: &[Self], version: AbiVersion) -> (usize, usize) {
-        let use_max = version >= AbiVersion::V2_2;
-
-        let mut result = (0, 0);
-        let (total_bits, total_refs) = &mut result;
-        for value in values {
-            if use_max {
-                *total_bits += value.max_bits as usize;
-                *total_refs += value.max_refs as usize;
-            } else {
-                *total_bits += value.data.bit_len() as usize;
-                *total_refs += value.data.references().len();
-            }
-        }
-
-        result
-    }
-}
-
-fn write_int(
-    bits: u16,
-    sign: Sign,
-    value: &BigUint,
-    target: &mut CellBuilder,
-) -> Result<(u16, u8), Error> {
-    if value.bits() > bits as u64 {
-        return Err(Error::IntOverflow);
-    }
-
-    let is_negative = sign == Sign::Minus;
-    let bytes = to_signed_bytes_be(is_negative, value);
-    let value_bits = (bytes.len() * 8) as u16;
-
-    if bytes.is_empty() {
-        ok!(target.store_zeros(bits));
-    } else if bits > value_bits {
-        let diff = bits - value_bits;
-        ok!(if is_negative {
-            target.store_ones(diff)
+    fn compute_size_full(&self, version: AbiVersion) -> FullAbiTypeSize {
+        if version.use_max_size() {
+            self.compute_max_size_full()
         } else {
-            target.store_zeros(diff)
-        });
-        ok!(target.store_raw(&bytes, value_bits));
-    } else {
-        let bits_offset = value_bits - bits;
-        let bytes_offset = (bits_offset / 8) as usize;
-        let rem = bits_offset % 8;
-
-        let (left, right) = bytes.split_at(bytes_offset + 1);
-        if let Some(left) = left.last() {
-            ok!(target.store_small_uint(*left << rem, 8 - rem));
-        }
-        if !right.is_empty() {
-            ok!(target.store_raw(right, (right.len() * 8) as u16));
+            self.compute_exact_size_full()
         }
     }
 
-    Ok((bits, 0))
-}
-
-fn write_varint(
-    size: NonZeroU8,
-    sign: Sign,
-    value: &BigUint,
-    target: &mut CellBuilder,
-) -> Result<(u16, u8), Error> {
-    let is_negative = sign == Sign::Minus;
-    let bytes = to_signed_bytes_be(is_negative, value);
-
-    let value_size = size.get() - 1;
-    if bytes.len() > value_size as usize {
-        return Err(Error::IntOverflow);
+    fn compute_max_size_full(&self) -> FullAbiTypeSize {
+        if let Self::Tuple(items) = self {
+            items
+                .iter()
+                .map(|item| item.value.compute_max_size_full())
+                .sum()
+        } else {
+            self.compute_max_size_short().into()
+        }
     }
 
-    let len_bits = (8 - value_size.leading_zeros()) as u16;
-    let value_bits = (bytes.len() * 8) as u16;
+    fn compute_exact_size_full(&self) -> FullAbiTypeSize {
+        if let Self::Tuple(items) = self {
+            items
+                .iter()
+                .map(|item| item.value.compute_exact_size_full())
+                .sum()
+        } else {
+            self.compute_exact_size_short().into()
+        }
+    }
 
-    ok!(target.store_small_uint(bytes.len() as u8, len_bits));
-    ok!(target.store_raw(&bytes, value_bits));
+    fn compute_exact_size_short(&self) -> ShortAbiTypeSize {
+        fn compute_varuint_size(n: &NonZeroU8, value: &BigUint) -> ShortAbiTypeSize {
+            let value_bytes: u8 = n.get() - 1;
+            let len_bits = (8 - value_bytes.leading_zeros()) as u16;
+            let value_bits = std::cmp::max(8, 8 * ((value.bits() + 7) / 8) as u16);
+            ShortAbiTypeSize {
+                bits: len_bits + value_bits,
+                refs: 0,
+            }
+        }
 
-    Ok((len_bits + (value_size as u16) * 8, 0))
+        match self {
+            Self::Uint(n, _) | Self::Int(n, _) => ShortAbiTypeSize { bits: *n, refs: 0 },
+            Self::VarUint(n, value) => compute_varuint_size(n, value),
+            Self::VarInt(n, value) => compute_varuint_size(n, value.magnitude()),
+            Self::Bool(_) => ShortAbiTypeSize { bits: 1, refs: 0 },
+            Self::Cell(_)
+            | Self::Bytes(_)
+            | Self::FixedBytes(_)
+            | Self::String(_)
+            | Self::Ref(_) => ShortAbiTypeSize { bits: 0, refs: 1 },
+            Self::Address(value) => ShortAbiTypeSize {
+                bits: value.bit_len(),
+                refs: 0,
+            },
+            Self::Token(tokens) => ShortAbiTypeSize {
+                bits: tokens.bit_len().unwrap_or(Tokens::MAX_BITS),
+                refs: 0,
+            },
+            Self::Array(_, values) => ShortAbiTypeSize {
+                bits: 33,
+                refs: !values.is_empty() as u8,
+            },
+            Self::FixedArray(_, values) => ShortAbiTypeSize {
+                bits: 1,
+                refs: !values.is_empty() as u8,
+            },
+            Self::Map(_, _, values) => ShortAbiTypeSize {
+                bits: 1,
+                refs: !values.is_empty() as u8,
+            },
+            Self::Optional(ty, value) => {
+                if let Some(value) = value {
+                    let ty_size = ty.max_size();
+                    if ty_size.bits < MAX_BIT_LEN as usize && ty_size.refs < MAX_REF_COUNT {
+                        ShortAbiTypeSize { bits: 1, refs: 0 } + value.compute_exact_size_short()
+                    } else {
+                        ShortAbiTypeSize { bits: 1, refs: 1 }
+                    }
+                } else {
+                    ShortAbiTypeSize { bits: 1, refs: 0 }
+                }
+            }
+            Self::Tuple(items) => {
+                let mut size = ShortAbiTypeSize::ZERO;
+                for item in items {
+                    size = size.saturating_add(item.value.compute_exact_size_short());
+                }
+                size
+            }
+        }
+    }
+
+    fn compute_max_size_short(&self) -> ShortAbiTypeSize {
+        match self {
+            Self::Uint(n, _) | Self::Int(n, _) => ShortAbiTypeSize { bits: *n, refs: 0 },
+            Self::VarUint(n, _) | Self::VarInt(n, _) => {
+                let value_bytes: u8 = n.get() - 1;
+                let bits = (8 - value_bytes.leading_zeros()) as u16 + (value_bytes as u16 * 8);
+                ShortAbiTypeSize { bits, refs: 0 }
+            }
+            Self::Bool(_) => ShortAbiTypeSize { bits: 1, refs: 0 },
+            Self::Cell(_)
+            | Self::Bytes(_)
+            | Self::FixedBytes(_)
+            | Self::String(_)
+            | Self::Ref(_) => ShortAbiTypeSize { bits: 0, refs: 1 },
+            Self::Address(_) => ShortAbiTypeSize {
+                bits: IntAddr::BITS_MAX,
+                refs: 0,
+            },
+            Self::Token(_) => ShortAbiTypeSize {
+                bits: Tokens::MAX_BITS,
+                refs: 0,
+            },
+            Self::Array(..) => ShortAbiTypeSize { bits: 33, refs: 1 },
+            Self::FixedArray(..) | Self::Map(..) => ShortAbiTypeSize { bits: 1, refs: 1 },
+            Self::Optional(ty, _) => {
+                let ty_size = ty.max_size();
+                if ty_size.bits < MAX_BIT_LEN as usize && ty_size.refs < MAX_REF_COUNT {
+                    ShortAbiTypeSize {
+                        bits: 1 + ty_size.bits as u16,
+                        refs: ty_size.refs as u8,
+                    }
+                } else {
+                    ShortAbiTypeSize { bits: 1, refs: 1 }
+                }
+            }
+            Self::Tuple(items) => {
+                let mut size = ShortAbiTypeSize::ZERO;
+                for item in items {
+                    size = size.saturating_add(item.value.compute_max_size_short());
+                }
+                size
+            }
+        }
+    }
 }
 
-fn write_simple(
-    value: &dyn Store,
-    max_bits: u16,
-    max_refs: u8,
-    target: &mut CellBuilder,
-) -> Result<(u16, u8), Error> {
-    ok!(value.store_into(target, &mut Cell::default_finalizer()));
-    Ok((max_bits, max_refs))
-}
-
-fn write_bytes(
-    mut data: &[u8],
+// TODO: Add builder for serializer
+pub struct AbiSerializer {
     version: AbiVersion,
-    target: &mut CellBuilder,
-) -> Result<(u16, u8), Error> {
-    const MAX_BYTES_PER_BUILDER: usize = (MAX_BIT_LEN / 8) as usize;
-    let mut len = data.len();
+    current: ShortAbiTypeSize,
+    remaining_total: FullAbiTypeSize,
+    stack: Vec<CellBuilder>,
+}
 
-    let mut bytes_per_builder = if version.major > 1 {
-        match len % MAX_BYTES_PER_BUILDER {
-            0 => MAX_BYTES_PER_BUILDER,
-            x => x,
+impl AbiSerializer {
+    pub fn new(version: AbiVersion) -> Self {
+        Self {
+            version,
+            current: ShortAbiTypeSize::ZERO,
+            remaining_total: FullAbiTypeSize::ZERO,
+            stack: Vec::new(),
         }
-    } else {
-        std::cmp::min(MAX_BYTES_PER_BUILDER, len)
-    };
+    }
 
-    let mut result = CellBuilder::new();
-    while len > 0 {
-        len -= bytes_per_builder;
-        let (head, tail) = data.split_at(len);
-        data = head;
+    fn add_offset(&mut self, offset: ShortAbiTypeSize) {
+        self.current += offset;
+    }
 
-        if result.bit_len() > 0 {
-            let child = ok!(std::mem::take(&mut result).build());
+    fn reserve_value(&mut self, value: &AbiValue) {
+        self.remaining_total += value.compute_size_full(self.version);
+    }
+
+    fn finalize(mut self, finalizer: &mut dyn Finalizer) -> Result<CellBuilder, Error> {
+        debug_assert_eq!(self.remaining_total, FullAbiTypeSize::ZERO);
+
+        let mut result = self.stack.pop().unwrap_or_default();
+        while let Some(builder) = self.stack.pop() {
+            let child = ok!(std::mem::replace(&mut result, builder).build_ext(finalizer));
             ok!(result.store_reference(child));
         }
-
-        ok!(result.store_raw(tail, (bytes_per_builder * 8) as u16));
-
-        bytes_per_builder = std::cmp::min(MAX_BYTES_PER_BUILDER, len);
+        Ok(result)
     }
 
-    ok!(target.store_reference(ok!(result.build())));
+    fn take_finalize(&mut self, finalizer: &mut dyn Finalizer) -> Result<CellBuilder, Error> {
+        debug_assert_eq!(self.remaining_total, FullAbiTypeSize::ZERO);
 
-    Ok((0, 1))
-}
+        self.current = ShortAbiTypeSize::ZERO;
+        self.remaining_total = FullAbiTypeSize::ZERO;
 
-fn write_array(
-    value_ty: &AbiType,
-    values: &[AbiValue],
-    fixed_len: bool,
-    version: AbiVersion,
-    target: &mut CellBuilder,
-) -> Result<(u16, u8), Error> {
-    let inline_value = fits_into_dict_leaf(32, value_ty.max_bits());
-
-    let mut dict = RawDict::<32>::new();
-    let mut key_builder = CellBuilder::new();
-    for (i, value) in values.iter().enumerate() {
-        ok!(key_builder.store_u32(i as u32));
-
-        let mut values = Vec::new();
-        ok!(value.store_as_parts(version, &mut values));
-        let value = ok!(SerializedPart::pack(values, version));
-        let value = if inline_value {
-            InlineOrRef::Inline(value.as_full_slice())
-        } else {
-            InlineOrRef::Ref(ok!(value.build()))
-        };
-
-        ok!(dict.set(key_builder.as_data_slice(), value));
-
-        ok!(key_builder.rewind(32));
-    }
-
-    if !fixed_len {
-        ok!(target.store_u32(values.len() as u32));
-    }
-    ok!(write_simple(&dict, 0, 0, target));
-
-    Ok((1 + if fixed_len { 0 } else { 32 }, 1))
-}
-
-fn write_map(
-    key_ty: &PlainAbiType,
-    value_ty: &AbiType,
-    value: &BTreeMap<PlainAbiValue, AbiValue>,
-    version: AbiVersion,
-    target: &mut CellBuilder,
-) -> Result<(u16, u8), Error> {
-    let key_bits = key_ty.key_bits();
-    let inline_value = fits_into_dict_leaf(key_bits, value_ty.max_bits());
-
-    let mut dict = None::<Cell>;
-    let mut key_builder = CellBuilder::new();
-    let finalizer = &mut Cell::default_finalizer();
-    for (key, value) in value {
-        ok!(key.store_into(&mut key_builder, &mut Cell::default_finalizer()));
-
-        let mut values = Vec::new();
-        ok!(value.store_as_parts(version, &mut values));
-        let value = ok!(SerializedPart::pack(values, version));
-        let value = if inline_value {
-            InlineOrRef::Inline(value.as_full_slice())
-        } else {
-            InlineOrRef::Ref(ok!(value.build()))
-        };
-
-        let (new_dict, _) = ok!(dict::dict_insert(
-            dict.as_ref(),
-            &mut key_builder.as_data_slice(),
-            key_bits,
-            &value,
-            dict::SetMode::Set,
-            finalizer,
-        ));
-        dict = new_dict;
-
-        ok!(key_builder.rewind(key_builder.bit_len()));
-    }
-
-    ok!(dict.store_into(target, finalizer));
-
-    Ok((1, 1))
-}
-
-fn write_optional(
-    ty: &AbiType,
-    value: Option<&AbiValue>,
-    version: AbiVersion,
-    target: &mut CellBuilder,
-) -> Result<(u16, u8), Error> {
-    let (max_ty_bits, max_ty_refs) = ty.max_size();
-    let (max_size, inline) = if max_ty_bits < MAX_BIT_LEN as usize && max_ty_refs < MAX_REF_COUNT {
-        ((1 + max_ty_bits as u16, max_ty_refs as u8), true)
-    } else {
-        ((1, 1), false)
-    };
-
-    match value {
-        Some(value) => {
-            let builder = ok!(value.make_builder(version));
-
-            ok!(target.store_bit(true));
-            ok!(if inline {
-                target.store_builder(&builder)
-            } else {
-                target.store_reference(ok!(builder.build()))
-            })
+        let mut result = self.stack.pop().unwrap_or_default();
+        while let Some(builder) = self.stack.pop() {
+            let child = ok!(std::mem::replace(&mut result, builder).build_ext(finalizer));
+            ok!(result.store_reference(child));
         }
-        None => ok!(target.store_bit(false)),
+        Ok(result)
     }
 
-    Ok(max_size)
-}
+    fn begin_child(&self) -> Self {
+        Self::new(self.version)
+    }
 
-fn write_ref(
-    value: &AbiValue,
-    version: AbiVersion,
-    target: &mut CellBuilder,
-) -> Result<(u16, u8), Error> {
-    let cell = ok!(value.make_builder(version).and_then(CellBuilder::build));
-    ok!(target.store_reference(cell));
-    Ok((0, 1))
+    fn require_builder(&mut self, value_size: ShortAbiTypeSize) -> &mut CellBuilder {
+        if self.stack.is_empty() {
+            self.stack.push(CellBuilder::new());
+        }
+
+        self.remaining_total -= value_size;
+
+        let remaining = ShortAbiTypeSize::MAX - self.current;
+
+        let store_inline = if value_size.bits > remaining.bits || value_size.refs > remaining.refs {
+            false
+        } else if value_size.refs > 0 && value_size.refs == remaining.refs {
+            self.version.major != 1
+                && self.remaining_total.refs == 0
+                && self.remaining_total.bits + value_size.bits as usize <= remaining.bits as usize
+        } else {
+            true
+        };
+
+        if !store_inline {
+            self.current = ShortAbiTypeSize::ZERO;
+            self.stack.push(CellBuilder::new());
+        }
+
+        self.current += value_size;
+
+        // SAFETY: we guarantee that there will be at least one element.
+        unsafe { self.stack.last_mut().unwrap_unchecked() }
+    }
+
+    fn write_value(&mut self, value: &AbiValue, f: &mut dyn Finalizer) -> Result<(), Error> {
+        match value {
+            AbiValue::Uint(n, value) => self.write_int(*n, Sign::Plus, value),
+            AbiValue::Int(n, value) => self.write_int(*n, value.sign(), value.magnitude()),
+            AbiValue::VarUint(n, value) => self.write_varint(*n, Sign::Plus, value),
+            AbiValue::VarInt(n, value) => self.write_varint(*n, value.sign(), value.magnitude()),
+            AbiValue::Bool(value) => self.write_bool(*value),
+            AbiValue::Cell(value) => self.write_cell(value),
+            AbiValue::Address(value) => self.write_address(value),
+            AbiValue::Bytes(value) | AbiValue::FixedBytes(value) => self.write_bytes(value, f),
+            AbiValue::String(value) => self.write_bytes(value.as_bytes(), f),
+            AbiValue::Token(value) => self.write_tokens(value),
+            AbiValue::Tuple(items) => self.write_tuple(items, f),
+            AbiValue::Array(ty, values) => self.write_array(ty, values, false, f),
+            AbiValue::FixedArray(ty, values) => self.write_array(ty, values, true, f),
+            AbiValue::Map(k, v, values) => self.write_map(k, v, values, f),
+            AbiValue::Optional(ty, value) => self.write_optional(ty, value.as_deref(), f),
+            AbiValue::Ref(value) => self.write_ref(value, f),
+        }
+    }
+
+    fn write_tuple(
+        &mut self,
+        items: &[NamedAbiValue],
+        finalizer: &mut dyn Finalizer,
+    ) -> Result<(), Error> {
+        for item in items {
+            ok!(self.write_value(&item.value, finalizer));
+        }
+        Ok(())
+    }
+
+    fn write_int(&mut self, bits: u16, sign: Sign, value: &BigUint) -> Result<(), Error> {
+        let target = self.require_builder(ShortAbiTypeSize { bits, refs: 0 });
+        write_int(bits, sign, value, target)
+    }
+
+    fn write_varint(&mut self, size: NonZeroU8, sign: Sign, value: &BigUint) -> Result<(), Error> {
+        let is_negative = sign == Sign::Minus;
+        let bytes = to_signed_bytes_be(is_negative, value);
+
+        let max_value_size = size.get() - 1;
+        if bytes.len() > max_value_size as usize {
+            return Err(Error::IntOverflow);
+        }
+
+        let len_bits = (8 - max_value_size.leading_zeros()) as u16;
+        let value_bits = (bytes.len() * 8) as u16;
+
+        let target = self.require_builder(ShortAbiTypeSize {
+            bits: if self.version.use_max_size() {
+                len_bits + (max_value_size as u16) * 8
+            } else {
+                len_bits + value_bits
+            },
+            refs: 0,
+        });
+
+        ok!(target.store_small_uint(bytes.len() as u8, len_bits));
+        target.store_raw(&bytes, value_bits)
+    }
+
+    fn write_bool(&mut self, value: bool) -> Result<(), Error> {
+        let target = self.require_builder(ShortAbiTypeSize { bits: 1, refs: 0 });
+        target.store_bit(value)
+    }
+
+    fn write_cell(&mut self, cell: &Cell) -> Result<(), Error> {
+        let target = self.require_builder(ShortAbiTypeSize { bits: 0, refs: 1 });
+        target.store_reference(cell.clone())
+    }
+
+    fn write_address(&mut self, address: &IntAddr) -> Result<(), Error> {
+        let target = self.require_builder(ShortAbiTypeSize {
+            bits: if self.version.use_max_size() {
+                IntAddr::BITS_MAX
+            } else {
+                address.bit_len()
+            },
+            refs: 0,
+        });
+        address.store_into(target, &mut Cell::default_finalizer())
+    }
+
+    fn write_tokens(&mut self, tokens: &Tokens) -> Result<(), Error> {
+        let target = self.require_builder(ShortAbiTypeSize {
+            bits: if self.version.use_max_size() {
+                Tokens::MAX_BITS
+            } else {
+                tokens.bit_len().unwrap_or(Tokens::MAX_BITS)
+            },
+            refs: 0,
+        });
+        tokens.store_into(target, &mut Cell::default_finalizer())
+    }
+
+    fn write_bytes(&mut self, mut data: &[u8], finalizer: &mut dyn Finalizer) -> Result<(), Error> {
+        const MAX_BYTES_PER_BUILDER: usize = (MAX_BIT_LEN / 8) as usize;
+        let mut len = data.len();
+
+        let mut bytes_per_builder = if self.version.major > 1 {
+            match len % MAX_BYTES_PER_BUILDER {
+                0 => MAX_BYTES_PER_BUILDER,
+                x => x,
+            }
+        } else {
+            std::cmp::min(MAX_BYTES_PER_BUILDER, len)
+        };
+
+        let mut result = CellBuilder::new();
+        while len > 0 {
+            len -= bytes_per_builder;
+            let (head, tail) = data.split_at(len);
+            data = head;
+
+            if result.bit_len() > 0 {
+                let child = ok!(std::mem::take(&mut result).build_ext(finalizer));
+                ok!(result.store_reference(child));
+            }
+
+            ok!(result.store_raw(tail, (bytes_per_builder * 8) as u16));
+
+            bytes_per_builder = std::cmp::min(MAX_BYTES_PER_BUILDER, len);
+        }
+
+        let target = self.require_builder(ShortAbiTypeSize { bits: 0, refs: 1 });
+        target.store_reference(ok!(result.build()))
+    }
+
+    fn write_array(
+        &mut self,
+        value_ty: &AbiType,
+        values: &[AbiValue],
+        fixed_len: bool,
+        finalizer: &mut dyn Finalizer,
+    ) -> Result<(), Error> {
+        let inline_value = fits_into_dict_leaf(32, value_ty.max_bits());
+
+        let mut dict = RawDict::<32>::new();
+        let mut key_builder = CellBuilder::new();
+        let mut serializer = self.begin_child();
+        for (i, value) in values.iter().enumerate() {
+            ok!(key_builder.store_u32(i as u32));
+
+            let value = {
+                serializer.reserve_value(value);
+                ok!(serializer.write_value(value, finalizer));
+                ok!(serializer.take_finalize(finalizer))
+            };
+            let value = if inline_value {
+                InlineOrRef::Inline(value.as_full_slice())
+            } else {
+                InlineOrRef::Ref(ok!(value.build_ext(finalizer)))
+            };
+
+            ok!(dict.set(key_builder.as_data_slice(), value));
+
+            ok!(key_builder.rewind(32));
+        }
+
+        let bits = 1 + if fixed_len { 1 } else { 32 };
+        let refs = if self.version.use_max_size() {
+            1
+        } else {
+            !values.is_empty() as u8
+        };
+
+        let target = self.require_builder(ShortAbiTypeSize { bits, refs });
+
+        if !fixed_len {
+            ok!(target.store_u32(values.len() as u32));
+        }
+        dict.store_into(target, finalizer)
+    }
+
+    fn write_map(
+        &mut self,
+        key_ty: &PlainAbiType,
+        value_ty: &AbiType,
+        value: &BTreeMap<PlainAbiValue, AbiValue>,
+        finalizer: &mut dyn Finalizer,
+    ) -> Result<(), Error> {
+        let key_bits = key_ty.key_bits();
+        let inline_value = fits_into_dict_leaf(key_bits, value_ty.max_bits());
+
+        let mut dict = None::<Cell>;
+        let mut key_builder = CellBuilder::new();
+        let mut serializer = self.begin_child();
+        for (key, value) in value {
+            ok!(key.store_into(&mut key_builder, finalizer));
+
+            let value = {
+                serializer.reserve_value(value);
+                ok!(serializer.write_value(value, finalizer));
+                ok!(serializer.take_finalize(finalizer))
+            };
+            let value = if inline_value {
+                InlineOrRef::Inline(value.as_full_slice())
+            } else {
+                InlineOrRef::Ref(ok!(value.build_ext(finalizer)))
+            };
+
+            let (new_dict, _) = ok!(dict::dict_insert(
+                dict.as_ref(),
+                &mut key_builder.as_data_slice(),
+                key_bits,
+                &value,
+                dict::SetMode::Set,
+                finalizer,
+            ));
+            dict = new_dict;
+
+            ok!(key_builder.rewind(key_builder.bit_len()));
+        }
+
+        let target = self.require_builder(ShortAbiTypeSize { bits: 1, refs: 1 });
+        dict.store_into(target, finalizer)
+    }
+
+    fn write_optional(
+        &mut self,
+        ty: &AbiType,
+        value: Option<&AbiValue>,
+        finalizer: &mut dyn Finalizer,
+    ) -> Result<(), Error> {
+        let (max_size, inline) = {
+            let ty_size = ty.max_size();
+            if ty_size.bits < MAX_BIT_LEN as usize && ty_size.refs < MAX_REF_COUNT {
+                let size = ShortAbiTypeSize {
+                    bits: 1 + ty_size.bits as u16,
+                    refs: ty_size.refs as u8,
+                };
+                (size, true)
+            } else {
+                (ShortAbiTypeSize { bits: 1, refs: 1 }, false)
+            }
+        };
+
+        match value {
+            Some(value) => {
+                let value = {
+                    let mut serializer = self.begin_child();
+                    serializer.reserve_value(value);
+                    ok!(serializer.write_value(value, finalizer));
+                    ok!(serializer.finalize(finalizer))
+                };
+
+                let target = self.require_builder(if self.version.use_max_size() {
+                    max_size
+                } else if inline {
+                    ShortAbiTypeSize {
+                        bits: 1 + value.bit_len(),
+                        refs: value.reference_count(),
+                    }
+                } else {
+                    ShortAbiTypeSize { bits: 1, refs: 1 }
+                });
+
+                ok!(target.store_bit(true));
+                if inline {
+                    target.store_builder(&value)
+                } else {
+                    target.store_reference(ok!(value.build_ext(finalizer)))
+                }
+            }
+            None => {
+                let target = self.require_builder(if self.version.use_max_size() {
+                    max_size
+                } else {
+                    ShortAbiTypeSize { bits: 1, refs: 0 }
+                });
+                target.store_bit(false)
+            }
+        }
+    }
+
+    fn write_ref(&mut self, value: &AbiValue, finalizer: &mut dyn Finalizer) -> Result<(), Error> {
+        let cell = {
+            let mut serializer = self.begin_child();
+            serializer.reserve_value(value);
+            ok!(serializer.write_value(value, finalizer));
+            let builder = ok!(serializer.finalize(finalizer));
+            ok!(builder.build_ext(finalizer))
+        };
+        let target = self.require_builder(ShortAbiTypeSize { bits: 0, refs: 1 });
+        target.store_reference(cell)
+    }
 }
 
 fn to_signed_bytes_be(is_negative: bool, value: &BigUint) -> Vec<u8> {
@@ -492,17 +654,57 @@ impl Store for InlineOrRef<'_> {
 impl Store for PlainAbiValue {
     fn store_into(&self, builder: &mut CellBuilder, f: &mut dyn Finalizer) -> Result<(), Error> {
         match self {
-            Self::Uint(bits, value) => {
-                ok!(write_int(*bits, Sign::Plus, value, builder));
-                Ok(())
-            }
-            Self::Int(bits, value) => {
-                ok!(write_int(*bits, value.sign(), value.magnitude(), builder));
-                Ok(())
-            }
+            Self::Uint(bits, value) => write_int(*bits, Sign::Plus, value, builder),
+            Self::Int(bits, value) => write_int(*bits, value.sign(), value.magnitude(), builder),
             Self::Bool(bit) => builder.store_bit(*bit),
             Self::Address(address) => address.store_into(builder, f),
         }
+    }
+}
+
+impl AbiVersion {
+    fn use_max_size(&self) -> bool {
+        self >= &Self::V2_2
+    }
+}
+
+fn write_int(
+    bits: u16,
+    sign: Sign,
+    value: &BigUint,
+    target: &mut CellBuilder,
+) -> Result<(), Error> {
+    if value.bits() > bits as u64 {
+        return Err(Error::IntOverflow);
+    }
+
+    let is_negative = sign == Sign::Minus;
+    let bytes = to_signed_bytes_be(is_negative, value);
+    let value_bits = (bytes.len() * 8) as u16;
+
+    if bytes.is_empty() {
+        target.store_zeros(bits)
+    } else if bits > value_bits {
+        let diff = bits - value_bits;
+        ok!(if is_negative {
+            target.store_ones(diff)
+        } else {
+            target.store_zeros(diff)
+        });
+        target.store_raw(&bytes, value_bits)
+    } else {
+        let bits_offset = value_bits - bits;
+        let bytes_offset = (bits_offset / 8) as usize;
+        let rem = bits_offset % 8;
+
+        let (left, right) = bytes.split_at(bytes_offset + 1);
+        if let Some(left) = left.last() {
+            ok!(target.store_small_uint(*left << rem, 8 - rem));
+        }
+        if !right.is_empty() {
+            ok!(target.store_raw(right, (right.len() * 8) as u16));
+        }
+        Ok(())
     }
 }
 

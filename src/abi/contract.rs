@@ -3,7 +3,7 @@ use anyhow::Result;
 use sha2::Digest;
 
 use crate::abi::AbiValue;
-use crate::cell::{CellBuilder, CellSlice};
+use crate::cell::CellSlice;
 
 use super::error::AbiError;
 use super::{AbiHeaderType, AbiVersion, NamedAbiType, NamedAbiValue};

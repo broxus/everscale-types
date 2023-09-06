@@ -500,8 +500,8 @@ fn load_optional(
         return Ok(None);
     }
 
-    let (max_ty_bits, max_ty_refs) = ty.max_size();
-    if max_ty_bits < MAX_BIT_LEN as usize && max_ty_refs < MAX_REF_COUNT {
+    let ty_size = ty.max_size();
+    if ty_size.bits < MAX_BIT_LEN as usize && ty_size.refs < MAX_REF_COUNT {
         let value = ok!(AbiValue::load_ext(ty, version, last, allow_partial, slice));
         Ok(Some(Box::new(value)))
     } else {

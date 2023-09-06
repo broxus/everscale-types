@@ -352,6 +352,12 @@ impl CellBuilder {
         self.bit_len
     }
 
+    /// Returns child cell count.
+    #[inline(always)]
+    pub const fn reference_count(&self) -> u8 {
+        self.references.len() as u8
+    }
+
     /// Returns remaining data capacity in bits.
     #[inline]
     pub fn spare_bits_capacity(&self) -> u16 {

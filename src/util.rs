@@ -104,13 +104,13 @@ impl<T, const N: usize> ArrayVec<T, N> {
 
     /// Returns the number of elements in the vector, also referred to as its ‘length’.
     #[inline]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.len as usize
     }
 
     /// Returns true if the vector contains no elements.
     #[inline]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.len == 0
     }
 
@@ -129,7 +129,7 @@ impl<T, const N: usize> ArrayVec<T, N> {
     }
 
     /// Returns a reference to an element.
-    pub fn get(&self, n: u8) -> Option<&T> {
+    pub const fn get(&self, n: u8) -> Option<&T> {
         if n < self.len {
             let references = self.inner.as_ptr() as *const T;
             // SAFETY: {len} elements were initialized, n < len
