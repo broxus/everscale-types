@@ -91,6 +91,8 @@ pub struct Message<'a> {
     pub layout: Option<MessageLayout>,
 }
 
+impl EquivalentRepr<OwnedMessage> for Message<'_> {}
+
 impl<'a> Store for Message<'a> {
     fn store_into(
         &self,
@@ -99,10 +101,11 @@ impl<'a> Store for Message<'a> {
     ) -> Result<(), Error> {
         let (layout, bits, refs) = match self.layout {
             Some(layout) => {
-                let (bits, refs) = layout.compute_full_len(&self.info, &self.init, &self.body);
+                let (bits, refs) =
+                    layout.compute_full_len(&self.info, self.init.as_ref(), self.body.as_ref());
                 (layout, bits, refs)
             }
-            None => MessageLayout::compute(&self.info, &self.init, &self.body),
+            None => MessageLayout::compute(&self.info, self.init.as_ref(), self.body.as_ref()),
         };
 
         // Check capacity
@@ -158,6 +161,122 @@ impl<'a> Load<'a> for Message<'a> {
             None
         } else {
             Some(body.value)
+        };
+
+        Ok(Self {
+            info,
+            init,
+            body,
+            layout: Some(layout),
+        })
+    }
+}
+
+/// Blockchain message.
+///
+/// [`Message`] alternative with a static lifetime.
+#[derive(Debug, Clone)]
+pub struct OwnedMessage {
+    /// Message info.
+    pub info: Box<MsgInfo>,
+    /// Optional state init.
+    pub init: Option<StateInit>,
+    /// Optional payload.
+    pub body: Option<CellSliceParts>,
+    /// Optional message layout.
+    pub layout: Option<MessageLayout>,
+}
+
+impl EquivalentRepr<Message<'_>> for OwnedMessage {}
+
+impl Store for OwnedMessage {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
+    ) -> Result<(), Error> {
+        let body_slice = ok!(self
+            .body
+            .as_ref()
+            .map(|(cell, range)| range.apply(cell))
+            .transpose());
+
+        let (layout, bits, refs) = match self.layout {
+            Some(layout) => {
+                let (bits, refs) =
+                    layout.compute_full_len(&self.info, self.init.as_ref(), body_slice.as_ref());
+                (layout, bits, refs)
+            }
+            None => MessageLayout::compute(&self.info, self.init.as_ref(), body_slice.as_ref()),
+        };
+
+        // Check capacity
+        if !builder.has_capacity(bits, refs) {
+            return Err(Error::CellOverflow);
+        }
+
+        // Try to store info
+        ok!(self.info.store_into(builder, finalizer));
+
+        // Try to store init
+        ok!(match &self.init {
+            Some(value) => {
+                ok!(builder.store_bit_one()); // just$1
+                SliceOrCell {
+                    to_cell: layout.init_to_cell,
+                    value,
+                }
+                .store_into(builder, finalizer)
+            }
+            None => builder.store_bit_zero(), // nothing$0
+        });
+
+        // Try to store body
+        match &self.body {
+            Some((cell, range)) => {
+                if layout.body_to_cell && range.is_full(cell.as_ref()) {
+                    ok!(builder.store_bit_one());
+                    builder.store_reference(cell.clone())
+                } else {
+                    SliceOrCell {
+                        to_cell: layout.body_to_cell,
+                        value: ok!(range.apply(cell)),
+                    }
+                    .store_into(builder, finalizer)
+                }
+            }
+            None => builder.store_bit_zero(),
+        }
+    }
+}
+
+impl<'a> Load<'a> for OwnedMessage {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
+        let info = ok!(Box::<MsgInfo>::load_from(slice));
+        let init = ok!(Option::<SliceOrCell<StateInit>>::load_from(slice));
+
+        let body_to_cell = ok!(slice.load_bit());
+        let body = if body_to_cell {
+            let body = ok!(slice.load_reference_cloned());
+            let range = CellSliceRange::full(body.as_ref());
+            (!range.is_data_empty() || !range.is_refs_empty()).then_some((body, range))
+        } else if !slice.is_data_empty() || !slice.is_refs_empty() {
+            let range = slice.range();
+            let mut builder = CellBuilder::new();
+            ok!(builder.store_slice(slice));
+            Some((ok!(builder.build()), range))
+        } else {
+            None
+        };
+
+        let (init, init_to_cell) = match init {
+            Some(SliceOrCell { to_cell, value }) => (Some(value), to_cell),
+            None => (None, false),
+        };
+
+        let layout = MessageLayout {
+            init_to_cell,
+            body_to_cell,
         };
 
         Ok(Self {
@@ -243,8 +362,8 @@ impl MessageLayout {
     pub const fn compute_full_len(
         &self,
         info: &MsgInfo,
-        init: &Option<StateInit>,
-        body: &Option<CellSlice<'_>>,
+        init: Option<&StateInit>,
+        body: Option<&CellSlice<'_>>,
     ) -> (u16, u8) {
         let l = DetailedMessageLayout::compute(info, init, body);
 
@@ -274,8 +393,8 @@ impl MessageLayout {
     /// Also returns the number of bits and refs for the root cell.
     pub const fn compute(
         info: &MsgInfo,
-        init: &Option<StateInit>,
-        body: &Option<CellSlice<'_>>,
+        init: Option<&StateInit>,
+        body: Option<&CellSlice<'_>>,
     ) -> (Self, u16, u8) {
         let l = DetailedMessageLayout::compute(info, init, body);
 
@@ -333,8 +452,8 @@ struct DetailedMessageLayout {
 impl DetailedMessageLayout {
     const fn compute(
         info: &MsgInfo,
-        init: &Option<StateInit>,
-        body: &Option<CellSlice<'_>>,
+        init: Option<&StateInit>,
+        body: Option<&CellSlice<'_>>,
     ) -> Self {
         let mut info_bits = info.bit_len() + 2; // (Maybe X) (1bit) + (Either X) (1bit)
         let info_refs = info.has_references() as u8;

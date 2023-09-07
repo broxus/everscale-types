@@ -13,6 +13,7 @@ use super::{
 use super::{dict_remove_bound_owned, raw::*};
 
 /// Typed dictionary with fixed length keys.
+#[repr(transparent)]
 pub struct Dict<K, V> {
     pub(crate) root: Option<Cell>,
     _key: PhantomData<K>,
@@ -111,6 +112,30 @@ impl<K, V> Dict<K, V> {
     #[inline]
     pub const fn root(&self) -> &Option<Cell> {
         &self.root
+    }
+
+    /// Converts into a dictionary with an equivalent value type.
+    #[inline]
+    pub fn cast_into<Q, T>(self) -> Dict<Q, T>
+    where
+        Q: EquivalentRepr<K>,
+        T: EquivalentRepr<V>,
+    {
+        Dict {
+            root: self.root,
+            _key: PhantomData,
+            _value: PhantomData,
+        }
+    }
+
+    /// Casts itself into a lazy loaded for an equivalent type.
+    pub fn cast_ref<Q, T>(&self) -> &Dict<Q, T>
+    where
+        Q: EquivalentRepr<K>,
+        T: EquivalentRepr<V>,
+    {
+        // SAFETY: Dict is #[repr(transparent)]
+        unsafe { &*(self as *const Self as *const Dict<Q, T>) }
     }
 }
 

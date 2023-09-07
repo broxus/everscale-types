@@ -44,6 +44,12 @@ mod __checks {
     assert_impl_all!(CellBuilder: Send);
 }
 
+/// Marker trait which allows casting lazy-loaded data.
+pub trait EquivalentRepr<T> {}
+
+/// Raw cell slice is equivalent to anything.
+impl<T> EquivalentRepr<T> for CellSlice<'_> {}
+
 /// Cell implementation family.
 pub trait CellFamily: Sized {
     /// Creates an empty cell.
