@@ -47,8 +47,8 @@ mod __checks {
 /// Marker trait which allows casting lazy-loaded data.
 pub trait EquivalentRepr<T> {}
 
-/// Raw cell slice is equivalent to anything.
-impl<T> EquivalentRepr<T> for CellSlice<'_> {}
+/// All types are equivalent to itself.
+impl<T> EquivalentRepr<T> for T {}
 
 /// Cell implementation family.
 pub trait CellFamily: Sized {
