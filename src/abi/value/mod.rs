@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use bytes::Bytes;
-use everscale_crypto::ed25519;
 use num_bigint::{BigInt, BigUint};
 
 use super::{ty::*, IntoAbi, IntoPlainAbi, WithAbiType, WithPlainAbiType};
@@ -14,7 +13,7 @@ use crate::models::IntAddr;
 use crate::num::Tokens;
 
 mod de;
-mod ser;
+pub(crate) mod ser;
 
 /// ABI value with name.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -394,7 +393,7 @@ pub enum AbiHeader {
     /// `expire` header.
     Expire(u32),
     /// `pubkey` header.
-    PublicKey(Option<Box<ed25519::PublicKey>>),
+    PublicKey(Option<Box<ed25519_dalek::VerifyingKey>>),
 }
 
 impl AbiHeader {

@@ -99,6 +99,9 @@ pub enum AbiError {
         /// Length of the parsed bytes.
         len: usize,
     },
+    /// Address is required for signature for some ABI versions and it was not provided.
+    #[error("an address was expected for signing but was not provided")]
+    AddressNotProvided,
     /// Expected a different function id while decoding function input.
     #[error("expected function input id 0x{expected:08x}, got 0x{id:08x}")]
     InputIdMismatch {

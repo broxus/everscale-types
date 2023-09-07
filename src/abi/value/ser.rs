@@ -4,8 +4,8 @@ use std::num::NonZeroU8;
 use num_bigint::{BigUint, Sign};
 
 use crate::abi::{
-    AbiType, AbiValue, AbiVersion, FullAbiTypeSize, NamedAbiValue, PlainAbiType, PlainAbiValue,
-    ShortAbiTypeSize,
+    AbiHeader, AbiHeaderType, AbiType, AbiValue, AbiVersion, FullAbiTypeSize, NamedAbiValue,
+    PlainAbiType, PlainAbiValue, ShortAbiTypeSize,
 };
 use crate::cell::{
     Cell, CellBuilder, CellSlice, DefaultFinalizer, Finalizer, Store, MAX_BIT_LEN, MAX_REF_COUNT,
@@ -217,8 +217,35 @@ impl AbiValue {
     }
 }
 
-// TODO: Add builder for serializer
-pub struct AbiSerializer {
+impl AbiHeader {
+    fn compute_size(&self, version: AbiVersion) -> ShortAbiTypeSize {
+        if version.use_max_size() {
+            self.compute_max_size()
+        } else {
+            self.compute_exact_size()
+        }
+    }
+
+    fn compute_exact_size(&self) -> ShortAbiTypeSize {
+        let bits = match self {
+            Self::Time(_) => 64,
+            Self::Expire(_) => 32,
+            Self::PublicKey(value) => 1 + if value.is_some() { 256 } else { 0 },
+        };
+        ShortAbiTypeSize { bits, refs: 0 }
+    }
+
+    fn compute_max_size(&self) -> ShortAbiTypeSize {
+        let bits = match self {
+            Self::Time(_) => 64,
+            Self::Expire(_) => 32,
+            Self::PublicKey(_) => 1 + 256,
+        };
+        ShortAbiTypeSize { bits, refs: 0 }
+    }
+}
+
+pub(crate) struct AbiSerializer {
     version: AbiVersion,
     current: ShortAbiTypeSize,
     remaining_total: FullAbiTypeSize,
@@ -235,15 +262,31 @@ impl AbiSerializer {
         }
     }
 
-    fn add_offset(&mut self, offset: ShortAbiTypeSize) {
+    pub fn add_offset(&mut self, offset: ShortAbiTypeSize) {
         self.current += offset;
     }
 
-    fn reserve_value(&mut self, value: &AbiValue) {
+    pub fn reserve_value(&mut self, value: &AbiValue) {
         self.remaining_total += value.compute_size_full(self.version);
     }
 
-    fn finalize(mut self, finalizer: &mut dyn Finalizer) -> Result<CellBuilder, Error> {
+    pub fn reserve_headers(&mut self, headers: &[AbiHeaderType], has_public_key: bool) {
+        for header in headers {
+            self.remaining_total.bits += match header {
+                AbiHeaderType::Time => 64,
+                AbiHeaderType::Expire => 32,
+                AbiHeaderType::PublicKey => {
+                    1 + if self.version.use_max_size() || has_public_key {
+                        256
+                    } else {
+                        0
+                    }
+                }
+            };
+        }
+    }
+
+    pub fn finalize(mut self, finalizer: &mut dyn Finalizer) -> Result<CellBuilder, Error> {
         debug_assert_eq!(self.remaining_total, FullAbiTypeSize::ZERO);
 
         let mut result = self.stack.pop().unwrap_or_default();
@@ -254,7 +297,7 @@ impl AbiSerializer {
         Ok(result)
     }
 
-    fn take_finalize(&mut self, finalizer: &mut dyn Finalizer) -> Result<CellBuilder, Error> {
+    pub fn take_finalize(&mut self, finalizer: &mut dyn Finalizer) -> Result<CellBuilder, Error> {
         debug_assert_eq!(self.remaining_total, FullAbiTypeSize::ZERO);
 
         self.current = ShortAbiTypeSize::ZERO;
@@ -302,7 +345,39 @@ impl AbiSerializer {
         unsafe { self.stack.last_mut().unwrap_unchecked() }
     }
 
-    fn write_value(&mut self, value: &AbiValue, f: &mut dyn Finalizer) -> Result<(), Error> {
+    pub(crate) fn write_header_value(&mut self, value: &AbiHeader) -> Result<(), Error> {
+        match value {
+            AbiHeader::Time(value) => self
+                .require_builder(ShortAbiTypeSize { bits: 64, refs: 0 })
+                .store_u64(*value),
+            AbiHeader::Expire(value) => self
+                .require_builder(ShortAbiTypeSize { bits: 32, refs: 0 })
+                .store_u32(*value),
+            AbiHeader::PublicKey(value) => {
+                let target = self.require_builder(ShortAbiTypeSize {
+                    bits: 1 + if self.version.use_max_size() || value.is_some() {
+                        256
+                    } else {
+                        0
+                    },
+                    refs: 0,
+                });
+                match value {
+                    None => target.store_bit_zero(),
+                    Some(value) => {
+                        ok!(target.store_bit_one());
+                        target.store_raw(value.as_bytes(), 256)
+                    }
+                }
+            }
+        }
+    }
+
+    pub(crate) fn write_value(
+        &mut self,
+        value: &AbiValue,
+        f: &mut dyn Finalizer,
+    ) -> Result<(), Error> {
         match value {
             AbiValue::Uint(n, value) => self.write_int(*n, Sign::Plus, value),
             AbiValue::Int(n, value) => self.write_int(*n, value.sign(), value.magnitude()),
@@ -323,7 +398,7 @@ impl AbiSerializer {
         }
     }
 
-    fn write_tuple(
+    pub(crate) fn write_tuple(
         &mut self,
         items: &[NamedAbiValue],
         finalizer: &mut dyn Finalizer,
