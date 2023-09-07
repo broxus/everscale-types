@@ -247,38 +247,7 @@ impl DynCell {
     /// the total storage used by this dag taking into account the
     /// identification of equal cells.
     pub fn compute_unique_stats(&self, limit: usize) -> Option<CellTreeStats> {
-        let mut visited = ahash::HashSet::<&HashBytes>::default();
-        let mut stack = vec![self.references()];
-
-        let mut stats = CellTreeStats {
-            bit_count: self.bit_len() as u64,
-            cell_count: 1,
-        };
-
-        'outer: while let Some(item) = stack.last_mut() {
-            for cell in item.by_ref() {
-                if !visited.insert(cell.repr_hash()) {
-                    continue;
-                }
-
-                if stats.cell_count >= limit as u64 {
-                    return None;
-                }
-
-                stats.bit_count += cell.bit_len() as u64;
-                stats.cell_count += 1;
-
-                let next = cell.references();
-                if next.max > 0 {
-                    stack.push(next);
-                    continue 'outer;
-                }
-            }
-
-            stack.pop();
-        }
-
-        Some(stats)
+        StorageStat::compute_for_cell(self, limit)
     }
 
     /// Returns an object that implements [`Debug`] for printing only
@@ -1116,6 +1085,14 @@ pub struct CellTreeStats {
     pub cell_count: u64,
 }
 
+impl CellTreeStats {
+    /// The additive identity for this type, i.e. `0`.
+    pub const ZERO: Self = CellTreeStats {
+        bit_count: 0,
+        cell_count: 0,
+    };
+}
+
 impl std::ops::Add for CellTreeStats {
     type Output = Self;
 
@@ -1133,6 +1110,123 @@ impl std::ops::AddAssign for CellTreeStats {
     fn add_assign(&mut self, rhs: Self) {
         self.bit_count = self.bit_count.saturating_add(rhs.bit_count);
         self.cell_count = self.cell_count.saturating_add(rhs.cell_count);
+    }
+}
+
+/// A helper to track the size of the unique data in multiple cell trees.
+///
+/// NOTE: It uses hashes for deduplication, so you can only use it for
+/// fully computed and valid trees.
+pub struct StorageStat<'a> {
+    visited: ahash::HashSet<&'a HashBytes>,
+    stack: Vec<RefsIter<'a>>,
+    stats: CellTreeStats,
+    limit: usize,
+}
+
+impl<'a> StorageStat<'a> {
+    /// Recursively computes the count of distinct cells returning
+    /// the total storage used by this dag taking into account the
+    /// identification of equal cells.
+    ///
+    /// Root slice does not count as cell. A slice subrange of
+    /// cells is used during computation.
+    pub fn compute_for_slice<'b: 'a>(
+        slice: &'a CellSlice<'b>,
+        limit: usize,
+    ) -> Option<CellTreeStats> {
+        let mut this = Self::with_limit(limit);
+        if this.add_slice(slice) {
+            Some(this.stats)
+        } else {
+            None
+        }
+    }
+
+    /// Recursively computes the count of distinct cells returning
+    /// the total storage used by this dag taking into account the
+    /// identification of equal cells.
+    pub fn compute_for_cell(cell: &'a DynCell, limit: usize) -> Option<CellTreeStats> {
+        let mut this = Self::with_limit(limit);
+        if this.add_cell(cell) {
+            Some(this.stats)
+        } else {
+            None
+        }
+    }
+
+    /// Creates a new storage stat state with an explicit limit.
+    pub fn with_limit(limit: usize) -> Self {
+        Self {
+            visited: Default::default(),
+            stack: Vec::new(),
+            stats: CellTreeStats::ZERO,
+            limit,
+        }
+    }
+
+    /// Creates a new storage stat state without a limit.
+    pub fn unlimited() -> Self {
+        Self::with_limit(usize::MAX)
+    }
+
+    /// Returns the current tree stats.
+    pub fn stats(&self) -> CellTreeStats {
+        self.stats
+    }
+
+    /// Merges current stats with the stats from the provided cell tree.
+    ///
+    /// Returns `false` if the limit was reached.
+    pub fn add_cell(&mut self, cell: &'a DynCell) -> bool {
+        if !self.visited.insert(cell.repr_hash()) {
+            return true;
+        }
+
+        self.stats.bit_count += cell.bit_len() as u64;
+        self.stats.cell_count += 1;
+
+        self.stack.clear();
+        self.stack.push(cell.references());
+        self.reduce_stack()
+    }
+
+    /// Merges current stats with the stats from the provided slice.
+    ///
+    /// Returns `false` if the limit was reached.
+    pub fn add_slice(&mut self, slice: &CellSlice<'a>) -> bool {
+        self.stats.bit_count += slice.remaining_bits() as u64;
+
+        self.stack.clear();
+        self.stack.push(slice.references());
+        self.reduce_stack()
+    }
+
+    fn reduce_stack(&mut self) -> bool {
+        'outer: while let Some(item) = self.stack.last_mut() {
+            for cell in item.by_ref() {
+                if !self.visited.insert(cell.repr_hash()) {
+                    continue;
+                }
+
+                if self.stats.cell_count >= self.limit as u64 {
+                    return false;
+                }
+
+                self.stats.bit_count += cell.bit_len() as u64;
+                self.stats.cell_count += 1;
+
+                let next = cell.references();
+                if next.max > 0 {
+                    self.stack.push(next);
+                    continue 'outer;
+                }
+            }
+
+            self.stack.pop();
+        }
+
+        true
     }
 }
 

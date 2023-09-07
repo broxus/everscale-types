@@ -2,7 +2,9 @@ use std::num::{NonZeroU16, NonZeroU32, NonZeroU8};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::cell::{Cell, CellType, DynCell, HashBytes, LevelMask, RefsIter};
+use crate::cell::{
+    Cell, CellTreeStats, CellType, DynCell, HashBytes, LevelMask, RefsIter, StorageStat,
+};
 use crate::error::Error;
 use crate::util::{unlikely, Bitstring};
 
@@ -526,6 +528,16 @@ impl<'a> CellSlice<'a> {
     #[inline]
     pub fn is_full(&self) -> bool {
         self.range.is_full(self.cell)
+    }
+
+    /// Recursively computes the count of distinct cells returning
+    /// the total storage used by this dag taking into account the
+    /// identification of equal cells.
+    ///
+    /// Root slice does not count as cell. A slice subrange of
+    /// cells is used during computation.
+    pub fn compute_unique_stats(&self, limit: usize) -> Option<CellTreeStats> {
+        StorageStat::compute_for_slice(self, limit)
     }
 
     /// Tries to advance the start of data and refs windows,
