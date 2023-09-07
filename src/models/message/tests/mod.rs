@@ -1,4 +1,5 @@
 use super::*;
+use crate::models::Lazy;
 use crate::prelude::*;
 
 fn serialize_message(message: Message) -> Cell {
@@ -17,6 +18,16 @@ fn check_message(boc: &[u8]) -> Cell {
 
     let serialized = serialize_message(message);
     assert_eq!(serialized.as_ref(), boc.as_ref());
+
+    // Check an owned version
+    {
+        let owned = Lazy::<Message<'_>>::from_raw(boc.clone())
+            .cast_into::<OwnedMessage>()
+            .load()
+            .unwrap();
+
+        assert_eq!(CellBuilder::build_from(owned).unwrap(), boc);
+    }
 
     boc
 }
