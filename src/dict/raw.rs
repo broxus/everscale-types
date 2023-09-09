@@ -623,7 +623,13 @@ impl<'a> RawIter<'a> {
                         debug_assert!(
                             segment.prefix.is_some() && (refs_offset == 1 || refs_offset == 2)
                         );
-                        let next_bit = (refs_offset != 1) ^ self.reversed;
+
+                        let next_bit = (refs_offset != 1)
+                            ^ self.reversed
+                            ^ (self.signed
+                                && self.segments.len() == 1
+                                && segment.prefix.unwrap().is_data_empty());
+
                         match segment.data.cell().reference_cloned(next_bit as u8) {
                             Some(cell) => cell,
                             None => return Some(Err(self.finish(Error::CellUnderflow))),
