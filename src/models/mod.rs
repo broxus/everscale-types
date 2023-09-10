@@ -33,11 +33,11 @@ pub mod vm;
 mod __checks {
     use super::*;
 
-    assert_impl_all!(Lazy<Message>: Send);
-    assert_impl_all!(Account: Send);
-    assert_impl_all!(Block: Send);
-    assert_impl_all!(Message: Send);
-    assert_impl_all!(Transaction: Send);
+    assert_impl_all!(Lazy<Message>: Send, Sync);
+    assert_impl_all!(Account: Send, Sync);
+    assert_impl_all!(Block: Send, Sync);
+    assert_impl_all!(Message: Send, Sync);
+    assert_impl_all!(Transaction: Send, Sync);
 }
 
 /// Lazy-loaded model.

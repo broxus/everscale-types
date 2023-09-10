@@ -20,14 +20,14 @@ fn check_message(boc: &[u8]) -> Cell {
     assert_eq!(serialized.as_ref(), boc.as_ref());
 
     // Check an owned version
-    {
-        let owned = Lazy::<Message<'_>>::from_raw(boc.clone())
-            .cast_into::<OwnedMessage>()
-            .load()
-            .unwrap();
+    let owned = {
+        let lazy = Lazy::<Message<'_>>::from_raw(boc.clone());
+        lazy.cast_into::<OwnedMessage>()
+    };
 
-        assert_eq!(CellBuilder::build_from(owned).unwrap(), boc);
-    }
+    let owned = owned.load().unwrap();
+
+    assert_eq!(CellBuilder::build_from(owned).unwrap(), boc);
 
     boc
 }
@@ -44,7 +44,7 @@ fn external_message() -> anyhow::Result<()> {
             ..Default::default()
         }),
         init: None,
-        body: Some(body.as_slice()?),
+        body: body.as_slice()?,
         layout: None,
     });
     assert_eq!(boc.as_ref(), serialized.as_ref());
@@ -72,7 +72,7 @@ fn internal_message_empty() {
             ..Default::default()
         }),
         init: None,
-        body: None,
+        body: Default::default(),
         layout: None,
     });
     assert_eq!(boc.as_ref(), serialized.as_ref());
@@ -96,7 +96,7 @@ fn internal_message_with_body() -> anyhow::Result<()> {
             ..Default::default()
         }),
         init: None,
-        body: Some(body.as_slice()?),
+        body: body.as_slice()?,
         layout: Some(MessageLayout {
             init_to_cell: false,
             body_to_cell: true,
@@ -132,7 +132,7 @@ fn internal_message_with_deploy() -> anyhow::Result<()> {
             ..Default::default()
         }),
         init: Some(init),
-        body: Some(body.as_slice()?),
+        body: body.as_slice()?,
         layout: Some(MessageLayout {
             init_to_cell: true,
             body_to_cell: true,
@@ -172,7 +172,7 @@ fn internal_message_with_deploy_special() -> anyhow::Result<()> {
             ..Default::default()
         }),
         init: Some(init),
-        body: None,
+        body: Default::default(),
         layout: Some(MessageLayout {
             init_to_cell: true,
             body_to_cell: false,

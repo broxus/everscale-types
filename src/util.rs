@@ -332,6 +332,27 @@ pub(crate) fn debug_struct_field2_finish(
     builder.finish()
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn debug_struct_field4_finish(
+    f: &mut std::fmt::Formatter<'_>,
+    name: &str,
+    name1: &str,
+    value1: &dyn std::fmt::Debug,
+    name2: &str,
+    value2: &dyn std::fmt::Debug,
+    name3: &str,
+    value3: &dyn std::fmt::Debug,
+    name4: &str,
+    value4: &dyn std::fmt::Debug,
+) -> std::fmt::Result {
+    let mut builder = std::fmt::Formatter::debug_struct(f, name);
+    builder.field(name1, value1);
+    builder.field(name2, value2);
+    builder.field(name3, value3);
+    builder.field(name4, value4);
+    builder.finish()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
