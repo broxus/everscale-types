@@ -8,6 +8,8 @@ use crate::cell::{
 use crate::error::Error;
 use crate::util::{unlikely, Bitstring};
 
+use super::CellFamily;
+
 /// A data structure that can be deserialized from cells.
 pub trait Load<'a>: Sized {
     /// Tries to load itself from a cell slice.
@@ -321,6 +323,14 @@ impl CellSliceRange {
 pub struct CellSlice<'a> {
     cell: &'a DynCell,
     range: CellSliceRange,
+}
+
+impl Default for CellSlice<'_> {
+    #[inline]
+    fn default() -> Self {
+        // SAFETY: empty cell is an ordinary cell
+        unsafe { Cell::empty_cell_ref().as_slice_unchecked() }
+    }
 }
 
 impl<'a> AsRef<CellSlice<'a>> for CellSlice<'a> {
