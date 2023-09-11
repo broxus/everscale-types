@@ -1,7 +1,5 @@
 //! Message models.
 
-use std::marker::PhantomData;
-
 use crate::cell::*;
 use crate::error::Error;
 use crate::num::*;
@@ -80,65 +78,59 @@ impl<'a> Load<'a> for LazyMessage {
     }
 }
 
-/// Blockchain message.
-pub type Message<'a> = BaseMessage<RefMessageImpl<'a>>;
+/// Blockchain message (with body as slice).
+pub type Message<'a> = BaseMessage<MsgInfo, CellSlice<'a>>;
 
 impl EquivalentRepr<OwnedMessage> for Message<'_> {}
+impl EquivalentRepr<RelaxedMessage<'_>> for Message<'_> {}
+impl EquivalentRepr<OwnedRelaxedMessage> for Message<'_> {}
 
-/// Blockchain message.
-pub type OwnedMessage = BaseMessage<OwnedMessageImpl>;
+/// Blockchain message (with body as slice parts).
+pub type OwnedMessage = BaseMessage<MsgInfo, CellSliceParts>;
 
 impl EquivalentRepr<Message<'_>> for OwnedMessage {}
+impl EquivalentRepr<RelaxedMessage<'_>> for OwnedMessage {}
+impl EquivalentRepr<OwnedRelaxedMessage> for OwnedMessage {}
+
+/// Unfinished blockchain message (with body as slice).
+pub type RelaxedMessage<'a> = BaseMessage<RelaxedMsgInfo, CellSlice<'a>>;
+
+impl EquivalentRepr<Message<'_>> for RelaxedMessage<'_> {}
+impl EquivalentRepr<OwnedMessage> for RelaxedMessage<'_> {}
+impl EquivalentRepr<OwnedRelaxedMessage> for RelaxedMessage<'_> {}
+
+/// Unfinished blockchain message (with body as slice parts).
+pub type OwnedRelaxedMessage = BaseMessage<RelaxedMsgInfo, CellSliceParts>;
+
+impl EquivalentRepr<Message<'_>> for OwnedRelaxedMessage {}
+impl EquivalentRepr<OwnedMessage> for OwnedRelaxedMessage {}
+impl EquivalentRepr<RelaxedMessage<'_>> for OwnedRelaxedMessage {}
 
 /// Blockchain message.
-pub struct BaseMessage<T: MessageImpl> {
+#[derive(Debug, Clone)]
+pub struct BaseMessage<I, B> {
     /// Message info.
-    pub info: T::Info,
+    pub info: I,
     /// Optional state init.
     pub init: Option<StateInit>,
     /// Optional payload.
-    pub body: T::Body,
+    pub body: B,
     /// Optional message layout.
     pub layout: Option<MessageLayout>,
 }
 
-impl<T: MessageImpl> Clone for BaseMessage<T> {
-    #[inline]
-    fn clone(&self) -> Self {
-        Self {
-            info: self.info.clone(),
-            init: self.init.clone(),
-            body: self.body.clone(),
-            layout: self.layout.clone(),
-        }
-    }
-}
-
-impl<T: MessageImpl> std::fmt::Debug for BaseMessage<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        crate::util::debug_struct_field4_finish(
-            f,
-            "Message",
-            "info",
-            &self.info,
-            "init",
-            &self.init,
-            "body",
-            &self.body,
-            "layout",
-            &self.layout,
-        )
-    }
-}
-
-impl<T: MessageImpl> Store for BaseMessage<T> {
+impl<I, B> Store for BaseMessage<I, B>
+where
+    I: Store + SliceSize,
+    B: StoreBody + SliceSize,
+{
     fn store_into(
         &self,
         builder: &mut CellBuilder,
         finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
-        let info_size = T::compute_info_size(&self.info);
-        let body_size = T::compute_body_size(&self.body);
+        let info_size = self.info.size();
+        let body_size = self.body.size();
         let (layout, bits, refs) = match self.layout {
             Some(layout) => {
                 let (bits, refs) =
@@ -171,17 +163,22 @@ impl<T: MessageImpl> Store for BaseMessage<T> {
 
         // Try to store body
         ok!(builder.store_bit(layout.body_to_cell));
-        T::store_body(&self.body, layout.body_to_cell, builder, finalizer)
+        self.body
+            .store_body(layout.body_to_cell, builder, finalizer)
     }
 }
 
-impl<'a, T: MessageImpl> Load<'a> for BaseMessage<T> {
+impl<'a, I, B> Load<'a> for BaseMessage<I, B>
+where
+    I: Load<'a>,
+    B: LoadBody<'a>,
+{
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        let info = ok!(T::Info::load_from(slice));
+        let info = ok!(I::load_from(slice));
         let init = ok!(Option::<SliceOrCell<StateInit>>::load_from(slice));
 
         let body_to_cell = ok!(slice.load_bit());
-        let body = ok!(T::load_body(body_to_cell, slice));
+        let body = ok!(B::load_body(body_to_cell, slice));
 
         let (init, init_to_cell) = match init {
             Some(SliceOrCell { to_cell, value }) => (Some(value), to_cell),
@@ -202,83 +199,71 @@ impl<'a, T: MessageImpl> Load<'a> for BaseMessage<T> {
     }
 }
 
-pub trait MessageImpl {
-    type Info: std::fmt::Debug + Send + Sync + Clone + Store + for<'a> Load<'a>;
-    type Body: std::fmt::Debug + Send + Sync + Clone;
+trait SliceSize {
+    fn size(&self) -> (u16, u8);
+}
 
-    fn compute_info_size(info: &Self::Info) -> (u16, u8);
-    fn compute_body_size(body: &Self::Body) -> (u16, u8);
+impl SliceSize for MsgInfo {
+    #[inline]
+    fn size(&self) -> (u16, u8) {
+        MsgInfo::size(self)
+    }
+}
 
+impl SliceSize for RelaxedMsgInfo {
+    #[inline]
+    fn size(&self) -> (u16, u8) {
+        RelaxedMsgInfo::size(self)
+    }
+}
+
+trait StoreBody {
     fn store_body(
-        body: &Self::Body,
+        &self,
         to_cell: bool,
         builder: &mut CellBuilder,
         finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error>;
-
-    fn load_body(from_cell: bool, slice: &mut CellSlice<'_>) -> Result<Self::Body, Error>;
 }
 
-pub struct RefMessageImpl<'a>(PhantomData<&'a ()>);
-
-impl<'a> MessageImpl for RefMessageImpl<'a> {
-    type Info = MsgInfo;
-    type Body = CellSlice<'a>;
-
+impl<'a> SliceSize for CellSlice<'a> {
     #[inline]
-    fn compute_info_size(info: &Self::Info) -> (u16, u8) {
-        info.size()
+    fn size(&self) -> (u16, u8) {
+        (self.remaining_bits(), self.remaining_refs())
     }
+}
 
-    #[inline]
-    fn compute_body_size(body: &Self::Body) -> (u16, u8) {
-        (body.remaining_bits(), body.remaining_refs())
-    }
-
-    #[inline]
+impl<'a> StoreBody for CellSlice<'a> {
     fn store_body(
-        value: &Self::Body,
+        &self,
         to_cell: bool,
         builder: &mut CellBuilder,
         finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
-        SliceOrCell { to_cell, value }.store_only_value_into(builder, finalizer)
-    }
-
-    #[inline]
-    fn load_body(from_cell: bool, slice: &mut CellSlice<'_>) -> Result<Self::Body, Error> {
-        if from_cell {
-            slice.load_reference_as_slice()
-        } else {
-            Ok(slice.load_remaining())
+        SliceOrCell {
+            to_cell,
+            value: self,
         }
+        .store_only_value_into(builder, finalizer)
     }
 }
 
-pub struct OwnedMessageImpl;
-
-impl MessageImpl for OwnedMessageImpl {
-    type Info = MsgInfo;
-    type Body = CellSliceParts;
-
+impl SliceSize for CellSliceParts {
     #[inline]
-    fn compute_info_size(info: &Self::Info) -> (u16, u8) {
-        info.size()
-    }
-
-    #[inline]
-    fn compute_body_size((_, range): &Self::Body) -> (u16, u8) {
+    fn size(&self) -> (u16, u8) {
+        let (_, range) = self;
         (range.remaining_bits(), range.remaining_refs())
     }
+}
 
-    #[inline]
+impl StoreBody for CellSliceParts {
     fn store_body(
-        body: &Self::Body,
+        &self,
         to_cell: bool,
         builder: &mut CellBuilder,
         finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
-        let (cell, range) = body;
+        let (cell, range) = self;
         if to_cell && range.is_full(cell.as_ref()) {
             builder.store_reference(cell.clone())
         } else {
@@ -289,19 +274,35 @@ impl MessageImpl for OwnedMessageImpl {
             .store_only_value_into(builder, finalizer)
         }
     }
+}
 
-    #[inline]
-    fn load_body(from_cell: bool, slice: &mut CellSlice<'_>) -> Result<Self::Body, Error> {
-        Ok(if from_cell {
-            let body = ok!(slice.load_reference_cloned());
-            let range = CellSliceRange::full(body.as_ref());
-            (body, range)
+trait LoadBody<'a>: Sized {
+    fn load_body(from_cell: bool, slice: &mut CellSlice<'a>) -> Result<Self, Error>;
+}
+
+impl<'a> LoadBody<'a> for CellSlice<'a> {
+    fn load_body(from_cell: bool, slice: &mut CellSlice<'a>) -> Result<Self, Error> {
+        if from_cell {
+            slice.load_reference_as_slice()
         } else {
-            let range = slice.range();
+            Ok(slice.load_remaining())
+        }
+    }
+}
+
+impl<'a> LoadBody<'a> for CellSliceParts {
+    fn load_body(from_cell: bool, slice: &mut CellSlice<'a>) -> Result<Self, Error> {
+        let body = ok!(if from_cell {
+            slice.load_reference_cloned()
+        } else {
+            let slice = slice.load_remaining();
             let mut builder = CellBuilder::new();
             ok!(builder.store_slice(slice));
-            (ok!(builder.build()), range)
-        })
+            builder.build()
+        });
+
+        let range = CellSliceRange::full(body.as_ref());
+        Ok((body, range))
     }
 }
 
