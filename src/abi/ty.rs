@@ -613,9 +613,12 @@ impl std::fmt::Display for PlainAbiType {
     }
 }
 
+/// Short type stats.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 pub struct ShortAbiTypeSize {
+    /// Total number of bits that the value of this type can occupy.
     pub bits: u16,
+    /// Total number refs that the value of this type can occupy.
     pub refs: u8,
 }
 
@@ -686,9 +689,12 @@ impl std::ops::SubAssign for ShortAbiTypeSize {
     }
 }
 
+/// Extended type stats.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 pub struct FullAbiTypeSize {
+    /// Total number of bits that the value of this type can occupy across multiple cells.
     pub bits: usize,
+    /// Total number refs that the value of this type can occupy across multiple cells.
     pub refs: usize,
 }
 
@@ -702,6 +708,7 @@ impl FullAbiTypeSize {
         self.bits <= MAX_BIT_LEN as _ && self.refs <= MAX_REF_COUNT
     }
 
+    /// Tries to narrow the stats to fit into one cell.
     #[inline]
     pub const fn try_into_cell_size(self) -> Option<(u16, u8)> {
         if self.fits_into_cell() {

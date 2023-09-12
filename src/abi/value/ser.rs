@@ -217,34 +217,6 @@ impl AbiValue {
     }
 }
 
-impl AbiHeader {
-    fn compute_size(&self, version: AbiVersion) -> ShortAbiTypeSize {
-        if version.use_max_size() {
-            self.compute_max_size()
-        } else {
-            self.compute_exact_size()
-        }
-    }
-
-    fn compute_exact_size(&self) -> ShortAbiTypeSize {
-        let bits = match self {
-            Self::Time(_) => 64,
-            Self::Expire(_) => 32,
-            Self::PublicKey(value) => 1 + if value.is_some() { 256 } else { 0 },
-        };
-        ShortAbiTypeSize { bits, refs: 0 }
-    }
-
-    fn compute_max_size(&self) -> ShortAbiTypeSize {
-        let bits = match self {
-            Self::Time(_) => 64,
-            Self::Expire(_) => 32,
-            Self::PublicKey(_) => 1 + 256,
-        };
-        ShortAbiTypeSize { bits, refs: 0 }
-    }
-}
-
 pub(crate) struct AbiSerializer {
     version: AbiVersion,
     current: ShortAbiTypeSize,

@@ -43,6 +43,16 @@ impl CurrencyCollection {
     }
 }
 
+impl From<Tokens> for CurrencyCollection {
+    #[inline]
+    fn from(tokens: Tokens) -> Self {
+        Self {
+            tokens,
+            other: ExtraCurrencyCollection::new(),
+        }
+    }
+}
+
 impl<'a> AugDictSkipValue<'a> for CurrencyCollection {
     #[inline]
     fn skip_value(slice: &mut CellSlice<'a>) -> bool {

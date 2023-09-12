@@ -2,6 +2,8 @@
 
 use std::str::FromStr;
 
+pub use self::contract::{Contract, Function, UnsignedBody, UnsignedExternalMessage};
+pub use self::signature::{extend_signature_with_id, sign_with_signature_id};
 pub use self::traits::{IntoAbi, IntoPlainAbi, WithAbiType, WithPlainAbiType};
 pub use self::ty::{
     AbiHeaderType, AbiType, FullAbiTypeSize, NamedAbiType, PlainAbiType, ShortAbiTypeSize,
@@ -11,6 +13,7 @@ pub use self::value::{AbiHeader, AbiValue, NamedAbiValue, PlainAbiValue};
 pub mod error;
 
 mod contract;
+mod signature;
 mod traits;
 mod ty;
 mod value;
