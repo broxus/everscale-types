@@ -2,7 +2,9 @@
 
 use std::marker::PhantomData;
 
-use crate::cell::{Cell, CellBuilder, CellSlice, DefaultFinalizer, Finalizer, Load, Store};
+use crate::cell::{
+    Cell, CellBuilder, CellSlice, DefaultFinalizer, EquivalentRepr, Finalizer, Load, Store,
+};
 use crate::error::Error;
 use crate::util::*;
 
@@ -31,14 +33,15 @@ pub mod vm;
 mod __checks {
     use super::*;
 
-    assert_impl_all!(Lazy<Message>: Send);
-    assert_impl_all!(Account: Send);
-    assert_impl_all!(Block: Send);
-    assert_impl_all!(Message: Send);
-    assert_impl_all!(Transaction: Send);
+    assert_impl_all!(Lazy<Message>: Send, Sync);
+    assert_impl_all!(Account: Send, Sync);
+    assert_impl_all!(Block: Send, Sync);
+    assert_impl_all!(Message: Send, Sync);
+    assert_impl_all!(Transaction: Send, Sync);
 }
 
 /// Lazy-loaded model.
+#[repr(transparent)]
 pub struct Lazy<T> {
     cell: Cell,
     _marker: PhantomData<T>,
@@ -88,6 +91,26 @@ impl<T> Lazy<T> {
     #[inline]
     pub fn inner(&self) -> &Cell {
         &self.cell
+    }
+
+    /// Converts into a lazy loader for an equivalent type.
+    pub fn cast_into<Q>(self) -> Lazy<Q>
+    where
+        Q: EquivalentRepr<T>,
+    {
+        Lazy {
+            cell: self.cell,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Casts itself into a lazy loaded for an equivalent type.
+    pub fn cast_ref<Q>(&self) -> &Lazy<Q>
+    where
+        Q: EquivalentRepr<T>,
+    {
+        // SAFETY: Lazy is #[repr(transparent)]
+        unsafe { &*(self as *const Self as *const Lazy<Q>) }
     }
 }
 

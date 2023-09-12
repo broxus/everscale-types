@@ -14,95 +14,66 @@ mod address;
 #[cfg(test)]
 mod tests;
 
-/// Lazy-loaded message model.
-#[derive(Debug, Clone, Eq)]
-#[repr(transparent)]
-pub struct LazyMessage(Cell);
+/// Blockchain message (with body as slice).
+pub type Message<'a> = BaseMessage<MsgInfo, CellSlice<'a>>;
 
-impl LazyMessage {
-    /// Serializes the provided data and returns the typed wrapper around it.
-    pub fn new(data: &Message) -> Result<Self, Error> {
-        let mut builder = CellBuilder::new();
-        let finalizer = &mut Cell::default_finalizer();
-        ok!(data.store_into(&mut builder, finalizer));
-        Ok(Self::from_raw(ok!(builder.build_ext(finalizer))))
-    }
+impl EquivalentRepr<OwnedMessage> for Message<'_> {}
+impl EquivalentRepr<RelaxedMessage<'_>> for Message<'_> {}
+impl EquivalentRepr<OwnedRelaxedMessage> for Message<'_> {}
 
-    /// Wraps the cell in a typed wrapper.
-    #[inline]
-    pub fn from_raw(cell: Cell) -> Self {
-        Self(cell)
-    }
+/// Blockchain message (with body as slice parts).
+pub type OwnedMessage = BaseMessage<MsgInfo, CellSliceParts>;
 
-    /// Converts into the underlying cell.
-    #[inline]
-    pub fn into_inner(self) -> Cell {
-        self.0
-    }
+impl EquivalentRepr<Message<'_>> for OwnedMessage {}
+impl EquivalentRepr<RelaxedMessage<'_>> for OwnedMessage {}
+impl EquivalentRepr<OwnedRelaxedMessage> for OwnedMessage {}
 
-    /// Returns the underlying cell.
-    #[inline]
-    pub fn inner(&self) -> &Cell {
-        &self.0
-    }
+/// Unfinished blockchain message (with body as slice).
+pub type RelaxedMessage<'a> = BaseMessage<RelaxedMsgInfo, CellSlice<'a>>;
 
-    /// Loads inner data from cell.
-    pub fn load(&self) -> Result<Message<'_>, Error> {
-        self.0.as_ref().parse::<Message>()
-    }
-}
+impl EquivalentRepr<Message<'_>> for RelaxedMessage<'_> {}
+impl EquivalentRepr<OwnedMessage> for RelaxedMessage<'_> {}
+impl EquivalentRepr<OwnedRelaxedMessage> for RelaxedMessage<'_> {}
 
-impl PartialEq for LazyMessage {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.0.as_ref() == other.0.as_ref()
-    }
-}
+/// Unfinished blockchain message (with body as slice parts).
+pub type OwnedRelaxedMessage = BaseMessage<RelaxedMsgInfo, CellSliceParts>;
 
-impl PartialEq<Cell> for LazyMessage {
-    #[inline]
-    fn eq(&self, other: &Cell) -> bool {
-        self.0.as_ref() == other.as_ref()
-    }
-}
-
-impl Store for LazyMessage {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
-        builder.store_reference(self.0.clone())
-    }
-}
-
-impl<'a> Load<'a> for LazyMessage {
-    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        slice.load_reference_cloned().map(Self)
-    }
-}
+impl EquivalentRepr<Message<'_>> for OwnedRelaxedMessage {}
+impl EquivalentRepr<OwnedMessage> for OwnedRelaxedMessage {}
+impl EquivalentRepr<RelaxedMessage<'_>> for OwnedRelaxedMessage {}
 
 /// Blockchain message.
 #[derive(Debug, Clone)]
-pub struct Message<'a> {
+pub struct BaseMessage<I, B> {
     /// Message info.
-    pub info: MsgInfo,
+    pub info: I,
     /// Optional state init.
     pub init: Option<StateInit>,
     /// Optional payload.
-    pub body: Option<CellSlice<'a>>,
+    pub body: B,
     /// Optional message layout.
     pub layout: Option<MessageLayout>,
 }
 
-impl<'a> Store for Message<'a> {
+impl<I, B> Store for BaseMessage<I, B>
+where
+    I: Store + SliceSize,
+    B: StoreBody + SliceSize,
+{
     fn store_into(
         &self,
         builder: &mut CellBuilder,
         finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
+        let info_size = self.info.size();
+        let body_size = self.body.size();
         let (layout, bits, refs) = match self.layout {
             Some(layout) => {
-                let (bits, refs) = layout.compute_full_len(&self.info, &self.init, &self.body);
+                let (bits, refs) =
+                    layout.compute_full_len(info_size, self.init.as_ref(), body_size);
                 (layout, bits, refs)
             }
-            None => MessageLayout::compute(&self.info, &self.init, &self.body),
+            None => MessageLayout::compute(info_size, self.init.as_ref(), body_size),
         };
 
         // Check capacity
@@ -127,22 +98,23 @@ impl<'a> Store for Message<'a> {
         });
 
         // Try to store body
-        match &self.body {
-            Some(value) => SliceOrCell {
-                to_cell: layout.body_to_cell,
-                value,
-            }
-            .store_into(builder, finalizer),
-            None => builder.store_bit_zero(),
-        }
+        ok!(builder.store_bit(layout.body_to_cell));
+        self.body
+            .store_body(layout.body_to_cell, builder, finalizer)
     }
 }
 
-impl<'a> Load<'a> for Message<'a> {
+impl<'a, I, B> Load<'a> for BaseMessage<I, B>
+where
+    I: Load<'a>,
+    B: LoadBody<'a>,
+{
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        let info = ok!(MsgInfo::load_from(slice));
+        let info = ok!(I::load_from(slice));
         let init = ok!(Option::<SliceOrCell<StateInit>>::load_from(slice));
-        let body = ok!(SliceOrCell::<CellSlice<'a>>::load_from(slice));
+
+        let body_to_cell = ok!(slice.load_bit());
+        let body = ok!(B::load_body(body_to_cell, slice));
 
         let (init, init_to_cell) = match init {
             Some(SliceOrCell { to_cell, value }) => (Some(value), to_cell),
@@ -151,13 +123,7 @@ impl<'a> Load<'a> for Message<'a> {
 
         let layout = MessageLayout {
             init_to_cell,
-            body_to_cell: body.to_cell,
-        };
-
-        let body = if body.value.is_data_empty() && body.value.is_refs_empty() {
-            None
-        } else {
-            Some(body.value)
+            body_to_cell,
         };
 
         Ok(Self {
@@ -169,13 +135,120 @@ impl<'a> Load<'a> for Message<'a> {
     }
 }
 
+trait SliceSize {
+    fn size(&self) -> (u16, u8);
+}
+
+impl SliceSize for MsgInfo {
+    #[inline]
+    fn size(&self) -> (u16, u8) {
+        MsgInfo::size(self)
+    }
+}
+
+impl SliceSize for RelaxedMsgInfo {
+    #[inline]
+    fn size(&self) -> (u16, u8) {
+        RelaxedMsgInfo::size(self)
+    }
+}
+
+trait StoreBody {
+    fn store_body(
+        &self,
+        to_cell: bool,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
+    ) -> Result<(), Error>;
+}
+
+impl<'a> SliceSize for CellSlice<'a> {
+    #[inline]
+    fn size(&self) -> (u16, u8) {
+        (self.remaining_bits(), self.remaining_refs())
+    }
+}
+
+impl<'a> StoreBody for CellSlice<'a> {
+    fn store_body(
+        &self,
+        to_cell: bool,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
+    ) -> Result<(), Error> {
+        SliceOrCell {
+            to_cell,
+            value: self,
+        }
+        .store_only_value_into(builder, finalizer)
+    }
+}
+
+impl SliceSize for CellSliceParts {
+    #[inline]
+    fn size(&self) -> (u16, u8) {
+        let (_, range) = self;
+        (range.remaining_bits(), range.remaining_refs())
+    }
+}
+
+impl StoreBody for CellSliceParts {
+    fn store_body(
+        &self,
+        to_cell: bool,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
+    ) -> Result<(), Error> {
+        let (cell, range) = self;
+        if to_cell && range.is_full(cell.as_ref()) {
+            builder.store_reference(cell.clone())
+        } else {
+            SliceOrCell {
+                to_cell,
+                value: ok!(range.apply(cell)),
+            }
+            .store_only_value_into(builder, finalizer)
+        }
+    }
+}
+
+trait LoadBody<'a>: Sized {
+    fn load_body(from_cell: bool, slice: &mut CellSlice<'a>) -> Result<Self, Error>;
+}
+
+impl<'a> LoadBody<'a> for CellSlice<'a> {
+    fn load_body(from_cell: bool, slice: &mut CellSlice<'a>) -> Result<Self, Error> {
+        if from_cell {
+            slice.load_reference_as_slice()
+        } else {
+            Ok(slice.load_remaining())
+        }
+    }
+}
+
+impl<'a> LoadBody<'a> for CellSliceParts {
+    fn load_body(from_cell: bool, slice: &mut CellSlice<'a>) -> Result<Self, Error> {
+        let body = ok!(if from_cell {
+            slice.load_reference_cloned()
+        } else {
+            let slice = slice.load_remaining();
+            let mut builder = CellBuilder::new();
+            ok!(builder.store_slice(slice));
+            builder.build()
+        });
+
+        let range = CellSliceRange::full(body.as_ref());
+        Ok((body, range))
+    }
+}
+
 struct SliceOrCell<T> {
     to_cell: bool,
     value: T,
 }
 
-impl<T: Store> Store for SliceOrCell<T> {
-    fn store_into(
+impl<T: Store> SliceOrCell<T> {
+    fn store_only_value_into(
         &self,
         builder: &mut CellBuilder,
         finalizer: &mut dyn Finalizer,
@@ -186,15 +259,21 @@ impl<T: Store> Store for SliceOrCell<T> {
                 ok!(self.value.store_into(&mut builder, finalizer));
                 ok!(builder.build_ext(finalizer))
             };
-
-            // right$1 ^Cell
-            ok!(builder.store_bit_one());
             builder.store_reference(cell)
         } else {
-            // left$0 X
-            ok!(builder.store_bit_zero());
             self.value.store_into(builder, finalizer)
         }
+    }
+}
+
+impl<T: Store> Store for SliceOrCell<T> {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
+    ) -> Result<(), Error> {
+        ok!(builder.store_bit(self.to_cell));
+        self.store_only_value_into(builder, finalizer)
     }
 }
 
@@ -242,11 +321,11 @@ impl MessageLayout {
     /// Computes the number of bits and refs for this layout for the root cell.
     pub const fn compute_full_len(
         &self,
-        info: &MsgInfo,
-        init: &Option<StateInit>,
-        body: &Option<CellSlice<'_>>,
+        info_size: (u16, u8),
+        init: Option<&StateInit>,
+        body_size: (u16, u8),
     ) -> (u16, u8) {
-        let l = DetailedMessageLayout::compute(info, init, body);
+        let l = DetailedMessageLayout::compute(info_size, init, body_size);
 
         let mut total_bits = l.info_bits;
         let mut total_refs = l.info_refs;
@@ -273,11 +352,11 @@ impl MessageLayout {
     /// Computes the most optimal layout of the message parts.
     /// Also returns the number of bits and refs for the root cell.
     pub const fn compute(
-        info: &MsgInfo,
-        init: &Option<StateInit>,
-        body: &Option<CellSlice<'_>>,
+        info_size: (u16, u8),
+        init: Option<&StateInit>,
+        body_size: (u16, u8),
     ) -> (Self, u16, u8) {
-        let l = DetailedMessageLayout::compute(info, init, body);
+        let l = DetailedMessageLayout::compute(info_size, init, body_size);
 
         // Try plain layout
         let total_bits = l.info_bits + l.init_bits + l.body_bits;
@@ -331,13 +410,9 @@ struct DetailedMessageLayout {
 }
 
 impl DetailedMessageLayout {
-    const fn compute(
-        info: &MsgInfo,
-        init: &Option<StateInit>,
-        body: &Option<CellSlice<'_>>,
-    ) -> Self {
-        let mut info_bits = info.bit_len() + 2; // (Maybe X) (1bit) + (Either X) (1bit)
-        let info_refs = info.has_references() as u8;
+    const fn compute(info_size: (u16, u8), init: Option<&StateInit>, body_size: (u16, u8)) -> Self {
+        let (mut info_bits, info_refs) = info_size;
+        info_bits += 2; // (Maybe X) (1bit) + (Either X) (1bit)
 
         let (init_bits, init_refs) = match init {
             Some(init) => {
@@ -347,10 +422,7 @@ impl DetailedMessageLayout {
             None => (0, 0),
         };
 
-        let (body_bits, body_refs) = match body {
-            Some(body) => (body.remaining_bits(), body.remaining_refs()),
-            None => (0, 0),
-        };
+        let (body_bits, body_refs) = body_size;
 
         Self {
             info_bits,
@@ -360,6 +432,72 @@ impl DetailedMessageLayout {
             body_bits,
             body_refs,
         }
+    }
+}
+
+/// Unfinalized message info.
+pub enum RelaxedMsgInfo {
+    /// Internal message info,
+    Int(RelaxedIntMsgInfo),
+    /// External outgoing message info,
+    ExtOut(RelaxedExtOutMsgInfo),
+}
+
+impl RelaxedMsgInfo {
+    /// Returns the number of data bits that this struct occupies.
+    pub const fn bit_len(&self) -> u16 {
+        match self {
+            Self::Int(info) => info.bit_len(),
+            Self::ExtOut(info) => info.bit_len(),
+        }
+    }
+
+    const fn has_references(&self) -> bool {
+        match self {
+            Self::Int(info) => !info.value.other.is_empty(),
+            _ => false,
+        }
+    }
+
+    const fn size(&self) -> (u16, u8) {
+        (self.bit_len(), self.has_references() as u8)
+    }
+}
+
+impl Store for RelaxedMsgInfo {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
+    ) -> Result<(), Error> {
+        match self {
+            Self::Int(info) => {
+                ok!(builder.store_bit_zero());
+                info.store_into(builder, finalizer)
+            }
+            Self::ExtOut(info) => {
+                ok!(builder.store_small_uint(0b11, 2));
+                info.store_into(builder, finalizer)
+            }
+        }
+    }
+}
+
+impl<'a> Load<'a> for RelaxedMsgInfo {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
+        Ok(if !ok!(slice.load_bit()) {
+            match RelaxedIntMsgInfo::load_from(slice) {
+                Ok(info) => Self::Int(info),
+                Err(e) => return Err(e),
+            }
+        } else if ok!(slice.load_bit()) {
+            match RelaxedExtOutMsgInfo::load_from(slice) {
+                Ok(info) => Self::ExtOut(info),
+                Err(e) => return Err(e),
+            }
+        } else {
+            return Err(Error::InvalidTag);
+        })
     }
 }
 
@@ -389,6 +527,10 @@ impl MsgInfo {
             Self::Int(info) => !info.value.other.is_empty(),
             _ => false,
         }
+    }
+
+    const fn size(&self) -> (u16, u8) {
+        (self.bit_len(), self.has_references() as u8)
     }
 }
 
@@ -530,6 +672,100 @@ impl<'a> Load<'a> for IntMsgInfo {
     }
 }
 
+/// Unfinished internal message info.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct RelaxedIntMsgInfo {
+    /// Whether IHR is disabled for the message.
+    pub ihr_disabled: bool,
+    /// Whether to bounce this message back if the destination transaction fails.
+    pub bounce: bool,
+    /// Whether this message is a bounced message from some failed transaction.
+    pub bounced: bool,
+    /// Optional internal source address.
+    pub src: Option<IntAddr>,
+    /// Internal destination address.
+    pub dst: IntAddr,
+    /// Attached amounts.
+    pub value: CurrencyCollection,
+    /// IHR fee.
+    ///
+    /// NOTE: currently unused, but can be used to split attached amount.
+    pub ihr_fee: Tokens,
+    /// Forwarding fee paid for using the routing.
+    pub fwd_fee: Tokens,
+    /// Logical time when the message was created.
+    pub created_lt: u64,
+    /// Unix timestamp when the message was created.
+    pub created_at: u32,
+}
+
+impl Default for RelaxedIntMsgInfo {
+    fn default() -> Self {
+        Self {
+            ihr_disabled: true,
+            bounce: false,
+            bounced: false,
+            src: Default::default(),
+            dst: Default::default(),
+            value: CurrencyCollection::ZERO,
+            ihr_fee: Default::default(),
+            fwd_fee: Default::default(),
+            created_lt: 0,
+            created_at: 0,
+        }
+    }
+}
+
+impl RelaxedIntMsgInfo {
+    /// Returns the number of data bits that this struct occupies.
+    pub const fn bit_len(&self) -> u16 {
+        3 + compute_opt_int_addr_bit_len(&self.src)
+            + self.dst.bit_len()
+            + self.value.bit_len()
+            + self.ihr_fee.unwrap_bit_len()
+            + self.fwd_fee.unwrap_bit_len()
+            + 64
+            + 32
+    }
+}
+
+impl Store for RelaxedIntMsgInfo {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
+    ) -> Result<(), Error> {
+        let flags =
+            ((self.ihr_disabled as u8) << 2) | ((self.bounce as u8) << 1) | self.bounced as u8;
+        ok!(builder.store_small_uint(flags, 3));
+        ok!(store_opt_int_addr(builder, finalizer, &self.src));
+        ok!(self.dst.store_into(builder, finalizer));
+        ok!(self.value.store_into(builder, finalizer));
+        ok!(self.ihr_fee.store_into(builder, finalizer));
+        ok!(self.fwd_fee.store_into(builder, finalizer));
+        ok!(builder.store_u64(self.created_lt));
+        builder.store_u32(self.created_at)
+    }
+}
+
+impl<'a> Load<'a> for RelaxedIntMsgInfo {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
+        let flags = ok!(slice.load_small_uint(3));
+        Ok(Self {
+            ihr_disabled: flags & 0b100 != 0,
+            bounce: flags & 0b010 != 0,
+            bounced: flags & 0b001 != 0,
+            src: ok!(load_opt_int_addr(slice)),
+            dst: ok!(IntAddr::load_from(slice)),
+            value: ok!(CurrencyCollection::load_from(slice)),
+            ihr_fee: ok!(Tokens::load_from(slice)),
+            fwd_fee: ok!(Tokens::load_from(slice)),
+            created_lt: ok!(slice.load_u64()),
+            created_at: ok!(slice.load_u32()),
+        })
+    }
+}
+
 /// External incoming message info.
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct ExtInMsgInfo {
@@ -609,7 +845,6 @@ impl Store for ExtOutMsgInfo {
         if !builder.has_capacity(self.bit_len(), 0) {
             return Err(Error::CellOverflow);
         }
-        ok!(builder.store_small_uint(0b11, 2));
         ok!(self.src.store_into(builder, finalizer));
         ok!(store_ext_addr(builder, finalizer, &self.dst));
         ok!(builder.store_u64(self.created_lt));
@@ -628,6 +863,50 @@ impl<'a> Load<'a> for ExtOutMsgInfo {
     }
 }
 
+/// Unfinalized external outgoing message info.
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
+pub struct RelaxedExtOutMsgInfo {
+    /// Optional internal source address.
+    pub src: Option<IntAddr>,
+    /// Optional external address.
+    pub dst: Option<ExtAddr>,
+    /// Logical time when the message was created.
+    pub created_lt: u64,
+    /// Unix timestamp when the message was created.
+    pub created_at: u32,
+}
+
+impl RelaxedExtOutMsgInfo {
+    /// Returns the number of data bits that this struct occupies.
+    pub const fn bit_len(&self) -> u16 {
+        2 + compute_opt_int_addr_bit_len(&self.src) + compute_ext_addr_bit_len(&self.dst) + 64 + 32
+    }
+}
+
+impl Store for RelaxedExtOutMsgInfo {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder,
+        finalizer: &mut dyn Finalizer,
+    ) -> Result<(), Error> {
+        ok!(store_opt_int_addr(builder, finalizer, &self.src));
+        ok!(store_ext_addr(builder, finalizer, &self.dst));
+        ok!(builder.store_u64(self.created_lt));
+        builder.store_u32(self.created_at)
+    }
+}
+
+impl<'a> Load<'a> for RelaxedExtOutMsgInfo {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
+        Ok(Self {
+            src: ok!(load_opt_int_addr(slice)),
+            dst: ok!(load_ext_addr(slice)),
+            created_lt: ok!(slice.load_u64()),
+            created_at: ok!(slice.load_u32()),
+        })
+    }
+}
+
 const fn compute_ext_addr_bit_len(addr: &Option<ExtAddr>) -> u16 {
     match addr {
         Some(addr) => 2 + addr.bit_len(),
@@ -635,7 +914,6 @@ const fn compute_ext_addr_bit_len(addr: &Option<ExtAddr>) -> u16 {
     }
 }
 
-#[inline]
 fn store_ext_addr(
     builder: &mut CellBuilder,
     finalizer: &mut dyn Finalizer,
@@ -655,7 +933,6 @@ fn store_ext_addr(
     }
 }
 
-#[inline]
 fn load_ext_addr(slice: &mut CellSlice<'_>) -> Result<Option<ExtAddr>, Error> {
     if ok!(slice.load_bit()) {
         return Err(Error::InvalidTag);
@@ -673,4 +950,32 @@ fn load_ext_addr(slice: &mut CellSlice<'_>) -> Result<Option<ExtAddr>, Error> {
     let mut data = vec![0; (data_bit_len.into_inner() as usize + 7) / 8];
     ok!(slice.load_raw(&mut data, data_bit_len.into_inner()));
     Ok(Some(ExtAddr { data_bit_len, data }))
+}
+
+const fn compute_opt_int_addr_bit_len(addr: &Option<IntAddr>) -> u16 {
+    match addr {
+        Some(src) => src.bit_len(),
+        None => 2,
+    }
+}
+
+fn store_opt_int_addr(
+    builder: &mut CellBuilder,
+    finalizer: &mut dyn Finalizer,
+    addr: &Option<IntAddr>,
+) -> Result<(), Error> {
+    match addr {
+        Some(addr) => addr.store_into(builder, finalizer),
+        None => builder.store_zeros(2),
+    }
+}
+
+fn load_opt_int_addr(slice: &mut CellSlice<'_>) -> Result<Option<IntAddr>, Error> {
+    if ok!(slice.get_bit(0)) {
+        IntAddr::load_from(slice).map(Some)
+    } else if ok!(slice.load_small_uint(2)) == 0b00 {
+        Ok(None)
+    } else {
+        Err(Error::InvalidTag)
+    }
 }

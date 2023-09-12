@@ -1,8 +1,11 @@
+use std::borrow::Borrow;
+
 use super::*;
+use crate::models::Lazy;
 use crate::prelude::*;
 
-fn serialize_message(message: Message) -> Cell {
-    CellBuilder::build_from(message).unwrap()
+fn serialize_message<'a, T: Borrow<Message<'a>>>(message: T) -> Cell {
+    CellBuilder::build_from(message.borrow()).unwrap()
 }
 
 fn check_message(boc: &[u8]) -> Cell {
@@ -15,8 +18,18 @@ fn check_message(boc: &[u8]) -> Cell {
         println!("{}", Boc::encode_base64(init));
     }
 
-    let serialized = serialize_message(message);
+    let serialized = serialize_message(&message);
     assert_eq!(serialized.as_ref(), boc.as_ref());
+
+    // Check an owned version
+    {
+        let owned = Lazy::<Message<'_>>::from_raw(boc.clone())
+            .cast_into::<OwnedMessage>()
+            .load()
+            .unwrap();
+
+        assert_eq!(CellBuilder::build_from(owned).unwrap(), boc);
+    };
 
     boc
 }
@@ -33,12 +46,32 @@ fn external_message() -> anyhow::Result<()> {
             ..Default::default()
         }),
         init: None,
-        body: Some(body.as_slice()?),
+        body: body.as_slice()?,
         layout: None,
     });
     assert_eq!(boc.as_ref(), serialized.as_ref());
 
     Ok(())
+}
+
+#[test]
+fn external_outgoing() {
+    let boc = check_message(include_bytes!("external_out_message.boc"));
+    let body = Boc::decode_base64("te6ccgEBAQEADgAAGJMdgs1k/wsgCERmwQ==").unwrap();
+    let serialized = serialize_message(Message {
+        info: MsgInfo::ExtOut(ExtOutMsgInfo {
+            src: "0:3addd84bf73267312a477049fd9b8db761bf39c585c150f8e6f9451347af2b6c"
+                .parse()
+                .unwrap(),
+            dst: None,
+            created_lt: 41854595000003,
+            created_at: 1694436128,
+        }),
+        init: None,
+        body: body.as_slice().unwrap(),
+        layout: None,
+    });
+    assert_eq!(boc.as_ref(), serialized.as_ref());
 }
 
 #[test]
@@ -61,7 +94,7 @@ fn internal_message_empty() {
             ..Default::default()
         }),
         init: None,
-        body: None,
+        body: Default::default(),
         layout: None,
     });
     assert_eq!(boc.as_ref(), serialized.as_ref());
@@ -85,7 +118,7 @@ fn internal_message_with_body() -> anyhow::Result<()> {
             ..Default::default()
         }),
         init: None,
-        body: Some(body.as_slice()?),
+        body: body.as_slice()?,
         layout: Some(MessageLayout {
             init_to_cell: false,
             body_to_cell: true,
@@ -121,7 +154,7 @@ fn internal_message_with_deploy() -> anyhow::Result<()> {
             ..Default::default()
         }),
         init: Some(init),
-        body: Some(body.as_slice()?),
+        body: body.as_slice()?,
         layout: Some(MessageLayout {
             init_to_cell: true,
             body_to_cell: true,
@@ -161,7 +194,7 @@ fn internal_message_with_deploy_special() -> anyhow::Result<()> {
             ..Default::default()
         }),
         init: Some(init),
-        body: None,
+        body: Default::default(),
         layout: Some(MessageLayout {
             init_to_cell: true,
             body_to_cell: false,
