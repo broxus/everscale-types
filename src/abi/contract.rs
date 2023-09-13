@@ -1,5 +1,10 @@
+use std::borrow::Cow;
+use std::str::FromStr;
+use std::sync::Arc;
+
 use ahash::HashMap;
 use anyhow::Result;
+use serde::Deserialize;
 use sha2::Digest;
 
 use crate::abi::value::ser::AbiSerializer;
@@ -23,31 +28,171 @@ pub struct Contract {
     /// List of headers for external messages.
     ///
     /// NOTE: header order matters.
-    pub header: Vec<AbiHeaderType>,
+    pub header: Arc<[AbiHeaderType]>,
 
     /// A mapping with all contract methods by name.
-    pub functions: HashMap<String, Function>,
+    pub functions: HashMap<Arc<str>, Function>,
+
+    /// A mapping with all contract events by name.
+    pub events: HashMap<Arc<str>, Event>,
+}
+
+impl<'de> Deserialize<'de> for Contract {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        #[repr(transparent)]
+        struct Id(u32);
+
+        impl<'de> Deserialize<'de> for Id {
+            fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                #[derive(Deserialize)]
+                #[serde(transparent)]
+                struct Id<'a>(#[serde(borrow)] Cow<'a, str>);
+
+                match ok!(Id::deserialize(deserializer)).0.strip_prefix("0x") {
+                    Some(s) => u32::from_str_radix(s, 16).map(Self).map_err(Error::custom),
+                    None => Err(Error::custom("Hex number must be prefixed with 0x")),
+                }
+            }
+        }
+
+        #[derive(Deserialize)]
+        struct SerdeContract {
+            #[serde(default, rename = "ABI version")]
+            abi_version: Option<u8>,
+            #[serde(default)]
+            version: Option<String>,
+            #[serde(default)]
+            header: Vec<AbiHeaderType>,
+            functions: Vec<SerdeFunction>,
+            #[serde(default)]
+            events: Vec<SerdeEvent>,
+            #[serde(default)]
+            fields: Vec<NamedAbiType>,
+        }
+
+        #[derive(Deserialize)]
+        struct SerdeFunction {
+            name: String,
+            #[serde(default)]
+            inputs: Vec<NamedAbiType>,
+            #[serde(default)]
+            outputs: Vec<NamedAbiType>,
+            #[serde(default)]
+            id: Option<Id>,
+        }
+
+        #[derive(Deserialize)]
+        struct SerdeEvent {
+            name: String,
+            #[serde(default)]
+            inputs: Vec<NamedAbiType>,
+            #[serde(default)]
+            id: Option<Id>,
+        }
+
+        let contract = ok!(SerdeContract::deserialize(deserializer));
+        let abi_version = if let Some(version) = &contract.version {
+            ok!(AbiVersion::from_str(version).map_err(Error::custom))
+        } else if let Some(major) = contract.abi_version {
+            AbiVersion::new(major, 0)
+        } else {
+            return Err(Error::custom("No ABI version found"));
+        };
+
+        let header = Arc::<[AbiHeaderType]>::from(contract.header);
+
+        let functions = contract
+            .functions
+            .into_iter()
+            .map(|item| {
+                let (input_id, output_id) = match item.id {
+                    Some(Id(id)) => (id, id),
+                    None => {
+                        let id = Function::compute_function_id(
+                            abi_version,
+                            &item.name,
+                            header.as_ref(),
+                            &item.inputs,
+                            &item.outputs,
+                        );
+                        (id & Function::INPUT_ID_MASK, id | !Function::INPUT_ID_MASK)
+                    }
+                };
+                let name = Arc::<str>::from(item.name);
+                (
+                    name.clone(),
+                    Function {
+                        abi_version,
+                        name,
+                        header: header.clone(),
+                        inputs: Arc::from(item.inputs),
+                        outputs: Arc::from(item.outputs),
+                        input_id,
+                        output_id,
+                    },
+                )
+            })
+            .collect();
+
+        let events = contract
+            .events
+            .into_iter()
+            .map(|item| {
+                let id = match item.id {
+                    Some(Id(id)) => id,
+                    None => {
+                        let id = Event::compute_event_id(abi_version, &item.name, &item.inputs);
+                        id & Function::INPUT_ID_MASK
+                    }
+                };
+                let name = Arc::<str>::from(item.name);
+                (
+                    name.clone(),
+                    Event {
+                        abi_version,
+                        name,
+                        inputs: Arc::from(item.inputs),
+                        id,
+                    },
+                )
+            })
+            .collect();
+
+        // TODO: parse events and fields
+
+        Ok(Self {
+            abi_version,
+            header,
+            functions,
+            events,
+        })
+    }
 }
 
 /// Contract method ABI definition.
+#[derive(Debug, Clone)]
 pub struct Function {
     /// ABI version (same as contract ABI version).
     pub abi_version: AbiVersion,
-
     /// List of headers for external messages.
     /// Must be the same as in contract.
     ///
     /// NOTE: header order matters.
-    pub header: Vec<AbiHeaderType>,
-
+    pub header: Arc<[AbiHeaderType]>,
     /// Method name.
-    pub name: String,
-
+    pub name: Arc<str>,
     /// Method input argument types.
-    pub inputs: Vec<NamedAbiType>,
+    pub inputs: Arc<[NamedAbiType]>,
     /// Method output types.
-    pub outputs: Vec<NamedAbiType>,
-
+    pub outputs: Arc<[NamedAbiType]>,
     /// Function id in incoming messages (with input).
     pub input_id: u32,
     /// Function id in outgoing messages (with output).
@@ -55,6 +200,9 @@ pub struct Function {
 }
 
 impl Function {
+    /// Mask with a bit difference of input id and output id.
+    pub const INPUT_ID_MASK: u32 = 0x7fffffff;
+
     /// Computes function id from the full function signature.
     pub fn compute_function_id(
         abi_version: AbiVersion,
@@ -97,7 +245,7 @@ impl Function {
         serializer.finalize(finalizer).map_err(From::from)
     }
 
-    /// Encodes an unsigned body with invocation of this method with as an external message.
+    /// Encodes an unsigned body with invocation of this method as an external message.
     pub fn encode_external_input(
         &self,
         tokens: &[NamedAbiValue],
@@ -131,7 +279,7 @@ impl Function {
             serializer.reserve_value(&token.value);
         }
 
-        for header in &self.header {
+        for header in self.header.as_ref() {
             serializer.write_header_value(&match header {
                 AbiHeaderType::Time => AbiHeader::Time(now),
                 AbiHeaderType::Expire => AbiHeader::Expire(expire_at),
@@ -179,7 +327,7 @@ impl Function {
             .with_dst(address.clone()))
     }
 
-    /// Encodes a message body with invocation of this method with as an internal message.
+    /// Encodes a message body with invocation of this method as an internal message.
     pub fn encode_internal_input(&self, tokens: &[NamedAbiValue]) -> Result<CellBuilder> {
         ok!(NamedAbiValue::check_types(tokens, &self.inputs));
         Self::encode_internal_msg_body(self.abi_version, self.input_id, tokens)
@@ -289,6 +437,82 @@ impl Function {
             header: &self.header,
             inputs: &self.inputs,
             outputs: &self.outputs,
+        }
+    }
+}
+
+/// Contract event ABI definition.
+#[derive(Debug, Clone)]
+pub struct Event {
+    /// ABI version (same as contract ABI version).
+    pub abi_version: AbiVersion,
+    /// Event name.
+    pub name: Arc<str>,
+    /// Event arguments.
+    pub inputs: Arc<[NamedAbiType]>,
+    /// Event id derived from signature.
+    pub id: u32,
+}
+
+impl Event {
+    /// Computes event id from the full event signature.
+    pub fn compute_event_id(abi_version: AbiVersion, name: &str, inputs: &[NamedAbiType]) -> u32 {
+        let mut hasher = sha2::Sha256::new();
+        EventSignatureRaw {
+            abi_version,
+            name,
+            inputs,
+        }
+        .update_hasher(&mut hasher);
+
+        let hash: [u8; 32] = hasher.finalize().into();
+        u32::from_be_bytes(hash[0..4].try_into().unwrap())
+    }
+
+    /// Encodes a message body with this event as an internal message.
+    pub fn encode_internal_input(&self, tokens: &[NamedAbiValue]) -> Result<CellBuilder> {
+        ok!(NamedAbiValue::check_types(tokens, &self.inputs));
+        Function::encode_internal_msg_body(self.abi_version, self.id, tokens)
+    }
+
+    /// Tries to parse input arguments for this event from an internal message body.
+    ///
+    /// NOTE: The slice is required to contain nothing other than these arguments.
+    pub fn decode_internal_input(&self, mut slice: CellSlice<'_>) -> Result<Vec<NamedAbiValue>> {
+        self.decode_internal_input_ext(&mut slice, false)
+    }
+
+    /// Tries to parse input arguments for this event from an internal message body.
+    pub fn decode_internal_input_ext(
+        &self,
+        slice: &mut CellSlice<'_>,
+        allow_partial: bool,
+    ) -> Result<Vec<NamedAbiValue>> {
+        let id = slice.load_u32()?;
+        anyhow::ensure!(
+            id == self.id,
+            AbiError::InputIdMismatch {
+                expected: self.id,
+                id
+            }
+        );
+        let res = ok!(NamedAbiValue::load_tuple_ext(
+            &self.inputs,
+            self.abi_version,
+            true,
+            allow_partial,
+            slice
+        ));
+        ok!(AbiValue::check_remaining(slice, allow_partial));
+        Ok(res)
+    }
+
+    /// Returns an object which can be used to display the normalized signature of this event.
+    pub fn display_signature(&self) -> impl std::fmt::Display + '_ {
+        EventSignatureRaw {
+            abi_version: self.abi_version,
+            name: &self.name,
+            inputs: &self.inputs,
         }
     }
 }
@@ -459,18 +683,7 @@ struct FunctionSignatureRaw<'a> {
 
 impl FunctionSignatureRaw<'_> {
     fn update_hasher<H: Digest>(&self, engine: &mut H) {
-        #[repr(transparent)]
-        struct Hasher<'a, H>(&'a mut H);
-
-        impl<H: Digest> std::fmt::Write for Hasher<'_, H> {
-            #[inline]
-            fn write_str(&mut self, s: &str) -> std::fmt::Result {
-                self.0.update(s.as_bytes());
-                Ok(())
-            }
-        }
-
-        std::fmt::write(&mut Hasher(engine), format_args!("{self}")).unwrap();
+        std::fmt::write(&mut DisplayHasher(engine), format_args!("{self}")).unwrap();
     }
 }
 
@@ -505,5 +718,43 @@ impl std::fmt::Display for FunctionSignatureRaw<'_> {
         }
 
         write!(f, ")v{}", self.abi_version.major)
+    }
+}
+
+struct EventSignatureRaw<'a> {
+    abi_version: AbiVersion,
+    name: &'a str,
+    inputs: &'a [NamedAbiType],
+}
+
+impl EventSignatureRaw<'_> {
+    fn update_hasher<H: Digest>(&self, engine: &mut H) {
+        std::fmt::write(&mut DisplayHasher(engine), format_args!("{self}")).unwrap();
+    }
+}
+
+impl std::fmt::Display for EventSignatureRaw<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        ok!(write!(f, "{}(", self.name));
+
+        let mut first = true;
+        for item in self.inputs {
+            if !std::mem::take(&mut first) {
+                ok!(f.write_str(","));
+            }
+            ok!(std::fmt::Display::fmt(&item.ty, f));
+        }
+        write!(f, ")v{}", self.abi_version.major)
+    }
+}
+
+#[repr(transparent)]
+struct DisplayHasher<'a, H>(&'a mut H);
+
+impl<H: Digest> std::fmt::Write for DisplayHasher<'_, H> {
+    #[inline]
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        self.0.update(s.as_bytes());
+        Ok(())
     }
 }

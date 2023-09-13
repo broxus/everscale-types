@@ -103,7 +103,7 @@ pub enum AbiError {
     #[error("an address was expected for signing but was not provided")]
     AddressNotProvided,
     /// Expected a different function id while decoding function input.
-    #[error("expected function input id 0x{expected:08x}, got 0x{id:08x}")]
+    #[error("expected input id 0x{expected:08x}, got 0x{id:08x}")]
     InputIdMismatch {
         /// Function input id.
         expected: u32,
@@ -111,7 +111,7 @@ pub enum AbiError {
         id: u32,
     },
     /// Expected a different function id while decoding function output.
-    #[error("expected function output id 0x{expected:08x}, got 0x{id:08x}")]
+    #[error("expected output id 0x{expected:08x}, got 0x{id:08x}")]
     OutputIdMismatch {
         /// Function output id.
         expected: u32,

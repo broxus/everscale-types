@@ -184,6 +184,30 @@ impl std::fmt::Display for AbiHeaderType {
     }
 }
 
+impl Serialize for AbiHeaderType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_str(&self)
+    }
+}
+
+impl<'de> Deserialize<'de> for AbiHeaderType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        #[derive(Deserialize)]
+        #[serde(transparent)]
+        struct Helper<'a>(#[serde(borrow)] Cow<'a, str>);
+
+        Self::from_str(&ok!(Helper::deserialize(deserializer)).0).map_err(Error::custom)
+    }
+}
+
 /// ABI value type.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum AbiType {
