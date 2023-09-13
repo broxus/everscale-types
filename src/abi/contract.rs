@@ -35,6 +35,53 @@ pub struct Contract {
 
     /// A mapping with all contract events by name.
     pub events: HashMap<Arc<str>, Event>,
+
+    /// Contract storage fields.
+    pub fields: Arc<[NamedAbiType]>,
+}
+
+impl Contract {
+    /// Finds a method declaration with the specfied id.
+    pub fn find_function_by_id(&self, id: u32, input: bool) -> Option<&Function> {
+        self.functions
+            .values()
+            .find(|item| input && item.input_id == id || !input && item.output_id == id)
+    }
+
+    /// Finds an event with the specified id.
+    pub fn find_event_by_id(&self, id: u32) -> Option<&Event> {
+        self.events.values().find(|event| event.id == id)
+    }
+
+    /// Encodes an account data with the specified storage fields of this contract.
+    pub fn encode_fields(&self, tokens: &[NamedAbiValue]) -> Result<CellBuilder> {
+        ok!(NamedAbiValue::check_types(tokens, &self.fields));
+        NamedAbiValue::tuple_to_builder(tokens, self.abi_version).map_err(From::from)
+    }
+
+    /// Tries to parse storage fields of this contract from an account data.
+    ///
+    /// NOTE: The slice is required to contain nothing other than these fields.
+    pub fn decode_fields(&self, mut slice: CellSlice<'_>) -> Result<Vec<NamedAbiValue>> {
+        self.decode_fields_ext(&mut slice, false)
+    }
+
+    /// Tries to parse storage fields of this contract from an account data.
+    pub fn decode_fields_ext(
+        &self,
+        slice: &mut CellSlice<'_>,
+        allow_partial: bool,
+    ) -> Result<Vec<NamedAbiValue>> {
+        let res = ok!(NamedAbiValue::load_tuple_ext(
+            &self.fields,
+            self.abi_version,
+            true,
+            allow_partial,
+            slice
+        ));
+        ok!(AbiValue::check_remaining(slice, allow_partial));
+        Ok(res)
+    }
 }
 
 impl<'de> Deserialize<'de> for Contract {
@@ -166,13 +213,12 @@ impl<'de> Deserialize<'de> for Contract {
             })
             .collect();
 
-        // TODO: parse events and fields
-
         Ok(Self {
             abi_version,
             header,
             functions,
             events,
+            fields: Arc::from(contract.fields),
         })
     }
 }
