@@ -18,7 +18,9 @@ use crate::num::Tokens;
 use crate::prelude::{CellFamily, CellSliceRange, HashBytes};
 
 use super::error::AbiError;
-use super::{AbiHeaderType, AbiValue, AbiVersion, NamedAbiType, NamedAbiValue, ShortAbiTypeSize};
+use super::{
+    AbiHeaderType, AbiType, AbiValue, AbiVersion, NamedAbiType, NamedAbiValue, ShortAbiTypeSize,
+};
 
 /// Contract ABI definition.
 pub struct Contract {
@@ -291,6 +293,12 @@ impl Function {
         serializer.finalize(finalizer).map_err(From::from)
     }
 
+    /// Returns a method builder with the specified ABI version and name.
+    #[inline]
+    pub fn builder<T: Into<String>>(abi_version: AbiVersion, name: T) -> FunctionBuilder {
+        FunctionBuilder::new(abi_version, name)
+    }
+
     /// Encodes an unsigned body with invocation of this method as an external message.
     pub fn encode_external_input(
         &self,
@@ -484,6 +492,102 @@ impl Function {
             inputs: &self.inputs,
             outputs: &self.outputs,
         }
+    }
+}
+
+/// Method ABI declaration builder.
+#[derive(Debug, Clone)]
+pub struct FunctionBuilder {
+    abi_version: AbiVersion,
+    name: String,
+    header: Vec<AbiHeaderType>,
+    inputs: Vec<NamedAbiType>,
+    outputs: Vec<NamedAbiType>,
+    id: Option<u32>,
+}
+
+impl FunctionBuilder {
+    /// Creates an empty ABI declaration for a method with the specified ABI version and name.
+    pub fn new<T: Into<String>>(abi_version: AbiVersion, name: T) -> Self {
+        Self {
+            abi_version,
+            name: name.into(),
+            header: Default::default(),
+            inputs: Default::default(),
+            outputs: Default::default(),
+            id: None,
+        }
+    }
+
+    /// Finalizes an ABI declaration.
+    pub fn build(self) -> Function {
+        let (input_id, output_id) = match self.id {
+            Some(id) => (id, id),
+            None => {
+                let id = Function::compute_function_id(
+                    self.abi_version,
+                    &self.name,
+                    &self.header,
+                    &self.inputs,
+                    &self.outputs,
+                );
+                (id & Function::INPUT_ID_MASK, id | !Function::INPUT_ID_MASK)
+            }
+        };
+
+        Function {
+            abi_version: self.abi_version,
+            header: Arc::from(self.header),
+            name: Arc::from(self.name),
+            inputs: Arc::from(self.inputs),
+            outputs: Arc::from(self.outputs),
+            input_id,
+            output_id,
+        }
+    }
+
+    /// Sets method headers to the specified list.
+    pub fn with_header<I: IntoIterator<Item = AbiHeaderType>>(mut self, header: I) -> Self {
+        self.header = header.into_iter().collect();
+        self
+    }
+
+    /// Sets method input types to the specified list of named arguments.
+    pub fn with_inputs<I: IntoIterator<Item = NamedAbiType>>(mut self, inputs: I) -> Self {
+        self.inputs = inputs.into_iter().collect();
+        self
+    }
+
+    /// Sets method input types to the specified list of unnamed arguments.
+    pub fn with_unnamed_inputs<I: IntoIterator<Item = AbiType>>(mut self, inputs: I) -> Self {
+        self.inputs = inputs
+            .into_iter()
+            .enumerate()
+            .map(NamedAbiType::from)
+            .collect();
+        self
+    }
+
+    /// Sets method output types to the specified list of named arguments.
+    pub fn with_outputs<I: IntoIterator<Item = NamedAbiType>>(mut self, outputs: I) -> Self {
+        self.outputs = outputs.into_iter().collect();
+        self
+    }
+
+    /// Sets method output types to the specified list of unnamed arguments.
+    pub fn with_unnamed_outputs<I: IntoIterator<Item = AbiType>>(mut self, outputs: I) -> Self {
+        self.outputs = outputs
+            .into_iter()
+            .enumerate()
+            .map(NamedAbiType::from)
+            .collect();
+        self
+    }
+
+    /// Sets an explicit function id.
+    pub fn with_id(mut self, id: u32) -> Self {
+        self.id = Some(id);
+        self
     }
 }
 
