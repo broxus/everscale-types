@@ -55,6 +55,14 @@ pub struct BaseMessage<I, B> {
     pub layout: Option<MessageLayout>,
 }
 
+impl<I: ExactSize, B: ExactSize> BaseMessage<I, B> {
+    /// Computes the most optimal layout of the message parts.
+    pub fn compute_layout(info: &I, init: Option<&StateInit>, body: &B) -> MessageLayout {
+        let (layout, ..) = MessageLayout::compute(info.exact_size(), init, body.exact_size());
+        layout
+    }
+}
+
 impl<I, B> Store for BaseMessage<I, B>
 where
     I: Store + ExactSize,

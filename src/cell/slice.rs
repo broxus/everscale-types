@@ -1558,6 +1558,20 @@ pub trait ExactSize {
     fn exact_size(&self) -> CellSliceSize;
 }
 
+impl<T: ExactSize> ExactSize for &T {
+    #[inline]
+    fn exact_size(&self) -> CellSliceSize {
+        T::exact_size(self)
+    }
+}
+
+impl<T: ExactSize> ExactSize for &mut T {
+    #[inline]
+    fn exact_size(&self) -> CellSliceSize {
+        T::exact_size(self)
+    }
+}
+
 impl<T: ExactSize> ExactSize for Box<T> {
     #[inline]
     fn exact_size(&self) -> CellSliceSize {
