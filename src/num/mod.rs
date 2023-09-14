@@ -706,7 +706,7 @@ macro_rules! impl_small_uints {
                 _: &mut dyn Finalizer
             ) -> Result<(), Error> {
                 if !self.is_valid() {
-                    return Err(Error::InvalidData);
+                    return Err(Error::IntOverflow);
                 }
                 builder.store_uint(self.0 as u64, Self::BITS)
             }
@@ -771,7 +771,7 @@ impl SplitDepth {
     pub const fn new(value: u8) -> Result<Self, Error> {
         match NonZeroU8::new(value) {
             Some(value) => Ok(Self(value)),
-            None => Err(Error::InvalidData),
+            None => Err(Error::IntOverflow),
         }
     }
 
@@ -781,7 +781,7 @@ impl SplitDepth {
         if bit_len < u8::MAX as u16 {
             Self::new(bit_len as u8)
         } else {
-            Err(Error::InvalidData)
+            Err(Error::IntOverflow)
         }
     }
 

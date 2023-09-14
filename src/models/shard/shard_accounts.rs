@@ -96,7 +96,7 @@ impl Store for DepthBalanceInfo {
         finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         if !self.is_valid() {
-            return Err(Error::InvalidData);
+            return Err(Error::IntOverflow);
         }
         ok!(builder.store_small_uint(self.split_depth, Self::SPLIT_DEPTH_BITS));
         self.balance.store_into(builder, finalizer)
@@ -112,7 +112,7 @@ impl<'a> Load<'a> for DepthBalanceInfo {
         if result.is_valid() {
             Ok(result)
         } else {
-            Err(Error::InvalidData)
+            Err(Error::IntOverflow)
         }
     }
 }

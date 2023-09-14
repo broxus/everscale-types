@@ -352,6 +352,12 @@ impl CellBuilder {
         self.bit_len
     }
 
+    /// Returns child cell count.
+    #[inline(always)]
+    pub const fn reference_count(&self) -> u8 {
+        self.references.len() as u8
+    }
+
     /// Returns remaining data capacity in bits.
     #[inline]
     pub fn spare_bits_capacity(&self) -> u16 {
@@ -421,6 +427,12 @@ impl CellBuilder {
         } else {
             Err(Error::CellOverflow)
         }
+    }
+
+    /// Tries to store the specified number of set bits in the cell,
+    /// returning `false` if there is not enough remaining capacity.
+    pub fn store_ones(&mut self, bits: u16) -> Result<(), Error> {
+        self.store_raw(crate::cell::cell_impl::ALL_ONES_CELL.data(), bits)
     }
 
     /// Tries to store one zero bit in the cell,

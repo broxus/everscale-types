@@ -96,10 +96,9 @@ impl BocRepr {
     }
 }
 
-fn borrow_cow_bytes<'de: 'a, 'a, D, R>(deserializer: D) -> Result<R, D::Error>
+fn borrow_cow_bytes<'de: 'a, 'a, D>(deserializer: D) -> Result<Cow<'a, [u8]>, D::Error>
 where
     D: Deserializer<'de>,
-    R: From<Cow<'a, [u8]>>,
 {
     use serde::de::{Error, Visitor};
 
@@ -155,9 +154,7 @@ where
         }
     }
 
-    deserializer
-        .deserialize_bytes(CowBytesVisitor)
-        .map(From::from)
+    deserializer.deserialize_bytes(CowBytesVisitor)
 }
 
 #[cfg(test)]

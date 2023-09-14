@@ -419,7 +419,7 @@ impl<'a> Load<'a> for ShardIdent {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let prefix_len = ok!(slice.load_u8());
         if prefix_len > Self::MAX_SPLIT_DEPTH {
-            return Err(Error::InvalidData);
+            return Err(Error::IntOverflow);
         }
 
         let workchain = ok!(slice.load_u32()) as i32;
