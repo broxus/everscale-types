@@ -7,7 +7,9 @@ pub use self::contract::{
     UnsignedExternalMessage,
 };
 pub use self::signature::{extend_signature_with_id, sign_with_signature_id};
-pub use self::traits::{IntoAbi, IntoPlainAbi, WithAbiType, WithPlainAbiType};
+pub use self::traits::{
+    FromAbi, FromPlainAbi, IntoAbi, IntoPlainAbi, WithAbiType, WithPlainAbiType,
+};
 pub use self::ty::{
     AbiHeaderType, AbiType, FullAbiTypeSize, NamedAbiType, PlainAbiType, ShortAbiTypeSize,
 };

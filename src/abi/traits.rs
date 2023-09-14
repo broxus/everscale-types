@@ -208,7 +208,7 @@ impl_with_plain_abi_type! {
     VarAddr => Address,
 }
 
-/// A type with can be converted into a plain ABI value.
+/// A type which can be converted into a plain ABI value.
 pub trait IntoPlainAbi: IntoAbi {
     /// Returns a corresponding plain ABI value.
     ///
