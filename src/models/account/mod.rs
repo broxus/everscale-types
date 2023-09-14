@@ -344,16 +344,31 @@ impl Default for StateInit {
 }
 
 impl StateInit {
+    /// Exact size of this value when it is stored in slice.
+    pub const fn exact_size_const(&self) -> CellSliceSize {
+        CellSliceSize {
+            bits: self.bit_len(),
+            refs: self.reference_count(),
+        }
+    }
+
     /// Returns the number of data bits that this struct occupies.
-    pub const fn bit_len(&self) -> u16 {
+    const fn bit_len(&self) -> u16 {
         (1 + self.split_depth.is_some() as u16 * SplitDepth::BITS)
             + (1 + self.special.is_some() as u16 * SpecialFlags::BITS)
             + 3
     }
 
     /// Returns the number of references that this struct occupies.
-    pub const fn reference_count(&self) -> u8 {
+    const fn reference_count(&self) -> u8 {
         self.code.is_some() as u8 + self.data.is_some() as u8 + !self.libraries.is_empty() as u8
+    }
+}
+
+impl ExactSize for StateInit {
+    #[inline]
+    fn exact_size(&self) -> CellSliceSize {
+        self.exact_size_const()
     }
 }
 

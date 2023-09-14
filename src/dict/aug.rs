@@ -47,6 +47,13 @@ pub struct AugDict<K, A, V> {
     _value: PhantomData<(A, V)>,
 }
 
+impl<K, A: ExactSize, V> ExactSize for AugDict<K, A, V> {
+    #[inline]
+    fn exact_size(&self) -> CellSliceSize {
+        self.dict.exact_size() + self.extra.exact_size()
+    }
+}
+
 impl<'a, K, A: Load<'a>, V> Load<'a> for AugDict<K, A, V> {
     #[inline]
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {

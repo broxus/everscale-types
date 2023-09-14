@@ -20,6 +20,16 @@ pub struct Dict<K, V> {
     _value: PhantomData<V>,
 }
 
+impl<K, V> ExactSize for Dict<K, V> {
+    #[inline]
+    fn exact_size(&self) -> CellSliceSize {
+        CellSliceSize {
+            bits: 1,
+            refs: self.root.is_some() as u8,
+        }
+    }
+}
+
 impl<'a, K, V> Load<'a> for Dict<K, V> {
     #[inline]
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {

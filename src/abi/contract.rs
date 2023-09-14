@@ -10,8 +10,8 @@ use sha2::Digest;
 use crate::abi::value::ser::AbiSerializer;
 use crate::abi::AbiHeader;
 use crate::cell::{
-    Cell, CellBuilder, CellFamily, CellSlice, CellSliceRange, DefaultFinalizer, DynCell, HashBytes,
-    Store,
+    Cell, CellBuilder, CellFamily, CellSlice, CellSliceRange, CellSliceSize, DefaultFinalizer,
+    DynCell, HashBytes, Store,
 };
 use crate::dict::RawDict;
 use crate::models::{
@@ -22,9 +22,7 @@ use crate::num::Tokens;
 use crate::prelude::Dict;
 
 use super::error::AbiError;
-use super::{
-    AbiHeaderType, AbiType, AbiValue, AbiVersion, NamedAbiType, NamedAbiValue, ShortAbiTypeSize,
-};
+use super::{AbiHeaderType, AbiType, AbiValue, AbiVersion, NamedAbiType, NamedAbiValue};
 
 /// Contract ABI definition.
 pub struct Contract {
@@ -734,7 +732,7 @@ impl<'f, 'a> ExternalInput<'f, 'a> {
         if reserve_signature {
             serializer.add_offset(if abi_version.major == 1 {
                 // Reserve reference for signature
-                ShortAbiTypeSize { bits: 0, refs: 1 }
+                CellSliceSize { bits: 0, refs: 1 }
             } else {
                 let bits = if abi_version >= AbiVersion::V2_3 {
                     // Reserve only for address as it also ensures the the signature will fit
@@ -743,7 +741,7 @@ impl<'f, 'a> ExternalInput<'f, 'a> {
                     // Reserve for `Some` non-empty signature
                     1 + 512
                 };
-                ShortAbiTypeSize { bits, refs: 0 }
+                CellSliceSize { bits, refs: 0 }
             });
         }
 

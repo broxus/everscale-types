@@ -36,6 +36,16 @@ use super::{
 /// ```
 pub struct RawDict<const N: u16>(pub(crate) Option<Cell>);
 
+impl<const N: u16> ExactSize for RawDict<N> {
+    #[inline]
+    fn exact_size(&self) -> CellSliceSize {
+        CellSliceSize {
+            bits: 1,
+            refs: self.0.is_some() as u8,
+        }
+    }
+}
+
 impl<'a, const N: u16> Load<'a> for RawDict<N> {
     #[inline]
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {

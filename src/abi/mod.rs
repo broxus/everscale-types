@@ -10,9 +10,7 @@ pub use self::signature::{extend_signature_with_id, sign_with_signature_id};
 pub use self::traits::{
     FromAbi, FromPlainAbi, IntoAbi, IntoPlainAbi, WithAbiType, WithPlainAbiType,
 };
-pub use self::ty::{
-    AbiHeaderType, AbiType, FullAbiTypeSize, NamedAbiType, PlainAbiType, ShortAbiTypeSize,
-};
+pub use self::ty::{AbiHeaderType, AbiType, NamedAbiType, PlainAbiType};
 pub use self::value::{AbiHeader, AbiValue, NamedAbiValue, PlainAbiValue};
 
 pub mod error;

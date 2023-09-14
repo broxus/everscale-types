@@ -6,7 +6,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use super::error::{ParseAbiTypeError, ParseNamedAbiTypeError};
-use crate::cell::{MAX_BIT_LEN, MAX_REF_COUNT};
+use crate::cell::{CellTreeStats, MAX_BIT_LEN, MAX_REF_COUNT};
 use crate::models::{IntAddr, StdAddr};
 use crate::num::Tokens;
 
@@ -281,37 +281,60 @@ impl AbiType {
     }
 
     /// Returns the maximum number of bits and refs that this type can occupy.
-    pub fn max_size(&self) -> FullAbiTypeSize {
+    pub fn max_size(&self) -> CellTreeStats {
         match self {
-            Self::Uint(n) | Self::Int(n) => FullAbiTypeSize {
-                bits: *n as _,
-                refs: 0,
+            Self::Uint(n) | Self::Int(n) => CellTreeStats {
+                bit_count: *n as _,
+                cell_count: 0,
             },
             Self::VarUint(n) | Self::VarInt(n) => {
                 let value_bytes: u8 = n.get() - 1;
-                let bits = (8 - value_bytes.leading_zeros()) as usize + (value_bytes as usize * 8);
-                FullAbiTypeSize { bits, refs: 0 }
+                let bit_count = (8 - value_bytes.leading_zeros()) as u64 + (value_bytes as u64 * 8);
+                CellTreeStats {
+                    bit_count,
+                    cell_count: 0,
+                }
             }
-            Self::Bool => FullAbiTypeSize { bits: 1, refs: 0 },
+            Self::Bool => CellTreeStats {
+                bit_count: 1,
+                cell_count: 0,
+            },
             Self::Cell | Self::Bytes | Self::FixedBytes(_) | Self::String | Self::Ref(_) => {
-                FullAbiTypeSize { bits: 0, refs: 1 }
+                CellTreeStats {
+                    bit_count: 0,
+                    cell_count: 1,
+                }
             }
-            Self::Address => FullAbiTypeSize {
-                bits: IntAddr::BITS_MAX as _,
-                refs: 0,
+            Self::Address => CellTreeStats {
+                bit_count: IntAddr::BITS_MAX as _,
+                cell_count: 0,
             },
-            Self::Token => FullAbiTypeSize {
-                bits: Tokens::MAX_BITS as usize,
-                refs: 0,
+            Self::Token => CellTreeStats {
+                bit_count: Tokens::MAX_BITS as _,
+                cell_count: 0,
             },
-            Self::Array(_) => FullAbiTypeSize { bits: 33, refs: 1 },
-            Self::FixedArray(..) | Self::Map(..) => FullAbiTypeSize { bits: 1, refs: 1 },
+            Self::Array(_) => CellTreeStats {
+                bit_count: 33,
+                cell_count: 1,
+            },
+            Self::FixedArray(..) | Self::Map(..) => CellTreeStats {
+                bit_count: 1,
+                cell_count: 1,
+            },
             Self::Optional(ty) => {
                 let ty_size = ty.max_size();
-                if ty_size.bits < MAX_BIT_LEN as usize && ty_size.refs < MAX_REF_COUNT {
-                    FullAbiTypeSize { bits: 1, refs: 0 } + ty_size
+                if ty_size.bit_count < MAX_BIT_LEN as u64
+                    && ty_size.cell_count < MAX_REF_COUNT as u64
+                {
+                    CellTreeStats {
+                        bit_count: 1,
+                        cell_count: 0,
+                    } + ty_size
                 } else {
-                    FullAbiTypeSize { bits: 1, refs: 1 }
+                    CellTreeStats {
+                        bit_count: 1,
+                        cell_count: 1,
+                    }
                 }
             }
             Self::Tuple(items) => items.iter().map(|item| item.ty.max_size()).sum(),
@@ -320,12 +343,12 @@ impl AbiType {
 
     /// Returns the maximum number of bits that this type can occupy.
     pub fn max_bits(&self) -> usize {
-        self.max_size().bits
+        self.max_size().bit_count as usize
     }
 
     /// Returns the maximum number of cells that this type can occupy.
     pub fn max_refs(&self) -> usize {
-        self.max_size().refs
+        self.max_size().cell_count as usize
     }
 
     fn components(&self) -> Option<&[NamedAbiType]> {
@@ -656,193 +679,6 @@ impl std::fmt::Display for PlainAbiType {
             Self::Address => "address",
         };
         f.write_str(s)
-    }
-}
-
-/// Short type stats.
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
-pub struct ShortAbiTypeSize {
-    /// Total number of bits that the value of this type can occupy.
-    pub bits: u16,
-    /// Total number refs that the value of this type can occupy.
-    pub refs: u8,
-}
-
-impl ShortAbiTypeSize {
-    /// The additive identity for this type, i.e. `0`.
-    pub const ZERO: Self = Self { bits: 0, refs: 0 };
-
-    /// The largest valid value that can be represented by this type.
-    pub const MAX: Self = Self {
-        bits: MAX_BIT_LEN,
-        refs: MAX_REF_COUNT as _,
-    };
-
-    /// Saturating size addition. Computes self + rhs for bits and refs,
-    /// saturating at the numeric bounds instead of overflowing.
-    #[inline]
-    pub const fn saturating_add(self, rhs: Self) -> Self {
-        Self {
-            bits: self.bits.saturating_add(rhs.bits),
-            refs: self.refs.saturating_add(rhs.refs),
-        }
-    }
-}
-
-impl From<ShortAbiTypeSize> for FullAbiTypeSize {
-    #[inline]
-    fn from(value: ShortAbiTypeSize) -> Self {
-        Self {
-            bits: value.bits as _,
-            refs: value.refs as _,
-        }
-    }
-}
-
-impl std::ops::Add for ShortAbiTypeSize {
-    type Output = Self;
-
-    #[inline]
-    fn add(mut self, rhs: Self) -> Self::Output {
-        self += rhs;
-        self
-    }
-}
-
-impl std::ops::AddAssign for ShortAbiTypeSize {
-    #[inline]
-    fn add_assign(&mut self, rhs: Self) {
-        self.bits += rhs.bits;
-        self.refs += rhs.refs;
-    }
-}
-
-impl std::ops::Sub for ShortAbiTypeSize {
-    type Output = Self;
-
-    #[inline]
-    fn sub(mut self, rhs: Self) -> Self::Output {
-        self -= rhs;
-        self
-    }
-}
-
-impl std::ops::SubAssign for ShortAbiTypeSize {
-    #[inline]
-    fn sub_assign(&mut self, rhs: Self) {
-        self.bits -= rhs.bits;
-        self.refs -= rhs.refs;
-    }
-}
-
-/// Extended type stats.
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
-pub struct FullAbiTypeSize {
-    /// Total number of bits that the value of this type can occupy across multiple cells.
-    pub bits: usize,
-    /// Total number refs that the value of this type can occupy across multiple cells.
-    pub refs: usize,
-}
-
-impl FullAbiTypeSize {
-    /// The additive identity for this type, i.e. `0`.
-    pub const ZERO: Self = Self { bits: 0, refs: 0 };
-
-    /// Returns true if the number of bits and refs is in the valid range for the cell.
-    #[inline]
-    pub const fn fits_into_cell(&self) -> bool {
-        self.bits <= MAX_BIT_LEN as _ && self.refs <= MAX_REF_COUNT
-    }
-
-    /// Tries to narrow the stats to fit into one cell.
-    #[inline]
-    pub const fn try_into_cell_size(self) -> Option<(u16, u8)> {
-        if self.fits_into_cell() {
-            Some((self.bits as u16, self.refs as u8))
-        } else {
-            None
-        }
-    }
-}
-
-impl std::iter::Sum for FullAbiTypeSize {
-    #[inline]
-    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        let mut res = Self::ZERO;
-        for item in iter {
-            res += item;
-        }
-        res
-    }
-}
-
-impl std::ops::Add for FullAbiTypeSize {
-    type Output = Self;
-
-    #[inline]
-    fn add(mut self, rhs: Self) -> Self::Output {
-        self += rhs;
-        self
-    }
-}
-
-impl std::ops::AddAssign for FullAbiTypeSize {
-    #[inline]
-    fn add_assign(&mut self, rhs: Self) {
-        self.bits += rhs.bits;
-        self.refs += rhs.refs;
-    }
-}
-
-impl std::ops::Add<ShortAbiTypeSize> for FullAbiTypeSize {
-    type Output = Self;
-
-    #[inline]
-    fn add(mut self, rhs: ShortAbiTypeSize) -> Self::Output {
-        self += rhs;
-        self
-    }
-}
-
-impl std::ops::AddAssign<ShortAbiTypeSize> for FullAbiTypeSize {
-    fn add_assign(&mut self, rhs: ShortAbiTypeSize) {
-        self.bits += rhs.bits as usize;
-        self.refs += rhs.refs as usize;
-    }
-}
-
-impl std::ops::Sub for FullAbiTypeSize {
-    type Output = Self;
-
-    #[inline]
-    fn sub(mut self, rhs: Self) -> Self::Output {
-        self -= rhs;
-        self
-    }
-}
-
-impl std::ops::SubAssign for FullAbiTypeSize {
-    #[inline]
-    fn sub_assign(&mut self, rhs: Self) {
-        self.bits -= rhs.bits;
-        self.refs -= rhs.refs;
-    }
-}
-
-impl std::ops::Sub<ShortAbiTypeSize> for FullAbiTypeSize {
-    type Output = Self;
-
-    #[inline]
-    fn sub(mut self, rhs: ShortAbiTypeSize) -> Self::Output {
-        self -= rhs;
-        self
-    }
-}
-
-impl std::ops::SubAssign<ShortAbiTypeSize> for FullAbiTypeSize {
-    fn sub_assign(&mut self, rhs: ShortAbiTypeSize) {
-        self.bits -= rhs.bits as usize;
-        self.refs -= rhs.refs as usize;
     }
 }
 

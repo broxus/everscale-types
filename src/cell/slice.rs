@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::cell::{
     Cell, CellTreeStats, CellType, DynCell, HashBytes, LevelMask, RefsIter, StorageStat,
+    MAX_BIT_LEN, MAX_REF_COUNT,
 };
 use crate::error::Error;
 use crate::util::{unlikely, Bitstring};
@@ -55,7 +56,7 @@ impl<'a> Load<'a> for () {
 
 macro_rules! impl_load_for_tuples {
     ($( ($($t:ident),+) ),*$(,)?) => {$(
-        impl<'a, $($t: Load<'a>),+> Load<'a> for ($($t),*) {
+        impl<'a, $($t: Load<'a>),+> Load<'a> for ($($t),*,) {
             fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
                 Ok(($(ok!(<$t>::load_from(slice))),+))
             }
@@ -64,11 +65,11 @@ macro_rules! impl_load_for_tuples {
 }
 
 impl_load_for_tuples! {
-    (T1, T2),
-    (T1, T2, T3),
-    (T1, T2, T3, T4),
-    (T1, T2, T3, T4, T5),
-    (T1, T2, T3, T4, T5, T6),
+    (T0, T1),
+    (T0, T1, T2),
+    (T0, T1, T2, T3),
+    (T0, T1, T2, T3, T4),
+    (T0, T1, T2, T3, T4, T5),
 }
 
 impl<'a, T: Load<'a>> Load<'a> for Option<T> {
@@ -82,6 +83,17 @@ impl<'a, T: Load<'a>> Load<'a> for Option<T> {
         } else {
             Ok(None)
         }
+    }
+}
+
+impl<T: ExactSize> ExactSize for Option<T> {
+    #[inline]
+    fn exact_size(&self) -> CellSliceSize {
+        let mut total = CellSliceSize { bits: 1, refs: 0 };
+        if let Some(this) = self {
+            total += this.exact_size();
+        }
+        total
     }
 }
 
@@ -154,14 +166,35 @@ impl<'a> Load<'a> for &'a DynCell {
     }
 }
 
+impl ExactSize for DynCell {
+    #[inline]
+    fn exact_size(&self) -> CellSliceSize {
+        CellSliceSize { bits: 0, refs: 1 }
+    }
+}
+
 impl<'a> Load<'a> for Cell {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         slice.load_reference_cloned()
     }
 }
 
+impl ExactSize for Cell {
+    #[inline]
+    fn exact_size(&self) -> CellSliceSize {
+        CellSliceSize { bits: 0, refs: 1 }
+    }
+}
+
 /// Owned cell slice parts alias.
 pub type CellSliceParts = (Cell, CellSliceRange);
+
+impl ExactSize for CellSliceParts {
+    #[inline]
+    fn exact_size(&self) -> CellSliceSize {
+        self.1.exact_size_const()
+    }
+}
 
 /// Indices of the slice data and refs windows.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -239,6 +272,14 @@ impl CellSliceRange {
         CellSlice {
             range: self,
             cell: cell.as_ref(),
+        }
+    }
+
+    /// Returns the number of remaining bits and refs in the slice.
+    pub const fn exact_size_const(&self) -> CellSliceSize {
+        CellSliceSize {
+            bits: self.remaining_bits(),
+            refs: self.remaining_refs(),
         }
     }
 
@@ -451,6 +492,11 @@ impl<'a> CellSlice<'a> {
     /// ```
     pub const fn is_refs_empty(&self) -> bool {
         self.range.is_refs_empty()
+    }
+
+    /// Returns the number of remaining bits and refs in the slice.
+    pub const fn exact_size_const(&self) -> CellSliceSize {
+        self.range.exact_size_const()
     }
 
     /// Returns the number of remaining bits of data in the slice.
@@ -1496,6 +1542,164 @@ impl<'a> CellSlice<'a> {
         }
 
         DisplayData(self)
+    }
+}
+
+impl ExactSize for CellSlice<'_> {
+    #[inline]
+    fn exact_size(&self) -> CellSliceSize {
+        self.exact_size_const()
+    }
+}
+
+/// A type with a known size in bits and refs.
+pub trait ExactSize {
+    /// Exact size of the value when it is stored in a slice.
+    fn exact_size(&self) -> CellSliceSize;
+}
+
+impl<T: ExactSize> ExactSize for Box<T> {
+    #[inline]
+    fn exact_size(&self) -> CellSliceSize {
+        T::exact_size(self)
+    }
+}
+
+impl<T: ExactSize> ExactSize for Arc<T> {
+    #[inline]
+    fn exact_size(&self) -> CellSliceSize {
+        T::exact_size(self)
+    }
+}
+
+impl<T: ExactSize> ExactSize for Rc<T> {
+    #[inline]
+    fn exact_size(&self) -> CellSliceSize {
+        T::exact_size(self)
+    }
+}
+
+impl ExactSize for () {
+    #[inline]
+    fn exact_size(&self) -> CellSliceSize {
+        CellSliceSize::ZERO
+    }
+}
+
+macro_rules! strip_plus {
+    (+ $($rest: tt)*) => {
+        $($rest)*
+    }
+}
+
+macro_rules! impl_exact_size_for_tuples {
+    ($( ($($tt:tt: $t:ident),+) ),*$(,)?) => {$(
+        impl<$($t: ExactSize),+> ExactSize for ($($t),*,) {
+            fn exact_size(&self) -> CellSliceSize {
+                strip_plus!($(+ ExactSize::exact_size(&self.$tt))+)
+            }
+        }
+    )*};
+}
+
+impl_exact_size_for_tuples! {
+    (0: T0),
+    (0: T0, 1: T1),
+    (0: T0, 1: T1, 2: T2),
+    (0: T0, 1: T1, 2: T2, 3: T3),
+    (0: T0, 1: T1, 2: T2, 3: T3, 4: T4),
+    (0: T0, 1: T1, 2: T2, 3: T3, 4: T4, 5: T5),
+}
+
+/// A size of a cell slice.
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+pub struct CellSliceSize {
+    /// Total number of bits in cell slice.
+    pub bits: u16,
+    /// Total number refs in cell slice.
+    pub refs: u8,
+}
+
+impl CellSliceSize {
+    /// The additive identity for this type, i.e. `0`.
+    pub const ZERO: Self = Self { bits: 0, refs: 0 };
+
+    /// The largest valid value that can be represented by this type.
+    pub const MAX: Self = Self {
+        bits: MAX_BIT_LEN,
+        refs: MAX_REF_COUNT as _,
+    };
+
+    /// Returns true if the number of bits and refs is in the valid range for the cell.
+    #[inline]
+    pub const fn fits_into_cell(&self) -> bool {
+        self.bits <= MAX_BIT_LEN && self.refs <= MAX_REF_COUNT as _
+    }
+
+    /// Saturating size addition. Computes self + rhs for bits and refs,
+    /// saturating at the numeric bounds instead of overflowing.
+    #[inline]
+    pub const fn saturating_add(self, rhs: Self) -> Self {
+        Self {
+            bits: self.bits.saturating_add(rhs.bits),
+            refs: self.refs.saturating_add(rhs.refs),
+        }
+    }
+
+    /// Saturating size substraction. Computes self - rhs for bits and refs,
+    /// saturating at the numeric bounds instead of overflowing.
+    #[inline]
+    pub const fn saturating_sub(self, rhs: Self) -> Self {
+        Self {
+            bits: self.bits.saturating_sub(rhs.bits),
+            refs: self.refs.saturating_sub(rhs.refs),
+        }
+    }
+}
+
+impl From<CellSliceSize> for CellTreeStats {
+    #[inline]
+    fn from(value: CellSliceSize) -> Self {
+        Self {
+            bit_count: value.bits as _,
+            cell_count: value.refs as _,
+        }
+    }
+}
+
+impl std::ops::Add for CellSliceSize {
+    type Output = Self;
+
+    #[inline]
+    fn add(mut self, rhs: Self) -> Self::Output {
+        self += rhs;
+        self
+    }
+}
+
+impl std::ops::AddAssign for CellSliceSize {
+    #[inline]
+    fn add_assign(&mut self, rhs: Self) {
+        self.bits += rhs.bits;
+        self.refs += rhs.refs;
+    }
+}
+
+impl std::ops::Sub for CellSliceSize {
+    type Output = Self;
+
+    #[inline]
+    fn sub(mut self, rhs: Self) -> Self::Output {
+        self -= rhs;
+        self
+    }
+}
+
+impl std::ops::SubAssign for CellSliceSize {
+    #[inline]
+    fn sub_assign(&mut self, rhs: Self) {
+        self.bits -= rhs.bits;
+        self.refs -= rhs.refs;
     }
 }
 

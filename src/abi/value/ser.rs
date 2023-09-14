@@ -4,11 +4,12 @@ use std::num::NonZeroU8;
 use num_bigint::{BigUint, Sign};
 
 use crate::abi::{
-    AbiHeader, AbiHeaderType, AbiType, AbiValue, AbiVersion, FullAbiTypeSize, NamedAbiValue,
-    PlainAbiType, PlainAbiValue, ShortAbiTypeSize,
+    AbiHeader, AbiHeaderType, AbiType, AbiValue, AbiVersion, NamedAbiValue, PlainAbiType,
+    PlainAbiValue,
 };
 use crate::cell::{
-    Cell, CellBuilder, CellSlice, DefaultFinalizer, Finalizer, Store, MAX_BIT_LEN, MAX_REF_COUNT,
+    Cell, CellBuilder, CellSlice, CellSliceSize, CellTreeStats, DefaultFinalizer, Finalizer, Store,
+    MAX_BIT_LEN, MAX_REF_COUNT,
 };
 use crate::dict::{self, RawDict};
 use crate::error::Error;
@@ -78,7 +79,7 @@ impl AbiValue {
         self.make_builder(version).and_then(CellBuilder::build)
     }
 
-    fn compute_size_full(&self, version: AbiVersion) -> FullAbiTypeSize {
+    fn compute_size_full(&self, version: AbiVersion) -> CellTreeStats {
         if version.use_max_size() {
             self.compute_max_size_full()
         } else {
@@ -86,7 +87,7 @@ impl AbiValue {
         }
     }
 
-    fn compute_max_size_full(&self) -> FullAbiTypeSize {
+    fn compute_max_size_full(&self) -> CellTreeStats {
         if let Self::Tuple(items) = self {
             items
                 .iter()
@@ -97,7 +98,7 @@ impl AbiValue {
         }
     }
 
-    fn compute_exact_size_full(&self) -> FullAbiTypeSize {
+    fn compute_exact_size_full(&self) -> CellTreeStats {
         if let Self::Tuple(items) = self {
             items
                 .iter()
@@ -108,61 +109,63 @@ impl AbiValue {
         }
     }
 
-    fn compute_exact_size_short(&self) -> ShortAbiTypeSize {
-        fn compute_varuint_size(n: &NonZeroU8, value: &BigUint) -> ShortAbiTypeSize {
+    fn compute_exact_size_short(&self) -> CellSliceSize {
+        fn compute_varuint_size(n: &NonZeroU8, value: &BigUint) -> CellSliceSize {
             let value_bytes: u8 = n.get() - 1;
             let len_bits = (8 - value_bytes.leading_zeros()) as u16;
             let value_bits = std::cmp::max(8, 8 * ((value.bits() + 7) / 8) as u16);
-            ShortAbiTypeSize {
+            CellSliceSize {
                 bits: len_bits + value_bits,
                 refs: 0,
             }
         }
 
         match self {
-            Self::Uint(n, _) | Self::Int(n, _) => ShortAbiTypeSize { bits: *n, refs: 0 },
+            Self::Uint(n, _) | Self::Int(n, _) => CellSliceSize { bits: *n, refs: 0 },
             Self::VarUint(n, value) => compute_varuint_size(n, value),
             Self::VarInt(n, value) => compute_varuint_size(n, value.magnitude()),
-            Self::Bool(_) => ShortAbiTypeSize { bits: 1, refs: 0 },
+            Self::Bool(_) => CellSliceSize { bits: 1, refs: 0 },
             Self::Cell(_)
             | Self::Bytes(_)
             | Self::FixedBytes(_)
             | Self::String(_)
-            | Self::Ref(_) => ShortAbiTypeSize { bits: 0, refs: 1 },
-            Self::Address(value) => ShortAbiTypeSize {
+            | Self::Ref(_) => CellSliceSize { bits: 0, refs: 1 },
+            Self::Address(value) => CellSliceSize {
                 bits: value.bit_len(),
                 refs: 0,
             },
-            Self::Token(tokens) => ShortAbiTypeSize {
+            Self::Token(tokens) => CellSliceSize {
                 bits: tokens.bit_len().unwrap_or(Tokens::MAX_BITS),
                 refs: 0,
             },
-            Self::Array(_, values) => ShortAbiTypeSize {
+            Self::Array(_, values) => CellSliceSize {
                 bits: 33,
                 refs: !values.is_empty() as u8,
             },
-            Self::FixedArray(_, values) => ShortAbiTypeSize {
+            Self::FixedArray(_, values) => CellSliceSize {
                 bits: 1,
                 refs: !values.is_empty() as u8,
             },
-            Self::Map(_, _, values) => ShortAbiTypeSize {
+            Self::Map(_, _, values) => CellSliceSize {
                 bits: 1,
                 refs: !values.is_empty() as u8,
             },
             Self::Optional(ty, value) => {
                 if let Some(value) = value {
                     let ty_size = ty.max_size();
-                    if ty_size.bits < MAX_BIT_LEN as usize && ty_size.refs < MAX_REF_COUNT {
-                        ShortAbiTypeSize { bits: 1, refs: 0 } + value.compute_exact_size_short()
+                    if ty_size.bit_count < MAX_BIT_LEN as u64
+                        && ty_size.cell_count < MAX_REF_COUNT as u64
+                    {
+                        CellSliceSize { bits: 1, refs: 0 } + value.compute_exact_size_short()
                     } else {
-                        ShortAbiTypeSize { bits: 1, refs: 1 }
+                        CellSliceSize { bits: 1, refs: 1 }
                     }
                 } else {
-                    ShortAbiTypeSize { bits: 1, refs: 0 }
+                    CellSliceSize { bits: 1, refs: 0 }
                 }
             }
             Self::Tuple(items) => {
-                let mut size = ShortAbiTypeSize::ZERO;
+                let mut size = CellSliceSize::ZERO;
                 for item in items {
                     size = size.saturating_add(item.value.compute_exact_size_short());
                 }
@@ -171,43 +174,45 @@ impl AbiValue {
         }
     }
 
-    fn compute_max_size_short(&self) -> ShortAbiTypeSize {
+    fn compute_max_size_short(&self) -> CellSliceSize {
         match self {
-            Self::Uint(n, _) | Self::Int(n, _) => ShortAbiTypeSize { bits: *n, refs: 0 },
+            Self::Uint(n, _) | Self::Int(n, _) => CellSliceSize { bits: *n, refs: 0 },
             Self::VarUint(n, _) | Self::VarInt(n, _) => {
                 let value_bytes: u8 = n.get() - 1;
                 let bits = (8 - value_bytes.leading_zeros()) as u16 + (value_bytes as u16 * 8);
-                ShortAbiTypeSize { bits, refs: 0 }
+                CellSliceSize { bits, refs: 0 }
             }
-            Self::Bool(_) => ShortAbiTypeSize { bits: 1, refs: 0 },
+            Self::Bool(_) => CellSliceSize { bits: 1, refs: 0 },
             Self::Cell(_)
             | Self::Bytes(_)
             | Self::FixedBytes(_)
             | Self::String(_)
-            | Self::Ref(_) => ShortAbiTypeSize { bits: 0, refs: 1 },
-            Self::Address(_) => ShortAbiTypeSize {
+            | Self::Ref(_) => CellSliceSize { bits: 0, refs: 1 },
+            Self::Address(_) => CellSliceSize {
                 bits: IntAddr::BITS_MAX,
                 refs: 0,
             },
-            Self::Token(_) => ShortAbiTypeSize {
+            Self::Token(_) => CellSliceSize {
                 bits: Tokens::MAX_BITS,
                 refs: 0,
             },
-            Self::Array(..) => ShortAbiTypeSize { bits: 33, refs: 1 },
-            Self::FixedArray(..) | Self::Map(..) => ShortAbiTypeSize { bits: 1, refs: 1 },
+            Self::Array(..) => CellSliceSize { bits: 33, refs: 1 },
+            Self::FixedArray(..) | Self::Map(..) => CellSliceSize { bits: 1, refs: 1 },
             Self::Optional(ty, _) => {
                 let ty_size = ty.max_size();
-                if ty_size.bits < MAX_BIT_LEN as usize && ty_size.refs < MAX_REF_COUNT {
-                    ShortAbiTypeSize {
-                        bits: 1 + ty_size.bits as u16,
-                        refs: ty_size.refs as u8,
+                if ty_size.bit_count < MAX_BIT_LEN as u64
+                    && ty_size.cell_count < MAX_REF_COUNT as u64
+                {
+                    CellSliceSize {
+                        bits: 1 + ty_size.bit_count as u16,
+                        refs: ty_size.cell_count as u8,
                     }
                 } else {
-                    ShortAbiTypeSize { bits: 1, refs: 1 }
+                    CellSliceSize { bits: 1, refs: 1 }
                 }
             }
             Self::Tuple(items) => {
-                let mut size = ShortAbiTypeSize::ZERO;
+                let mut size = CellSliceSize::ZERO;
                 for item in items {
                     size = size.saturating_add(item.value.compute_max_size_short());
                 }
@@ -219,8 +224,8 @@ impl AbiValue {
 
 pub(crate) struct AbiSerializer {
     version: AbiVersion,
-    current: ShortAbiTypeSize,
-    remaining_total: FullAbiTypeSize,
+    current: CellSliceSize,
+    remaining_total: CellTreeStats,
     stack: Vec<CellBuilder>,
 }
 
@@ -228,13 +233,13 @@ impl AbiSerializer {
     pub fn new(version: AbiVersion) -> Self {
         Self {
             version,
-            current: ShortAbiTypeSize::ZERO,
-            remaining_total: FullAbiTypeSize::ZERO,
+            current: CellSliceSize::ZERO,
+            remaining_total: CellTreeStats::ZERO,
             stack: Vec::new(),
         }
     }
 
-    pub fn add_offset(&mut self, offset: ShortAbiTypeSize) {
+    pub fn add_offset(&mut self, offset: CellSliceSize) {
         self.current += offset;
     }
 
@@ -244,7 +249,7 @@ impl AbiSerializer {
 
     pub fn reserve_headers(&mut self, headers: &[AbiHeaderType], has_public_key: bool) {
         for header in headers {
-            self.remaining_total.bits += match header {
+            self.remaining_total.bit_count += match header {
                 AbiHeaderType::Time => 64,
                 AbiHeaderType::Expire => 32,
                 AbiHeaderType::PublicKey => {
@@ -259,7 +264,7 @@ impl AbiSerializer {
     }
 
     pub fn finalize(mut self, finalizer: &mut dyn Finalizer) -> Result<CellBuilder, Error> {
-        debug_assert_eq!(self.remaining_total, FullAbiTypeSize::ZERO);
+        debug_assert_eq!(self.remaining_total, CellTreeStats::ZERO);
 
         let mut result = self.stack.pop().unwrap_or_default();
         while let Some(builder) = self.stack.pop() {
@@ -270,10 +275,10 @@ impl AbiSerializer {
     }
 
     pub fn take_finalize(&mut self, finalizer: &mut dyn Finalizer) -> Result<CellBuilder, Error> {
-        debug_assert_eq!(self.remaining_total, FullAbiTypeSize::ZERO);
+        debug_assert_eq!(self.remaining_total, CellTreeStats::ZERO);
 
-        self.current = ShortAbiTypeSize::ZERO;
-        self.remaining_total = FullAbiTypeSize::ZERO;
+        self.current = CellSliceSize::ZERO;
+        self.remaining_total = CellTreeStats::ZERO;
 
         let mut result = self.stack.pop().unwrap_or_default();
         while let Some(builder) = self.stack.pop() {
@@ -287,27 +292,27 @@ impl AbiSerializer {
         Self::new(self.version)
     }
 
-    fn require_builder(&mut self, value_size: ShortAbiTypeSize) -> &mut CellBuilder {
+    fn require_builder(&mut self, value_size: CellSliceSize) -> &mut CellBuilder {
         if self.stack.is_empty() {
             self.stack.push(CellBuilder::new());
         }
 
         self.remaining_total -= value_size;
 
-        let remaining = ShortAbiTypeSize::MAX - self.current;
+        let remaining = CellSliceSize::MAX - self.current;
 
         let store_inline = if value_size.bits > remaining.bits || value_size.refs > remaining.refs {
             false
         } else if value_size.refs > 0 && value_size.refs == remaining.refs {
             self.version.major != 1
-                && self.remaining_total.refs == 0
-                && self.remaining_total.bits + value_size.bits as usize <= remaining.bits as usize
+                && self.remaining_total.cell_count == 0
+                && self.remaining_total.bit_count + value_size.bits as u64 <= remaining.bits as u64
         } else {
             true
         };
 
         if !store_inline {
-            self.current = ShortAbiTypeSize::ZERO;
+            self.current = CellSliceSize::ZERO;
             self.stack.push(CellBuilder::new());
         }
 
@@ -320,13 +325,13 @@ impl AbiSerializer {
     pub(crate) fn write_header_value(&mut self, value: &AbiHeader) -> Result<(), Error> {
         match value {
             AbiHeader::Time(value) => self
-                .require_builder(ShortAbiTypeSize { bits: 64, refs: 0 })
+                .require_builder(CellSliceSize { bits: 64, refs: 0 })
                 .store_u64(*value),
             AbiHeader::Expire(value) => self
-                .require_builder(ShortAbiTypeSize { bits: 32, refs: 0 })
+                .require_builder(CellSliceSize { bits: 32, refs: 0 })
                 .store_u32(*value),
             AbiHeader::PublicKey(value) => {
-                let target = self.require_builder(ShortAbiTypeSize {
+                let target = self.require_builder(CellSliceSize {
                     bits: 1 + if self.version.use_max_size() || value.is_some() {
                         256
                     } else {
@@ -382,7 +387,7 @@ impl AbiSerializer {
     }
 
     fn write_int(&mut self, bits: u16, sign: Sign, value: &BigUint) -> Result<(), Error> {
-        let target = self.require_builder(ShortAbiTypeSize { bits, refs: 0 });
+        let target = self.require_builder(CellSliceSize { bits, refs: 0 });
         write_int(bits, sign, value, target)
     }
 
@@ -398,7 +403,7 @@ impl AbiSerializer {
         let len_bits = (8 - max_value_size.leading_zeros()) as u16;
         let value_bits = (bytes.len() * 8) as u16;
 
-        let target = self.require_builder(ShortAbiTypeSize {
+        let target = self.require_builder(CellSliceSize {
             bits: if self.version.use_max_size() {
                 len_bits + (max_value_size as u16) * 8
             } else {
@@ -412,17 +417,17 @@ impl AbiSerializer {
     }
 
     fn write_bool(&mut self, value: bool) -> Result<(), Error> {
-        let target = self.require_builder(ShortAbiTypeSize { bits: 1, refs: 0 });
+        let target = self.require_builder(CellSliceSize { bits: 1, refs: 0 });
         target.store_bit(value)
     }
 
     fn write_cell(&mut self, cell: &Cell) -> Result<(), Error> {
-        let target = self.require_builder(ShortAbiTypeSize { bits: 0, refs: 1 });
+        let target = self.require_builder(CellSliceSize { bits: 0, refs: 1 });
         target.store_reference(cell.clone())
     }
 
     fn write_address(&mut self, address: &IntAddr) -> Result<(), Error> {
-        let target = self.require_builder(ShortAbiTypeSize {
+        let target = self.require_builder(CellSliceSize {
             bits: if self.version.use_max_size() {
                 IntAddr::BITS_MAX
             } else {
@@ -434,7 +439,7 @@ impl AbiSerializer {
     }
 
     fn write_tokens(&mut self, tokens: &Tokens) -> Result<(), Error> {
-        let target = self.require_builder(ShortAbiTypeSize {
+        let target = self.require_builder(CellSliceSize {
             bits: if self.version.use_max_size() {
                 Tokens::MAX_BITS
             } else {
@@ -474,7 +479,7 @@ impl AbiSerializer {
             bytes_per_builder = std::cmp::min(MAX_BYTES_PER_BUILDER, len);
         }
 
-        let target = self.require_builder(ShortAbiTypeSize { bits: 0, refs: 1 });
+        let target = self.require_builder(CellSliceSize { bits: 0, refs: 1 });
         target.store_reference(ok!(result.build()))
     }
 
@@ -516,7 +521,7 @@ impl AbiSerializer {
             !values.is_empty() as u8
         };
 
-        let target = self.require_builder(ShortAbiTypeSize { bits, refs });
+        let target = self.require_builder(CellSliceSize { bits, refs });
 
         if !fixed_len {
             ok!(target.store_u32(values.len() as u32));
@@ -564,7 +569,7 @@ impl AbiSerializer {
             ok!(key_builder.rewind(key_builder.bit_len()));
         }
 
-        let target = self.require_builder(ShortAbiTypeSize { bits: 1, refs: 1 });
+        let target = self.require_builder(CellSliceSize { bits: 1, refs: 1 });
         dict.store_into(target, finalizer)
     }
 
@@ -576,14 +581,14 @@ impl AbiSerializer {
     ) -> Result<(), Error> {
         let (max_size, inline) = {
             let ty_size = ty.max_size();
-            if ty_size.bits < MAX_BIT_LEN as usize && ty_size.refs < MAX_REF_COUNT {
-                let size = ShortAbiTypeSize {
-                    bits: 1 + ty_size.bits as u16,
-                    refs: ty_size.refs as u8,
+            if ty_size.bit_count < MAX_BIT_LEN as _ && ty_size.cell_count < MAX_REF_COUNT as _ {
+                let size = CellSliceSize {
+                    bits: 1 + ty_size.bit_count as u16,
+                    refs: ty_size.cell_count as u8,
                 };
                 (size, true)
             } else {
-                (ShortAbiTypeSize { bits: 1, refs: 1 }, false)
+                (CellSliceSize { bits: 1, refs: 1 }, false)
             }
         };
 
@@ -599,12 +604,12 @@ impl AbiSerializer {
                 let target = self.require_builder(if self.version.use_max_size() {
                     max_size
                 } else if inline {
-                    ShortAbiTypeSize {
+                    CellSliceSize {
                         bits: 1 + value.bit_len(),
                         refs: value.reference_count(),
                     }
                 } else {
-                    ShortAbiTypeSize { bits: 1, refs: 1 }
+                    CellSliceSize { bits: 1, refs: 1 }
                 });
 
                 ok!(target.store_bit(true));
@@ -618,7 +623,7 @@ impl AbiSerializer {
                 let target = self.require_builder(if self.version.use_max_size() {
                     max_size
                 } else {
-                    ShortAbiTypeSize { bits: 1, refs: 0 }
+                    CellSliceSize { bits: 1, refs: 0 }
                 });
                 target.store_bit(false)
             }
@@ -633,7 +638,7 @@ impl AbiSerializer {
             let builder = ok!(serializer.finalize(finalizer));
             ok!(builder.build_ext(finalizer))
         };
-        let target = self.require_builder(ShortAbiTypeSize { bits: 0, refs: 1 });
+        let target = self.require_builder(CellSliceSize { bits: 0, refs: 1 });
         target.store_reference(cell)
     }
 }

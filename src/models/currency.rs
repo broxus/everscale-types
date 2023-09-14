@@ -60,6 +60,13 @@ impl<'a> AugDictSkipValue<'a> for CurrencyCollection {
     }
 }
 
+impl ExactSize for CurrencyCollection {
+    #[inline]
+    fn exact_size(&self) -> CellSliceSize {
+        self.tokens.exact_size() + self.other.exact_size()
+    }
+}
+
 /// Dictionary with amounts for multiple currencies.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
 #[repr(transparent)]
@@ -114,5 +121,12 @@ impl<'a> AugDictSkipValue<'a> for ExtraCurrencyCollection {
         } else {
             false
         }
+    }
+}
+
+impl ExactSize for ExtraCurrencyCollection {
+    #[inline]
+    fn exact_size(&self) -> CellSliceSize {
+        self.0.exact_size()
     }
 }
