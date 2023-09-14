@@ -2,7 +2,9 @@
 
 use std::str::FromStr;
 
-pub use self::contract::{Contract, Function, UnsignedBody, UnsignedExternalMessage};
+pub use self::contract::{
+    Contract, Event, EventBuilder, Function, FunctionBuilder, UnsignedBody, UnsignedExternalMessage,
+};
 pub use self::signature::{extend_signature_with_id, sign_with_signature_id};
 pub use self::traits::{IntoAbi, IntoPlainAbi, WithAbiType, WithPlainAbiType};
 pub use self::ty::{

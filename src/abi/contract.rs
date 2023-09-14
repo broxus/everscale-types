@@ -553,8 +553,12 @@ impl FunctionBuilder {
     }
 
     /// Sets method input types to the specified list of named arguments.
-    pub fn with_inputs<I: IntoIterator<Item = NamedAbiType>>(mut self, inputs: I) -> Self {
-        self.inputs = inputs.into_iter().collect();
+    pub fn with_inputs<I, T>(mut self, inputs: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<NamedAbiType>,
+    {
+        self.inputs = inputs.into_iter().map(Into::into).collect();
         self
     }
 
@@ -569,7 +573,11 @@ impl FunctionBuilder {
     }
 
     /// Sets method output types to the specified list of named arguments.
-    pub fn with_outputs<I: IntoIterator<Item = NamedAbiType>>(mut self, outputs: I) -> Self {
+    pub fn with_outputs<I, T>(mut self, outputs: I) -> Self
+    where
+        I: IntoIterator<Item = NamedAbiType>,
+        T: Into<NamedAbiType>,
+    {
         self.outputs = outputs.into_iter().collect();
         self
     }
@@ -619,6 +627,12 @@ impl Event {
         u32::from_be_bytes(hash[0..4].try_into().unwrap())
     }
 
+    /// Returns an event builder with the specified ABI version and name.
+    #[inline]
+    pub fn builder<T: Into<String>>(abi_version: AbiVersion, name: T) -> EventBuilder {
+        EventBuilder::new(abi_version, name)
+    }
+
     /// Encodes a message body with this event as an internal message.
     pub fn encode_internal_input(&self, tokens: &[NamedAbiValue]) -> Result<CellBuilder> {
         ok!(NamedAbiValue::check_types(tokens, &self.inputs));
@@ -664,6 +678,71 @@ impl Event {
             name: &self.name,
             inputs: &self.inputs,
         }
+    }
+}
+
+/// Event ABI declaration builder.
+#[derive(Debug, Clone)]
+pub struct EventBuilder {
+    abi_version: AbiVersion,
+    name: String,
+    inputs: Vec<NamedAbiType>,
+    id: Option<u32>,
+}
+
+impl EventBuilder {
+    /// Creates an empty ABI declaration for an event with the specified ABI version and name.
+    pub fn new<T: Into<String>>(abi_version: AbiVersion, name: T) -> Self {
+        Self {
+            abi_version,
+            name: name.into(),
+            inputs: Default::default(),
+            id: None,
+        }
+    }
+
+    /// Finalizes an ABI declaration.
+    pub fn build(self) -> Event {
+        let id = match self.id {
+            Some(id) => id,
+            None => {
+                let id = Event::compute_event_id(self.abi_version, &self.name, &self.inputs);
+                id & Function::INPUT_ID_MASK
+            }
+        };
+
+        Event {
+            abi_version: self.abi_version,
+            name: Arc::from(self.name),
+            inputs: Arc::from(self.inputs),
+            id,
+        }
+    }
+
+    /// Sets event input types to the specified list of named arguments.
+    pub fn with_inputs<I, T>(mut self, inputs: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<NamedAbiType>,
+    {
+        self.inputs = inputs.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets event input types to the specified list of unnamed arguments.
+    pub fn with_unnamed_inputs<I: IntoIterator<Item = AbiType>>(mut self, inputs: I) -> Self {
+        self.inputs = inputs
+            .into_iter()
+            .enumerate()
+            .map(NamedAbiType::from)
+            .collect();
+        self
+    }
+
+    /// Sets an explicit event id.
+    pub fn with_id(mut self, id: u32) -> Self {
+        self.id = Some(id);
+        self
     }
 }
 
