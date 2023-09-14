@@ -228,17 +228,17 @@ impl<'a> LoadBody<'a> for CellSlice<'a> {
 
 impl<'a> LoadBody<'a> for CellSliceParts {
     fn load_body(from_cell: bool, slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        let body = ok!(if from_cell {
-            slice.load_reference_cloned()
+        if from_cell {
+            let body = ok!(slice.load_reference_cloned());
+            let range = CellSliceRange::full(body.as_ref());
+            Ok((body, range))
         } else {
-            let slice = slice.load_remaining();
+            let body = slice.load_remaining();
+            let body_holding_cell = ok!(body.cell().as_slice());
             let mut builder = CellBuilder::new();
-            ok!(builder.store_slice(slice));
-            builder.build()
-        });
-
-        let range = CellSliceRange::full(body.as_ref());
-        Ok((body, range))
+            ok!(builder.store_slice(body_holding_cell));
+            builder.build().map(|cell| (cell, body.range()))
+        }
     }
 }
 
