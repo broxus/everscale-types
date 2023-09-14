@@ -1,5 +1,7 @@
 //! ABI related error types.
 
+use std::sync::Arc;
+
 /// Error type for ABI version parsing related errors.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ParseAbiVersionError {
@@ -74,6 +76,12 @@ pub enum AbiError {
         /// A full signature of the received type.
         ty: Box<str>,
     },
+    /// More parameters were passed into state init than needed.
+    #[error("unexpected init data parameter `{0}`")]
+    UnexpectedInitDataParam(Arc<str>),
+    /// Field is absent in the init data dictionary.
+    #[error("missing init data field `{0}`")]
+    InitDataFieldNotFound(Arc<str>),
     /// There are still some unconsumed bits or refs and we did not expect this.
     #[error("slice was not fully consumed during parsing")]
     IncompleteDeserialization,

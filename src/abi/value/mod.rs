@@ -8,7 +8,7 @@ use num_bigint::{BigInt, BigUint};
 
 use super::{ty::*, IntoAbi, IntoPlainAbi, WithAbiType, WithPlainAbiType};
 use crate::abi::error::AbiError;
-use crate::cell::Cell;
+use crate::cell::{Cell, CellFamily};
 use crate::models::IntAddr;
 use crate::num::Tokens;
 
@@ -53,6 +53,19 @@ impl NamedAbiValue {
             value,
         }
     }
+
+    /// Ensures that value satisfies the type.
+    pub fn check_type<T: AsRef<AbiType>>(&self, ty: T) -> Result<()> {
+        fn type_mismatch(this: &NamedAbiValue, expected: &AbiType) -> AbiError {
+            AbiError::TypeMismatch {
+                expected: expected.to_string().into(),
+                ty: this.value.display_type().to_string().into(),
+            }
+        }
+        let ty = ty.as_ref();
+        anyhow::ensure!(self.value.has_type(ty), type_mismatch(self, ty));
+        Ok(())
+    }
 }
 
 impl From<(String, AbiValue)> for NamedAbiValue {
@@ -79,6 +92,16 @@ impl From<(usize, AbiValue)> for NamedAbiValue {
     #[inline]
     fn from((index, value): (usize, AbiValue)) -> Self {
         Self::from_index(index, value)
+    }
+}
+
+impl NamedAbiType {
+    /// Returns a default value corresponding to the this type.
+    pub fn make_default_value(&self) -> NamedAbiValue {
+        NamedAbiValue {
+            name: self.name.clone(),
+            value: self.ty.make_default_value(),
+        }
     }
 }
 
@@ -132,6 +155,19 @@ pub enum AbiValue {
 }
 
 impl AbiValue {
+    /// Ensures that value satisfies the type.
+    pub fn check_type<T: AsRef<AbiType>>(&self, ty: T) -> Result<()> {
+        fn type_mismatch(value: &AbiValue, expected: &AbiType) -> AbiError {
+            AbiError::TypeMismatch {
+                expected: expected.to_string().into(),
+                ty: value.display_type().to_string().into(),
+            }
+        }
+        let ty = ty.as_ref();
+        anyhow::ensure!(self.has_type(ty), type_mismatch(self, ty));
+        Ok(())
+    }
+
     /// Returns whether this value has the same type as the provided one.
     pub fn has_type(&self, ty: &AbiType) -> bool {
         match (self, ty) {
@@ -343,6 +379,41 @@ impl AbiValue {
         T: IntoAbi,
     {
         Self::Ref(Box::new(value.into_abi()))
+    }
+}
+
+impl AbiType {
+    /// Returns a default value corresponding to the this type.
+    pub fn make_default_value(&self) -> AbiValue {
+        match self {
+            AbiType::Uint(bits) => AbiValue::Uint(*bits, BigUint::default()),
+            AbiType::Int(bits) => AbiValue::Int(*bits, BigInt::default()),
+            AbiType::VarUint(size) => AbiValue::VarUint(*size, BigUint::default()),
+            AbiType::VarInt(size) => AbiValue::VarInt(*size, BigInt::default()),
+            AbiType::Bool => AbiValue::Bool(false),
+            AbiType::Cell => AbiValue::Cell(Cell::empty_cell()),
+            AbiType::Address => AbiValue::Address(Box::default()),
+            AbiType::Bytes => AbiValue::Bytes(Bytes::default()),
+            AbiType::FixedBytes(len) => AbiValue::FixedBytes(Bytes::from(vec![0u8; *len])),
+            AbiType::String => AbiValue::String(String::default()),
+            AbiType::Token => AbiValue::Token(Tokens::ZERO),
+            AbiType::Tuple(items) => {
+                let mut tuple = Vec::with_capacity(items.len());
+                for item in items.as_ref() {
+                    tuple.push(item.make_default_value());
+                }
+                AbiValue::Tuple(tuple)
+            }
+            AbiType::Array(ty) => AbiValue::Array(ty.clone(), Vec::new()),
+            AbiType::FixedArray(ty, items) => {
+                AbiValue::FixedArray(ty.clone(), vec![ty.make_default_value(); *items])
+            }
+            AbiType::Map(key_ty, value_ty) => {
+                AbiValue::Map(*key_ty, value_ty.clone(), BTreeMap::default())
+            }
+            AbiType::Optional(ty) => AbiValue::Optional(ty.clone(), None),
+            AbiType::Ref(ty) => AbiValue::Ref(Box::new(ty.make_default_value())),
+        }
     }
 }
 

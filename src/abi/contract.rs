@@ -9,13 +9,17 @@ use sha2::Digest;
 
 use crate::abi::value::ser::AbiSerializer;
 use crate::abi::AbiHeader;
-use crate::cell::{Cell, CellBuilder, CellSlice, DefaultFinalizer, Store};
+use crate::cell::{
+    Cell, CellBuilder, CellFamily, CellSlice, CellSliceRange, DefaultFinalizer, DynCell, HashBytes,
+    Store,
+};
+use crate::dict::RawDict;
 use crate::models::{
     ExtInMsgInfo, IntAddr, MsgInfo, OwnedMessage, OwnedRelaxedMessage, RelaxedIntMsgInfo,
     RelaxedMsgInfo, StateInit, StdAddr,
 };
 use crate::num::Tokens;
-use crate::prelude::{CellFamily, CellSliceRange, HashBytes};
+use crate::prelude::Dict;
 
 use super::error::AbiError;
 use super::{
@@ -30,13 +34,16 @@ pub struct Contract {
     /// List of headers for external messages.
     ///
     /// NOTE: header order matters.
-    pub header: Arc<[AbiHeaderType]>,
+    pub headers: Arc<[AbiHeaderType]>,
 
     /// A mapping with all contract methods by name.
     pub functions: HashMap<Arc<str>, Function>,
 
     /// A mapping with all contract events by name.
     pub events: HashMap<Arc<str>, Event>,
+
+    /// Contract init data.
+    pub init_data: HashMap<Arc<str>, (u64, NamedAbiType)>,
 
     /// Contract storage fields.
     pub fields: Arc<[NamedAbiType]>,
@@ -53,6 +60,139 @@ impl Contract {
     /// Finds an event with the specified id.
     pub fn find_event_by_id(&self, id: u32) -> Option<&Event> {
         self.events.values().find(|event| event.id == id)
+    }
+
+    /// Returns a new init data with replaced items.
+    ///
+    /// NOTE: `tokens` can be a subset of init data fields, all other
+    /// will not be touched.
+    pub fn update_init_data(
+        &self,
+        pubkey: Option<&ed25519_dalek::VerifyingKey>,
+        tokens: &[NamedAbiValue],
+        data: &Cell,
+    ) -> Result<Cell> {
+        // Always check if data is valid
+        let mut result = data.parse::<RawDict<64>>()?;
+
+        if pubkey.is_none() && tokens.is_empty() {
+            // Do nothing if no items are updated
+            return Ok(data.clone());
+        }
+
+        let finalizer = &mut Cell::default_finalizer();
+        let mut key_builder = CellBuilder::new();
+
+        for token in tokens {
+            let Some((key, ty)) = self.init_data.get(token.name.as_ref()) else {
+                anyhow::bail!(AbiError::UnexpectedInitDataParam(token.name.clone()));
+            };
+            token.check_type(ty)?;
+
+            key_builder.store_u64(*key)?;
+
+            result.set_ext(
+                key_builder.as_data_slice(),
+                &token.make_builder(self.abi_version)?.as_full_slice(),
+                finalizer,
+            )?;
+
+            key_builder.rewind(64)?;
+        }
+
+        // Set public key if specified
+        if let Some(pubkey) = pubkey {
+            key_builder.store_u64(0)?;
+            result.set_ext(
+                key_builder.as_data_slice(),
+                &CellBuilder::from_raw_data(pubkey.as_bytes(), 256)?.as_data_slice(),
+                finalizer,
+            )?;
+        }
+
+        // Encode init data as mapping
+        CellBuilder::build_from_ext(result, finalizer).map_err(From::from)
+    }
+
+    /// Encodes an account data with the specified initial parameters.
+    ///
+    /// NOTE: `tokens` can be a subset of init data fields, all other
+    /// will be set to default.
+    pub fn encode_init_data(
+        &self,
+        pubkey: &ed25519_dalek::VerifyingKey,
+        tokens: &[NamedAbiValue],
+    ) -> Result<Cell> {
+        let mut result = RawDict::<64>::new();
+
+        let mut init_data = self
+            .init_data
+            .iter()
+            .map(|(name, value)| (name.as_ref(), value))
+            .collect::<HashMap<_, _>>();
+
+        let finalizer = &mut Cell::default_finalizer();
+        let mut key_builder = CellBuilder::new();
+
+        // Write explicitly provided values
+        for token in tokens {
+            let Some((key, ty)) = init_data.remove(token.name.as_ref()) else {
+                anyhow::bail!(AbiError::UnexpectedInitDataParam(token.name.clone()));
+            };
+            token.check_type(ty)?;
+
+            key_builder.store_u64(*key)?;
+
+            result.set_ext(
+                key_builder.as_data_slice(),
+                &token.make_builder(self.abi_version)?.as_full_slice(),
+                finalizer,
+            )?;
+
+            key_builder.rewind(64)?;
+        }
+
+        // Write remaining values with default values
+        for (key, ty) in init_data.into_values() {
+            key_builder.store_u64(*key)?;
+
+            result.set_ext(
+                key_builder.as_data_slice(),
+                &ty.make_default_value()
+                    .make_builder(self.abi_version)?
+                    .as_full_slice(),
+                finalizer,
+            )?;
+
+            key_builder.rewind(64)?;
+        }
+
+        // Set public key
+        key_builder.store_u64(0)?;
+        result.set_ext(
+            key_builder.as_data_slice(),
+            &CellBuilder::from_raw_data(pubkey.as_bytes(), 256)?.as_data_slice(),
+            finalizer,
+        )?;
+
+        // Encode init data as mapping
+        CellBuilder::build_from_ext(result, finalizer).map_err(From::from)
+    }
+
+    /// Tries to parse init data fields of this contract from an account data.
+    pub fn decode_init_data(&self, data: &DynCell) -> Result<Vec<NamedAbiValue>> {
+        let init_data = data.parse::<Dict<u64, CellSlice>>()?;
+
+        let mut result = Vec::with_capacity(self.init_data.len());
+
+        for (key, item) in self.init_data.values() {
+            let Some(mut value) = init_data.get(key)? else {
+                anyhow::bail!(AbiError::InitDataFieldNotFound(item.name.clone()));
+            };
+            result.push(NamedAbiValue::load(item, self.abi_version, &mut value)?);
+        }
+
+        Ok(result)
     }
 
     /// Encodes an account data with the specified storage fields of this contract.
@@ -124,6 +264,8 @@ impl<'de> Deserialize<'de> for Contract {
             #[serde(default)]
             events: Vec<SerdeEvent>,
             #[serde(default)]
+            data: Vec<InitData>,
+            #[serde(default)]
             fields: Vec<NamedAbiType>,
         }
 
@@ -147,6 +289,13 @@ impl<'de> Deserialize<'de> for Contract {
             id: Option<Id>,
         }
 
+        #[derive(Deserialize)]
+        struct InitData {
+            key: u64,
+            #[serde(flatten)]
+            ty: NamedAbiType,
+        }
+
         let contract = ok!(SerdeContract::deserialize(deserializer));
         let abi_version = if let Some(version) = &contract.version {
             ok!(AbiVersion::from_str(version).map_err(Error::custom))
@@ -156,7 +305,7 @@ impl<'de> Deserialize<'de> for Contract {
             return Err(Error::custom("No ABI version found"));
         };
 
-        let header = Arc::<[AbiHeaderType]>::from(contract.header);
+        let headers = Arc::<[AbiHeaderType]>::from(contract.header);
 
         let functions = contract
             .functions
@@ -168,7 +317,7 @@ impl<'de> Deserialize<'de> for Contract {
                         let id = Function::compute_function_id(
                             abi_version,
                             &item.name,
-                            header.as_ref(),
+                            headers.as_ref(),
                             &item.inputs,
                             &item.outputs,
                         );
@@ -181,7 +330,7 @@ impl<'de> Deserialize<'de> for Contract {
                     Function {
                         abi_version,
                         name,
-                        header: header.clone(),
+                        headers: headers.clone(),
                         inputs: Arc::from(item.inputs),
                         outputs: Arc::from(item.outputs),
                         input_id,
@@ -215,11 +364,21 @@ impl<'de> Deserialize<'de> for Contract {
             })
             .collect();
 
+        let init_data = contract
+            .data
+            .into_iter()
+            .map(|item| {
+                let name = item.ty.name.clone();
+                (name, (item.key, item.ty))
+            })
+            .collect();
+
         Ok(Self {
             abi_version,
-            header,
+            headers,
             functions,
             events,
+            init_data,
             fields: Arc::from(contract.fields),
         })
     }
@@ -234,7 +393,7 @@ pub struct Function {
     /// Must be the same as in contract.
     ///
     /// NOTE: header order matters.
-    pub header: Arc<[AbiHeaderType]>,
+    pub headers: Arc<[AbiHeaderType]>,
     /// Method name.
     pub name: Arc<str>,
     /// Method input argument types.
@@ -255,7 +414,7 @@ impl Function {
     pub fn compute_function_id(
         abi_version: AbiVersion,
         name: &str,
-        header: &[AbiHeaderType],
+        headers: &[AbiHeaderType],
         inputs: &[NamedAbiType],
         outputs: &[NamedAbiType],
     ) -> u32 {
@@ -263,7 +422,7 @@ impl Function {
         FunctionSignatureRaw {
             abi_version,
             name,
-            header,
+            headers,
             inputs,
             outputs,
         }
@@ -328,12 +487,12 @@ impl Function {
             ShortAbiTypeSize { bits: 1, refs: 0 }
         });
 
-        serializer.reserve_headers(&self.header, pubkey.is_some());
+        serializer.reserve_headers(&self.headers, pubkey.is_some());
         for token in tokens {
             serializer.reserve_value(&token.value);
         }
 
-        for header in self.header.as_ref() {
+        for header in self.headers.as_ref() {
             serializer.write_header_value(&match header {
                 AbiHeaderType::Time => AbiHeader::Time(now),
                 AbiHeaderType::Expire => AbiHeader::Expire(expire_at),
@@ -488,7 +647,7 @@ impl Function {
         FunctionSignatureRaw {
             abi_version: self.abi_version,
             name: &self.name,
-            header: &self.header,
+            headers: &self.headers,
             inputs: &self.inputs,
             outputs: &self.outputs,
         }
@@ -500,7 +659,7 @@ impl Function {
 pub struct FunctionBuilder {
     abi_version: AbiVersion,
     name: String,
-    header: Vec<AbiHeaderType>,
+    headers: Vec<AbiHeaderType>,
     inputs: Vec<NamedAbiType>,
     outputs: Vec<NamedAbiType>,
     id: Option<u32>,
@@ -512,7 +671,7 @@ impl FunctionBuilder {
         Self {
             abi_version,
             name: name.into(),
-            header: Default::default(),
+            headers: Default::default(),
             inputs: Default::default(),
             outputs: Default::default(),
             id: None,
@@ -527,7 +686,7 @@ impl FunctionBuilder {
                 let id = Function::compute_function_id(
                     self.abi_version,
                     &self.name,
-                    &self.header,
+                    &self.headers,
                     &self.inputs,
                     &self.outputs,
                 );
@@ -537,7 +696,7 @@ impl FunctionBuilder {
 
         Function {
             abi_version: self.abi_version,
-            header: Arc::from(self.header),
+            headers: Arc::from(self.headers),
             name: Arc::from(self.name),
             inputs: Arc::from(self.inputs),
             outputs: Arc::from(self.outputs),
@@ -547,8 +706,8 @@ impl FunctionBuilder {
     }
 
     /// Sets method headers to the specified list.
-    pub fn with_header<I: IntoIterator<Item = AbiHeaderType>>(mut self, header: I) -> Self {
-        self.header = header.into_iter().collect();
+    pub fn with_headers<I: IntoIterator<Item = AbiHeaderType>>(mut self, headers: I) -> Self {
+        self.headers = headers.into_iter().collect();
         self
     }
 
@@ -905,7 +1064,7 @@ impl UnsignedBody {
 struct FunctionSignatureRaw<'a> {
     abi_version: AbiVersion,
     name: &'a str,
-    header: &'a [AbiHeaderType],
+    headers: &'a [AbiHeaderType],
     inputs: &'a [NamedAbiType],
     outputs: &'a [NamedAbiType],
 }
@@ -922,7 +1081,7 @@ impl std::fmt::Display for FunctionSignatureRaw<'_> {
 
         let mut first = true;
         if self.abi_version.major == 1 {
-            for header in self.header {
+            for header in self.headers {
                 if !std::mem::take(&mut first) {
                     ok!(f.write_str(","));
                 }

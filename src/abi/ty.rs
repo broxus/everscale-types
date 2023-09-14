@@ -38,6 +38,13 @@ impl NamedAbiType {
     }
 }
 
+impl AsRef<AbiType> for NamedAbiType {
+    #[inline]
+    fn as_ref(&self) -> &AbiType {
+        &self.ty
+    }
+}
+
 impl Serialize for NamedAbiType {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -502,6 +509,13 @@ impl AbiType {
 
     fn display_simple(&self) -> DisplayAbiTypeSimple<'_> {
         DisplayAbiTypeSimple(self)
+    }
+}
+
+impl AsRef<AbiType> for AbiType {
+    #[inline]
+    fn as_ref(&self) -> &AbiType {
+        self
     }
 }
 
