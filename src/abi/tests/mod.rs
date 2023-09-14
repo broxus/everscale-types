@@ -2,7 +2,7 @@ use bytes::Bytes;
 
 use crate::abi::*;
 use crate::models::StdAddr;
-use crate::prelude::{Cell, CellBuilder, DefaultFinalizer, HashBytes, Store};
+use crate::prelude::{Cell, CellBuilder, DefaultFinalizer, HashBytes, RawDict, Store};
 
 const DEPOOL_ABI: &str = include_str!("depool.abi.json");
 
@@ -231,4 +231,29 @@ fn decode_unsigned_external_input() {
         .unwrap();
 
     NamedAbiValue::check_types(&tokens, &function.inputs).unwrap();
+}
+
+#[test]
+fn encode_empty_init_data() {
+    let contract = serde_json::from_str::<Contract>(DEPOOL_ABI).unwrap();
+
+    let key = ed25519_dalek::SigningKey::from([0u8; 32]);
+    let pubkey = ed25519_dalek::VerifyingKey::from(&key);
+
+    let expected = {
+        let mut dict = RawDict::<64>::new();
+
+        let mut key = CellBuilder::new();
+        key.store_u64(0).unwrap();
+
+        let value = CellBuilder::from_raw_data(pubkey.as_bytes(), 256).unwrap();
+        dict.set(key.as_data_slice(), value.as_data_slice())
+            .unwrap();
+
+        CellBuilder::build_from(dict).unwrap()
+    };
+
+    let init_data = contract.encode_init_data(&pubkey, &[]).unwrap();
+
+    assert_eq!(init_data, expected);
 }

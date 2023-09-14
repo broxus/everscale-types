@@ -758,7 +758,7 @@ impl<'f, 'a> ExternalInput<'f, 'a> {
         let time = self.time.unwrap_or_else(now_ms);
         let expire_at = self
             .expire_at
-            .unwrap_or_else(|| (time / 1000) as u32 + DEFAULT_TIMEOUT_SEC);
+            .unwrap_or((time / 1000) as u32 + DEFAULT_TIMEOUT_SEC);
 
         for header in self.function.headers.as_ref() {
             serializer.write_header_value(&match header {

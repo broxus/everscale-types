@@ -30,8 +30,8 @@ impl NamedAbiValue {
         anyhow::ensure!(
             Self::have_types(items, types),
             AbiError::TypeMismatch {
-                expected: format!("{}", DisplayTupleType(types)).into(),
-                ty: format!("{}", DisplayTupleValueType(items)).into(),
+                expected: DisplayTupleType(types).to_string().into(),
+                ty: DisplayTupleValueType(items).to_string().into(),
             }
         );
         Ok(())
