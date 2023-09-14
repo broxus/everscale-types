@@ -556,6 +556,15 @@ impl<'a> CellSlice<'a> {
         self.range.try_advance(bits, refs)
     }
 
+    /// Tries to advance the start of data and refs windows.
+    pub fn advance(&mut self, bits: u16, refs: u8) -> Result<(), Error> {
+        if self.range.try_advance(bits, refs) {
+            Ok(())
+        } else {
+            Err(Error::CellUnderflow)
+        }
+    }
+
     /// Compares two slices by their data window **content** and refs.
     ///
     /// NOTE: this method is quite computationally heavy as it compares the content

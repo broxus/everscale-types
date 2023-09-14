@@ -20,6 +20,9 @@ mod traits;
 mod ty;
 mod value;
 
+#[cfg(test)]
+mod tests;
+
 /// ABI version.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct AbiVersion {

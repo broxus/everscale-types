@@ -487,7 +487,10 @@ impl Function {
             ShortAbiTypeSize { bits: 1, refs: 0 }
         });
 
+        let input_id = AbiValue::uint(32, self.input_id);
+
         serializer.reserve_headers(&self.headers, pubkey.is_some());
+        serializer.reserve_value(&input_id);
         for token in tokens {
             serializer.reserve_value(&token.value);
         }
@@ -501,6 +504,7 @@ impl Function {
         }
 
         let finalizer = &mut Cell::default_finalizer();
+        serializer.write_value(&input_id, finalizer)?;
         serializer.write_tuple(tokens, finalizer)?;
         let builder = serializer.finalize(finalizer)?;
 
@@ -538,6 +542,60 @@ impl Function {
         Ok(self
             .encode_external_input(tokens, now, expire_at, pubkey, Some(address))?
             .with_dst(address.clone()))
+    }
+
+    /// Tries to parse input arguments for this method from an external message body.
+    ///
+    /// NOTE: The slice is required to contain nothing other than these arguments.
+    pub fn decode_external_input(&self, mut slice: CellSlice<'_>) -> Result<Vec<NamedAbiValue>> {
+        self.decode_external_input_ext(&mut slice, false)
+    }
+
+    /// Tries to parse input arguments for this method from an external message body.
+    pub fn decode_external_input_ext(
+        &self,
+        slice: &mut CellSlice<'_>,
+        allow_partial: bool,
+    ) -> Result<Vec<NamedAbiValue>> {
+        // Read prefix
+        let id = if self.abi_version.major == 1 {
+            // Load input id
+            let id = slice.load_u32()?;
+            // Skip signature
+            slice.load_reference()?;
+            // Skip headers
+            ok!(AbiHeader::skip_all(&self.headers, slice));
+
+            id
+        } else {
+            // Skip signature
+            if slice.load_bit()? {
+                slice.advance(512, 0)?;
+            }
+            // Skip headers
+            ok!(AbiHeader::skip_all(&self.headers, slice));
+            // Load input id
+            slice.load_u32()?
+        };
+
+        // Check input id
+        anyhow::ensure!(
+            id == self.input_id,
+            AbiError::InputIdMismatch {
+                expected: self.input_id,
+                id
+            }
+        );
+
+        let res = ok!(NamedAbiValue::load_tuple_ext(
+            &self.inputs,
+            self.abi_version,
+            true,
+            allow_partial,
+            slice
+        ));
+        ok!(AbiValue::check_remaining(slice, allow_partial));
+        Ok(res)
     }
 
     /// Encodes a message body with invocation of this method as an internal message.

@@ -30,6 +30,9 @@ pub enum Error {
     /// Signature check failed.
     #[error("invalid signature")]
     InvalidSignature,
+    /// Public key is not in a ed25519 valid range.
+    #[error("invalid public key")]
+    InvalidPublicKey,
     /// Underlying integer type does not fit into the target type.
     #[error("underlying integer is too large to fit in target type")]
     IntOverflow,

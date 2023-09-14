@@ -261,6 +261,14 @@ pub enum AbiType {
 }
 
 impl AbiType {
+    /// Returns a named ABI type.
+    pub fn named<T: Into<String>>(self, name: T) -> NamedAbiType {
+        NamedAbiType {
+            name: Arc::from(name.into()),
+            ty: self,
+        }
+    }
+
     /// Tries to convert a generic ABI type into a plain ABI type.
     pub fn as_plain(&self) -> Option<PlainAbiType> {
         Some(match self {

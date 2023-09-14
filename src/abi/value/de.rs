@@ -7,7 +7,8 @@ use num_bigint::{BigInt, BigUint};
 
 use crate::abi::error::AbiError;
 use crate::abi::{
-    AbiType, AbiValue, AbiVersion, NamedAbiType, NamedAbiValue, PlainAbiType, PlainAbiValue,
+    AbiHeader, AbiHeaderType, AbiType, AbiValue, AbiVersion, NamedAbiType, NamedAbiValue,
+    PlainAbiType, PlainAbiValue,
 };
 use crate::cell::{Cell, CellSlice, Load, MAX_BIT_LEN, MAX_REF_COUNT};
 use crate::dict::{self, RawDict};
@@ -246,6 +247,66 @@ impl PlainAbiValue {
             PlainAbiType::Bool => slice.load_bit().map(Self::Bool),
             PlainAbiType::Address => IntAddr::load_from(slice).map(Box::new).map(Self::Address),
         }
+    }
+}
+
+impl AbiHeader {
+    /// Skips all specified headers in slice.
+    pub fn skip_all(headers: &[AbiHeaderType], slice: &mut CellSlice) -> Result<()> {
+        for header in headers {
+            ok!(Self::skip(*header, slice))
+        }
+        Ok(())
+    }
+
+    /// Loads and ignores a corresponding value from the slice.
+    pub fn skip(ty: AbiHeaderType, slice: &mut CellSlice) -> Result<()> {
+        match ty {
+            AbiHeaderType::Time => {
+                ok!(preload_bits(64, slice));
+                slice.advance(64, 0)?;
+            }
+            AbiHeaderType::Expire => {
+                ok!(preload_bits(32, slice));
+                slice.advance(32, 0)?;
+            }
+            AbiHeaderType::PublicKey => {
+                ok!(preload_bits(1, slice));
+                if slice.load_bit()? {
+                    ok!(preload_bits(256, slice));
+                    slice.advance(256, 0)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Loads a corresponding value from the slice.
+    pub fn load(ty: AbiHeaderType, slice: &mut CellSlice) -> Result<Self> {
+        Ok(match ty {
+            AbiHeaderType::Time => {
+                ok!(preload_bits(64, slice));
+                Self::Time(slice.load_u64()?)
+            }
+            AbiHeaderType::Expire => {
+                ok!(preload_bits(32, slice));
+                Self::Expire(slice.load_u32()?)
+            }
+            AbiHeaderType::PublicKey => {
+                ok!(preload_bits(1, slice));
+                Self::PublicKey(if slice.load_bit()? {
+                    ok!(preload_bits(256, slice));
+                    let Ok(pubkey) =
+                        ed25519_dalek::VerifyingKey::from_bytes(slice.load_u256()?.as_array())
+                    else {
+                        anyhow::bail!(Error::InvalidPublicKey);
+                    };
+                    Some(Box::new(pubkey))
+                } else {
+                    None
+                })
+            }
+        })
     }
 }
 

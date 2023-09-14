@@ -155,6 +155,14 @@ pub enum AbiValue {
 }
 
 impl AbiValue {
+    /// Returns a named ABI value.
+    pub fn named<T: Into<String>>(self, name: T) -> NamedAbiValue {
+        NamedAbiValue {
+            name: Arc::from(name.into()),
+            value: self,
+        }
+    }
+
     /// Ensures that value satisfies the type.
     pub fn check_type<T: AsRef<AbiType>>(&self, ty: T) -> Result<()> {
         fn type_mismatch(value: &AbiValue, expected: &AbiType) -> AbiError {
