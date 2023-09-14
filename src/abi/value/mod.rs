@@ -451,6 +451,12 @@ impl PlainAbiValue {
             _ => false,
         }
     }
+
+    /// Returns a printable object which will display a value type signature.
+    #[inline]
+    pub fn display_type(&self) -> impl std::fmt::Display + '_ {
+        DisplayPlainValueType(self)
+    }
 }
 
 impl From<PlainAbiValue> for AbiValue {
@@ -485,13 +491,44 @@ impl AbiHeader {
                 | (Self::PublicKey(_), AbiHeaderType::PublicKey)
         )
     }
+
+    /// Returns a printable object which will display a header type signature.
+    #[inline]
+    pub fn display_type(&self) -> impl std::fmt::Display + '_ {
+        DisplayHeaderType(self)
+    }
+}
+
+struct DisplayHeaderType<'a>(&'a AbiHeader);
+
+impl std::fmt::Display for DisplayHeaderType<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self.0 {
+            AbiHeader::Time(_) => "time",
+            AbiHeader::Expire(_) => "expire",
+            AbiHeader::PublicKey(_) => "pubkey",
+        })
+    }
+}
+
+struct DisplayPlainValueType<'a>(&'a PlainAbiValue);
+
+impl std::fmt::Display for DisplayPlainValueType<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self.0 {
+            PlainAbiValue::Uint(n, _) => return write!(f, "uint{n}"),
+            PlainAbiValue::Int(n, _) => return write!(f, "int{n}"),
+            PlainAbiValue::Bool(_) => "bool",
+            PlainAbiValue::Address(_) => "address",
+        })
+    }
 }
 
 struct DisplayValueType<'a>(&'a AbiValue);
 
 impl std::fmt::Display for DisplayValueType<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match &self.0 {
+        let s = match self.0 {
             AbiValue::Uint(n, _) => return write!(f, "uint{n}"),
             AbiValue::Int(n, _) => return write!(f, "int{n}"),
             AbiValue::VarUint(n, _) => return write!(f, "varuint{n}"),

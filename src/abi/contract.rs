@@ -730,22 +730,22 @@ impl<'f, 'a> ExternalInput<'f, 'a> {
         let abi_version = self.function.abi_version;
 
         let mut serializer = AbiSerializer::new(abi_version);
-        serializer.add_offset(if abi_version.major == 1 {
-            // Reserve reference for signature
-            ShortAbiTypeSize { bits: 0, refs: 1 }
-        } else if reserve_signature {
-            let bits = if abi_version >= AbiVersion::V2_3 {
-                // Reserve only for address as it also ensures the the signature will fit
-                IntAddr::BITS_MAX
+
+        if reserve_signature {
+            serializer.add_offset(if abi_version.major == 1 {
+                // Reserve reference for signature
+                ShortAbiTypeSize { bits: 0, refs: 1 }
             } else {
-                // Reserve for `Some` non-empty signature
-                1 + 512
-            };
-            ShortAbiTypeSize { bits, refs: 0 }
-        } else {
-            // Reserve for `None`
-            ShortAbiTypeSize { bits: 1, refs: 0 }
-        });
+                let bits = if abi_version >= AbiVersion::V2_3 {
+                    // Reserve only for address as it also ensures the the signature will fit
+                    IntAddr::BITS_MAX
+                } else {
+                    // Reserve for `Some` non-empty signature
+                    1 + 512
+                };
+                ShortAbiTypeSize { bits, refs: 0 }
+            });
+        }
 
         let input_id = AbiValue::uint(32, self.function.input_id);
 
@@ -753,6 +753,18 @@ impl<'f, 'a> ExternalInput<'f, 'a> {
         serializer.reserve_value(&input_id);
         for token in self.tokens {
             serializer.reserve_value(&token.value);
+        }
+
+        let finalizer = &mut Cell::default_finalizer();
+
+        if !reserve_signature {
+            let value = if abi_version.major == 1 {
+                AbiValue::Cell(Cell::default())
+            } else {
+                AbiValue::Bool(false)
+            };
+            serializer.reserve_value(&value);
+            serializer.write_value(&value, finalizer)?;
         }
 
         let time = self.time.unwrap_or_else(now_ms);
@@ -770,7 +782,6 @@ impl<'f, 'a> ExternalInput<'f, 'a> {
             })?;
         }
 
-        let finalizer = &mut Cell::default_finalizer();
         serializer.write_value(&input_id, finalizer)?;
         serializer.write_tuple(self.tokens, finalizer)?;
 

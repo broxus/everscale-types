@@ -202,6 +202,9 @@ fn encode_unsigned_external_input() {
         .build_input_without_signature()
         .unwrap();
 
+    println!("{}", expected.display_tree());
+    println!("{}", body.display_tree());
+
     assert_eq!(body, expected);
 }
 

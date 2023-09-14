@@ -1,10 +1,13 @@
 use std::collections::{BTreeMap, HashMap};
+use std::hash::{BuildHasher, Hash};
 use std::num::NonZeroU8;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use anyhow::Result;
 use bytes::Bytes;
 use num_bigint::{BigInt, BigUint};
+use num_traits::ToPrimitive;
 
 use super::{AbiType, AbiValue, NamedAbiType, NamedAbiValue, PlainAbiType, PlainAbiValue};
 use crate::cell::{Cell, HashBytes};
@@ -171,8 +174,8 @@ pub trait WithPlainAbiType: WithAbiType {
 }
 
 macro_rules! impl_with_plain_abi_type {
-    ($($int:ty => $ident:ident$(($n:literal))?),*$(,)?) => {$(
-        impl WithPlainAbiType for $int {
+    ($($ty:ty => $ident:ident$(($n:literal))?),*$(,)?) => {$(
+        impl WithPlainAbiType for $ty {
             fn plain_abi_type() -> PlainAbiType {
                 PlainAbiType::$ident$(($n))?
             }
@@ -219,8 +222,8 @@ pub trait IntoPlainAbi: IntoAbi {
 }
 
 macro_rules! impl_into_plain_abi {
-    ($($int:ty => |$n:ident| { $expr1:expr, $expr2:expr $(,)? }),*$(,)?) => {$(
-        impl IntoPlainAbi for $int {
+    ($($ty:ty => |$n:ident| { $expr1:expr, $expr2:expr $(,)? }),*$(,)?) => {$(
+        impl IntoPlainAbi for $ty {
             #[inline]
             fn as_plain_abi(&self) -> PlainAbiValue {
                 let $n = self;
@@ -323,7 +326,7 @@ impl_into_plain_abi! {
     },
 }
 
-/// A type with can be converted into an ABI value.
+/// A type which can be converted into an ABI value.
 pub trait IntoAbi {
     /// Returns a corresponding ABI value.
     ///
@@ -337,8 +340,8 @@ pub trait IntoAbi {
 }
 
 macro_rules! impl_into_abi {
-    ($($int:ty => |$n:ident| { $expr1:expr, $expr2:expr $(,)? }),*$(,)?) => {$(
-        impl IntoAbi for $int {
+    ($($ty:ty => |$n:ident| { $expr1:expr, $expr2:expr $(,)? }),*$(,)?) => {$(
+        impl IntoAbi for $ty {
             #[inline]
             fn as_abi(&self) -> AbiValue {
                 let $n = self;
@@ -632,6 +635,359 @@ impl_into_abi_for_tuple! { 0: T0, 1: T1, 2: T2, 3: T3 }
 impl_into_abi_for_tuple! { 0: T0, 1: T1, 2: T2, 3: T3, 4: T4 }
 impl_into_abi_for_tuple! { 0: T0, 1: T1, 2: T2, 3: T3, 4: T4, 5: T5 }
 impl_into_abi_for_tuple! { 0: T0, 1: T1, 2: T2, 3: T3, 4: T4, 5: T5, 6: T6 }
+
+/// A type which can be converted from a plain ABI value.
+pub trait FromPlainAbi: Sized {
+    /// Constructs self from the plain ABI value.
+    fn from_plain_abi(value: PlainAbiValue) -> Result<Self>;
+}
+
+/// A type which can be converted from an ABI value.
+pub trait FromAbi: Sized {
+    /// Constructs self from the ABI value.
+    fn from_abi(value: AbiValue) -> Result<Self>;
+}
+
+fn expected_type(expected: &'static str, value: &AbiValue) -> anyhow::Error {
+    anyhow::Error::from(crate::abi::error::AbiError::TypeMismatch {
+        expected: Box::from(expected),
+        ty: value.display_type().to_string().into(),
+    })
+}
+
+fn expected_plain_type(expected: &'static str, value: &PlainAbiValue) -> anyhow::Error {
+    anyhow::Error::from(crate::abi::error::AbiError::TypeMismatch {
+        expected: Box::from(expected),
+        ty: value.display_type().to_string().into(),
+    })
+}
+
+macro_rules! impl_from_abi_for_int {
+    ($($ty:ty => ($variant:ident($bits:literal), $s:literal, $expr:tt)),*$(,)?) => {$(
+        impl FromAbi for $ty {
+            fn from_abi(value: AbiValue) -> Result<Self> {
+                match &value {
+                    AbiValue::$variant($bits, v) => match ToPrimitive::$expr(v) {
+                        Some(value) => Ok(value),
+                        None => Err(anyhow::Error::from(crate::error::Error::IntOverflow)),
+                    },
+                    value => Err(expected_type($s, value)),
+                }
+            }
+        }
+
+        impl FromPlainAbi for $ty {
+            fn from_plain_abi(value: PlainAbiValue) -> Result<Self> {
+                match &value {
+                    PlainAbiValue::$variant($bits, v) => match ToPrimitive::$expr(v) {
+                        Some(value) => Ok(value),
+                        None => Err(anyhow::Error::from(crate::error::Error::IntOverflow)),
+                    },
+                    value => Err(expected_plain_type($s, value)),
+                }
+            }
+        }
+    )*};
+}
+
+impl_from_abi_for_int! {
+    u8 => (Uint(8), "uint8", to_u8),
+    u16 => (Uint(16), "uint16", to_u16),
+    u32 => (Uint(32), "uint32", to_u32),
+    u64 => (Uint(64), "uint64", to_u64),
+    u128 => (Uint(128), "uint128", to_u128),
+
+    i8 => (Int(8), "int8", to_i8),
+    i16 => (Int(16), "int16", to_i16),
+    i32 => (Int(32), "int32", to_i32),
+    i64 => (Int(64), "int64", to_i64),
+    i128 => (Int(128), "int128", to_i128),
+}
+
+impl FromAbi for AbiValue {
+    #[inline]
+    fn from_abi(value: AbiValue) -> Result<Self> {
+        Ok(value)
+    }
+}
+
+impl FromAbi for bool {
+    fn from_abi(value: AbiValue) -> Result<Self> {
+        match &value {
+            AbiValue::Bool(value) => Ok(*value),
+            value => Err(expected_type("bool", value)),
+        }
+    }
+}
+
+impl FromPlainAbi for bool {
+    fn from_plain_abi(value: PlainAbiValue) -> Result<Self> {
+        match &value {
+            PlainAbiValue::Bool(value) => Ok(*value),
+            value => Err(expected_plain_type("bool", value)),
+        }
+    }
+}
+
+impl FromAbi for VarUint24 {
+    fn from_abi(value: AbiValue) -> Result<Self> {
+        match &value {
+            AbiValue::VarUint(size, v) if size.get() == 4 => match v.to_u32() {
+                Some(value) => Ok(Self::new(value)),
+                None => Err(anyhow::Error::from(crate::error::Error::IntOverflow)),
+            },
+            value => Err(expected_type("varuint4", value)),
+        }
+    }
+}
+
+impl FromAbi for VarUint56 {
+    fn from_abi(value: AbiValue) -> Result<Self> {
+        match &value {
+            AbiValue::VarUint(size, v) if size.get() == 8 => match v.to_u64() {
+                Some(value) => Ok(Self::new(value)),
+                None => Err(anyhow::Error::from(crate::error::Error::IntOverflow)),
+            },
+            value => Err(expected_type("varuint8", value)),
+        }
+    }
+}
+
+impl FromAbi for Tokens {
+    fn from_abi(value: AbiValue) -> Result<Self> {
+        match value {
+            AbiValue::VarUint(size, v) if size.get() == 16 => match v.to_u128() {
+                Some(value) => Ok(Self::new(value)),
+                None => Err(anyhow::Error::from(crate::error::Error::IntOverflow)),
+            },
+            AbiValue::Token(tokens) => Ok(tokens),
+            value => Err(expected_type("varuint8", &value)),
+        }
+    }
+}
+
+impl FromAbi for HashBytes {
+    fn from_abi(value: AbiValue) -> Result<Self> {
+        match &value {
+            AbiValue::Uint(256, v) => {
+                let mut result = HashBytes::ZERO;
+
+                let bytes = v.to_bytes_be();
+                let bytes_len = bytes.len();
+                match 32usize.checked_sub(bytes_len) {
+                    None => result.0.copy_from_slice(&bytes[bytes_len - 32..]),
+                    Some(pad) => result.0[pad..].copy_from_slice(&bytes),
+                };
+
+                Ok(result)
+            }
+            value => Err(expected_type("uint256", value)),
+        }
+    }
+}
+
+impl FromAbi for Cell {
+    fn from_abi(value: AbiValue) -> Result<Self> {
+        match value {
+            AbiValue::Cell(cell) => Ok(cell),
+            value => Err(expected_type("cell", &value)),
+        }
+    }
+}
+
+impl FromAbi for Bytes {
+    fn from_abi(value: AbiValue) -> Result<Self> {
+        match value {
+            AbiValue::Bytes(bytes) | AbiValue::FixedBytes(bytes) => Ok(bytes),
+            value => Err(expected_type("bytes or fixedbytes", &value)),
+        }
+    }
+}
+
+impl FromAbi for String {
+    fn from_abi(value: AbiValue) -> Result<Self> {
+        match value {
+            AbiValue::String(string) => Ok(string),
+            value => Err(expected_type("string", &value)),
+        }
+    }
+}
+
+impl FromAbi for IntAddr {
+    fn from_abi(value: AbiValue) -> Result<Self> {
+        match value {
+            AbiValue::Address(address) => Ok(*address),
+            value => Err(expected_type("address", &value)),
+        }
+    }
+}
+
+impl FromPlainAbi for IntAddr {
+    fn from_plain_abi(value: PlainAbiValue) -> Result<Self> {
+        match value {
+            PlainAbiValue::Address(address) => Ok(*address),
+            value => Err(expected_plain_type("address", &value)),
+        }
+    }
+}
+
+impl FromAbi for StdAddr {
+    fn from_abi(value: AbiValue) -> Result<Self> {
+        if let AbiValue::Address(address) = &value {
+            if let IntAddr::Std(address) = address.as_ref() {
+                return Ok(address.clone());
+            }
+        }
+        Err(expected_type("std address", &value))
+    }
+}
+
+impl FromPlainAbi for StdAddr {
+    fn from_plain_abi(value: PlainAbiValue) -> Result<Self> {
+        if let PlainAbiValue::Address(address) = &value {
+            if let IntAddr::Std(address) = address.as_ref() {
+                return Ok(address.clone());
+            }
+        }
+        Err(expected_plain_type("std address", &value))
+    }
+}
+
+impl FromAbi for VarAddr {
+    fn from_abi(value: AbiValue) -> Result<Self> {
+        if let AbiValue::Address(address) = &value {
+            if let IntAddr::Var(address) = address.as_ref() {
+                return Ok(address.clone());
+            }
+        }
+        Err(expected_type("var address", &value))
+    }
+}
+
+impl FromPlainAbi for VarAddr {
+    fn from_plain_abi(value: PlainAbiValue) -> Result<Self> {
+        if let PlainAbiValue::Address(address) = &value {
+            if let IntAddr::Var(address) = address.as_ref() {
+                return Ok(address.clone());
+            }
+        }
+        Err(expected_plain_type("var address", &value))
+    }
+}
+
+impl<T: FromAbi> FromAbi for Vec<T> {
+    fn from_abi(value: AbiValue) -> Result<Self> {
+        let items = match value {
+            AbiValue::Array(_, items) | AbiValue::FixedArray(_, items) => items,
+            value => return Err(expected_type("array", &value)),
+        };
+        let mut result = Vec::with_capacity(items.len());
+        for item in items {
+            result.push(ok!(T::from_abi(item)));
+        }
+        Ok(result)
+    }
+}
+
+impl<K: FromPlainAbi + Ord, V: FromAbi> FromAbi for BTreeMap<K, V> {
+    fn from_abi(value: AbiValue) -> Result<Self> {
+        match value {
+            AbiValue::Map(_, _, map) => {
+                let mut result = BTreeMap::new();
+                for (key, value) in map {
+                    result.insert(ok!(K::from_plain_abi(key)), ok!(V::from_abi(value)));
+                }
+                Ok(result)
+            }
+            value => Err(expected_type("map", &value)),
+        }
+    }
+}
+
+impl<K: FromPlainAbi + Eq + Hash, V: FromAbi, S: BuildHasher + Default> FromAbi
+    for HashMap<K, V, S>
+{
+    fn from_abi(value: AbiValue) -> Result<Self> {
+        match value {
+            AbiValue::Map(_, _, map) => {
+                let mut result = HashMap::with_capacity_and_hasher(map.len(), S::default());
+                for (key, value) in map {
+                    result.insert(ok!(K::from_plain_abi(key)), ok!(V::from_abi(value)));
+                }
+                Ok(result)
+            }
+            value => Err(expected_type("map", &value)),
+        }
+    }
+}
+
+impl<T: FromAbi> FromAbi for Option<T> {
+    fn from_abi(value: AbiValue) -> Result<Self> {
+        match value {
+            AbiValue::Optional(_, value) => match value {
+                Some(value) => T::from_abi(*value).map(Some),
+                None => Ok(None),
+            },
+            value => Err(expected_type("optional", &value)),
+        }
+    }
+}
+
+impl FromAbi for () {
+    fn from_abi(value: AbiValue) -> Result<Self> {
+        if let AbiValue::Tuple(items) = &value {
+            if items.is_empty() {
+                return Ok(());
+            }
+        }
+        Err(expected_type("()", &value))
+    }
+}
+
+macro_rules! impl_from_abi_for_tuple {
+    ($len:literal => $($t:ident),+$(,)?) => {
+        impl<$($t: FromAbi),*> FromAbi for ($($t),+,) {
+            fn from_abi(value: AbiValue) -> Result<Self> {
+                match value {
+                    AbiValue::Tuple(items) if items.len() == $len => {
+                        let mut items = items.into_iter();
+                        Ok(($(ok!(<$t as FromAbi>::from_abi(items.next().expect("exists").value))),*,))
+                    }
+                    value => Err(expected_type("tuple", &value))
+                }
+            }
+        }
+    };
+}
+
+impl_from_abi_for_tuple! { 1 => T0 }
+impl_from_abi_for_tuple! { 2 => T0, T1 }
+impl_from_abi_for_tuple! { 3 => T0, T1, T2 }
+impl_from_abi_for_tuple! { 4 => T0, T1, T2, T3 }
+impl_from_abi_for_tuple! { 5 => T0, T1, T2, T3, T4 }
+impl_from_abi_for_tuple! { 6 => T0, T1, T2, T3, T4, T5 }
+impl_from_abi_for_tuple! { 7 => T0, T1, T2, T3, T4, T5, T6 }
+
+impl<T: FromAbi> FromAbi for Box<T> {
+    #[inline]
+    fn from_abi(value: AbiValue) -> Result<Self> {
+        T::from_abi(value).map(Box::new)
+    }
+}
+
+impl<T: FromAbi> FromAbi for Arc<T> {
+    #[inline]
+    fn from_abi(value: AbiValue) -> Result<Self> {
+        T::from_abi(value).map(Arc::new)
+    }
+}
+
+impl<T: FromAbi> FromAbi for Rc<T> {
+    #[inline]
+    fn from_abi(value: AbiValue) -> Result<Self> {
+        T::from_abi(value).map(Rc::new)
+    }
+}
 
 #[cfg(test)]
 mod tests {
