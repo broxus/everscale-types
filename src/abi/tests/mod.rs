@@ -92,9 +92,6 @@ fn encode_external_input() {
     let contract = serde_json::from_str::<Contract>(DEPOOL_ABI).unwrap();
     let function = contract.functions.get("constructor").unwrap();
 
-    let key = ed25519_dalek::SigningKey::from([0; 32]);
-    let pubkey = ed25519_dalek::VerifyingKey::from(&key);
-
     let expected = {
         let mut builder = CellBuilder::new();
         builder.store_bit_one().unwrap();
@@ -119,19 +116,16 @@ fn encode_external_input() {
     };
 
     let body = function
-        .encode_external_input(
-            &[
-                123u64.into_abi().named("minStake"),
-                321u64.into_abi().named("validatorAssurance"),
-                Cell::default().into_abi().named("proxyCode"),
-                StdAddr::default().into_abi().named("validatorWallet"),
-                1u8.into_abi().named("participantRewardFraction"),
-            ],
-            10000,
-            10,
-            Some(&pubkey),
-            None,
-        )
+        .encode_external(&[
+            123u64.into_abi().named("minStake"),
+            321u64.into_abi().named("validatorAssurance"),
+            Cell::default().into_abi().named("proxyCode"),
+            StdAddr::default().into_abi().named("validatorWallet"),
+            1u8.into_abi().named("participantRewardFraction"),
+        ])
+        .with_time(10000)
+        .with_expire_at(10)
+        .build_input()
         .unwrap()
         .with_fake_signature()
         .unwrap();
@@ -164,6 +158,71 @@ fn decode_external_input() {
                 builder.build().unwrap()
             })
             .unwrap();
+        builder.build().unwrap()
+    };
+
+    let tokens = function
+        .decode_external_input(body.as_slice().unwrap())
+        .unwrap();
+
+    NamedAbiValue::check_types(&tokens, &function.inputs).unwrap();
+}
+
+#[test]
+fn encode_unsigned_external_input() {
+    let contract = serde_json::from_str::<Contract>(DEPOOL_ABI).unwrap();
+    let function = contract.functions.get("constructor").unwrap();
+
+    let expected = {
+        let mut builder = CellBuilder::new();
+        builder.store_bit_zero().unwrap();
+        builder.store_u64(10000).unwrap();
+        builder.store_u32(10).unwrap();
+        builder.store_u32(function.input_id).unwrap();
+        builder.store_u64(123).unwrap();
+        builder.store_u64(321).unwrap();
+        builder.store_reference(Cell::default()).unwrap();
+        StdAddr::default()
+            .store_into(&mut builder, &mut Cell::default_finalizer())
+            .unwrap();
+        builder.store_u8(1).unwrap();
+        builder.build().unwrap()
+    };
+
+    let (_, body) = function
+        .encode_external(&[
+            123u64.into_abi().named("minStake"),
+            321u64.into_abi().named("validatorAssurance"),
+            Cell::default().into_abi().named("proxyCode"),
+            StdAddr::default().into_abi().named("validatorWallet"),
+            1u8.into_abi().named("participantRewardFraction"),
+        ])
+        .with_time(10000)
+        .with_expire_at(10)
+        .build_input_without_signature()
+        .unwrap();
+
+    assert_eq!(body, expected);
+}
+
+#[test]
+fn decode_unsigned_external_input() {
+    let contract = serde_json::from_str::<Contract>(DEPOOL_ABI).unwrap();
+    let function = contract.functions.get("constructor").unwrap();
+
+    let body = {
+        let mut builder = CellBuilder::new();
+        builder.store_bit_zero().unwrap();
+        builder.store_u64(10000).unwrap();
+        builder.store_u32(10).unwrap();
+        builder.store_u32(function.input_id).unwrap();
+        builder.store_u64(123).unwrap();
+        builder.store_u64(321).unwrap();
+        builder.store_reference(Cell::default()).unwrap();
+        StdAddr::default()
+            .store_into(&mut builder, &mut Cell::default_finalizer())
+            .unwrap();
+        builder.store_u8(1).unwrap();
         builder.build().unwrap()
     };
 

@@ -459,89 +459,15 @@ impl Function {
     }
 
     /// Encodes an unsigned body with invocation of this method as an external message.
-    pub fn encode_external_input(
-        &self,
-        tokens: &[NamedAbiValue],
-        now: u64,
-        expire_at: u32,
-        pubkey: Option<&ed25519_dalek::VerifyingKey>,
-        address: Option<&StdAddr>,
-    ) -> Result<UnsignedBody> {
-        ok!(NamedAbiValue::check_types(tokens, &self.inputs));
-
-        let mut serializer = AbiSerializer::new(self.abi_version);
-        serializer.add_offset(if self.abi_version.major == 1 {
-            // Reserve reference for signature
-            ShortAbiTypeSize { bits: 0, refs: 1 }
-        } else if pubkey.is_some() {
-            let bits = if self.abi_version >= AbiVersion::V2_3 {
-                // Reserve only for address as it also ensures the the signature will fit
-                IntAddr::BITS_MAX
-            } else {
-                // Reserve for `Some` non-empty signature
-                1 + 512
-            };
-            ShortAbiTypeSize { bits, refs: 0 }
-        } else {
-            // Reserve for `None`
-            ShortAbiTypeSize { bits: 1, refs: 0 }
-        });
-
-        let input_id = AbiValue::uint(32, self.input_id);
-
-        serializer.reserve_headers(&self.headers, pubkey.is_some());
-        serializer.reserve_value(&input_id);
-        for token in tokens {
-            serializer.reserve_value(&token.value);
+    pub fn encode_external<'f, 'a: 'f>(&'f self, tokens: &'a [NamedAbiValue]) -> ExternalInput {
+        ExternalInput {
+            function: self,
+            tokens,
+            time: None,
+            expire_at: None,
+            pubkey: None,
+            address: None,
         }
-
-        for header in self.headers.as_ref() {
-            serializer.write_header_value(&match header {
-                AbiHeaderType::Time => AbiHeader::Time(now),
-                AbiHeaderType::Expire => AbiHeader::Expire(expire_at),
-                AbiHeaderType::PublicKey => AbiHeader::PublicKey(pubkey.map(|key| Box::new(*key))),
-            })?;
-        }
-
-        let finalizer = &mut Cell::default_finalizer();
-        serializer.write_value(&input_id, finalizer)?;
-        serializer.write_tuple(tokens, finalizer)?;
-        let builder = serializer.finalize(finalizer)?;
-
-        let (hash, payload) = if self.abi_version >= AbiVersion::V2_3 {
-            let mut to_sign = CellBuilder::new();
-            match address {
-                Some(address) => address.store_into(&mut to_sign, finalizer)?,
-                None => anyhow::bail!(AbiError::AddressNotProvided),
-            };
-            to_sign.store_builder(&builder)?;
-            let hash = *to_sign.build_ext(finalizer)?.repr_hash();
-            (hash, builder.build()?)
-        } else {
-            let payload = builder.clone().build_ext(finalizer)?;
-            (*payload.repr_hash(), payload)
-        };
-
-        Ok(UnsignedBody {
-            abi_version: self.abi_version,
-            expire_at,
-            payload,
-            hash,
-        })
-    }
-
-    /// Encodes an unsigned external message with invocation of this method.
-    pub fn encode_external_message(
-        &self,
-        tokens: &[NamedAbiValue],
-        now: u64,
-        expire_at: u32,
-        pubkey: Option<&ed25519_dalek::VerifyingKey>,
-        address: &StdAddr,
-    ) -> Result<UnsignedExternalMessage> {
-        Ok(self
-            .encode_external_input(tokens, now, expire_at, pubkey, Some(address))?
-            .with_dst(address.clone()))
     }
 
     /// Tries to parse input arguments for this method from an external message body.
@@ -709,6 +635,199 @@ impl Function {
             inputs: &self.inputs,
             outputs: &self.outputs,
         }
+    }
+}
+
+/// External input builder.
+#[derive(Clone)]
+pub struct ExternalInput<'f, 'a> {
+    function: &'f Function,
+    tokens: &'a [NamedAbiValue],
+    time: Option<u64>,
+    expire_at: Option<u32>,
+    pubkey: Option<&'a ed25519_dalek::VerifyingKey>,
+    address: Option<&'a StdAddr>,
+}
+
+impl<'f, 'a> ExternalInput<'f, 'a> {
+    /// Builds an external message to the specified address.
+    pub fn build_message(&self, address: &StdAddr) -> Result<UnsignedExternalMessage> {
+        Ok(ok!(self.build_input_ext(Some(address))).with_dst(address.clone()))
+    }
+
+    /// Builds an exteranl message to the specified address without signature.
+    ///
+    /// Returns an expiration timestamp along with message.
+    pub fn build_message_without_signature(
+        &self,
+        address: &StdAddr,
+    ) -> Result<(u32, OwnedMessage)> {
+        let (expire_at, body) = ok!(self.build_input_without_signature());
+        let range = CellSliceRange::full(body.as_ref());
+        Ok((
+            expire_at,
+            OwnedMessage {
+                info: MsgInfo::ExtIn(ExtInMsgInfo {
+                    dst: IntAddr::Std(address.clone()),
+                    ..Default::default()
+                }),
+                body: (body, range),
+                init: None,
+                layout: None,
+            },
+        ))
+    }
+
+    /// Builds an external message body.
+    pub fn build_input(&self) -> Result<UnsignedBody> {
+        self.build_input_ext(self.address)
+    }
+
+    fn build_input_ext(&self, address: Option<&StdAddr>) -> Result<UnsignedBody> {
+        let (expire_at, payload) = self.build_payload(true)?;
+
+        let finalizer = &mut Cell::default_finalizer();
+        let hash = if self.function.abi_version >= AbiVersion::V2_3 {
+            let mut to_sign = CellBuilder::new();
+            match address {
+                Some(address) => address.store_into(&mut to_sign, finalizer)?,
+                None => anyhow::bail!(AbiError::AddressNotProvided),
+            };
+            to_sign.store_slice(payload.as_slice()?)?;
+            *to_sign.build_ext(finalizer)?.repr_hash()
+        } else {
+            *payload.repr_hash()
+        };
+
+        Ok(UnsignedBody {
+            abi_version: self.function.abi_version,
+            expire_at,
+            payload,
+            hash,
+        })
+    }
+
+    /// Builds an external message body without signature.
+    pub fn build_input_without_signature(&self) -> Result<(u32, Cell)> {
+        self.build_payload(false)
+    }
+
+    fn build_payload(&self, reserve_signature: bool) -> Result<(u32, Cell)> {
+        const DEFAULT_TIMEOUT_SEC: u32 = 60;
+
+        fn now_ms() -> u64 {
+            std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64
+        }
+
+        ok!(NamedAbiValue::check_types(
+            self.tokens,
+            &self.function.inputs
+        ));
+
+        let abi_version = self.function.abi_version;
+
+        let mut serializer = AbiSerializer::new(abi_version);
+        serializer.add_offset(if abi_version.major == 1 {
+            // Reserve reference for signature
+            ShortAbiTypeSize { bits: 0, refs: 1 }
+        } else if reserve_signature {
+            let bits = if abi_version >= AbiVersion::V2_3 {
+                // Reserve only for address as it also ensures the the signature will fit
+                IntAddr::BITS_MAX
+            } else {
+                // Reserve for `Some` non-empty signature
+                1 + 512
+            };
+            ShortAbiTypeSize { bits, refs: 0 }
+        } else {
+            // Reserve for `None`
+            ShortAbiTypeSize { bits: 1, refs: 0 }
+        });
+
+        let input_id = AbiValue::uint(32, self.function.input_id);
+
+        serializer.reserve_headers(&self.function.headers, self.pubkey.is_some());
+        serializer.reserve_value(&input_id);
+        for token in self.tokens {
+            serializer.reserve_value(&token.value);
+        }
+
+        let time = self.time.unwrap_or_else(now_ms);
+        let expire_at = self
+            .expire_at
+            .unwrap_or_else(|| (time / 1000) as u32 + DEFAULT_TIMEOUT_SEC);
+
+        for header in self.function.headers.as_ref() {
+            serializer.write_header_value(&match header {
+                AbiHeaderType::Time => AbiHeader::Time(time),
+                AbiHeaderType::Expire => AbiHeader::Expire(expire_at),
+                AbiHeaderType::PublicKey => {
+                    AbiHeader::PublicKey(self.pubkey.map(|key| Box::new(*key)))
+                }
+            })?;
+        }
+
+        let finalizer = &mut Cell::default_finalizer();
+        serializer.write_value(&input_id, finalizer)?;
+        serializer.write_tuple(self.tokens, finalizer)?;
+
+        let payload = serializer.finalize(finalizer)?.build_ext(finalizer)?;
+        Ok((expire_at, payload))
+    }
+
+    /// Use the specified time for the `time` header.
+    #[inline]
+    pub fn set_time(&mut self, time: u64) {
+        self.time = Some(time);
+    }
+
+    /// Use the specified time for the `time` header.
+    #[inline]
+    pub fn with_time(mut self, time: u64) -> Self {
+        self.set_time(time);
+        self
+    }
+
+    /// Use the specified expiration timestamp for the `expire` header.
+    #[inline]
+    pub fn set_expire_at(&mut self, expire_at: u32) {
+        self.expire_at = Some(expire_at);
+    }
+
+    /// Use the specified expiration timestamp for the `expire` header.
+    #[inline]
+    pub fn with_expire_at(mut self, expire_at: u32) -> Self {
+        self.set_expire_at(expire_at);
+        self
+    }
+
+    /// Use the specified public key for the `pubkey` header.
+    #[inline]
+    pub fn set_pubkey(&mut self, pubkey: &'a ed25519_dalek::VerifyingKey) {
+        self.pubkey = Some(pubkey);
+    }
+
+    /// Use the specified public key for the `pubkey` header.
+    #[inline]
+    pub fn with_pubkey(mut self, pubkey: &'a ed25519_dalek::VerifyingKey) -> Self {
+        self.set_pubkey(pubkey);
+        self
+    }
+
+    /// Use the specified address for ABIv2.3 signature.
+    #[inline]
+    pub fn set_address(&mut self, address: &'a StdAddr) {
+        self.address = Some(address);
+    }
+
+    /// Use the specified address for ABIv2.3 signature.
+    #[inline]
+    pub fn with_address(mut self, address: &'a StdAddr) -> Self {
+        self.set_address(address);
+        self
     }
 }
 
