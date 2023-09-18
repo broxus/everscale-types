@@ -57,6 +57,7 @@ impl Store for ComputePhase {
                 let cell = {
                     let mut builder = CellBuilder::new();
                     ok!(phase.gas_used.store_into(&mut builder, finalizer));
+                    ok!(phase.gas_limit.store_into(&mut builder, finalizer));
                     ok!(phase.gas_credit.store_into(&mut builder, finalizer));
                     ok!(builder.store_u8(phase.mode as u8));
                     ok!(builder.store_u32(phase.exit_code as u32));
