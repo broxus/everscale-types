@@ -9,7 +9,7 @@ use crate::util::Bitstring;
 pub use self::builder::{CellBuilder, CellRefsBuilder, Store};
 pub use self::cell_impl::{StaticCell, VirtualCellWrapper};
 pub use self::finalizer::{CellParts, DefaultFinalizer, Finalizer};
-pub use self::slice::{CellSlice, CellSliceParts, CellSliceRange, Load};
+pub use self::slice::{CellSlice, CellSliceParts, CellSliceRange, CellSliceSize, ExactSize, Load};
 pub use self::usage_tree::{UsageTree, UsageTreeMode, UsageTreeWithSubtrees};
 
 #[cfg(not(feature = "sync"))]
@@ -1110,6 +1110,62 @@ impl std::ops::AddAssign for CellTreeStats {
     fn add_assign(&mut self, rhs: Self) {
         self.bit_count = self.bit_count.saturating_add(rhs.bit_count);
         self.cell_count = self.cell_count.saturating_add(rhs.cell_count);
+    }
+}
+
+impl std::ops::Add<CellSliceSize> for CellTreeStats {
+    type Output = Self;
+
+    #[inline]
+    fn add(self, rhs: CellSliceSize) -> Self::Output {
+        Self {
+            bit_count: self.bit_count.saturating_add(rhs.bits as _),
+            cell_count: self.cell_count.saturating_add(rhs.refs as _),
+        }
+    }
+}
+
+impl std::iter::Sum for CellTreeStats {
+    #[inline]
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        let mut res = Self::ZERO;
+        for item in iter {
+            res += item;
+        }
+        res
+    }
+}
+
+impl std::ops::AddAssign<CellSliceSize> for CellTreeStats {
+    fn add_assign(&mut self, rhs: CellSliceSize) {
+        self.bit_count = self.bit_count.saturating_add(rhs.bits as _);
+        self.cell_count = self.cell_count.saturating_add(rhs.refs as _);
+    }
+}
+
+impl std::ops::Sub for CellTreeStats {
+    type Output = Self;
+
+    #[inline]
+    fn sub(mut self, rhs: Self) -> Self::Output {
+        self -= rhs;
+        self
+    }
+}
+
+impl std::ops::SubAssign for CellTreeStats {
+    #[inline]
+    fn sub_assign(&mut self, rhs: Self) {
+        self.bit_count = self.bit_count.saturating_sub(rhs.bit_count);
+        self.cell_count = self.cell_count.saturating_sub(rhs.cell_count);
+    }
+}
+
+impl std::ops::SubAssign<CellSliceSize> for CellTreeStats {
+    #[inline]
+    fn sub_assign(&mut self, rhs: CellSliceSize) {
+        self.bit_count = self.bit_count.saturating_sub(rhs.bits as _);
+        self.cell_count = self.cell_count.saturating_sub(rhs.refs as _);
     }
 }
 

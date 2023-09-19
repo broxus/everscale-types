@@ -3,7 +3,8 @@
 use std::marker::PhantomData;
 
 use crate::cell::{
-    Cell, CellBuilder, CellSlice, DefaultFinalizer, EquivalentRepr, Finalizer, Load, Store,
+    Cell, CellBuilder, CellSlice, CellSliceSize, DefaultFinalizer, EquivalentRepr, Finalizer, Load,
+    Store,
 };
 use crate::error::Error;
 use crate::util::*;
@@ -33,11 +34,11 @@ pub mod vm;
 mod __checks {
     use super::*;
 
-    assert_impl_all!(Lazy<Message>: Send);
-    assert_impl_all!(Account: Send);
-    assert_impl_all!(Block: Send);
-    assert_impl_all!(Message: Send);
-    assert_impl_all!(Transaction: Send);
+    assert_impl_all!(Lazy<Message>: Send, Sync);
+    assert_impl_all!(Account: Send, Sync);
+    assert_impl_all!(Block: Send, Sync);
+    assert_impl_all!(Message: Send, Sync);
+    assert_impl_all!(Transaction: Send, Sync);
 }
 
 /// Lazy-loaded model.
@@ -45,6 +46,13 @@ mod __checks {
 pub struct Lazy<T> {
     cell: Cell,
     _marker: PhantomData<T>,
+}
+
+impl<T> crate::cell::ExactSize for Lazy<T> {
+    #[inline]
+    fn exact_size(&self) -> CellSliceSize {
+        CellSliceSize { bits: 0, refs: 1 }
+    }
 }
 
 impl<T> std::fmt::Debug for Lazy<T> {

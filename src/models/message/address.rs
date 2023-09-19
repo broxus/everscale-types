@@ -23,6 +23,9 @@ impl Default for IntAddr {
 }
 
 impl IntAddr {
+    /// The maximum number of bits that address occupies.
+    pub const BITS_MAX: u16 = 1 + VarAddr::BITS_MAX;
+
     /// Returns `true` if this address is for a masterchain block.
     ///
     /// See [`ShardIdent::MASTERCHAIN`]
@@ -73,6 +76,13 @@ impl IntAddr {
             Self::Std(addr) => addr.bit_len(),
             Self::Var(addr) => addr.bit_len(),
         }
+    }
+}
+
+impl From<(i8, HashBytes)> for IntAddr {
+    #[inline]
+    fn from((workchain, address): (i8, HashBytes)) -> Self {
+        IntAddr::Std(StdAddr::new(workchain, address))
     }
 }
 
@@ -198,6 +208,20 @@ impl std::fmt::Display for StdAddr {
         }
 
         f.write_fmt(format_args!("{}:{}", self.workchain, self.address))
+    }
+}
+
+impl From<(i8, HashBytes)> for StdAddr {
+    #[inline]
+    fn from((workchain, address): (i8, HashBytes)) -> Self {
+        Self::new(workchain, address)
+    }
+}
+
+impl From<(i8, [u8; 32])> for StdAddr {
+    #[inline]
+    fn from((workchain, address): (i8, [u8; 32])) -> Self {
+        Self::new(workchain, HashBytes(address))
     }
 }
 

@@ -37,6 +37,16 @@ use super::{
 /// ```
 pub struct RawDict<const N: u16>(pub(crate) Option<Cell>);
 
+impl<const N: u16> ExactSize for RawDict<N> {
+    #[inline]
+    fn exact_size(&self) -> CellSliceSize {
+        CellSliceSize {
+            bits: 1,
+            refs: self.0.is_some() as u8,
+        }
+    }
+}
+
 impl<'a, const N: u16> Load<'a> for RawDict<N> {
     #[inline]
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
@@ -669,7 +679,13 @@ impl<'a> RawIter<'a> {
                         debug_assert!(
                             segment.prefix.is_some() && (refs_offset == 1 || refs_offset == 2)
                         );
-                        let next_bit = (refs_offset != 1) ^ self.reversed;
+
+                        let next_bit = (refs_offset != 1)
+                            ^ self.reversed
+                            ^ (self.signed
+                                && self.segments.len() == 1
+                                && segment.prefix.unwrap().is_data_empty());
+
                         match segment.data.cell().reference_cloned(next_bit as u8) {
                             Some(cell) => cell,
                             None => return Some(Err(self.finish(Error::CellUnderflow))),

@@ -3,7 +3,8 @@ use bitflags::bitflags;
 use crate::cell::*;
 use crate::error::Error;
 use crate::models::currency::CurrencyCollection;
-use crate::models::message::LazyMessage;
+use crate::models::message::OwnedRelaxedMessage;
+use crate::models::Lazy;
 
 /// Out actions list reverse iterator.
 pub struct OutActionsRevIter<'a> {
@@ -148,7 +149,7 @@ pub enum OutAction {
         /// Behavior flags.
         mode: SendMsgFlags,
         /// A cell with a message.
-        out_msg: LazyMessage,
+        out_msg: Lazy<OwnedRelaxedMessage>,
     },
     /// Creates an output action that would change this smart contract code
     /// to that given by cell.
@@ -237,7 +238,7 @@ impl<'a> Load<'a> for OutAction {
         Ok(match tag {
             Self::TAG_SEND_MSG => Self::SendMsg {
                 mode: ok!(SendMsgFlags::load_from(slice)),
-                out_msg: ok!(LazyMessage::load_from(slice)),
+                out_msg: ok!(Lazy::load_from(slice)),
             },
             Self::TAG_SET_CODE => Self::SetCode {
                 new_code: ok!(slice.load_reference_cloned()),

@@ -374,6 +374,16 @@ macro_rules! impl_var_uints {
             }
         }
 
+        impl ExactSize for $ident {
+            #[inline]
+            fn exact_size(&self) -> CellSliceSize {
+                CellSliceSize {
+                    bits: self.bit_len().unwrap_or_default(),
+                    refs: 0,
+                }
+            }
+        }
+
         impl_ops! { $ident, $inner }
     };
 }
@@ -556,6 +566,16 @@ impl VarUint248 {
     }
 }
 
+impl ExactSize for VarUint248 {
+    #[inline]
+    fn exact_size(&self) -> CellSliceSize {
+        CellSliceSize {
+            bits: self.bit_len().unwrap_or_default(),
+            refs: 0,
+        }
+    }
+}
+
 impl Ord for VarUint248 {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.into_words().cmp(&other.into_words())
@@ -699,6 +719,13 @@ macro_rules! impl_small_uints {
             }
         }
 
+        impl ExactSize for $ident {
+            #[inline]
+            fn exact_size(&self) -> CellSliceSize {
+                CellSliceSize { bits: $bits, refs: 0 }
+            }
+        }
+
         impl Store for $ident {
             fn store_into(
                 &self,
@@ -706,7 +733,7 @@ macro_rules! impl_small_uints {
                 _: &mut dyn Finalizer
             ) -> Result<(), Error> {
                 if !self.is_valid() {
-                    return Err(Error::InvalidData);
+                    return Err(Error::IntOverflow);
                 }
                 builder.store_uint(self.0 as u64, Self::BITS)
             }
@@ -771,7 +798,7 @@ impl SplitDepth {
     pub const fn new(value: u8) -> Result<Self, Error> {
         match NonZeroU8::new(value) {
             Some(value) => Ok(Self(value)),
-            None => Err(Error::InvalidData),
+            None => Err(Error::IntOverflow),
         }
     }
 
@@ -781,7 +808,7 @@ impl SplitDepth {
         if bit_len < u8::MAX as u16 {
             Self::new(bit_len as u8)
         } else {
-            Err(Error::InvalidData)
+            Err(Error::IntOverflow)
         }
     }
 
@@ -789,6 +816,16 @@ impl SplitDepth {
     #[inline]
     pub const fn into_bit_len(self) -> u16 {
         self.0.get() as u16
+    }
+}
+
+impl ExactSize for SplitDepth {
+    #[inline]
+    fn exact_size(&self) -> CellSliceSize {
+        CellSliceSize {
+            bits: Self::BITS,
+            refs: 0,
+        }
     }
 }
 

@@ -43,10 +43,27 @@ impl CurrencyCollection {
     }
 }
 
+impl From<Tokens> for CurrencyCollection {
+    #[inline]
+    fn from(tokens: Tokens) -> Self {
+        Self {
+            tokens,
+            other: ExtraCurrencyCollection::new(),
+        }
+    }
+}
+
 impl<'a> AugDictSkipValue<'a> for CurrencyCollection {
     #[inline]
     fn skip_value(slice: &mut CellSlice<'a>) -> bool {
         Tokens::skip_value(slice) && ExtraCurrencyCollection::skip_value(slice)
+    }
+}
+
+impl ExactSize for CurrencyCollection {
+    #[inline]
+    fn exact_size(&self) -> CellSliceSize {
+        self.tokens.exact_size() + self.other.exact_size()
     }
 }
 
@@ -104,5 +121,12 @@ impl<'a> AugDictSkipValue<'a> for ExtraCurrencyCollection {
         } else {
             false
         }
+    }
+}
+
+impl ExactSize for ExtraCurrencyCollection {
+    #[inline]
+    fn exact_size(&self) -> CellSliceSize {
+        self.0.exact_size()
     }
 }

@@ -720,7 +720,7 @@ impl Store for ValidatorSet {
         finalizer: &mut dyn Finalizer,
     ) -> Result<(), Error> {
         let Ok(total) = u16::try_from(self.list.len()) else {
-            return Err(Error::InvalidData);
+            return Err(Error::IntOverflow);
         };
 
         // TODO: optimize
