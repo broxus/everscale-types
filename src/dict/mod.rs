@@ -1,12 +1,12 @@
 //! Dictionary implementation.
 
-use crate::cell::*;
-use crate::error::Error;
-
 pub use aug::*;
 pub use cell_context::*;
 pub use raw::*;
 pub use typed::*;
+
+use crate::cell::*;
+use crate::error::Error;
 
 mod aug;
 mod cell_context;
@@ -155,10 +155,7 @@ pub fn dict_remove_owned<G: CellContext>(
 
         // Load value branch
         let value = match last.data.reference_cloned(index) {
-            Some(child) => {
-                // leave resulting value as it is
-                cell_context.load_cell(child, LoadCellMode::USE_GAS)?
-            }
+            Some(child) => child,
             None => return Err(Error::CellUnderflow.into()),
         };
 
