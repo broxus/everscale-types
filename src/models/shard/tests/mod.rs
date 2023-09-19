@@ -2,12 +2,17 @@ use super::*;
 use crate::models::Block;
 use crate::prelude::Boc;
 
-fn check_state(data: Cell) {
-    let data = data.parse::<ShardStateUnsplit>().unwrap();
-
+fn check_state(cell: Cell) {
+    let data = cell.parse::<ShardStateUnsplit>().unwrap();
     println!("data: {data:#?}");
+    assert_eq!(CellBuilder::build_from(&data).unwrap(), cell);
 
     let shard_accounts = data.load_accounts().unwrap();
+    assert_eq!(
+        CellBuilder::build_from(&shard_accounts).unwrap(),
+        data.accounts.cell
+    );
+
     for entry in shard_accounts.iter() {
         let (id, shard_state) = entry.unwrap();
         let account = shard_state.load_account().unwrap();
@@ -28,6 +33,10 @@ fn check_state(data: Cell) {
 
     let custom = data.load_custom().unwrap().unwrap();
     println!("custom: {custom:#?}");
+    assert_eq!(
+        CellBuilder::build_from(&custom).unwrap(),
+        data.custom.unwrap().cell
+    );
 }
 
 #[test]
