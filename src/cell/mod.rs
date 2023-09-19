@@ -7,6 +7,7 @@ use crate::error::{Error, ParseHashBytesError};
 use crate::util::Bitstring;
 
 pub use self::builder::{CellBuilder, CellRefsBuilder, Store};
+pub use self::cell_context::{CellContext, DefaultCellContext, LoadMode, NoopCellContext};
 pub use self::cell_impl::{StaticCell, VirtualCellWrapper};
 pub use self::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 pub use self::slice::{CellSlice, CellSliceParts, CellSliceRange, CellSliceSize, ExactSize, Load};
@@ -22,6 +23,9 @@ pub use everscale_types_proc::{Load, Store};
 
 /// Generic cell implementation.
 mod cell_impl;
+
+/// Traits for gas accounting and resolving exotic cells.
+mod cell_context;
 
 /// Cell finalization primitives.
 mod finalizer;

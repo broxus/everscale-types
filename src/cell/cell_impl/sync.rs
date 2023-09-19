@@ -109,6 +109,7 @@ impl CellFamily for Cell {
 impl DefaultFinalizer for Cell {
     type Finalizer = ArcCellFinalizer;
 
+    #[inline]
     fn default_finalizer() -> Self::Finalizer {
         ArcCellFinalizer
     }
