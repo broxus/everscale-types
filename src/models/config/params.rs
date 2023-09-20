@@ -726,7 +726,8 @@ impl Store for ValidatorSet {
         // TODO: optimize
         let mut validators = Dict::<u16, ValidatorDescription>::new();
         for (i, item) in self.list.iter().enumerate() {
-            ok!(validators.set_ext(i as u16, item, finalizer));
+            // TODO: use cell context instead of finalizer?
+            ok!(validators.set(i as u16, item));
         }
 
         ok!(builder.store_u8(Self::TAG_V2));

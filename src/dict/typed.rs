@@ -181,7 +181,13 @@ where
         {
             let mut builder = CellBuilder::new();
             ok!(key.store_into(&mut builder, &mut Cell::default_finalizer()));
-            Ok(ok!(dict_get(root.as_ref(), K::BITS, builder.as_data_slice())).is_some())
+            Ok(ok!(dict_get(
+                root.as_ref(),
+                K::BITS,
+                builder.as_data_slice(),
+                &mut Cell::default_cell_context()
+            ))
+            .is_some())
         }
         contains_key_impl(&self.root, key.borrow())
     }
@@ -208,7 +214,12 @@ where
             let Some(mut value) = ({
                 let mut builder = CellBuilder::new();
                 ok!(key.store_into(&mut builder, &mut Cell::default_finalizer()));
-                ok!(dict_get(root.as_ref(), K::BITS, builder.as_data_slice()))
+                ok!(dict_get(
+                    root.as_ref(),
+                    K::BITS,
+                    builder.as_data_slice(),
+                    &mut Cell::default_cell_context()
+                ))
             }) else {
                 return Ok(None);
             };
@@ -236,7 +247,12 @@ where
         {
             let mut builder = CellBuilder::new();
             ok!(key.store_into(&mut builder, &mut Cell::default_finalizer()));
-            dict_get(root.as_ref(), K::BITS, builder.as_data_slice())
+            dict_get(
+                root.as_ref(),
+                K::BITS,
+                builder.as_data_slice(),
+                &mut Cell::default_cell_context(),
+            )
         }
 
         get_raw_impl(&self.root, key.borrow())
@@ -251,7 +267,7 @@ where
         Q: Borrow<K>,
         for<'a> V: Load<'a> + 'static,
     {
-        match ok!(self.remove_raw_ext(key, &mut Cell::default_finalizer())) {
+        match ok!(self.remove_raw_ext(key, &mut Cell::default_cell_context())) {
             Some((cell, range)) => {
                 let mut slice = ok!(range.apply(&cell));
                 Ok(Some(ok!(V::load_from(&mut slice))))
@@ -268,7 +284,7 @@ where
     where
         Q: Borrow<K>,
     {
-        self.remove_raw_ext(key, &mut Cell::default_finalizer())
+        self.remove_raw_ext(key, &mut Cell::default_cell_context())
     }
 
     /// Removes the lowest key from the dict.
@@ -278,7 +294,7 @@ where
     ///
     /// [`remove_bound_ext`]: RawDict::remove_bound_ext
     pub fn remove_min_raw(&mut self, signed: bool) -> Result<Option<(K, CellSliceParts)>, Error> {
-        self.remove_bound_raw_ext(DictBound::Min, signed, &mut Cell::default_finalizer())
+        self.remove_bound_raw_ext(DictBound::Min, signed, &mut Cell::default_cell_context())
     }
 
     /// Removes the largest key from the dict.
@@ -288,7 +304,7 @@ where
     ///
     /// [`remove_bound_ext`]: RawDict::remove_bound_ext
     pub fn remove_max_raw(&mut self, signed: bool) -> Result<Option<(K, CellSliceParts)>, Error> {
-        self.remove_bound_raw_ext(DictBound::Max, signed, &mut Cell::default_finalizer())
+        self.remove_bound_raw_ext(DictBound::Max, signed, &mut Cell::default_cell_context())
     }
 
     /// Removes the specified dict bound.
@@ -302,7 +318,7 @@ where
         bound: DictBound,
         signed: bool,
     ) -> Result<Option<(K, CellSliceParts)>, Error> {
-        self.remove_bound_raw_ext(bound, signed, &mut Cell::default_finalizer())
+        self.remove_bound_raw_ext(bound, signed, &mut Cell::default_cell_context())
     }
 }
 
@@ -321,7 +337,7 @@ where
         Q: Borrow<K>,
         T: Borrow<V>,
     {
-        self.set_ext(key, value, &mut Cell::default_finalizer())
+        self.set_ext(key, value, &mut Cell::default_cell_context())
     }
 
     /// Sets the value associated with the key in the dictionary
@@ -335,7 +351,7 @@ where
         Q: Borrow<K>,
         T: Borrow<V>,
     {
-        self.replace_ext(key, value, &mut Cell::default_finalizer())
+        self.replace_ext(key, value, &mut Cell::default_cell_context())
     }
 
     /// Sets the value associated with key in dictionary,
@@ -349,7 +365,7 @@ where
         Q: Borrow<K>,
         T: Borrow<V>,
     {
-        self.add_ext(key, value, &mut Cell::default_finalizer())
+        self.add_ext(key, value, &mut Cell::default_cell_context())
     }
 }
 
@@ -463,13 +479,15 @@ where
             let Some((key, (cell, range))) = ({
                 let mut builder = CellBuilder::new();
                 ok!(key.store_into(&mut builder, &mut Cell::default_finalizer()));
+                // TODO: add `dict_find` with non-owned return type
                 ok!(dict_find_owned(
-                    root.as_ref(),
+                    root.clone(),
                     K::BITS,
                     builder.as_data_slice(),
                     towards,
                     inclusive,
-                    signed
+                    signed,
+                    &mut Cell::default_cell_context()
                 ))
             }) else {
                 return Ok(None);
@@ -530,8 +548,13 @@ where
         bound: DictBound,
         signed: bool,
     ) -> Result<Option<(K, CellSlice<'_>)>, Error> {
-        let Some((key, value)) = ok!(dict_find_bound(self.root.as_ref(), K::BITS, bound, signed))
-        else {
+        let Some((key, value)) = ok!(dict_find_bound(
+            self.root.as_ref(),
+            K::BITS,
+            bound,
+            signed,
+            &mut Cell::default_cell_context()
+        )) else {
             return Ok(None);
         };
         match K::from_raw_data(key.raw_data()) {
@@ -548,14 +571,14 @@ where
         &mut self,
         bound: DictBound,
         signed: bool,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<Option<(K, CellSliceParts)>, Error> {
         let (dict, removed) = ok!(dict_remove_bound_owned(
-            self.root.as_ref(),
+            self.root.clone(),
             K::BITS,
             bound,
             signed,
-            finalizer
+            context
         ));
         self.root = dict;
         Ok(match removed {
@@ -579,7 +602,7 @@ where
     pub fn remove_raw_ext<Q>(
         &mut self,
         key: Q,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<Option<CellSliceParts>, Error>
     where
         Q: Borrow<K>,
@@ -587,7 +610,7 @@ where
         pub fn remove_raw_ext_impl<K>(
             root: &Option<Cell>,
             key: &K,
-            finalizer: &mut dyn Finalizer,
+            context: &mut dyn CellContext,
         ) -> Result<(Option<Cell>, Option<CellSliceParts>), Error>
         where
             K: Store + DictKey,
@@ -599,11 +622,11 @@ where
                 &mut builder.as_data_slice(),
                 K::BITS,
                 false,
-                finalizer,
+                context,
             )
         }
 
-        let (dict, removed) = ok!(remove_raw_ext_impl(&self.root, key.borrow(), finalizer));
+        let (dict, removed) = ok!(remove_raw_ext_impl(&self.root, key.borrow(), context));
         self.root = dict;
         Ok(removed)
     }
@@ -667,13 +690,13 @@ where
         &mut self,
         key: Q,
         value: T,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<bool, Error>
     where
         Q: Borrow<K>,
         T: Borrow<V>,
     {
-        self.insert_impl(key.borrow(), value.borrow(), SetMode::Set, finalizer)
+        self.insert_impl(key.borrow(), value.borrow(), SetMode::Set, context)
     }
 
     /// Sets the value associated with the key in the dictionary
@@ -682,13 +705,13 @@ where
         &mut self,
         key: Q,
         value: T,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<bool, Error>
     where
         Q: Borrow<K>,
         T: Borrow<V>,
     {
-        self.insert_impl(key.borrow(), value.borrow(), SetMode::Replace, finalizer)
+        self.insert_impl(key.borrow(), value.borrow(), SetMode::Replace, context)
     }
 
     /// Sets the value associated with key in dictionary,
@@ -697,13 +720,13 @@ where
         &mut self,
         key: Q,
         value: T,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<bool, Error>
     where
         Q: Borrow<K>,
         T: Borrow<V>,
     {
-        self.insert_impl(key.borrow(), value.borrow(), SetMode::Add, finalizer)
+        self.insert_impl(key.borrow(), value.borrow(), SetMode::Add, context)
     }
 
     fn insert_impl(
@@ -711,7 +734,7 @@ where
         key: &K,
         value: &V,
         mode: SetMode,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<bool, Error>
     where
         K: Store + DictKey,
@@ -726,7 +749,7 @@ where
                 K::BITS,
                 value,
                 mode,
-                finalizer
+                context
             ))
         };
         self.root = new_root;

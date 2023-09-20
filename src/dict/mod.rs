@@ -321,7 +321,7 @@ pub fn dict_insert_owned(
 ) -> Result<(Option<Cell>, bool, Option<CellSliceParts>), Error> {
     fn stack_or_last(
         stack: &[Segment],
-        root: Cell,
+        root: &Cell,
         context: &mut dyn CellContext,
         mode: LoadMode,
     ) -> Result<Cell, Error> {
@@ -329,10 +329,10 @@ pub fn dict_insert_owned(
             Some(Segment { data, next_branch }) => {
                 match data.reference_cloned(*next_branch as u8) {
                     Some(cell) => context.load_cell(cell, mode),
-                    None => return Err(Error::CellUnderflow),
+                    None => Err(Error::CellUnderflow),
                 }
             }
-            None => Ok(root),
+            None => Ok(root.clone()),
         }
     }
 
@@ -366,7 +366,7 @@ pub fn dict_insert_owned(
                 // Check if we can replace the value
                 if !mode.can_replace() {
                     let value = (
-                        ok!(stack_or_last(&stack, root, context, LoadMode::Full)),
+                        ok!(stack_or_last(&stack, &root, context, LoadMode::Full)),
                         remaining_data.range(),
                     );
                     // TODO: what is the desired behavior for root as a library?
@@ -438,7 +438,7 @@ pub fn dict_insert_owned(
     let value = match value_range {
         Some(range) => Some((
             // TODO: change mode to `LoadMode::Noop` if copy-on-write for libraries is not ok
-            ok!(stack_or_last(&stack, root, context, LoadMode::Resolve)),
+            ok!(stack_or_last(&stack, &root, context, LoadMode::Resolve)),
             range,
         )),
         None => None,
@@ -460,7 +460,7 @@ pub fn dict_get<'a: 'b, 'b>(
         return Err(Error::CellUnderflow);
     }
 
-    let mut data = match root.as_ref() {
+    let mut data = match root {
         Some(data) => ok!(context
             .load_dyn_cell(data.as_ref(), LoadMode::Full)
             .and_then(CellSlice::new)),
@@ -869,15 +869,16 @@ pub fn dict_find_bound_owned(
     }
 
     // Build cell slice parts
+    let range = data.range();
     let slice = match prev {
         Some((prev, next_branch)) => {
             let cell = match prev.reference_cloned(next_branch as u8) {
                 Some(cell) => ok!(context.load_cell(cell, LoadMode::Resolve)),
                 None => return Err(Error::CellUnderflow),
             };
-            (cell, data.range())
+            (cell, range)
         }
-        None => (root, data.range()),
+        None => (root, range),
     };
 
     // Return the last slice as data
@@ -961,7 +962,7 @@ pub fn dict_remove_bound_owned(
 
         // Load the opposite branch
         let mut opposite = match last.data.reference(1 - index) {
-            // TODO: change mode to `LoadMode::Noop` if copy-on-write for libraries is not ok
+            // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok
             Some(cell) => ok!(context
                 .load_dyn_cell(cell, LoadMode::Full)
                 .and_then(CellSlice::new)),
