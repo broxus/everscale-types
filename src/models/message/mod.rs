@@ -71,7 +71,7 @@ where
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         let info_size = self.info.exact_size();
         let body_size = self.body.exact_size();
@@ -90,7 +90,7 @@ where
         }
 
         // Try to store info
-        ok!(self.info.store_into(builder, finalizer));
+        ok!(self.info.store_into(builder, context));
 
         // Try to store init
         ok!(match &self.init {
@@ -100,15 +100,14 @@ where
                     to_cell: layout.init_to_cell,
                     value,
                 }
-                .store_into(builder, finalizer)
+                .store_into(builder, context)
             }
             None => builder.store_bit_zero(), // nothing$0
         });
 
         // Try to store body
         ok!(builder.store_bit(layout.body_to_cell));
-        self.body
-            .store_body(layout.body_to_cell, builder, finalizer)
+        self.body.store_body(layout.body_to_cell, builder, context)
     }
 }
 
@@ -148,7 +147,7 @@ trait StoreBody {
         &self,
         to_cell: bool,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error>;
 }
 
@@ -157,13 +156,13 @@ impl<'a> StoreBody for CellSlice<'a> {
         &self,
         to_cell: bool,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         SliceOrCell {
             to_cell,
             value: self,
         }
-        .store_only_value_into(builder, finalizer)
+        .store_only_value_into(builder, context)
     }
 }
 
@@ -172,7 +171,7 @@ impl StoreBody for CellSliceParts {
         &self,
         to_cell: bool,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         let (cell, range) = self;
         if to_cell && range.is_full(cell.as_ref()) {
@@ -182,7 +181,7 @@ impl StoreBody for CellSliceParts {
                 to_cell,
                 value: ok!(range.apply(cell)),
             }
-            .store_only_value_into(builder, finalizer)
+            .store_only_value_into(builder, context)
         }
     }
 }
@@ -226,17 +225,17 @@ impl<T: Store> SliceOrCell<T> {
     fn store_only_value_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         if self.to_cell {
             let cell = {
                 let mut builder = CellBuilder::new();
-                ok!(self.value.store_into(&mut builder, finalizer));
-                ok!(builder.build_ext(finalizer))
+                ok!(self.value.store_into(&mut builder, context));
+                ok!(builder.build_ext(context))
             };
             builder.store_reference(cell)
         } else {
-            self.value.store_into(builder, finalizer)
+            self.value.store_into(builder, context)
         }
     }
 }
@@ -245,10 +244,10 @@ impl<T: Store> Store for SliceOrCell<T> {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         ok!(builder.store_bit(self.to_cell));
-        self.store_only_value_into(builder, finalizer)
+        self.store_only_value_into(builder, context)
     }
 }
 
@@ -468,16 +467,16 @@ impl Store for RelaxedMsgInfo {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         match self {
             Self::Int(info) => {
                 ok!(builder.store_bit_zero());
-                info.store_into(builder, finalizer)
+                info.store_into(builder, context)
             }
             Self::ExtOut(info) => {
                 ok!(builder.store_small_uint(0b11, 2));
-                info.store_into(builder, finalizer)
+                info.store_into(builder, context)
             }
         }
     }
@@ -549,20 +548,20 @@ impl Store for MsgInfo {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         match self {
             Self::Int(info) => {
                 ok!(builder.store_bit_zero());
-                info.store_into(builder, finalizer)
+                info.store_into(builder, context)
             }
             Self::ExtIn(info) => {
                 ok!(builder.store_small_uint(0b10, 2));
-                info.store_into(builder, finalizer)
+                info.store_into(builder, context)
             }
             Self::ExtOut(info) => {
                 ok!(builder.store_small_uint(0b11, 2));
-                info.store_into(builder, finalizer)
+                info.store_into(builder, context)
             }
         }
     }
@@ -650,16 +649,16 @@ impl Store for IntMsgInfo {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         let flags =
             ((self.ihr_disabled as u8) << 2) | ((self.bounce as u8) << 1) | self.bounced as u8;
         ok!(builder.store_small_uint(flags, 3));
-        ok!(self.src.store_into(builder, finalizer));
-        ok!(self.dst.store_into(builder, finalizer));
-        ok!(self.value.store_into(builder, finalizer));
-        ok!(self.ihr_fee.store_into(builder, finalizer));
-        ok!(self.fwd_fee.store_into(builder, finalizer));
+        ok!(self.src.store_into(builder, context));
+        ok!(self.dst.store_into(builder, context));
+        ok!(self.value.store_into(builder, context));
+        ok!(self.ihr_fee.store_into(builder, context));
+        ok!(self.fwd_fee.store_into(builder, context));
         ok!(builder.store_u64(self.created_lt));
         builder.store_u32(self.created_at)
     }
@@ -744,16 +743,16 @@ impl Store for RelaxedIntMsgInfo {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         let flags =
             ((self.ihr_disabled as u8) << 2) | ((self.bounce as u8) << 1) | self.bounced as u8;
         ok!(builder.store_small_uint(flags, 3));
-        ok!(store_opt_int_addr(builder, finalizer, &self.src));
-        ok!(self.dst.store_into(builder, finalizer));
-        ok!(self.value.store_into(builder, finalizer));
-        ok!(self.ihr_fee.store_into(builder, finalizer));
-        ok!(self.fwd_fee.store_into(builder, finalizer));
+        ok!(store_opt_int_addr(builder, context, &self.src));
+        ok!(self.dst.store_into(builder, context));
+        ok!(self.value.store_into(builder, context));
+        ok!(self.ihr_fee.store_into(builder, context));
+        ok!(self.fwd_fee.store_into(builder, context));
         ok!(builder.store_u64(self.created_lt));
         builder.store_u32(self.created_at)
     }
@@ -803,7 +802,7 @@ impl Store for ExtInMsgInfo {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         if !self.import_fee.is_valid() {
             return Err(Error::InvalidData);
@@ -811,9 +810,9 @@ impl Store for ExtInMsgInfo {
         if !builder.has_capacity(self.bit_len(), 0) {
             return Err(Error::CellOverflow);
         }
-        ok!(store_ext_addr(builder, finalizer, &self.src));
-        ok!(self.dst.store_into(builder, finalizer));
-        self.import_fee.store_into(builder, finalizer)
+        ok!(store_ext_addr(builder, context, &self.src));
+        ok!(self.dst.store_into(builder, context));
+        self.import_fee.store_into(builder, context)
     }
 }
 
@@ -851,13 +850,13 @@ impl Store for ExtOutMsgInfo {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         if !builder.has_capacity(self.bit_len(), 0) {
             return Err(Error::CellOverflow);
         }
-        ok!(self.src.store_into(builder, finalizer));
-        ok!(store_ext_addr(builder, finalizer, &self.dst));
+        ok!(self.src.store_into(builder, context));
+        ok!(store_ext_addr(builder, context, &self.dst));
         ok!(builder.store_u64(self.created_lt));
         builder.store_u32(self.created_at)
     }
@@ -898,10 +897,10 @@ impl Store for RelaxedExtOutMsgInfo {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
-        ok!(store_opt_int_addr(builder, finalizer, &self.src));
-        ok!(store_ext_addr(builder, finalizer, &self.dst));
+        ok!(store_opt_int_addr(builder, context, &self.src));
+        ok!(store_ext_addr(builder, context, &self.dst));
         ok!(builder.store_u64(self.created_lt));
         builder.store_u32(self.created_at)
     }
@@ -927,7 +926,7 @@ const fn compute_ext_addr_bit_len(addr: &Option<ExtAddr>) -> u16 {
 
 fn store_ext_addr(
     builder: &mut CellBuilder,
-    finalizer: &mut dyn Finalizer,
+    context: &mut dyn CellContext,
     addr: &Option<ExtAddr>,
 ) -> Result<(), Error> {
     match addr {
@@ -938,7 +937,7 @@ fn store_ext_addr(
             }
             ok!(builder.store_bit_zero());
             ok!(builder.store_bit_one());
-            ok!(data_bit_len.store_into(builder, finalizer));
+            ok!(data_bit_len.store_into(builder, context));
             builder.store_raw(data, data_bit_len.into_inner())
         }
     }
@@ -972,11 +971,11 @@ const fn compute_opt_int_addr_bit_len(addr: &Option<IntAddr>) -> u16 {
 
 fn store_opt_int_addr(
     builder: &mut CellBuilder,
-    finalizer: &mut dyn Finalizer,
+    context: &mut dyn CellContext,
     addr: &Option<IntAddr>,
 ) -> Result<(), Error> {
     match addr {
-        Some(addr) => addr.store_into(builder, finalizer),
+        Some(addr) => addr.store_into(builder, context),
         None => builder.store_zeros(2),
     }
 }

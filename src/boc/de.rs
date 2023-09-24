@@ -3,7 +3,7 @@ use std::ops::Deref;
 use smallvec::SmallVec;
 
 use super::BocTag;
-use crate::cell::{Cell, CellDescriptor, CellParts, Finalizer, LevelMask, MAX_REF_COUNT};
+use crate::cell::{Cell, CellContext, CellDescriptor, CellParts, LevelMask, MAX_REF_COUNT};
 use crate::util::{read_be_u32_fast, read_be_u64_fast, unlikely, ArrayVec};
 
 #[cfg(feature = "stats")]
@@ -247,8 +247,8 @@ impl<'a> BocHeader<'a> {
         })
     }
 
-    /// Assembles cell tree from slices using the specified finalizer.
-    pub fn finalize(&self, finalizer: &mut dyn Finalizer) -> Result<ProcessedCells, Error> {
+    /// Assembles cell tree from slices using the specified cell context.
+    pub fn finalize(&self, context: &mut dyn CellContext) -> Result<ProcessedCells, Error> {
         let ref_size = self.ref_size;
         let cell_count = self.cells.len() as u32;
 
@@ -266,7 +266,7 @@ impl<'a> BocHeader<'a> {
                 ))
             };
 
-            let cell = match finalizer.finalize_cell(ctx) {
+            let cell = match context.finalize_cell(ctx) {
                 Ok(cell) => cell,
                 Err(_) => return Err(Error::InvalidCell),
             };

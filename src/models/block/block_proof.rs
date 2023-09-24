@@ -24,19 +24,19 @@ impl Store for BlockProof {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         let child_cell = match &self.signatures {
             Some(signatures) => {
                 let mut builder = CellBuilder::new();
-                ok!(signatures.store_into(&mut builder, finalizer));
-                Some(ok!(builder.build_ext(finalizer)))
+                ok!(signatures.store_into(&mut builder, context));
+                Some(ok!(builder.build_ext(context)))
             }
             None => None,
         };
 
         ok!(builder.store_u8(Self::TAG));
-        ok!(self.proof_for.store_into(builder, finalizer));
+        ok!(self.proof_for.store_into(builder, context));
         ok!(builder.store_reference(self.root.clone()));
         match child_cell {
             Some(cell) => {

@@ -46,9 +46,9 @@ impl<K, V> Store for Dict<K, V> {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
-        self.root.store_into(builder, finalizer)
+        self.root.store_into(builder, context)
     }
 }
 
@@ -153,9 +153,9 @@ impl<K: DictKey, V> Dict<K, V> {
     /// Loads a non-empty dictionary from a root cell.
     pub fn load_from_root_ext(
         slice: &mut CellSlice<'_>,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<Self, Error> {
-        match dict_load_from_root(slice, K::BITS, finalizer) {
+        match dict_load_from_root(slice, K::BITS, context) {
             Ok(root) => Ok(Self {
                 root: Some(root),
                 _key: PhantomData,
@@ -180,8 +180,14 @@ where
             K: Store + DictKey,
         {
             let mut builder = CellBuilder::new();
-            ok!(key.store_into(&mut builder, &mut Cell::default_finalizer()));
-            Ok(ok!(dict_get(root.as_ref(), K::BITS, builder.as_data_slice())).is_some())
+            ok!(key.store_into(&mut builder, &mut Cell::empty_context()));
+            Ok(ok!(dict_get(
+                root.as_ref(),
+                K::BITS,
+                builder.as_data_slice(),
+                &mut Cell::empty_context()
+            ))
+            .is_some())
         }
         contains_key_impl(&self.root, key.borrow())
     }
@@ -207,8 +213,13 @@ where
         {
             let Some(mut value) = ({
                 let mut builder = CellBuilder::new();
-                ok!(key.store_into(&mut builder, &mut Cell::default_finalizer()));
-                ok!(dict_get(root.as_ref(), K::BITS, builder.as_data_slice()))
+                ok!(key.store_into(&mut builder, &mut Cell::empty_context()));
+                ok!(dict_get(
+                    root.as_ref(),
+                    K::BITS,
+                    builder.as_data_slice(),
+                    &mut Cell::empty_context()
+                ))
             }) else {
                 return Ok(None);
             };
@@ -235,8 +246,13 @@ where
             K: Store + DictKey,
         {
             let mut builder = CellBuilder::new();
-            ok!(key.store_into(&mut builder, &mut Cell::default_finalizer()));
-            dict_get(root.as_ref(), K::BITS, builder.as_data_slice())
+            ok!(key.store_into(&mut builder, &mut Cell::empty_context()));
+            dict_get(
+                root.as_ref(),
+                K::BITS,
+                builder.as_data_slice(),
+                &mut Cell::empty_context(),
+            )
         }
 
         get_raw_impl(&self.root, key.borrow())
@@ -245,13 +261,13 @@ where
     /// Removes the value associated with key in dictionary.
     /// Returns an optional removed value.
     ///
-    /// The dict is rebuilt using the default finalizer.
+    /// The dict is rebuilt using an empty cell context.
     pub fn remove<Q>(&mut self, key: Q) -> Result<Option<V>, Error>
     where
         Q: Borrow<K>,
         for<'a> V: Load<'a> + 'static,
     {
-        match ok!(self.remove_raw_ext(key, &mut Cell::default_finalizer())) {
+        match ok!(self.remove_raw_ext(key, &mut Cell::empty_context())) {
             Some((cell, range)) => {
                 let mut slice = ok!(range.apply(&cell));
                 Ok(Some(ok!(V::load_from(&mut slice))))
@@ -263,38 +279,38 @@ where
     /// Removes the value associated with key in dictionary.
     /// Returns an optional removed value as cell slice parts.
     ///
-    /// The dict is rebuilt using the default finalizer.
+    /// The dict is rebuilt using an empty cell context.
     pub fn remove_raw<Q>(&mut self, key: Q) -> Result<Option<CellSliceParts>, Error>
     where
         Q: Borrow<K>,
     {
-        self.remove_raw_ext(key, &mut Cell::default_finalizer())
+        self.remove_raw_ext(key, &mut Cell::empty_context())
     }
 
     /// Removes the lowest key from the dict.
     /// Returns an optional removed key and value as cell slice parts.
     ///
-    /// Use [`remove_bound_ext`] if you need to use a custom finalizer.
+    /// Use [`remove_bound_ext`] if you need to use a custom cell context.
     ///
     /// [`remove_bound_ext`]: RawDict::remove_bound_ext
     pub fn remove_min_raw(&mut self, signed: bool) -> Result<Option<(K, CellSliceParts)>, Error> {
-        self.remove_bound_raw_ext(DictBound::Min, signed, &mut Cell::default_finalizer())
+        self.remove_bound_raw_ext(DictBound::Min, signed, &mut Cell::empty_context())
     }
 
     /// Removes the largest key from the dict.
     /// Returns an optional removed key and value as cell slice parts.
     ///
-    /// Use [`remove_bound_ext`] if you need to use a custom finalizer.
+    /// Use [`remove_bound_ext`] if you need to use a custom cell context.
     ///
     /// [`remove_bound_ext`]: RawDict::remove_bound_ext
     pub fn remove_max_raw(&mut self, signed: bool) -> Result<Option<(K, CellSliceParts)>, Error> {
-        self.remove_bound_raw_ext(DictBound::Max, signed, &mut Cell::default_finalizer())
+        self.remove_bound_raw_ext(DictBound::Max, signed, &mut Cell::empty_context())
     }
 
     /// Removes the specified dict bound.
     /// Returns an optional removed key and value as cell slice parts.
     ///
-    /// Use [`remove_bound_ext`] if you need to use a custom finalizer.
+    /// Use [`remove_bound_ext`] if you need to use a custom cell context.
     ///
     /// [`remove_bound_ext`]: RawDict::remove_bound_ext
     pub fn remove_bound_raw(
@@ -302,7 +318,7 @@ where
         bound: DictBound,
         signed: bool,
     ) -> Result<Option<(K, CellSliceParts)>, Error> {
-        self.remove_bound_raw_ext(bound, signed, &mut Cell::default_finalizer())
+        self.remove_bound_raw_ext(bound, signed, &mut Cell::empty_context())
     }
 }
 
@@ -313,7 +329,7 @@ where
 {
     /// Sets the value associated with the key in the dictionary.
     ///
-    /// Use [`set_ext`] if you need to use a custom finalizer.
+    /// Use [`set_ext`] if you need to use a custom cell context.
     ///
     /// [`set_ext`]: Dict::set_ext
     pub fn set<Q, T>(&mut self, key: Q, value: T) -> Result<bool, Error>
@@ -321,13 +337,13 @@ where
         Q: Borrow<K>,
         T: Borrow<V>,
     {
-        self.set_ext(key, value, &mut Cell::default_finalizer())
+        self.set_ext(key, value, &mut Cell::empty_context())
     }
 
     /// Sets the value associated with the key in the dictionary
     /// only if the key was already present in it.
     ///
-    /// Use [`replace_ext`] if you need to use a custom finalizer.
+    /// Use [`replace_ext`] if you need to use a custom cell context.
     ///
     /// [`replace_ext`]: Dict::replace_ext
     pub fn replace<Q, T>(&mut self, key: Q, value: T) -> Result<bool, Error>
@@ -335,13 +351,13 @@ where
         Q: Borrow<K>,
         T: Borrow<V>,
     {
-        self.replace_ext(key, value, &mut Cell::default_finalizer())
+        self.replace_ext(key, value, &mut Cell::empty_context())
     }
 
     /// Sets the value associated with key in dictionary,
     /// but only if it is not already present.
     ///
-    /// Use [`add_ext`] if you need to use a custom finalizer.
+    /// Use [`add_ext`] if you need to use a custom cell context.
     ///
     /// [`add_ext`]: Dict::add_ext
     pub fn add<Q, T>(&mut self, key: Q, value: T) -> Result<bool, Error>
@@ -349,7 +365,7 @@ where
         Q: Borrow<K>,
         T: Borrow<V>,
     {
-        self.add_ext(key, value, &mut Cell::default_finalizer())
+        self.add_ext(key, value, &mut Cell::empty_context())
     }
 }
 
@@ -460,16 +476,19 @@ where
             K: DictKey + Store,
             for<'a> V: Load<'a>,
         {
+            let context = &mut Cell::empty_context();
             let Some((key, (cell, range))) = ({
                 let mut builder = CellBuilder::new();
-                ok!(key.store_into(&mut builder, &mut Cell::default_finalizer()));
+                ok!(key.store_into(&mut builder, context));
+                // TODO: add `dict_find` with non-owned return type
                 ok!(dict_find_owned(
-                    root.as_ref(),
+                    root.clone(),
                     K::BITS,
                     builder.as_data_slice(),
                     towards,
                     inclusive,
-                    signed
+                    signed,
+                    context,
                 ))
             }) else {
                 return Ok(None);
@@ -530,8 +549,13 @@ where
         bound: DictBound,
         signed: bool,
     ) -> Result<Option<(K, CellSlice<'_>)>, Error> {
-        let Some((key, value)) = ok!(dict_find_bound(self.root.as_ref(), K::BITS, bound, signed))
-        else {
+        let Some((key, value)) = ok!(dict_find_bound(
+            self.root.as_ref(),
+            K::BITS,
+            bound,
+            signed,
+            &mut Cell::empty_context()
+        )) else {
             return Ok(None);
         };
         match K::from_raw_data(key.raw_data()) {
@@ -543,19 +567,19 @@ where
     /// Removes the specified dict bound.
     /// Returns an optional removed key and value as cell slice parts.
     ///
-    /// Key and dict are serialized using the provided finalizer.
+    /// Key and dict are serialized using the provided cell context.
     pub fn remove_bound_raw_ext(
         &mut self,
         bound: DictBound,
         signed: bool,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<Option<(K, CellSliceParts)>, Error> {
         let (dict, removed) = ok!(dict_remove_bound_owned(
-            self.root.as_ref(),
+            self.root.clone(),
             K::BITS,
             bound,
             signed,
-            finalizer
+            context
         ));
         self.root = dict;
         Ok(match removed {
@@ -575,11 +599,11 @@ where
     /// Removes the value associated with key in dictionary.
     /// Returns an optional removed value as cell slice parts.
     ///
-    /// Dict is rebuild using the provided finalizer.
+    /// Dict is rebuild using the provided cell context.
     pub fn remove_raw_ext<Q>(
         &mut self,
         key: Q,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<Option<CellSliceParts>, Error>
     where
         Q: Borrow<K>,
@@ -587,23 +611,23 @@ where
         pub fn remove_raw_ext_impl<K>(
             root: &Option<Cell>,
             key: &K,
-            finalizer: &mut dyn Finalizer,
+            context: &mut dyn CellContext,
         ) -> Result<(Option<Cell>, Option<CellSliceParts>), Error>
         where
             K: Store + DictKey,
         {
             let mut builder = CellBuilder::new();
-            ok!(key.store_into(&mut builder, &mut Cell::default_finalizer()));
+            ok!(key.store_into(&mut builder, &mut Cell::empty_context()));
             dict_remove_owned(
                 root.as_ref(),
                 &mut builder.as_data_slice(),
                 K::BITS,
                 false,
-                finalizer,
+                context,
             )
         }
 
-        let (dict, removed) = ok!(remove_raw_ext_impl(&self.root, key.borrow(), finalizer));
+        let (dict, removed) = ok!(remove_raw_ext_impl(&self.root, key.borrow(), context));
         self.root = dict;
         Ok(removed)
     }
@@ -667,13 +691,13 @@ where
         &mut self,
         key: Q,
         value: T,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<bool, Error>
     where
         Q: Borrow<K>,
         T: Borrow<V>,
     {
-        self.insert_impl(key.borrow(), value.borrow(), SetMode::Set, finalizer)
+        self.insert_impl(key.borrow(), value.borrow(), SetMode::Set, context)
     }
 
     /// Sets the value associated with the key in the dictionary
@@ -682,13 +706,13 @@ where
         &mut self,
         key: Q,
         value: T,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<bool, Error>
     where
         Q: Borrow<K>,
         T: Borrow<V>,
     {
-        self.insert_impl(key.borrow(), value.borrow(), SetMode::Replace, finalizer)
+        self.insert_impl(key.borrow(), value.borrow(), SetMode::Replace, context)
     }
 
     /// Sets the value associated with key in dictionary,
@@ -697,13 +721,13 @@ where
         &mut self,
         key: Q,
         value: T,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<bool, Error>
     where
         Q: Borrow<K>,
         T: Borrow<V>,
     {
-        self.insert_impl(key.borrow(), value.borrow(), SetMode::Add, finalizer)
+        self.insert_impl(key.borrow(), value.borrow(), SetMode::Add, context)
     }
 
     fn insert_impl(
@@ -711,7 +735,7 @@ where
         key: &K,
         value: &V,
         mode: SetMode,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<bool, Error>
     where
         K: Store + DictKey,
@@ -719,14 +743,14 @@ where
     {
         let (new_root, changed) = {
             let mut key_builder = CellBuilder::new();
-            ok!(key.store_into(&mut key_builder, &mut Cell::default_finalizer()));
+            ok!(key.store_into(&mut key_builder, &mut Cell::empty_context()));
             ok!(dict_insert(
                 self.root.as_ref(),
                 &mut key_builder.as_data_slice(),
                 K::BITS,
                 value,
                 mode,
-                finalizer
+                context
             ))
         };
         self.root = new_root;

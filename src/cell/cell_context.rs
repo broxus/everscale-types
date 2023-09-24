@@ -1,36 +1,54 @@
-use sha2::Digest;
+use sha2::digest::Digest;
 
-use crate::cell::{
-    Cell, CellDescriptor, CellFamily, CellType, HashBytes, LevelMask, MAX_REF_COUNT,
-};
+use crate::cell::{Cell, CellDescriptor, CellType, DynCell, HashBytes, LevelMask, MAX_REF_COUNT};
 use crate::error::Error;
 use crate::util::{unlikely, ArrayVec};
 
 #[cfg(feature = "stats")]
 use crate::cell::CellTreeStats;
 
-/// A trait for describing cell finalization logic.
-pub trait Finalizer {
+/// Gas accounting and resolcing exotic cells.
+pub trait CellContext {
     /// Builds a new cell from cell parts.
     fn finalize_cell(&mut self, cell: CellParts<'_>) -> Result<Cell, Error>;
+
+    /// Resolve an owned cell.
+    fn load_cell(&mut self, cell: Cell, mode: LoadMode) -> Result<Cell, Error>;
+
+    /// Resolve a cell reference.
+    fn load_dyn_cell<'a>(
+        &mut self,
+        cell: &'a DynCell,
+        mode: LoadMode,
+    ) -> Result<&'a DynCell, Error>;
 }
 
-impl<F> Finalizer for F
-where
-    F: FnMut(CellParts) -> Result<Cell, Error>,
-{
-    fn finalize_cell(&mut self, cell: CellParts) -> Result<Cell, Error> {
-        (*self)(cell)
+/// Dictionary insertion mode.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[repr(u8)]
+pub enum LoadMode {
+    /// Do not modify the default behavior.
+    Noop = 0b00,
+    /// Count the cost of loading the cell.
+    UseGas = 0b01,
+    /// Resolve exotic cells such as libraries or merkle stuff.
+    Resolve = 0b10,
+    /// Both `UseGas` and `Resolve`.
+    Full = 0b11,
+}
+
+impl LoadMode {
+    /// Returns `true` if this mode requires gas accounting.
+    #[inline]
+    pub const fn use_gas(self) -> bool {
+        self as u8 & 0b01 != 0
     }
-}
 
-/// Cell family with known default finalizer (noop in most cases).
-pub trait DefaultFinalizer: CellFamily {
-    /// The default finalizer type.
-    type Finalizer: Finalizer;
-
-    /// Creates a default finalizer.
-    fn default_finalizer() -> Self::Finalizer;
+    /// Returns `true` if exotic cells are resolved in this mode.
+    #[inline]
+    pub const fn resolve(self) -> bool {
+        self as u8 & 0b10 != 0
+    }
 }
 
 /// Partially assembled cell.

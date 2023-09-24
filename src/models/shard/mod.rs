@@ -34,11 +34,11 @@ impl Store for ShardState {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         match self {
-            Self::Unsplit(state) => state.store_into(builder, finalizer),
-            Self::Split(state) => state.store_into(builder, finalizer),
+            Self::Unsplit(state) => state.store_into(builder, context),
+            Self::Split(state) => state.store_into(builder, context),
         }
     }
 }
@@ -130,19 +130,17 @@ impl Store for ShardStateUnsplit {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         let child_cell = {
             let mut builder = CellBuilder::new();
             ok!(builder.store_u64(self.overload_history));
             ok!(builder.store_u64(self.underload_history));
-            ok!(self.total_balance.store_into(&mut builder, finalizer));
-            ok!(self
-                .total_validator_fees
-                .store_into(&mut builder, finalizer));
-            ok!(self.libraries.store_into(&mut builder, finalizer));
-            ok!(self.master_ref.store_into(&mut builder, finalizer));
-            ok!(builder.build_ext(finalizer))
+            ok!(self.total_balance.store_into(&mut builder, context));
+            ok!(self.total_validator_fees.store_into(&mut builder, context));
+            ok!(self.libraries.store_into(&mut builder, context));
+            ok!(self.master_ref.store_into(&mut builder, context));
+            ok!(builder.build_ext(context))
         };
 
         #[cfg(not(feature = "venom"))]
@@ -151,7 +149,7 @@ impl Store for ShardStateUnsplit {
         ok!(builder.store_u32(Self::TAG_V2));
 
         ok!(builder.store_u32(self.global_id as u32));
-        ok!(self.shard_ident.store_into(builder, finalizer));
+        ok!(self.shard_ident.store_into(builder, context));
         ok!(builder.store_u32(self.seqno));
         ok!(builder.store_u32(self.vert_seqno));
         ok!(builder.store_u32(self.gen_utime));
@@ -163,15 +161,15 @@ impl Store for ShardStateUnsplit {
         ok!(builder.store_reference(child_cell));
 
         #[cfg(not(feature = "venom"))]
-        ok!(self.custom.store_into(builder, finalizer));
+        ok!(self.custom.store_into(builder, context));
 
         #[cfg(feature = "venom")]
         if self.custom.is_some() && self.shard_block_refs.is_some() {
             return Err(Error::InvalidData);
         } else if let Some(refs) = &self.shard_block_refs {
-            ok!(refs.store_into(builder, finalizer));
+            ok!(refs.store_into(builder, context));
         } else {
-            ok!(self.custom.store_into(builder, finalizer));
+            ok!(self.custom.store_into(builder, context));
         }
 
         Ok(())
@@ -260,7 +258,7 @@ pub struct LibDescr {
 }
 
 impl Store for LibDescr {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         ok!(builder.store_small_uint(0, 2));
         ok!(builder.store_reference(self.lib.clone()));
         match self.publishers.root() {
@@ -277,10 +275,7 @@ impl<'a> Load<'a> for LibDescr {
         }
         Ok(Self {
             lib: ok!(slice.load_reference_cloned()),
-            publishers: ok!(Dict::load_from_root_ext(
-                slice,
-                &mut Cell::default_finalizer()
-            )),
+            publishers: ok!(Dict::load_from_root_ext(slice, &mut Cell::empty_context())),
         })
     }
 }

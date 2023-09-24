@@ -42,7 +42,7 @@ impl Store for BlockExtra {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         #[cfg(not(feature = "venom"))]
         ok!(builder.store_u32(Self::TAG_V1));
@@ -56,16 +56,16 @@ impl Store for BlockExtra {
         ok!(builder.store_u256(&self.created_by));
 
         #[cfg(not(feature = "venom"))]
-        ok!(self.custom.store_into(builder, finalizer));
+        ok!(self.custom.store_into(builder, context));
 
         #[cfg(feature = "venom")]
         ok!(builder.store_reference({
             let mut builder = CellBuilder::new();
 
-            ok!(self.custom.store_into(&mut builder, finalizer));
-            ok!(self.shard_block_refs.store_into(&mut builder, finalizer));
+            ok!(self.custom.store_into(&mut builder, context));
+            ok!(self.shard_block_refs.store_into(&mut builder, context));
 
-            ok!(builder.build_ext(finalizer))
+            ok!(builder.build_ext(context))
         }));
 
         Ok(())
@@ -146,7 +146,7 @@ impl Store for AccountBlock {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         let transactions_root = match self.transactions.dict().root() {
             Some(root) => ok!(root.as_ref().as_slice()),
@@ -156,7 +156,7 @@ impl Store for AccountBlock {
         ok!(builder.store_small_uint(Self::TAG, 4));
         ok!(builder.store_u256(&self.account));
         ok!(builder.store_slice(transactions_root));
-        self.state_update.store_into(builder, finalizer)
+        self.state_update.store_into(builder, context)
     }
 }
 
@@ -170,10 +170,7 @@ impl<'a> Load<'a> for AccountBlock {
 
         Ok(Self {
             account: ok!(slice.load_u256()),
-            transactions: ok!(AugDict::load_from_root(
-                slice,
-                &mut Cell::default_finalizer()
-            )),
+            transactions: ok!(AugDict::load_from_root(slice, &mut Cell::empty_context())),
             state_update: ok!(Lazy::load_from(slice)),
         })
     }
@@ -214,7 +211,7 @@ impl Store for McBlockExtra {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         let tag = if self.copyleft_msgs.is_empty() {
             Self::TAG_V1
@@ -224,27 +221,25 @@ impl Store for McBlockExtra {
 
         let cell = {
             let mut builder = CellBuilder::new();
-            ok!(self
-                .prev_block_signatures
-                .store_into(&mut builder, finalizer));
-            ok!(self.recover_create_msg.store_into(&mut builder, finalizer));
-            ok!(self.mint_msg.store_into(&mut builder, finalizer));
+            ok!(self.prev_block_signatures.store_into(&mut builder, context));
+            ok!(self.recover_create_msg.store_into(&mut builder, context));
+            ok!(self.mint_msg.store_into(&mut builder, context));
 
             if !self.copyleft_msgs.is_empty() {
-                ok!(self.copyleft_msgs.store_into(&mut builder, finalizer));
+                ok!(self.copyleft_msgs.store_into(&mut builder, context));
             }
 
-            ok!(builder.build_ext(finalizer))
+            ok!(builder.build_ext(context))
         };
 
         ok!(builder.store_u16(tag));
         ok!(builder.store_bit(self.config.is_some()));
-        ok!(self.shards.store_into(builder, finalizer));
-        ok!(self.fees.store_into(builder, finalizer));
+        ok!(self.shards.store_into(builder, context));
+        ok!(self.fees.store_into(builder, context));
         ok!(builder.store_reference(cell));
 
         if let Some(config) = &self.config {
-            config.store_into(builder, finalizer)
+            config.store_into(builder, context)
         } else {
             Ok(())
         }
@@ -372,7 +367,7 @@ impl AsRef<[u8; 64]> for Signature {
 }
 
 impl Store for Signature {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         ok!(builder.store_small_uint(Self::TAG, Self::TAG_LEN));
         builder.store_raw(&self.0, 512)
     }

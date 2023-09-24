@@ -1,6 +1,6 @@
 //! BOC (Bag Of Cells) implementation.
 
-use crate::cell::{Cell, CellBuilder, DefaultFinalizer, DynCell, Finalizer, Load, Store};
+use crate::cell::{Cell, CellBuilder, CellContext, CellFamily, DynCell, Load, Store};
 
 /// BOC decoder implementation.
 pub mod de;
@@ -88,45 +88,45 @@ impl Boc {
     }
 
     /// Decodes a `base64` encoded BOC into a cell tree
-    /// using the default Cell family finalizer.
+    /// using an empty cell context.
     #[cfg(any(feature = "base64", test))]
     #[inline]
     pub fn decode_base64<T: AsRef<[u8]>>(data: T) -> Result<Cell, de::Error> {
         fn decode_base64_impl(data: &[u8]) -> Result<Cell, de::Error> {
             match crate::util::decode_base64(data) {
-                Ok(data) => Boc::decode_ext(data.as_slice(), &mut Cell::default_finalizer()),
+                Ok(data) => Boc::decode_ext(data.as_slice(), &mut Cell::empty_context()),
                 Err(_) => Err(de::Error::UnknownBocTag),
             }
         }
         decode_base64_impl(data.as_ref())
     }
 
-    /// Decodes a cell tree using the default Cell family finalizer.
+    /// Decodes a cell tree using an empty cell context.
     #[inline]
     pub fn decode<T>(data: T) -> Result<Cell, de::Error>
     where
         T: AsRef<[u8]>,
     {
         fn decode_impl(data: &[u8]) -> Result<Cell, de::Error> {
-            Boc::decode_ext(data, &mut Cell::default_finalizer())
+            Boc::decode_ext(data, &mut Cell::empty_context())
         }
         decode_impl(data.as_ref())
     }
 
-    /// Decodes a pair of cell trees using the default Cell family finalizer.
+    /// Decodes a pair of cell trees using an empty cell context.
     #[inline]
     pub fn decode_pair<T>(data: T) -> Result<(Cell, Cell), de::Error>
     where
         T: AsRef<[u8]>,
     {
         fn decode_pair_impl(data: &[u8]) -> Result<(Cell, Cell), de::Error> {
-            Boc::decode_pair_ext(data, &mut Cell::default_finalizer())
+            Boc::decode_pair_ext(data, &mut Cell::empty_context())
         }
         decode_pair_impl(data.as_ref())
     }
 
-    /// Decodes a cell tree using the specified finalizer.
-    pub fn decode_ext(data: &[u8], finalizer: &mut dyn Finalizer) -> Result<Cell, de::Error> {
+    /// Decodes a cell tree using the specified cell context.
+    pub fn decode_ext(data: &[u8], context: &mut dyn CellContext) -> Result<Cell, de::Error> {
         use self::de::*;
 
         let header = ok!(de::BocHeader::decode(
@@ -138,7 +138,7 @@ impl Boc {
         ));
 
         if let Some(&root) = header.roots().first() {
-            let cells = ok!(header.finalize(finalizer));
+            let cells = ok!(header.finalize(context));
             if let Some(root) = cells.get(root) {
                 return Ok(root);
             }
@@ -147,10 +147,10 @@ impl Boc {
         Err(de::Error::RootCellNotFound)
     }
 
-    /// Decodes a pair of cell trees using the specified finalizer.
+    /// Decodes a pair of cell trees using the specified cell context.
     pub fn decode_pair_ext(
         data: &[u8],
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(Cell, Cell), de::Error> {
         use self::de::*;
 
@@ -164,7 +164,7 @@ impl Boc {
 
         let mut roots = header.roots().iter();
         if let (Some(&root1), Some(&root2)) = (roots.next(), roots.next()) {
-            let cells = ok!(header.finalize(finalizer));
+            let cells = ok!(header.finalize(context));
             if let (Some(root1), Some(root2)) = (cells.get(root1), cells.get(root2)) {
                 return Ok((root1, root2));
             }
@@ -178,27 +178,27 @@ impl Boc {
 pub struct BocRepr;
 
 impl BocRepr {
-    /// Encodes the specified cell tree as BOC using default finalizer and
+    /// Encodes the specified cell tree as BOC using an empty cell context and
     /// returns the `base64` encoded bytes as a string.
     #[cfg(any(feature = "base64", test))]
     pub fn encode_base64<T>(data: T) -> Result<String, crate::error::Error>
     where
         T: Store,
     {
-        let boc = ok!(Self::encode_ext(data, &mut Cell::default_finalizer()));
+        let boc = ok!(Self::encode_ext(data, &mut Cell::empty_context()));
         Ok(crate::util::encode_base64(boc))
     }
 
-    /// Encodes the specified cell tree as BOC using default finalizer.
+    /// Encodes the specified cell tree as BOC using an empty cell context.
     pub fn encode<T>(data: T) -> Result<Vec<u8>, crate::error::Error>
     where
         T: Store,
     {
-        Self::encode_ext(data, &mut Cell::default_finalizer())
+        Self::encode_ext(data, &mut Cell::empty_context())
     }
 
     /// Decodes a `base64` encoded BOC into an object
-    /// using the default Cell family finalizer.
+    /// using an empty cell context.
     #[cfg(any(feature = "base64", test))]
     #[inline]
     pub fn decode_base64<T, D>(data: D) -> Result<T, BocReprError>
@@ -211,14 +211,14 @@ impl BocRepr {
             for<'a> T: Load<'a>,
         {
             match crate::util::decode_base64(data) {
-                Ok(data) => BocRepr::decode_ext(data.as_slice(), &mut Cell::default_finalizer()),
+                Ok(data) => BocRepr::decode_ext(data.as_slice(), &mut Cell::empty_context()),
                 Err(_) => Err(BocReprError::InvalidBoc(de::Error::UnknownBocTag)),
             }
         }
         decode_base64_impl::<T>(data.as_ref())
     }
 
-    /// Decodes an object using the default Cell family finalizer.
+    /// Decodes an object using an empty cell context.
     #[inline]
     pub fn decode<T, D>(data: D) -> Result<T, BocReprError>
     where
@@ -229,7 +229,7 @@ impl BocRepr {
         where
             for<'a> T: Load<'a>,
         {
-            BocRepr::decode_ext(data, &mut Cell::default_finalizer())
+            BocRepr::decode_ext(data, &mut Cell::empty_context())
         }
         decode_impl::<T>(data.as_ref())
     }
@@ -239,29 +239,29 @@ impl BocRepr {
     /// Encodes the specified object as BOC.
     pub fn encode_ext<T>(
         data: T,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<Vec<u8>, crate::error::Error>
     where
         T: Store,
     {
         fn encode_ext_impl(
             data: &dyn Store,
-            finalizer: &mut dyn Finalizer,
+            context: &mut dyn CellContext,
         ) -> Result<Vec<u8>, crate::error::Error> {
             let mut builder = CellBuilder::new();
-            ok!(data.store_into(&mut builder, finalizer));
-            let cell = ok!(builder.build_ext(finalizer));
+            ok!(data.store_into(&mut builder, context));
+            let cell = ok!(builder.build_ext(context));
             Ok(Boc::encode(cell))
         }
-        encode_ext_impl(&data, finalizer)
+        encode_ext_impl(&data, context)
     }
 
-    /// Decodes object from BOC using the specified finalizer.
-    pub fn decode_ext<T>(data: &[u8], finalizer: &mut dyn Finalizer) -> Result<T, BocReprError>
+    /// Decodes object from BOC using the specified cell context.
+    pub fn decode_ext<T>(data: &[u8], context: &mut dyn CellContext) -> Result<T, BocReprError>
     where
         for<'a> T: Load<'a>,
     {
-        let cell = match Boc::decode_ext(data, finalizer) {
+        let cell = match Boc::decode_ext(data, context) {
             Ok(cell) => cell,
             Err(e) => return Err(BocReprError::InvalidBoc(e)),
         };

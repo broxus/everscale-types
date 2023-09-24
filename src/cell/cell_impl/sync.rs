@@ -7,7 +7,7 @@ use super::{
     EmptyOrdinaryCell, HeaderWithData, LibraryReference, OrdinaryCell, OrdinaryCellHeader,
     PrunedBranch, PrunedBranchHeader, VirtualCell, ALL_ONES_CELL, ALL_ZEROS_CELL,
 };
-use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
+use crate::cell::cell_context::{CellContext, CellParts, LoadMode};
 use crate::cell::{CellFamily, CellImpl, CellType, DynCell, HashBytes};
 use crate::error::Error;
 use crate::util::TryAsMut;
@@ -75,6 +75,8 @@ impl From<Arc<DynCell>> for Cell {
 }
 
 impl CellFamily for Cell {
+    type EmptyCellContext = EmptyCellContext;
+
     fn empty_cell() -> Cell {
         use once_cell::sync::OnceCell;
 
@@ -84,14 +86,22 @@ impl CellFamily for Cell {
             .clone()
     }
 
+    #[inline]
     fn empty_cell_ref() -> &'static DynCell {
         &EmptyOrdinaryCell
     }
 
+    #[inline]
+    fn empty_context() -> Self::EmptyCellContext {
+        EmptyCellContext
+    }
+
+    #[inline]
     fn all_zeros_ref() -> &'static DynCell {
         &ALL_ZEROS_CELL
     }
 
+    #[inline]
     fn all_ones_ref() -> &'static DynCell {
         &ALL_ONES_CELL
     }
@@ -103,14 +113,6 @@ impl CellFamily for Cell {
         } else {
             Cell(Arc::new(VirtualCell(cell)))
         }
-    }
-}
-
-impl DefaultFinalizer for Cell {
-    type Finalizer = ArcCellFinalizer;
-
-    fn default_finalizer() -> Self::Finalizer {
-        ArcCellFinalizer
     }
 }
 
@@ -128,15 +130,25 @@ impl TryAsMut<DynCell> for Cell {
     }
 }
 
-/// Thread-safe cell finalizer.
+/// Empty context for thread-safe cells.
 #[derive(Default, Clone, Copy)]
-pub struct ArcCellFinalizer;
+pub struct EmptyCellContext;
 
-impl Finalizer for ArcCellFinalizer {
+impl CellContext for EmptyCellContext {
     fn finalize_cell(&mut self, ctx: CellParts) -> Result<Cell, Error> {
         let hashes = ok!(ctx.compute_hashes());
         // SAFETY: ctx now represents a well-formed cell
         Ok(unsafe { make_cell(ctx, hashes) })
+    }
+
+    #[inline]
+    fn load_cell(&mut self, cell: Cell, _: LoadMode) -> Result<Cell, Error> {
+        Ok(cell)
+    }
+
+    #[inline]
+    fn load_dyn_cell<'a>(&mut self, cell: &'a DynCell, _: LoadMode) -> Result<&'a DynCell, Error> {
+        Ok(cell)
     }
 }
 

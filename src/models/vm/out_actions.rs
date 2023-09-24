@@ -67,7 +67,7 @@ bitflags! {
 }
 
 impl Store for SendMsgFlags {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         builder.store_u8(self.bits())
     }
 }
@@ -97,7 +97,7 @@ bitflags! {
 }
 
 impl Store for ReserveCurrencyFlags {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         builder.store_u8(self.bits())
     }
 }
@@ -193,7 +193,7 @@ impl Store for OutAction {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         match self {
             Self::SendMsg { mode, out_msg } => {
@@ -208,7 +208,7 @@ impl Store for OutAction {
             Self::ReserveCurrency { mode, value } => {
                 ok!(builder.store_u32(Self::TAG_RESERVE));
                 ok!(builder.store_u8(mode.bits()));
-                value.store_into(builder, finalizer)
+                value.store_into(builder, context)
             }
             Self::ChangeLibrary { mode, lib } => {
                 ok!(builder.store_u32(Self::TAG_CHANGE_LIB));

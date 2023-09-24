@@ -78,7 +78,7 @@ impl AccountStatus {
 
 impl Store for AccountStatus {
     #[inline]
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         builder.store_small_uint(*self as u8, 2)
     }
 }
@@ -181,7 +181,7 @@ impl Store for OptionalAccount {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         match &self.0 {
             None => builder.store_bit_zero(),
@@ -193,11 +193,11 @@ impl Store for OptionalAccount {
                     builder.store_bit_one()
                 });
 
-                ok!(account.address.store_into(builder, finalizer));
-                ok!(account.storage_stat.store_into(builder, finalizer));
+                ok!(account.address.store_into(builder, context));
+                ok!(account.storage_stat.store_into(builder, context));
                 ok!(builder.store_u64(account.last_trans_lt));
-                ok!(account.balance.store_into(builder, finalizer));
-                ok!(account.state.store_into(builder, finalizer));
+                ok!(account.balance.store_into(builder, context));
+                ok!(account.state.store_into(builder, context));
                 if let Some(init_code_hash) = &account.init_code_hash {
                     ok!(builder.store_bit_one());
                     builder.store_u256(init_code_hash)
@@ -282,13 +282,13 @@ impl Store for AccountState {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         match self {
             Self::Uninit => builder.store_small_uint(0b00, 2),
             Self::Active(state) => {
                 ok!(builder.store_bit_one());
-                state.store_into(builder, finalizer)
+                state.store_into(builder, context)
             }
             Self::Frozen(hash) => {
                 ok!(builder.store_small_uint(0b01, 2));
@@ -387,7 +387,7 @@ impl SpecialFlags {
 }
 
 impl Store for SpecialFlags {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         builder.store_small_uint(((self.tick as u8) << 1) | self.tock as u8, 2)
     }
 }

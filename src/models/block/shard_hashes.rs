@@ -312,7 +312,7 @@ impl Store for ShardDescription {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         #[allow(unused_mut)]
         let mut tag = if self.proof_chain.is_some() {
@@ -349,19 +349,19 @@ impl Store for ShardDescription {
         ok!(builder.store_u64(self.next_validator_shard));
         ok!(builder.store_u32(self.min_ref_mc_seqno));
         ok!(builder.store_u32(self.gen_utime));
-        ok!(self.split_merge_at.store_into(builder, finalizer));
+        ok!(self.split_merge_at.store_into(builder, context));
 
         let cell = {
             let mut builder = CellBuilder::new();
-            ok!(self.fees_collected.store_into(&mut builder, finalizer));
-            ok!(self.funds_created.store_into(&mut builder, finalizer));
+            ok!(self.fees_collected.store_into(&mut builder, context));
+            ok!(self.funds_created.store_into(&mut builder, context));
 
             #[allow(unused_labels)]
             'cell: {
                 #[cfg(feature = "venom")]
                 if self.collators.is_some() {
-                    ok!(self.proof_chain.store_into(&mut builder, finalizer));
-                    ok!(self.collators.store_into(&mut builder, finalizer));
+                    ok!(self.proof_chain.store_into(&mut builder, context));
+                    ok!(self.collators.store_into(&mut builder, context));
                     break 'cell;
                 }
 
@@ -370,15 +370,15 @@ impl Store for ShardDescription {
                         builder.store_bit_zero()
                     } else {
                         ok!(builder.store_bit_one());
-                        self.copyleft_rewards.store_into(&mut builder, finalizer)
+                        self.copyleft_rewards.store_into(&mut builder, context)
                     });
-                    ok!(proof_chain.store_into(&mut builder, finalizer));
+                    ok!(proof_chain.store_into(&mut builder, context));
                 } else if !self.copyleft_rewards.is_empty() {
-                    ok!(self.copyleft_rewards.store_into(&mut builder, finalizer));
+                    ok!(self.copyleft_rewards.store_into(&mut builder, context));
                 }
             }
 
-            ok!(builder.build_ext(finalizer))
+            ok!(builder.build_ext(context))
         };
 
         builder.store_reference(cell)
@@ -521,7 +521,7 @@ pub enum FutureSplitMerge {
 }
 
 impl Store for FutureSplitMerge {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         match *self {
             Self::Split {
                 split_utime,
@@ -572,7 +572,7 @@ pub struct ProofChain {
 }
 
 impl Store for ProofChain {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         ok!(builder.store_u8(self.len));
         builder.store_reference(self.child.clone())
     }

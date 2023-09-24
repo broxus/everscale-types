@@ -71,10 +71,10 @@ impl<K, A: Store, V> Store for AugDict<K, A, V> {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
-        ok!(self.dict.store_into(builder, finalizer));
-        self.extra.store_into(builder, finalizer)
+        ok!(self.dict.store_into(builder, context));
+        self.extra.store_into(builder, context)
     }
 }
 
@@ -126,13 +126,13 @@ impl<K: DictKey, A, V> AugDict<K, A, V> {
     #[allow(unused)]
     pub(crate) fn load_from_root<'a>(
         slice: &mut CellSlice<'a>,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<Self, Error>
     where
         A: Load<'a>,
         V: AugDictSkipValue<'a>,
     {
-        let (extra, root) = ok!(load_from_root::<A, V>(slice, K::BITS, finalizer));
+        let (extra, root) = ok!(load_from_root::<A, V>(slice, K::BITS, context));
 
         Ok(Self {
             dict: Dict::from(Some(root)),
@@ -146,7 +146,7 @@ impl<K: DictKey, A, V> AugDict<K, A, V> {
 fn load_from_root<'a, A, V>(
     slice: &mut CellSlice<'a>,
     key_bit_len: u16,
-    finalizer: &mut dyn Finalizer,
+    context: &mut dyn CellContext,
 ) -> Result<(A, Cell), Error>
 where
     A: Load<'a>,
@@ -173,7 +173,7 @@ where
 
     let mut b = CellBuilder::new();
     ok!(b.store_slice(root.get_prefix(root_bits, root_refs)));
-    match b.build_ext(finalizer) {
+    match b.build_ext(context) {
         Ok(cell) => Ok((extra, cell)),
         Err(e) => Err(e),
     }
@@ -235,7 +235,7 @@ where
 // {
 //     /// Sets the augmented value associated with the key in the dictionary.
 //     ///
-//     /// Use [`set_ext`] if you need to use a custom finalizer.
+//     /// Use [`set_ext`] if you need to use a custom cell context.
 //     ///
 //     /// [`set_ext`]: AugDict::set_ext
 //     pub fn set<Q, E, T>(&mut self, key: Q, aug: E, value: T) -> Result<(), Error>
@@ -244,13 +244,13 @@ where
 //         E: Borrow<A>,
 //         T: Borrow<V>,
 //     {
-//         self.set_ext(key, aug, value, &mut Cell::default_finalizer())
+//         self.set_ext(key, aug, value, &mut Cell::empty_context())
 //     }
 
 //     /// Sets the augmented value associated with the key in the dictionary
 //     /// only if the key was already present in it.
 //     ///
-//     /// Use [`replace_ext`] if you need to use a custom finalizer.
+//     /// Use [`replace_ext`] if you need to use a custom cell context.
 //     ///
 //     /// [`replace_ext`]: AugDict::replace_ext
 //     pub fn replace<Q, E, T>(&mut self, key: Q, aug: E, value: T) -> Result<(), Error>
@@ -259,13 +259,13 @@ where
 //         E: Borrow<A>,
 //         T: Borrow<V>,
 //     {
-//         self.replace_ext(key, aug, value, &mut Cell::default_finalizer())
+//         self.replace_ext(key, aug, value, &mut Cell::empty_context())
 //     }
 
 //     /// Sets the value associated with key in dictionary,
 //     /// but only if it is not already present.
 //     ///
-//     /// Use [`add_ext`] if you need to use a custom finalizer.
+//     /// Use [`add_ext`] if you need to use a custom cell context.
 //     ///
 //     /// [`add_ext`]: AugDict::add_ext
 //     pub fn add<Q, E, T>(&mut self, key: Q, aug: E, value: T) -> Result<(), Error>
@@ -274,7 +274,7 @@ where
 //         E: Borrow<A>,
 //         T: Borrow<V>,
 //     {
-//         self.add_ext(key, aug, value, &mut Cell::default_finalizer())
+//         self.add_ext(key, aug, value, &mut Cell::empty_context())
 //     }
 // }
 
@@ -401,7 +401,7 @@ where
 //         key: Q,
 //         aug: E,
 //         value: T,
-//         finalizer: &mut dyn Finalizer,
+//         context: &mut dyn CellContext,
 //     ) -> Result<(), Error>
 //     where
 //         Q: Borrow<K>,
@@ -413,7 +413,7 @@ where
 //             aug.borrow(),
 //             value.borrow(),
 //             SetMode::Set,
-//             finalizer,
+//             context,
 //         )
 //     }
 
@@ -424,7 +424,7 @@ where
 //         key: Q,
 //         aug: E,
 //         value: T,
-//         finalizer: &mut dyn Finalizer,
+//         context: &mut dyn CellContext,
 //     ) -> Result<(), Error>
 //     where
 //         Q: Borrow<K>,
@@ -436,7 +436,7 @@ where
 //             aug.borrow(),
 //             value.borrow(),
 //             SetMode::Replace,
-//             finalizer,
+//             context,
 //         )
 //     }
 
@@ -447,7 +447,7 @@ where
 //         key: Q,
 //         aug: E,
 //         value: T,
-//         finalizer: &mut dyn Finalizer,
+//         context: &mut dyn CellContext,
 //     ) -> Result<(), Error>
 //     where
 //         Q: Borrow<K>,
@@ -459,7 +459,7 @@ where
 //             aug.borrow(),
 //             value.borrow(),
 //             SetMode::Add,
-//             finalizer,
+//             context,
 //         )
 //     }
 
@@ -469,22 +469,22 @@ where
 //         aug: &A,
 //         value: &V,
 //         mode: SetMode,
-//         finalizer: &mut dyn Finalizer,
+//         context: &mut dyn CellContext,
 //     ) -> Result<(), Error>
 //     where
 //         K: Store + DictKey,
 //         A: Store,
 //         V: Store,
 //     {
-//         let key = ok!(serialize_entry(key, finalizer));
-//         let value = ok!(serialize_aug_entry(aug, value, finalizer));
+//         let key = ok!(serialize_entry(key, context));
+//         let value = ok!(serialize_aug_entry(aug, value, context));
 //         self.dict.root = ok!(dict_insert(
 //             &self.dict.root,
 //             &mut key.as_ref().as_slice(),
 //             K::BITS,
 //             &value.as_ref().as_slice(),
 //             mode,
-//             finalizer
+//             context,
 //         ));
 //         Ok(())
 //     }
@@ -551,11 +551,11 @@ where
 // fn serialize_aug_entry<A: Store, V: Store>(
 //     aug: &A,
 //     entry: &V,
-//     finalizer: &mut dyn Finalizer,
+//     context: &mut dyn CellContext,
 // ) -> Result<CellContainer, Error> {
 //     let mut builder = CellBuilder::new();
-//     if aug.store_into(&mut builder, finalizer) && entry.store_into(&mut builder, finalizer) {
-//         if let Some(key) = builder.build_ext(finalizer) {
+//     if aug.store_into(&mut builder, context) && entry.store_into(&mut builder, context) {
+//         if let Some(key) = builder.build_ext(context) {
 //             return Ok(key);
 //         }
 //     }

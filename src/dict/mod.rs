@@ -53,6 +53,7 @@ impl_dict_key! {
 
 /// Dictionary insertion mode.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[repr(u8)]
 pub enum SetMode {
     /// Sets the value associated with the key in the dictionary.
     Set = 0b11,
@@ -85,7 +86,7 @@ pub fn dict_remove_owned(
     key: &mut CellSlice,
     key_bit_len: u16,
     allow_subtree: bool,
-    finalizer: &mut dyn Finalizer,
+    context: &mut dyn CellContext,
 ) -> Result<(Option<Cell>, Option<CellSliceParts>), Error> {
     if !allow_subtree && key.remaining_bits() != key_bit_len {
         return Err(Error::CellUnderflow);
@@ -94,7 +95,9 @@ pub fn dict_remove_owned(
     let Some(root) = root else {
         return Ok((None, None));
     };
-    let mut data = root.as_ref();
+
+    // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok
+    let mut data = ok!(context.load_dyn_cell(root.as_ref(), LoadMode::Full));
 
     let mut stack = Vec::<Segment>::new();
 
@@ -130,7 +133,8 @@ pub fn dict_remove_owned(
                 let next_branch = Branch::from(ok!(key.load_bit()));
 
                 let child = match data.reference(next_branch as u8) {
-                    Some(child) => child,
+                    // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok
+                    Some(child) => ok!(context.load_dyn_cell(child, LoadMode::Full)),
                     None => return Err(Error::CellUnderflow),
                 };
 
@@ -153,6 +157,9 @@ pub fn dict_remove_owned(
         let Some(value) = last.data.reference_cloned(index) else {
             return Err(Error::CellUnderflow);
         };
+        // NOTE: do not use gas here as it was accounted while loading `child` in previous block.
+        // TODO: change mode to `LoadMode::Noop` if copy-on-write for libraries is not ok.
+        let value = ok!(context.load_cell(value, LoadMode::Resolve));
 
         // Load parent label
         let pfx = {
@@ -162,7 +169,13 @@ pub fn dict_remove_owned(
         };
 
         // Load the opposite branch
-        let mut opposite = ok!(last.data.get_reference_as_slice(1 - index));
+        let mut opposite = match last.data.reference(1 - index) {
+            // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok.
+            Some(cell) => ok!(context
+                .load_dyn_cell(cell, LoadMode::Full)
+                .and_then(CellSlice::new)),
+            None => return Err(Error::CellUnderflow),
+        };
         let rem = ok!(read_label(&mut opposite, key.remaining_bits()));
 
         // Build an edge cell
@@ -175,7 +188,7 @@ pub fn dict_remove_owned(
             &mut builder
         ));
         ok!(builder.store_slice(opposite));
-        let leaf = ok!(builder.build_ext(finalizer));
+        let leaf = ok!(builder.build_ext(context));
 
         // Return the new cell and the removed one
         (leaf, (value, removed))
@@ -183,7 +196,7 @@ pub fn dict_remove_owned(
         return Ok((None, Some((root.clone(), removed))));
     };
 
-    leaf = ok!(rebuild_dict_from_stack(stack, leaf, finalizer));
+    leaf = ok!(rebuild_dict_from_stack(stack, leaf, context));
 
     Ok((Some(leaf), Some(removed)))
 }
@@ -198,16 +211,17 @@ pub fn dict_insert(
     key_bit_len: u16,
     value: &dyn Store,
     mode: SetMode,
-    finalizer: &mut dyn Finalizer,
+    context: &mut dyn CellContext,
 ) -> Result<(Option<Cell>, bool), Error> {
     if key.remaining_bits() != key_bit_len {
         return Err(Error::CellUnderflow);
     }
 
     let mut data = match root.as_ref() {
-        Some(data) => data.as_ref(),
+        // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok.
+        Some(data) => ok!(context.load_dyn_cell(data.as_ref(), LoadMode::Full)),
         None if mode.can_add() => {
-            let data = ok!(make_leaf(key, key_bit_len, value, finalizer));
+            let data = ok!(make_leaf(key, key_bit_len, value, context));
             return Ok((Some(data), true));
         }
         None => return Ok((None, false)),
@@ -228,15 +242,17 @@ pub fn dict_insert(
             std::cmp::Ordering::Equal => {
                 // Check if we can replace the value
                 if !mode.can_replace() {
+                    // TODO: what is the desired behavior for root as a library?
                     return Ok((root.cloned(), false));
                 }
                 // Replace the existing value
-                break ok!(make_leaf(prefix, key.remaining_bits(), value, finalizer));
+                break ok!(make_leaf(prefix, key.remaining_bits(), value, context));
             }
             // LCP is less than prefix, an edge to slice was found
             std::cmp::Ordering::Less if lcp.remaining_bits() < prefix.remaining_bits() => {
                 // Check if we can add a new value
                 if !mode.can_add() {
+                    // TODO: what is the desired behavior for root as a library?
                     return Ok((root.cloned(), false));
                 }
                 break ok!(split_edge(
@@ -245,7 +261,7 @@ pub fn dict_insert(
                     &lcp,
                     key,
                     value,
-                    finalizer
+                    context
                 ));
             }
             // The key contains the entire prefix, but there are still some bits left
@@ -265,7 +281,8 @@ pub fn dict_insert(
                 };
 
                 let child = match data.reference(next_branch as u8) {
-                    Some(child) => child,
+                    // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok
+                    Some(cell) => ok!(context.load_dyn_cell(cell, LoadMode::Full)),
                     None => return Err(Error::CellUnderflow),
                 };
 
@@ -280,7 +297,7 @@ pub fn dict_insert(
         }
     };
 
-    leaf = ok!(rebuild_dict_from_stack(stack, leaf, finalizer));
+    leaf = ok!(rebuild_dict_from_stack(stack, leaf, context));
 
     Ok((Some(leaf), true))
 }
@@ -290,23 +307,28 @@ pub fn dict_insert(
 ///
 /// Returns a tuple with a new dict root, changed flag and the previous value.
 pub fn dict_insert_owned(
-    root: Option<&Cell>,
+    root: Option<Cell>,
     key: &mut CellSlice,
     key_bit_len: u16,
     value: &dyn Store,
     mode: SetMode,
-    finalizer: &mut dyn Finalizer,
+    context: &mut dyn CellContext,
 ) -> Result<(Option<Cell>, bool, Option<CellSliceParts>), Error> {
-    fn stack_or_last(stack: &[Segment], root: &Cell) -> Result<Cell, Error> {
-        Ok(match stack.last() {
+    fn stack_or_last(
+        stack: &[Segment],
+        root: &Cell,
+        context: &mut dyn CellContext,
+        mode: LoadMode,
+    ) -> Result<Cell, Error> {
+        match stack.last() {
             Some(Segment { data, next_branch }) => {
                 match data.reference_cloned(*next_branch as u8) {
-                    Some(cell) => cell,
-                    None => return Err(Error::CellUnderflow),
+                    Some(cell) => context.load_cell(cell, mode),
+                    None => Err(Error::CellUnderflow),
                 }
             }
-            None => root.clone(),
-        })
+            None => Ok(root.clone()),
+        }
     }
 
     if key.remaining_bits() != key_bit_len {
@@ -314,9 +336,10 @@ pub fn dict_insert_owned(
     }
 
     let root = match root {
-        Some(data) => data,
+        // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok.
+        Some(data) => ok!(context.load_cell(data, LoadMode::Full)),
         None if mode.can_add() => {
-            let data = ok!(make_leaf(key, key_bit_len, value, finalizer));
+            let data = ok!(make_leaf(key, key_bit_len, value, context));
             return Ok((Some(data), true, None));
         }
         None => return Ok((None, false, None)),
@@ -337,12 +360,16 @@ pub fn dict_insert_owned(
             std::cmp::Ordering::Equal => {
                 // Check if we can replace the value
                 if !mode.can_replace() {
-                    let value = (ok!(stack_or_last(&stack, root)), remaining_data.range());
+                    let value = (
+                        ok!(stack_or_last(&stack, &root, context, LoadMode::Full)),
+                        remaining_data.range(),
+                    );
+                    // TODO: what is the desired behavior for root as a library?
                     return Ok((Some(root.clone()), false, Some(value)));
                 }
                 // Replace the existing value
                 break (
-                    ok!(make_leaf(prefix, key.remaining_bits(), value, finalizer)),
+                    ok!(make_leaf(prefix, key.remaining_bits(), value, context)),
                     Some(remaining_data.range()),
                 );
             }
@@ -350,6 +377,7 @@ pub fn dict_insert_owned(
             std::cmp::Ordering::Less if lcp.remaining_bits() < prefix.remaining_bits() => {
                 // Check if we can add a new value
                 if !mode.can_add() {
+                    // TODO: what is the desired behavior for root as a library?
                     return Ok((Some(root.clone()), false, None));
                 }
                 break (
@@ -359,7 +387,7 @@ pub fn dict_insert_owned(
                         &lcp,
                         key,
                         value,
-                        finalizer
+                        context
                     )),
                     None,
                 );
@@ -381,7 +409,8 @@ pub fn dict_insert_owned(
                 };
 
                 let child = match data.reference(next_branch as u8) {
-                    Some(child) => child,
+                    // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok
+                    Some(cell) => ok!(context.load_dyn_cell(cell, LoadMode::Full)),
                     None => return Err(Error::CellUnderflow),
                 };
 
@@ -397,11 +426,15 @@ pub fn dict_insert_owned(
     };
 
     let value = match value_range {
-        Some(range) => Some((ok!(stack_or_last(&stack, root)), range)),
+        Some(range) => Some((
+            // TODO: change mode to `LoadMode::Noop` if copy-on-write for libraries is not ok
+            ok!(stack_or_last(&stack, &root, context, LoadMode::Resolve)),
+            range,
+        )),
         None => None,
     };
 
-    leaf = ok!(rebuild_dict_from_stack(stack, leaf, finalizer));
+    leaf = ok!(rebuild_dict_from_stack(stack, leaf, context));
 
     Ok((Some(leaf), true, value))
 }
@@ -411,13 +444,16 @@ pub fn dict_get<'a: 'b, 'b>(
     root: Option<&'a Cell>,
     key_bit_len: u16,
     mut key: CellSlice<'b>,
+    context: &mut dyn CellContext,
 ) -> Result<Option<CellSlice<'a>>, Error> {
     if key.remaining_bits() != key_bit_len {
         return Err(Error::CellUnderflow);
     }
 
-    let mut data = match root.as_ref() {
-        Some(data) => ok!(data.as_slice()),
+    let mut data = match root {
+        Some(data) => ok!(context
+            .load_dyn_cell(data.as_ref(), LoadMode::Full)
+            .and_then(CellSlice::new)),
         None => return Ok(None),
     };
 
@@ -444,7 +480,12 @@ pub fn dict_get<'a: 'b, 'b>(
 
         // Load next child based on the next bit
         let child_index = ok!(key.load_bit()) as u8;
-        data = ok!(data.cell().get_reference_as_slice(child_index));
+        data = match data.cell().reference(child_index) {
+            Some(cell) => ok!(context
+                .load_dyn_cell(cell, LoadMode::Full)
+                .and_then(CellSlice::new)),
+            None => return Err(Error::CellUnderflow),
+        };
     };
 
     // Return the last slice as data
@@ -453,16 +494,18 @@ pub fn dict_get<'a: 'b, 'b>(
 
 /// Returns cell slice parts of the value corresponding to the key.
 pub fn dict_get_owned(
-    root: Option<&Cell>,
+    root: Option<Cell>,
     key_bit_len: u16,
     mut key: CellSlice<'_>,
+    context: &mut dyn CellContext,
 ) -> Result<Option<CellSliceParts>, Error> {
     if key.remaining_bits() != key_bit_len {
         return Err(Error::CellUnderflow);
     }
 
-    let Some(root) = root else {
-        return Ok(None);
+    let root = match root {
+        Some(cell) => ok!(context.load_cell(cell, LoadMode::Full)),
+        None => return Ok(None),
     };
     let mut data = ok!(root.as_slice());
     let mut prev = None;
@@ -491,7 +534,12 @@ pub fn dict_get_owned(
         // Load next child based on the next bit
         let child_index = ok!(key.load_bit()) as u8;
         prev = Some((data.cell(), child_index));
-        data = ok!(data.cell().get_reference_as_slice(child_index));
+        data = match data.cell().reference(child_index) {
+            Some(cell) => ok!(context
+                .load_dyn_cell(cell, LoadMode::Full)
+                .and_then(CellSlice::new)),
+            None => return Err(Error::CellUnderflow),
+        };
     };
 
     // Return the last slice as data
@@ -499,7 +547,7 @@ pub fn dict_get_owned(
         Some(match prev {
             Some((prev, child_index)) => {
                 let cell = match prev.reference_cloned(child_index) {
-                    Some(cell) => cell,
+                    Some(cell) => ok!(context.load_cell(cell, LoadMode::Resolve)),
                     None => return Err(Error::CellUnderflow),
                 };
                 (cell, data.range())
@@ -513,12 +561,13 @@ pub fn dict_get_owned(
 
 /// Returns cell slice parts of the value corresponding to the key.
 pub fn dict_find_owned(
-    root: Option<&Cell>,
+    root: Option<Cell>,
     key_bit_len: u16,
     mut key: CellSlice<'_>,
     towards: DictBound,
     inclusive: bool,
     signed: bool,
+    context: &mut dyn CellContext,
 ) -> Result<Option<DictOwnedEntry>, Error> {
     if key.remaining_bits() != key_bit_len {
         return Err(Error::CellUnderflow);
@@ -529,8 +578,9 @@ pub fn dict_find_owned(
         Divergence(Branch),
     }
 
-    let Some(root) = root else {
-        return Ok(None);
+    let root = match root {
+        Some(data) => ok!(context.load_cell(data, LoadMode::Full)),
+        None => return Ok(None),
     };
 
     let mut original_key_range = key.range();
@@ -574,7 +624,7 @@ pub fn dict_find_owned(
                 let next_branch = Branch::from(ok!(key.load_bit()));
 
                 let child = match data.reference(next_branch as u8) {
-                    Some(child) => child,
+                    Some(cell) => ok!(context.load_dyn_cell(cell, LoadMode::Full)),
                     None => return Err(Error::CellUnderflow),
                 };
 
@@ -596,11 +646,11 @@ pub fn dict_find_owned(
             let cell = match stack.last() {
                 Some((Segment { data, next_branch }, _)) => {
                     match data.reference_cloned(*next_branch as u8) {
-                        Some(cell) => cell,
+                        Some(cell) => ok!(context.load_cell(cell, LoadMode::Resolve)),
                         None => return Err(Error::CellUnderflow),
                     }
                 }
-                None => root.clone(),
+                None => root,
             };
 
             let original_key = ok!(original_key_range.apply(key.cell()));
@@ -652,8 +702,10 @@ pub fn dict_find_owned(
     // Prepare the node to start the final search
     if let Some(branch) = first_branch {
         ok!(result_key.store_bit(branch.into_bit()));
-        let Some(child) = data.reference(branch as u8) else {
-            return Err(Error::CellUnderflow);
+        let child = match data.reference(branch as u8) {
+            // TODO: possibly incorrect for signed find
+            Some(child) => ok!(context.load_dyn_cell(child, LoadMode::Full)),
+            None => return Err(Error::CellUnderflow),
         };
         prev = Some((data, branch));
         data = child;
@@ -682,8 +734,9 @@ pub fn dict_find_owned(
 
         ok!(result_key.store_bit(rev_direction.into_bit()));
 
-        let Some(child) = data.reference(rev_direction as u8) else {
-            return Err(Error::CellUnderflow);
+        let child = match data.reference(rev_direction as u8) {
+            Some(child) => ok!(context.load_dyn_cell(child, LoadMode::Full)),
+            None => return Err(Error::CellUnderflow),
         };
         prev = Some((data, rev_direction));
         data = child;
@@ -691,10 +744,10 @@ pub fn dict_find_owned(
 
     let cell = match prev {
         Some((prev, next_branch)) => match prev.reference_cloned(next_branch as u8) {
-            Some(cell) => cell,
+            Some(cell) => ok!(context.load_cell(cell, LoadMode::Resolve)),
             None => return Err(Error::CellUnderflow),
         },
-        None => root.clone(),
+        None => root,
     };
 
     Ok(Some((result_key, (cell, value_range))))
@@ -706,9 +759,12 @@ pub fn dict_find_bound<'a: 'b, 'b>(
     mut key_bit_len: u16,
     bound: DictBound,
     signed: bool,
+    context: &mut dyn CellContext,
 ) -> Result<Option<(CellBuilder, CellSlice<'b>)>, Error> {
     let mut data = match root {
-        Some(data) => ok!(data.as_slice()),
+        Some(data) => ok!(context
+            .load_dyn_cell(data.as_ref(), LoadMode::Full)
+            .and_then(CellSlice::new)),
         None => return Ok(None),
     };
 
@@ -739,7 +795,12 @@ pub fn dict_find_bound<'a: 'b, 'b>(
         ok!(key.store_bit(next_branch.into_bit()));
 
         // Load next child based on the next bit
-        data = ok!(data.cell().get_reference_as_slice(next_branch as u8));
+        data = match data.cell().reference(next_branch as u8) {
+            Some(data) => ok!(context
+                .load_dyn_cell(data, LoadMode::Full)
+                .and_then(CellSlice::new)),
+            None => return Err(Error::CellUnderflow),
+        };
     }
 
     // Return the last slice as data
@@ -748,13 +809,15 @@ pub fn dict_find_bound<'a: 'b, 'b>(
 
 /// Finds the specified dict bound and returns a key and cell slice parts corresponding to the key.
 pub fn dict_find_bound_owned(
-    root: Option<&Cell>,
+    root: Option<Cell>,
     mut key_bit_len: u16,
     bound: DictBound,
     signed: bool,
+    context: &mut dyn CellContext,
 ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
-    let Some(root) = root else {
-        return Ok(None);
+    let root = match root {
+        Some(data) => ok!(context.load_cell(data, LoadMode::Full)),
+        None => return Ok(None),
     };
     let mut data = ok!(root.as_slice());
     let mut prev = None;
@@ -787,19 +850,25 @@ pub fn dict_find_bound_owned(
 
         // Load next child based on the next bit
         prev = Some((data.cell(), next_branch));
-        data = ok!(data.cell().get_reference_as_slice(next_branch as u8));
+        data = match data.cell().reference(next_branch as u8) {
+            Some(data) => ok!(context
+                .load_dyn_cell(data, LoadMode::Full)
+                .and_then(CellSlice::new)),
+            None => return Err(Error::CellUnderflow),
+        };
     }
 
     // Build cell slice parts
+    let range = data.range();
     let slice = match prev {
         Some((prev, next_branch)) => {
             let cell = match prev.reference_cloned(next_branch as u8) {
-                Some(cell) => cell,
+                Some(cell) => ok!(context.load_cell(cell, LoadMode::Resolve)),
                 None => return Err(Error::CellUnderflow),
             };
-            (cell, data.range())
+            (cell, range)
         }
-        None => (root.clone(), data.range()),
+        None => (root, range),
     };
 
     // Return the last slice as data
@@ -808,14 +877,16 @@ pub fn dict_find_bound_owned(
 
 /// Removes the specified dict bound and returns a removed key and cell slice parts.
 pub fn dict_remove_bound_owned(
-    root: Option<&Cell>,
+    root: Option<Cell>,
     mut key_bit_len: u16,
     bound: DictBound,
     signed: bool,
-    finalizer: &mut dyn Finalizer,
+    context: &mut dyn CellContext,
 ) -> Result<(Option<Cell>, Option<DictOwnedEntry>), Error> {
-    let Some(root) = root else {
-        return Ok((None, None));
+    let root = match root {
+        // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok
+        Some(data) => ok!(context.load_cell(data, LoadMode::Full)),
+        None => return Ok((None, None)),
     };
     let mut data = root.as_ref();
 
@@ -850,8 +921,10 @@ pub fn dict_remove_bound_owned(
         let next_branch = bound.update_direction(prefix, signed, &mut direction);
         ok!(key.store_bit(next_branch.into_bit()));
 
-        let Some(child) = data.reference(next_branch as u8) else {
-            return Err(Error::CellUnderflow);
+        let child = match data.reference(next_branch as u8) {
+            // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok
+            Some(cell) => ok!(context.load_dyn_cell(cell, LoadMode::Full)),
+            None => return Err(Error::CellUnderflow),
         };
 
         // Push an intermediate edge to the stack
@@ -864,8 +937,10 @@ pub fn dict_remove_bound_owned(
         let index = last.next_branch as u8;
 
         // Load value branch
-        let Some(value) = last.data.reference_cloned(index) else {
-            return Err(Error::CellUnderflow);
+        let value = match last.data.reference_cloned(index) {
+            // TODO: change mode to `LoadMode::Noop` if copy-on-write for libraries is not ok
+            Some(cell) => ok!(context.load_cell(cell, LoadMode::Resolve)),
+            None => return Err(Error::CellUnderflow),
         };
 
         // Load parent label
@@ -876,7 +951,13 @@ pub fn dict_remove_bound_owned(
         };
 
         // Load the opposite branch
-        let mut opposite = ok!(last.data.get_reference_as_slice(1 - index));
+        let mut opposite = match last.data.reference(1 - index) {
+            // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok
+            Some(cell) => ok!(context
+                .load_dyn_cell(cell, LoadMode::Full)
+                .and_then(CellSlice::new)),
+            None => return Err(Error::CellUnderflow),
+        };
         let rem = ok!(read_label(&mut opposite, key_bit_len));
 
         // Build an edge cell
@@ -889,7 +970,7 @@ pub fn dict_remove_bound_owned(
             &mut builder
         ));
         ok!(builder.store_slice(opposite));
-        let leaf = ok!(builder.build_ext(finalizer));
+        let leaf = ok!(builder.build_ext(context));
 
         // Return the new cell and the removed one
         (leaf, (value, removed))
@@ -897,7 +978,7 @@ pub fn dict_remove_bound_owned(
         return Ok((None, Some((key, (root.clone(), removed)))));
     };
 
-    leaf = ok!(rebuild_dict_from_stack(stack, leaf, finalizer));
+    leaf = ok!(rebuild_dict_from_stack(stack, leaf, context));
 
     Ok((Some(leaf), Some((key, removed))))
 }
@@ -907,12 +988,12 @@ fn make_leaf(
     key: &CellSlice,
     key_bit_len: u16,
     value: &dyn Store,
-    finalizer: &mut dyn Finalizer,
+    context: &mut dyn CellContext,
 ) -> Result<Cell, Error> {
     let mut builder = CellBuilder::new();
     ok!(write_label(key, key_bit_len, &mut builder));
-    ok!(value.store_into(&mut builder, finalizer));
-    builder.build_ext(finalizer)
+    ok!(value.store_into(&mut builder, context));
+    builder.build_ext(context)
 }
 
 // Splits an edge or leaf
@@ -922,7 +1003,7 @@ fn split_edge(
     lcp: &CellSlice,
     key: &mut CellSlice,
     value: &dyn Store,
-    finalizer: &mut dyn Finalizer,
+    context: &mut dyn CellContext,
 ) -> Result<Cell, Error> {
     // Advance the key
     let prev_key_bit_len = key.remaining_bits();
@@ -935,9 +1016,9 @@ fn split_edge(
     let old_to_right = ok!(prefix.load_bit());
 
     // Create a leaf for the old value
-    let mut left = ok!(make_leaf(prefix, key.remaining_bits(), data, finalizer));
+    let mut left = ok!(make_leaf(prefix, key.remaining_bits(), data, context));
     // Create a leaf for the right value
-    let mut right = ok!(make_leaf(key, key.remaining_bits(), value, finalizer));
+    let mut right = ok!(make_leaf(key, key.remaining_bits(), value, context));
 
     // The part that starts with 1 goes to the right cell
     if old_to_right {
@@ -949,7 +1030,7 @@ fn split_edge(
     ok!(write_label(lcp, prev_key_bit_len, &mut builder));
     ok!(builder.store_reference(left));
     ok!(builder.store_reference(right));
-    builder.build_ext(finalizer)
+    builder.build_ext(context)
 }
 
 /// Type alias for a pair of key and value as cell slice parts.
@@ -998,7 +1079,7 @@ impl DictBound {
 pub fn dict_load_from_root(
     slice: &mut CellSlice<'_>,
     key_bit_len: u16,
-    finalizer: &mut dyn Finalizer,
+    context: &mut dyn CellContext,
 ) -> Result<Cell, Error> {
     let mut root = *slice;
 
@@ -1016,13 +1097,13 @@ pub fn dict_load_from_root(
 
     let mut builder = CellBuilder::new();
     ok!(builder.store_slice(root));
-    builder.build_ext(finalizer)
+    builder.build_ext(context)
 }
 
 fn rebuild_dict_from_stack(
     mut segments: Vec<Segment<'_>>,
     mut leaf: Cell,
-    finalizer: &mut dyn Finalizer,
+    context: &mut dyn CellContext,
 ) -> Result<Cell, Error> {
     // Rebuild the tree starting from leaves
     while let Some(last) = segments.pop() {
@@ -1042,7 +1123,7 @@ fn rebuild_dict_from_stack(
         ok!(builder.store_cell_data(last.data));
         ok!(builder.store_reference(left));
         ok!(builder.store_reference(right));
-        leaf = ok!(builder.build_ext(finalizer));
+        leaf = ok!(builder.build_ext(context));
     }
 
     Ok(leaf)

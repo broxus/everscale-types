@@ -40,7 +40,7 @@ impl Store for McStateExtra {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         let flags = ((!self.copyleft_rewards.is_empty() as u16) << 1)
             | (self.block_create_stats.is_some() as u16);
@@ -48,28 +48,28 @@ impl Store for McStateExtra {
         let cell = {
             let mut builder = CellBuilder::new();
             ok!(builder.store_u16(flags));
-            ok!(self.validator_info.store_into(&mut builder, finalizer));
-            ok!(self.prev_blocks.store_into(&mut builder, finalizer));
+            ok!(self.validator_info.store_into(&mut builder, context));
+            ok!(self.prev_blocks.store_into(&mut builder, context));
             ok!(builder.store_bit(self.after_key_block));
-            ok!(self.last_key_block.store_into(&mut builder, finalizer));
+            ok!(self.last_key_block.store_into(&mut builder, context));
 
             if let Some(stats) = &self.block_create_stats {
                 ok!(builder.store_u8(Self::BLOCK_STATS_TAG));
-                ok!(stats.store_into(&mut builder, finalizer));
+                ok!(stats.store_into(&mut builder, context));
             }
 
             if !self.copyleft_rewards.is_empty() {
-                ok!(self.copyleft_rewards.store_into(&mut builder, finalizer));
+                ok!(self.copyleft_rewards.store_into(&mut builder, context));
             }
 
-            ok!(builder.build_ext(finalizer))
+            ok!(builder.build_ext(context))
         };
 
         ok!(builder.store_u16(Self::TAG));
-        ok!(self.shards.store_into(builder, finalizer));
-        ok!(self.config.store_into(builder, finalizer));
+        ok!(self.shards.store_into(builder, context));
+        ok!(self.config.store_into(builder, context));
         ok!(builder.store_reference(cell));
-        self.global_balance.store_into(builder, finalizer)
+        self.global_balance.store_into(builder, context)
     }
 }
 

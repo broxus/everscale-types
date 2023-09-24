@@ -108,11 +108,11 @@ impl Store for IntAddr {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         match self {
-            Self::Std(addr) => addr.store_into(builder, finalizer),
-            Self::Var(addr) => addr.store_into(builder, finalizer),
+            Self::Std(addr) => addr.store_into(builder, context),
+            Self::Var(addr) => addr.store_into(builder, context),
         }
     }
 }
@@ -271,13 +271,13 @@ impl Store for StdAddr {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         if !builder.has_capacity(self.bit_len(), 0) {
             return Err(Error::CellOverflow);
         }
         ok!(builder.store_small_uint(0b10, 2));
-        ok!(self.anycast.store_into(builder, finalizer));
+        ok!(self.anycast.store_into(builder, context));
         ok!(builder.store_u8(self.workchain as u8));
         builder.store_u256(&self.address)
     }
@@ -397,14 +397,14 @@ impl Store for VarAddr {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         if !builder.has_capacity(self.bit_len(), 0) {
             return Err(Error::CellOverflow);
         }
         ok!(builder.store_small_uint(0b11, 2));
-        ok!(self.anycast.store_into(builder, finalizer));
-        ok!(self.address_len.store_into(builder, finalizer));
+        ok!(self.anycast.store_into(builder, context));
+        ok!(self.address_len.store_into(builder, context));
         ok!(builder.store_u32(self.workchain as u32));
         builder.store_raw(&self.address, self.address_len.into_inner())
     }
@@ -542,12 +542,12 @@ impl Store for Anycast {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         if !builder.has_capacity(self.bit_len(), 0) {
             return Err(Error::CellOverflow);
         }
-        ok!(self.depth.store_into(builder, finalizer));
+        ok!(self.depth.store_into(builder, context));
         builder.store_raw(&self.rewrite_prefix, self.depth.into_bit_len())
     }
 }

@@ -230,7 +230,7 @@ fn shard_ident_store_load() {
     fn check_store_load(shard: ShardIdent) {
         let mut builder = CellBuilder::new();
         shard
-            .store_into(&mut builder, &mut Cell::default_finalizer())
+            .store_into(&mut builder, &mut Cell::empty_context())
             .unwrap();
         let cell = builder.build().unwrap();
         assert_eq!(cell.bit_len(), ShardIdent::BITS);

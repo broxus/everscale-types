@@ -406,7 +406,7 @@ impl ShardIdent {
 }
 
 impl Store for ShardIdent {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         let prefix_len = self.prefix_len() as u8;
         let prefix_without_tag = self.prefix - self.prefix_tag();
         ok!(builder.store_u8(prefix_len));

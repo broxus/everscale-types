@@ -10,8 +10,8 @@ use sha2::Digest;
 use crate::abi::value::ser::AbiSerializer;
 use crate::abi::AbiHeader;
 use crate::cell::{
-    Cell, CellBuilder, CellFamily, CellSlice, CellSliceRange, CellSliceSize, DefaultFinalizer,
-    DynCell, HashBytes, Store,
+    Cell, CellBuilder, CellFamily, CellSlice, CellSliceRange, CellSliceSize, DynCell, HashBytes,
+    Store,
 };
 use crate::dict::RawDict;
 use crate::models::{
@@ -78,7 +78,7 @@ impl Contract {
             return Ok(data.clone());
         }
 
-        let finalizer = &mut Cell::default_finalizer();
+        let context = &mut Cell::empty_context();
         let mut key_builder = CellBuilder::new();
 
         for token in tokens {
@@ -92,7 +92,7 @@ impl Contract {
             result.set_ext(
                 key_builder.as_data_slice(),
                 &token.make_builder(self.abi_version)?.as_full_slice(),
-                finalizer,
+                context,
             )?;
 
             key_builder.rewind(64)?;
@@ -104,12 +104,12 @@ impl Contract {
             result.set_ext(
                 key_builder.as_data_slice(),
                 &CellBuilder::from_raw_data(pubkey.as_bytes(), 256)?.as_data_slice(),
-                finalizer,
+                context,
             )?;
         }
 
         // Encode init data as mapping
-        CellBuilder::build_from_ext(result, finalizer).map_err(From::from)
+        CellBuilder::build_from_ext(result, context).map_err(From::from)
     }
 
     /// Encodes an account data with the specified initial parameters.
@@ -129,7 +129,7 @@ impl Contract {
             .map(|(name, value)| (name.as_ref(), value))
             .collect::<HashMap<_, _>>();
 
-        let finalizer = &mut Cell::default_finalizer();
+        let context = &mut Cell::empty_context();
         let mut key_builder = CellBuilder::new();
 
         // Write explicitly provided values
@@ -144,7 +144,7 @@ impl Contract {
             result.set_ext(
                 key_builder.as_data_slice(),
                 &token.make_builder(self.abi_version)?.as_full_slice(),
-                finalizer,
+                context,
             )?;
 
             key_builder.rewind(64)?;
@@ -159,7 +159,7 @@ impl Contract {
                 &ty.make_default_value()
                     .make_builder(self.abi_version)?
                     .as_full_slice(),
-                finalizer,
+                context,
             )?;
 
             key_builder.rewind(64)?;
@@ -170,11 +170,11 @@ impl Contract {
         result.set_ext(
             key_builder.as_data_slice(),
             &CellBuilder::from_raw_data(pubkey.as_bytes(), 256)?.as_data_slice(),
-            finalizer,
+            context,
         )?;
 
         // Encode init data as mapping
-        CellBuilder::build_from_ext(result, finalizer).map_err(From::from)
+        CellBuilder::build_from_ext(result, context).map_err(From::from)
     }
 
     /// Tries to parse init data fields of this contract from an account data.
@@ -444,10 +444,10 @@ impl Function {
             serializer.reserve_value(&token.value);
         }
 
-        let finalizer = &mut Cell::default_finalizer();
-        serializer.write_value(&output_id, finalizer)?;
-        serializer.write_tuple(tokens, finalizer)?;
-        serializer.finalize(finalizer).map_err(From::from)
+        let context = &mut Cell::empty_context();
+        serializer.write_value(&output_id, context)?;
+        serializer.write_tuple(tokens, context)?;
+        serializer.finalize(context).map_err(From::from)
     }
 
     /// Returns a method builder with the specified ABI version and name.
@@ -684,15 +684,15 @@ impl<'f, 'a> ExternalInput<'f, 'a> {
     fn build_input_ext(&self, address: Option<&StdAddr>) -> Result<UnsignedBody> {
         let (expire_at, payload) = self.build_payload(true)?;
 
-        let finalizer = &mut Cell::default_finalizer();
+        let context = &mut Cell::empty_context();
         let hash = if self.function.abi_version >= AbiVersion::V2_3 {
             let mut to_sign = CellBuilder::new();
             match address {
-                Some(address) => address.store_into(&mut to_sign, finalizer)?,
+                Some(address) => address.store_into(&mut to_sign, context)?,
                 None => anyhow::bail!(AbiError::AddressNotProvided),
             };
             to_sign.store_slice(payload.as_slice()?)?;
-            *to_sign.build_ext(finalizer)?.repr_hash()
+            *to_sign.build_ext(context)?.repr_hash()
         } else {
             *payload.repr_hash()
         };
@@ -753,7 +753,7 @@ impl<'f, 'a> ExternalInput<'f, 'a> {
             serializer.reserve_value(&token.value);
         }
 
-        let finalizer = &mut Cell::default_finalizer();
+        let context = &mut Cell::empty_context();
 
         if !reserve_signature {
             let value = if abi_version.major == 1 {
@@ -762,7 +762,7 @@ impl<'f, 'a> ExternalInput<'f, 'a> {
                 AbiValue::Bool(false)
             };
             serializer.reserve_value(&value);
-            serializer.write_value(&value, finalizer)?;
+            serializer.write_value(&value, context)?;
         }
 
         let time = self.time.unwrap_or_else(now_ms);
@@ -780,10 +780,10 @@ impl<'f, 'a> ExternalInput<'f, 'a> {
             })?;
         }
 
-        serializer.write_value(&input_id, finalizer)?;
-        serializer.write_tuple(self.tokens, finalizer)?;
+        serializer.write_value(&input_id, context)?;
+        serializer.write_tuple(self.tokens, context)?;
 
-        let payload = serializer.finalize(finalizer)?.build_ext(finalizer)?;
+        let payload = serializer.finalize(context)?.build_ext(context)?;
         Ok((expire_at, payload))
     }
 

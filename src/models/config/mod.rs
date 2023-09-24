@@ -25,7 +25,7 @@ pub struct BlockchainConfig {
 }
 
 impl Store for BlockchainConfig {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         let params_root = match self.params.root() {
             Some(root) => root.clone(),
             None => return Err(Error::InvalidData),
@@ -316,7 +316,7 @@ where
 {
     #[inline]
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        match Dict::load_from_root_ext(slice, &mut Cell::default_finalizer()) {
+        match Dict::load_from_root_ext(slice, &mut Cell::empty_context()) {
             Ok(value) => Ok(Self(value)),
             Err(e) => Err(e),
         }
