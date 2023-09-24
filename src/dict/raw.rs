@@ -1430,4 +1430,133 @@ mod tests {
 
         Ok(())
     }
+
+    #[derive(Debug, Default)]
+    struct SimpleContext {
+        used_gas: u64,
+        loaded_cells: ahash::HashSet<HashBytes>,
+        empty_context: <Cell as CellFamily>::EmptyCellContext,
+    }
+
+    impl SimpleContext {
+        const BUILD_CELL_GAS: u64 = 500;
+        const NEW_CELL_GAS: u64 = 100;
+        const OLD_CELL_GAS: u64 = 25;
+
+        fn consume_gas(&mut self, cell: &DynCell, mode: LoadMode) {
+            if mode.use_gas() {
+                self.used_gas += if self.loaded_cells.insert(*cell.repr_hash()) {
+                    Self::NEW_CELL_GAS
+                } else {
+                    Self::OLD_CELL_GAS
+                };
+            }
+        }
+    }
+
+    impl CellContext for SimpleContext {
+        #[inline]
+        fn finalize_cell(&mut self, cell: CellParts<'_>) -> Result<Cell, Error> {
+            self.used_gas += Self::BUILD_CELL_GAS;
+            self.empty_context.finalize_cell(cell)
+        }
+
+        #[inline]
+        fn load_cell(&mut self, cell: Cell, mode: LoadMode) -> Result<Cell, Error> {
+            self.consume_gas(cell.as_ref(), mode);
+            Ok(cell)
+        }
+
+        #[inline]
+        fn load_dyn_cell<'a>(
+            &mut self,
+            cell: &'a DynCell,
+            mode: LoadMode,
+        ) -> Result<&'a DynCell, Error> {
+            self.consume_gas(cell, mode);
+            Ok(cell)
+        }
+    }
+
+    #[test]
+    fn dict_get_gas_usage() -> anyhow::Result<()> {
+        // Prepare dict
+        let mut dict = RawDict::<32>::new();
+        for i in 0..10 {
+            let mut key = CellBuilder::new();
+            key.store_u32(i)?;
+            dict.set(key.as_data_slice(), i)?;
+        }
+
+        // First get
+        let context = &mut SimpleContext::default();
+
+        let mut key = CellBuilder::new();
+        key.store_u32(5)?;
+
+        dict.get_ext(key.as_data_slice(), context)?.unwrap();
+        assert_eq!(context.used_gas, SimpleContext::NEW_CELL_GAS * 5);
+
+        context.used_gas = 0;
+        dict.get_ext(key.as_data_slice(), context)?.unwrap();
+        assert_eq!(context.used_gas, SimpleContext::OLD_CELL_GAS * 5);
+
+        // Second get
+        context.used_gas = 0;
+        let mut key = CellBuilder::new();
+        key.store_u32(9)?;
+
+        dict.get_ext(key.as_data_slice(), context)?.unwrap();
+        assert_eq!(
+            context.used_gas,
+            SimpleContext::OLD_CELL_GAS * 1 + SimpleContext::NEW_CELL_GAS * 2
+        );
+
+        context.used_gas = 0;
+        dict.get_ext(key.as_data_slice(), context)?.unwrap();
+        assert_eq!(context.used_gas, SimpleContext::OLD_CELL_GAS * 3);
+
+        Ok(())
+    }
+
+    #[test]
+    fn dict_get_owned_gas_usage() -> anyhow::Result<()> {
+        // Prepare dict
+        let mut dict = RawDict::<32>::new();
+        for i in 0..10 {
+            let mut key = CellBuilder::new();
+            key.store_u32(i)?;
+            dict.set(key.as_data_slice(), i)?;
+        }
+
+        // First get
+        let context = &mut SimpleContext::default();
+
+        let mut key = CellBuilder::new();
+        key.store_u32(5)?;
+
+        dict.get_owned_ext(key.as_data_slice(), context)?.unwrap();
+        assert_eq!(context.used_gas, SimpleContext::NEW_CELL_GAS * 5);
+
+        context.used_gas = 0;
+        dict.get_owned_ext(key.as_data_slice(), context)?.unwrap();
+        assert_eq!(context.used_gas, SimpleContext::OLD_CELL_GAS * 5);
+
+        // Second get
+        context.used_gas = 0;
+        let mut key = CellBuilder::new();
+        key.store_u32(9)?;
+
+        dict.get_owned_ext(key.as_data_slice(), context)?.unwrap();
+        assert_eq!(
+            context.used_gas,
+            SimpleContext::OLD_CELL_GAS * 1 + SimpleContext::NEW_CELL_GAS * 2
+        );
+
+        context.used_gas = 0;
+        dict.get_owned_ext(key.as_data_slice(), context)?.unwrap();
+        assert_eq!(context.used_gas, SimpleContext::OLD_CELL_GAS * 3);
+
+        Ok(())
+    }
 }

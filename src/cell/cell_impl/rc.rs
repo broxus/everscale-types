@@ -121,7 +121,7 @@ impl TryAsMut<DynCell> for Cell {
 }
 
 /// Empty context for single-threaded cells.
-#[derive(Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct EmptyCellContext;
 
 impl CellContext for EmptyCellContext {
