@@ -32,7 +32,7 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Erro
             fn store_into(
                 &self,
                 __builder: &mut ::everscale_types::cell::CellBuilder,
-                __finalizer: &mut dyn ::everscale_types::cell::Finalizer
+                __context: &mut dyn ::everscale_types::cell::CellContext,
             ) -> ::core::result::Result<(), ::everscale_types::error::Error> {
                 #body
             }
@@ -151,7 +151,7 @@ fn store_op(field_ident: &TokenStream, ty: &syn::Type) -> TokenStream {
         }
     };
 
-    quote! { <#ty as ::everscale_types::cell::Store>::store_into(&#field_ident, __builder, __finalizer) }
+    quote! { <#ty as ::everscale_types::cell::Store>::store_into(&#field_ident, __builder, __context) }
 }
 
 fn into_ok(tokens: TokenStream) -> TokenStream {

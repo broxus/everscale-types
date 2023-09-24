@@ -188,7 +188,7 @@ pub fn dict_remove_owned(
             &mut builder
         ));
         ok!(builder.store_slice(opposite));
-        let leaf = ok!(builder.build_ext(context.as_finalizer()));
+        let leaf = ok!(builder.build_ext(context));
 
         // Return the new cell and the removed one
         (leaf, (value, removed))
@@ -221,7 +221,7 @@ pub fn dict_insert(
         // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok.
         Some(data) => ok!(context.load_dyn_cell(data.as_ref(), LoadMode::Full)),
         None if mode.can_add() => {
-            let data = ok!(make_leaf(key, key_bit_len, value, context.as_finalizer()));
+            let data = ok!(make_leaf(key, key_bit_len, value, context));
             return Ok((Some(data), true));
         }
         None => return Ok((None, false)),
@@ -246,12 +246,7 @@ pub fn dict_insert(
                     return Ok((root.cloned(), false));
                 }
                 // Replace the existing value
-                break ok!(make_leaf(
-                    prefix,
-                    key.remaining_bits(),
-                    value,
-                    context.as_finalizer()
-                ));
+                break ok!(make_leaf(prefix, key.remaining_bits(), value, context));
             }
             // LCP is less than prefix, an edge to slice was found
             std::cmp::Ordering::Less if lcp.remaining_bits() < prefix.remaining_bits() => {
@@ -266,7 +261,7 @@ pub fn dict_insert(
                     &lcp,
                     key,
                     value,
-                    context.as_finalizer()
+                    context
                 ));
             }
             // The key contains the entire prefix, but there are still some bits left
@@ -344,7 +339,7 @@ pub fn dict_insert_owned(
         // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok.
         Some(data) => ok!(context.load_cell(data, LoadMode::Full)),
         None if mode.can_add() => {
-            let data = ok!(make_leaf(key, key_bit_len, value, context.as_finalizer()));
+            let data = ok!(make_leaf(key, key_bit_len, value, context));
             return Ok((Some(data), true, None));
         }
         None => return Ok((None, false, None)),
@@ -374,12 +369,7 @@ pub fn dict_insert_owned(
                 }
                 // Replace the existing value
                 break (
-                    ok!(make_leaf(
-                        prefix,
-                        key.remaining_bits(),
-                        value,
-                        context.as_finalizer()
-                    )),
+                    ok!(make_leaf(prefix, key.remaining_bits(), value, context)),
                     Some(remaining_data.range()),
                 );
             }
@@ -397,7 +387,7 @@ pub fn dict_insert_owned(
                         &lcp,
                         key,
                         value,
-                        context.as_finalizer()
+                        context
                     )),
                     None,
                 );
@@ -980,7 +970,7 @@ pub fn dict_remove_bound_owned(
             &mut builder
         ));
         ok!(builder.store_slice(opposite));
-        let leaf = ok!(builder.build_ext(context.as_finalizer()));
+        let leaf = ok!(builder.build_ext(context));
 
         // Return the new cell and the removed one
         (leaf, (value, removed))
@@ -998,12 +988,12 @@ fn make_leaf(
     key: &CellSlice,
     key_bit_len: u16,
     value: &dyn Store,
-    finalizer: &mut dyn Finalizer,
+    context: &mut dyn CellContext,
 ) -> Result<Cell, Error> {
     let mut builder = CellBuilder::new();
     ok!(write_label(key, key_bit_len, &mut builder));
-    ok!(value.store_into(&mut builder, finalizer));
-    builder.build_ext(finalizer)
+    ok!(value.store_into(&mut builder, context));
+    builder.build_ext(context)
 }
 
 // Splits an edge or leaf
@@ -1013,7 +1003,7 @@ fn split_edge(
     lcp: &CellSlice,
     key: &mut CellSlice,
     value: &dyn Store,
-    finalizer: &mut dyn Finalizer,
+    context: &mut dyn CellContext,
 ) -> Result<Cell, Error> {
     // Advance the key
     let prev_key_bit_len = key.remaining_bits();
@@ -1026,9 +1016,9 @@ fn split_edge(
     let old_to_right = ok!(prefix.load_bit());
 
     // Create a leaf for the old value
-    let mut left = ok!(make_leaf(prefix, key.remaining_bits(), data, finalizer));
+    let mut left = ok!(make_leaf(prefix, key.remaining_bits(), data, context));
     // Create a leaf for the right value
-    let mut right = ok!(make_leaf(key, key.remaining_bits(), value, finalizer));
+    let mut right = ok!(make_leaf(key, key.remaining_bits(), value, context));
 
     // The part that starts with 1 goes to the right cell
     if old_to_right {
@@ -1040,7 +1030,7 @@ fn split_edge(
     ok!(write_label(lcp, prev_key_bit_len, &mut builder));
     ok!(builder.store_reference(left));
     ok!(builder.store_reference(right));
-    builder.build_ext(finalizer)
+    builder.build_ext(context)
 }
 
 /// Type alias for a pair of key and value as cell slice parts.
@@ -1089,7 +1079,7 @@ impl DictBound {
 pub fn dict_load_from_root(
     slice: &mut CellSlice<'_>,
     key_bit_len: u16,
-    finalizer: &mut dyn Finalizer,
+    context: &mut dyn CellContext,
 ) -> Result<Cell, Error> {
     let mut root = *slice;
 
@@ -1107,7 +1097,7 @@ pub fn dict_load_from_root(
 
     let mut builder = CellBuilder::new();
     ok!(builder.store_slice(root));
-    builder.build_ext(finalizer)
+    builder.build_ext(context)
 }
 
 fn rebuild_dict_from_stack(
@@ -1133,7 +1123,7 @@ fn rebuild_dict_from_stack(
         ok!(builder.store_cell_data(last.data));
         ok!(builder.store_reference(left));
         ok!(builder.store_reference(right));
-        leaf = ok!(builder.build_ext(context.as_finalizer()));
+        leaf = ok!(builder.build_ext(context));
     }
 
     Ok(leaf)

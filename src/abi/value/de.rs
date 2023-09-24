@@ -593,7 +593,6 @@ mod tests {
     use std::sync::Arc;
 
     use crate::boc::Boc;
-    use crate::cell::DefaultFinalizer;
     use crate::dict::Dict;
     use crate::models::{StdAddr, VarAddr};
     use crate::num::{Uint9, VarUint24, VarUint56};
@@ -1092,24 +1091,24 @@ mod tests {
         ]);
 
         //
-        let finalizer = &mut Cell::default_finalizer();
+        let context = &mut Cell::empty_context();
         let mut builder = CellBuilder::new();
         builder.store_u32(0)?;
         builder.store_reference(Cell::empty_cell())?;
 
-        bytes_map.store_into(&mut builder, finalizer)?;
-        int_map.store_into(&mut builder, finalizer)?;
+        bytes_map.store_into(&mut builder, context)?;
+        int_map.store_into(&mut builder, context)?;
 
         let cell_v2 = {
             let mut builder = builder.clone();
-            tuples_map.store_into(&mut builder, finalizer)?;
+            tuples_map.store_into(&mut builder, context)?;
             builder.store_bit_zero()?;
             builder.build()?
         };
 
         let cell_v1 = {
             let mut child_builder = CellBuilder::new();
-            tuples_map.store_into(&mut child_builder, finalizer)?;
+            tuples_map.store_into(&mut child_builder, context)?;
             child_builder.store_bit_zero()?;
 
             builder.store_reference(child_builder.build()?)?;
@@ -1154,7 +1153,7 @@ mod tests {
             let mut builder = CellBuilder::new();
             builder.store_u32(0)?;
             builder.store_reference(Cell::empty_cell())?;
-            addr_map.store_into(&mut builder, &mut Cell::default_finalizer())?;
+            addr_map.store_into(&mut builder, &mut Cell::empty_context())?;
             builder.build()?
         };
 
@@ -1222,15 +1221,15 @@ mod tests {
 
         //
         let cell = {
-            let finalizer = &mut Cell::default_finalizer();
+            let context = &mut Cell::empty_context();
             let mut builder = CellBuilder::new();
             builder.store_u32(0)?;
             builder.store_reference(Cell::empty_cell())?;
 
-            map.store_into(&mut builder, finalizer)?;
+            map.store_into(&mut builder, context)?;
 
             builder.store_u32(1)?;
-            array.store_into(&mut builder, finalizer)?;
+            array.store_into(&mut builder, context)?;
 
             builder.build()?
         };

@@ -122,7 +122,7 @@ impl Load<'_> for MerkleProof {
 }
 
 impl Store for MerkleProof {
-    fn store_into(&self, b: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
+    fn store_into(&self, b: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         if !b.has_capacity(Self::BITS, Self::REFS) {
             return Err(Error::CellOverflow);
         }
@@ -220,10 +220,10 @@ where
         }
     }
 
-    /// Builds a Merkle proof using the specified finalizer.
-    pub fn build_ext(self, finalizer: &mut dyn Finalizer) -> Result<MerkleProof, Error> {
+    /// Builds a Merkle proof using the specified cell context.
+    pub fn build_ext(self, context: &mut dyn CellContext) -> Result<MerkleProof, Error> {
         let root = self.root;
-        let cell = ok!(self.build_raw_ext(finalizer));
+        let cell = ok!(self.build_raw_ext(context));
         Ok(MerkleProof {
             hash: *root.repr_hash(),
             depth: root.repr_depth(),
@@ -231,14 +231,14 @@ where
         })
     }
 
-    /// Builds a Merkle proof child cell using the specified finalizer.
-    pub fn build_raw_ext(self, finalizer: &mut dyn Finalizer) -> Result<Cell, Error> {
+    /// Builds a Merkle proof child cell using the specified cell context.
+    pub fn build_raw_ext(self, context: &mut dyn CellContext) -> Result<Cell, Error> {
         BuilderImpl::<ahash::RandomState> {
             root: self.root,
             filter: &self.filter,
             cells: Default::default(),
             pruned_branches: None,
-            finalizer,
+            context,
         }
         .build()
     }
@@ -248,9 +248,9 @@ impl<'a, F> MerkleProofBuilder<'a, F>
 where
     F: MerkleFilter,
 {
-    /// Builds a Merkle proof using the default finalizer.
+    /// Builds a Merkle proof using an empty cell context.
     pub fn build(self) -> Result<MerkleProof, Error> {
-        self.build_ext(&mut Cell::default_finalizer())
+        self.build_ext(&mut Cell::empty_context())
     }
 }
 
@@ -264,10 +264,10 @@ impl<'a, F> MerkleProofExtBuilder<'a, F>
 where
     F: MerkleFilter,
 {
-    /// Builds a Merkle proof child cell using the specified finalizer.
+    /// Builds a Merkle proof child cell using the specified cell context.
     pub fn build_raw_ext(
         self,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(Cell, ahash::HashMap<&'a HashBytes, bool>), Error> {
         let mut pruned_branches = Default::default();
         let mut builder = BuilderImpl {
@@ -275,7 +275,7 @@ where
             filter: &self.filter,
             cells: Default::default(),
             pruned_branches: Some(&mut pruned_branches),
-            finalizer,
+            context,
         };
         let cell = ok!(builder.build());
         Ok((cell, pruned_branches))
@@ -287,7 +287,7 @@ struct BuilderImpl<'a, 'b, S = ahash::RandomState> {
     filter: &'b dyn MerkleFilter,
     cells: HashMap<&'a HashBytes, Cell, S>,
     pruned_branches: Option<&'b mut HashMap<&'a HashBytes, bool, S>>,
-    finalizer: &'b mut dyn Finalizer,
+    context: &'b mut dyn CellContext,
 }
 
 impl<'a, 'b, S> BuilderImpl<'a, 'b, S>
@@ -341,7 +341,7 @@ where
                             let child = ok!(make_pruned_branch_cold(
                                 child,
                                 last.merkle_depth,
-                                self.finalizer
+                                self.context
                             ));
 
                             // Insert pruned branch for the current cell
@@ -381,7 +381,7 @@ where
                 builder.set_exotic(last.descriptor.is_exotic());
                 _ = builder.store_cell_data(cell);
                 builder.set_references(last.children);
-                let proof_cell = ok!(builder.build_ext(self.finalizer));
+                let proof_cell = ok!(builder.build_ext(self.context));
 
                 // Save this cell as processed cell
                 self.cells.insert(cell.repr_hash(), proof_cell.clone());
@@ -406,7 +406,7 @@ where
 fn make_pruned_branch_cold(
     cell: &DynCell,
     merkle_depth: u8,
-    finalizer: &mut dyn Finalizer,
+    context: &mut dyn CellContext,
 ) -> Result<Cell, Error> {
-    make_pruned_branch(cell, merkle_depth, finalizer)
+    make_pruned_branch(cell, merkle_depth, context)
 }

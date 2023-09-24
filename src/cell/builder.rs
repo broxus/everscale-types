@@ -3,7 +3,7 @@ use std::mem::MaybeUninit;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::cell::finalizer::{CellParts, DefaultFinalizer, Finalizer};
+use crate::cell::cell_context::{CellContext, CellParts};
 use crate::cell::{
     Cell, CellDescriptor, CellImpl, CellSlice, CellType, DynCell, HashBytes, LevelMask,
     MAX_BIT_LEN, MAX_REF_COUNT,
@@ -11,6 +11,7 @@ use crate::cell::{
 use crate::error::Error;
 use crate::util::{ArrayVec, Bitstring};
 
+use super::CellFamily;
 #[cfg(feature = "stats")]
 use super::CellTreeStats;
 
@@ -20,7 +21,7 @@ pub trait Store {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error>;
 }
 
@@ -29,9 +30,9 @@ impl<T: Store + ?Sized> Store for &T {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
-        <T as Store>::store_into(self, builder, finalizer)
+        <T as Store>::store_into(self, builder, context)
     }
 }
 
@@ -40,9 +41,9 @@ impl<T: Store + ?Sized> Store for Box<T> {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
-        <T as Store>::store_into(self.as_ref(), builder, finalizer)
+        <T as Store>::store_into(self.as_ref(), builder, context)
     }
 }
 
@@ -51,9 +52,9 @@ impl<T: Store + ?Sized> Store for Arc<T> {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
-        <T as Store>::store_into(self.as_ref(), builder, finalizer)
+        <T as Store>::store_into(self.as_ref(), builder, context)
     }
 }
 
@@ -62,15 +63,15 @@ impl<T: Store + ?Sized> Store for Rc<T> {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
-        <T as Store>::store_into(self.as_ref(), builder, finalizer)
+        <T as Store>::store_into(self.as_ref(), builder, context)
     }
 }
 
 impl Store for () {
     #[inline]
-    fn store_into(&self, _: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
+    fn store_into(&self, _: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         Ok(())
     }
 }
@@ -81,10 +82,10 @@ macro_rules! impl_store_for_tuples {
             fn store_into(
                 &self,
                 builder: &mut CellBuilder,
-                finalizer: &mut dyn Finalizer
+                context: &mut dyn CellContext
             ) -> Result<(), Error> {
                 let ($($field),+) = self;
-                $(ok!($field.store_into(builder, finalizer)));*;
+                $(ok!($field.store_into(builder, context)));*;
                 Ok(())
             }
         }
@@ -104,12 +105,12 @@ impl<T: Store> Store for Option<T> {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         match self {
             Some(data) => {
                 ok!(builder.store_bit_one());
-                data.store_into(builder, finalizer)
+                data.store_into(builder, context)
             }
             None => builder.store_bit_zero(),
         }
@@ -118,14 +119,14 @@ impl<T: Store> Store for Option<T> {
 
 impl<'a> Store for CellSlice<'a> {
     #[inline]
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         builder.store_slice(self)
     }
 }
 
 impl Store for Cell {
     #[inline]
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         builder.store_reference(self.clone())
     }
 }
@@ -136,7 +137,7 @@ macro_rules! impl_primitive_store {
             #[inline]
             fn store_into(&self,
                 $b: &mut CellBuilder,
-                _: &mut dyn Finalizer
+                _: &mut dyn CellContext
             ) -> Result<(), Error> {
                 let $v = self;
                 $expr
@@ -279,30 +280,30 @@ macro_rules! impl_store_uint {
 }
 
 impl CellBuilder {
-    /// Builds a new cell from the specified data using the default finalizer.
+    /// Builds a new cell from the specified data using the default cell context.
     #[inline]
     pub fn build_from<T>(data: T) -> Result<Cell, Error>
     where
         T: Store,
     {
-        Self::build_from_ext(data, &mut Cell::default_finalizer())
+        Self::build_from_ext(data, &mut Cell::empty_context())
     }
 
-    /// Builds a new cell from the specified data using the provided finalizer.
+    /// Builds a new cell from the specified data using the provided cell context.
     #[inline]
-    pub fn build_from_ext<T>(data: T, finalizer: &mut dyn Finalizer) -> Result<Cell, Error>
+    pub fn build_from_ext<T>(data: T, context: &mut dyn CellContext) -> Result<Cell, Error>
     where
         T: Store,
     {
         fn build_from_ext_impl(
             data: &dyn Store,
-            finalizer: &mut dyn Finalizer,
+            context: &mut dyn CellContext,
         ) -> Result<Cell, Error> {
             let mut builder = CellBuilder::new();
-            ok!(data.store_into(&mut builder, finalizer));
-            builder.build_ext(finalizer)
+            ok!(data.store_into(&mut builder, context));
+            builder.build_ext(context)
         }
-        build_from_ext_impl(&data, finalizer)
+        build_from_ext_impl(&data, context)
     }
 
     /// Creates an empty cell builder.
@@ -900,8 +901,8 @@ impl CellBuilder {
         store_slice_impl(self, value.as_ref())
     }
 
-    /// Tries to build a new cell using the specified finalizer.
-    pub fn build_ext(mut self, finalizer: &mut dyn Finalizer) -> Result<Cell, Error> {
+    /// Tries to build a new cell using the specified cell context.
+    pub fn build_ext(mut self, context: &mut dyn CellContext) -> Result<Cell, Error> {
         debug_assert!(self.bit_len <= MAX_BIT_LEN);
         debug_assert!(self.references.len() <= MAX_REF_COUNT);
 
@@ -977,16 +978,16 @@ impl CellBuilder {
             references: self.references,
             data,
         };
-        finalizer.finalize_cell(cell_parts)
+        context.finalize_cell(cell_parts)
     }
 
-    /// Tries to build a new cell using the default finalizer.
+    /// Tries to build a new cell using the default cell context.
     ///
-    /// See [`default_finalizer`]
+    /// See [`empty_context`]
     ///
-    /// [`default_finalizer`]: fn@DefaultFinalizer::default_finalizer
+    /// [`empty_context`]: fn@CellFamily::empty_context
     pub fn build(self) -> Result<Cell, Error> {
-        self.build_ext(&mut Cell::default_finalizer())
+        self.build_ext(&mut Cell::empty_context())
     }
 
     /// Returns an object which will display data as a bitstring

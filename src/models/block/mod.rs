@@ -82,7 +82,7 @@ impl Store for Block {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         let tag = if self.out_msg_queue_updates.is_none() {
             Self::TAG_V1
@@ -99,17 +99,17 @@ impl Store for Block {
             if let Some(out_msg_queue_updates) = &self.out_msg_queue_updates {
                 let cell = {
                     let mut builder = CellBuilder::new();
-                    ok!(self.state_update.store_into(&mut builder, finalizer));
-                    ok!(out_msg_queue_updates.store_into(&mut builder, finalizer));
-                    ok!(builder.build_ext(finalizer))
+                    ok!(self.state_update.store_into(&mut builder, context));
+                    ok!(out_msg_queue_updates.store_into(&mut builder, context));
+                    ok!(builder.build_ext(context))
                 };
                 builder.store_reference(cell)
             } else {
-                self.state_update.store_into(builder, finalizer)
+                self.state_update.store_into(builder, context)
             }
         );
 
-        self.extra.store_into(builder, finalizer)
+        self.extra.store_into(builder, context)
     }
 }
 
@@ -233,7 +233,7 @@ impl Store for BlockInfo {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         let packed_flags = ((self.master_ref.is_some() as u8) << 7)
             | ((self.after_merge as u8) << 6)
@@ -253,7 +253,7 @@ impl Store for BlockInfo {
         ok!(builder.store_u16(u16::from_be_bytes([packed_flags, self.flags])));
         ok!(builder.store_u32(self.seqno));
         ok!(builder.store_u32(self.vert_seqno));
-        ok!(self.shard.store_into(builder, finalizer));
+        ok!(self.shard.store_into(builder, context));
         ok!(builder.store_u32(self.gen_utime));
         #[cfg(feature = "venom")]
         ok!(builder.store_u16(self.gen_utime_ms));
@@ -265,7 +265,7 @@ impl Store for BlockInfo {
         ok!(builder.store_u32(self.prev_key_block_seqno));
 
         if self.flags & Self::FLAG_WITH_GEN_SOFTWARE != 0 {
-            ok!(self.gen_software.store_into(builder, finalizer));
+            ok!(self.gen_software.store_into(builder, context));
         }
 
         if let Some(master_ref) = &self.master_ref {
@@ -437,7 +437,7 @@ impl Store for ValueFlow {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         let tag = if self.copyleft_rewards.is_empty() {
             Self::TAG_V1
@@ -447,30 +447,30 @@ impl Store for ValueFlow {
 
         let cell1 = {
             let mut builder = CellBuilder::new();
-            ok!(self.from_prev_block.store_into(&mut builder, finalizer));
-            ok!(self.to_next_block.store_into(&mut builder, finalizer));
-            ok!(self.imported.store_into(&mut builder, finalizer));
-            ok!(self.exported.store_into(&mut builder, finalizer));
-            ok!(builder.build_ext(finalizer))
+            ok!(self.from_prev_block.store_into(&mut builder, context));
+            ok!(self.to_next_block.store_into(&mut builder, context));
+            ok!(self.imported.store_into(&mut builder, context));
+            ok!(self.exported.store_into(&mut builder, context));
+            ok!(builder.build_ext(context))
         };
 
         ok!(builder.store_u32(tag));
         ok!(builder.store_reference(cell1));
 
-        ok!(self.fees_collected.store_into(builder, finalizer));
+        ok!(self.fees_collected.store_into(builder, context));
 
         let cell2 = {
             let mut builder = CellBuilder::new();
-            ok!(self.fees_imported.store_into(&mut builder, finalizer));
-            ok!(self.recovered.store_into(&mut builder, finalizer));
-            ok!(self.created.store_into(&mut builder, finalizer));
-            ok!(self.minted.store_into(&mut builder, finalizer));
-            ok!(builder.build_ext(finalizer))
+            ok!(self.fees_imported.store_into(&mut builder, context));
+            ok!(self.recovered.store_into(&mut builder, context));
+            ok!(self.created.store_into(&mut builder, context));
+            ok!(self.minted.store_into(&mut builder, context));
+            ok!(builder.build_ext(context))
         };
         ok!(builder.store_reference(cell2));
 
         if !self.copyleft_rewards.is_empty() {
-            self.copyleft_rewards.store_into(builder, finalizer)
+            self.copyleft_rewards.store_into(builder, context)
         } else {
             Ok(())
         }

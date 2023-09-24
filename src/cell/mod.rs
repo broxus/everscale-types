@@ -7,9 +7,8 @@ use crate::error::{Error, ParseHashBytesError};
 use crate::util::Bitstring;
 
 pub use self::builder::{CellBuilder, CellRefsBuilder, Store};
-pub use self::cell_context::{CellContext, DefaultCellContext, LoadMode, NoopCellContext};
+pub use self::cell_context::{CellContext, CellParts, LoadMode};
 pub use self::cell_impl::{StaticCell, VirtualCellWrapper};
-pub use self::finalizer::{CellParts, DefaultFinalizer, Finalizer};
 pub use self::slice::{CellSlice, CellSliceParts, CellSliceRange, CellSliceSize, ExactSize, Load};
 pub use self::usage_tree::{UsageTree, UsageTreeMode, UsageTreeWithSubtrees};
 
@@ -26,9 +25,6 @@ mod cell_impl;
 
 /// Traits for gas accounting and resolving exotic cells.
 mod cell_context;
-
-/// Cell finalization primitives.
-mod finalizer;
 
 /// Cell view utils.
 mod slice;
@@ -56,6 +52,9 @@ impl<T> EquivalentRepr<T> for T {}
 
 /// Cell implementation family.
 pub trait CellFamily: Sized {
+    /// The default cell context type.
+    type EmptyCellContext: CellContext;
+
     /// Creates an empty cell.
     ///
     /// NOTE: in most cases empty cell is ZST.
@@ -63,6 +62,9 @@ pub trait CellFamily: Sized {
 
     /// Returns a static reference to the empty cell
     fn empty_cell_ref() -> &'static DynCell;
+
+    /// Creates an empty cell context.
+    fn empty_context() -> Self::EmptyCellContext;
 
     /// Returns a static reference to the cell with all zeros.
     fn all_zeros_ref() -> &'static DynCell;
@@ -1405,15 +1407,15 @@ mod tests {
         let cell = Cell::empty_cell();
 
         let pruned1 =
-            crate::merkle::make_pruned_branch(cell.as_ref(), 0, &mut Cell::default_finalizer())
+            crate::merkle::make_pruned_branch(cell.as_ref(), 0, &mut Cell::empty_context())
                 .unwrap();
 
         let pruned2 =
-            crate::merkle::make_pruned_branch(pruned1.as_ref(), 1, &mut Cell::default_finalizer())
+            crate::merkle::make_pruned_branch(pruned1.as_ref(), 1, &mut Cell::empty_context())
                 .unwrap();
 
         let pruned3 =
-            crate::merkle::make_pruned_branch(pruned2.as_ref(), 2, &mut Cell::default_finalizer())
+            crate::merkle::make_pruned_branch(pruned2.as_ref(), 2, &mut Cell::empty_context())
                 .unwrap();
 
         // Level 3 -> 2

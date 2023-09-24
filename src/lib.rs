@@ -24,8 +24,7 @@
 //! data structure and is the only way to create a new cell with the provided data.
 //! Cell creation depends on a context (e.g. message creation in a wallet or a
 //! TVM execution with gas tracking), so [`CellBuilder::build_ext`] accepts
-//! a [`Finalizer`] parameter which can be used to track and modify cells creation.
-//! All basic cell families implement [`DefaultFinalizer`] for a noop finalization.
+//! a [`CellContext`] parameter which can be used to track and modify cells creation.
 //!
 //! ## BOC
 //!
@@ -95,8 +94,7 @@
 //! [`CellBuilder`]: cell::CellBuilder
 //! [`Cell::as_slice`]: cell::CellImpl::as_slice
 //! [`CellBuilder::build_ext`]: cell::CellBuilder::build_ext
-//! [`Finalizer`]: cell::Finalizer
-//! [`DefaultFinalizer`]: cell::DefaultFinalizer
+//! [`CellContext`]: cell::CellContext
 //! [`Boc`]: boc::Boc
 //! [`BocRepr`]: boc::BocRepr
 //! [`UsageTree`]: cell::UsageTree

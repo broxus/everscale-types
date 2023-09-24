@@ -8,18 +8,19 @@ use crate::abi::{
     PlainAbiValue,
 };
 use crate::cell::{
-    Cell, CellBuilder, CellContext, CellSlice, CellSliceSize, CellTreeStats, DefaultCellContext,
-    DefaultFinalizer, Finalizer, Store, MAX_BIT_LEN, MAX_REF_COUNT,
+    Cell, CellBuilder, CellContext, CellSlice, CellSliceSize, CellTreeStats, Store, MAX_BIT_LEN,
+    MAX_REF_COUNT,
 };
 use crate::dict::{self, RawDict};
 use crate::error::Error;
 use crate::models::IntAddr;
 use crate::num::Tokens;
+use crate::prelude::CellFamily;
 
 impl NamedAbiValue {
     /// Tries to store multiple values into a new builder according to the specified ABI version.
     pub fn tuple_to_builder(items: &[Self], version: AbiVersion) -> Result<CellBuilder, Error> {
-        let context = &mut Cell::default_cell_context();
+        let context = &mut Cell::empty_context();
         let mut serializer = AbiSerializer::new(version);
         for item in items {
             serializer.reserve_value(&item.value);
@@ -49,7 +50,7 @@ impl NamedAbiValue {
 impl AbiValue {
     /// Tries to store multiple values into a new builder according to the specified ABI version.
     pub fn tuple_to_builder(values: &[Self], version: AbiVersion) -> Result<CellBuilder, Error> {
-        let context = &mut Cell::default_cell_context();
+        let context = &mut Cell::empty_context();
         let mut serializer = AbiSerializer::new(version);
         for value in values {
             serializer.reserve_value(value);
@@ -67,7 +68,7 @@ impl AbiValue {
 
     /// Tries to store this value into a new builder according to the specified ABI version.
     pub fn make_builder(&self, version: AbiVersion) -> Result<CellBuilder, Error> {
-        let context = &mut Cell::default_cell_context();
+        let context = &mut Cell::empty_context();
         let mut serializer = AbiSerializer::new(version);
         serializer.reserve_value(self);
         ok!(serializer.write_value(self, context));
@@ -268,8 +269,7 @@ impl AbiSerializer {
 
         let mut result = self.stack.pop().unwrap_or_default();
         while let Some(builder) = self.stack.pop() {
-            let child =
-                ok!(std::mem::replace(&mut result, builder).build_ext(context.as_finalizer()));
+            let child = ok!(std::mem::replace(&mut result, builder).build_ext(context));
             ok!(result.store_reference(child));
         }
         Ok(result)
@@ -283,8 +283,7 @@ impl AbiSerializer {
 
         let mut result = self.stack.pop().unwrap_or_default();
         while let Some(builder) = self.stack.pop() {
-            let child =
-                ok!(std::mem::replace(&mut result, builder).build_ext(context.as_finalizer()));
+            let child = ok!(std::mem::replace(&mut result, builder).build_ext(context));
             ok!(result.store_reference(child));
         }
         Ok(result)
@@ -437,7 +436,7 @@ impl AbiSerializer {
             },
             refs: 0,
         });
-        address.store_into(target, &mut Cell::default_finalizer())
+        address.store_into(target, &mut Cell::empty_context())
     }
 
     fn write_tokens(&mut self, tokens: &Tokens) -> Result<(), Error> {
@@ -449,7 +448,7 @@ impl AbiSerializer {
             },
             refs: 0,
         });
-        tokens.store_into(target, &mut Cell::default_finalizer())
+        tokens.store_into(target, &mut Cell::empty_context())
     }
 
     fn write_bytes(&mut self, mut data: &[u8], context: &mut dyn CellContext) -> Result<(), Error> {
@@ -472,7 +471,7 @@ impl AbiSerializer {
             data = head;
 
             if result.bit_len() > 0 {
-                let child = ok!(std::mem::take(&mut result).build_ext(context.as_finalizer()));
+                let child = ok!(std::mem::take(&mut result).build_ext(context));
                 ok!(result.store_reference(child));
             }
 
@@ -508,7 +507,7 @@ impl AbiSerializer {
             let value = if inline_value {
                 InlineOrRef::Inline(value.as_full_slice())
             } else {
-                InlineOrRef::Ref(ok!(value.build_ext(context.as_finalizer())))
+                InlineOrRef::Ref(ok!(value.build_ext(context)))
             };
 
             ok!(dict.set(key_builder.as_data_slice(), value));
@@ -528,7 +527,7 @@ impl AbiSerializer {
         if !fixed_len {
             ok!(target.store_u32(values.len() as u32));
         }
-        dict.store_into(target, context.as_finalizer())
+        dict.store_into(target, context)
     }
 
     fn write_map(
@@ -545,7 +544,7 @@ impl AbiSerializer {
         let mut key_builder = CellBuilder::new();
         let mut serializer = self.begin_child();
         for (key, value) in value {
-            ok!(key.store_into(&mut key_builder, context.as_finalizer()));
+            ok!(key.store_into(&mut key_builder, context));
 
             let value = {
                 serializer.reserve_value(value);
@@ -555,7 +554,7 @@ impl AbiSerializer {
             let value = if inline_value {
                 InlineOrRef::Inline(value.as_full_slice())
             } else {
-                InlineOrRef::Ref(ok!(value.build_ext(context.as_finalizer())))
+                InlineOrRef::Ref(ok!(value.build_ext(context)))
             };
 
             let (new_dict, _) = ok!(dict::dict_insert(
@@ -572,7 +571,7 @@ impl AbiSerializer {
         }
 
         let target = self.require_builder(CellSliceSize { bits: 1, refs: 1 });
-        dict.store_into(target, context.as_finalizer())
+        dict.store_into(target, context)
     }
 
     fn write_optional(
@@ -618,7 +617,7 @@ impl AbiSerializer {
                 if inline {
                     target.store_builder(&value)
                 } else {
-                    target.store_reference(ok!(value.build_ext(context.as_finalizer())))
+                    target.store_reference(ok!(value.build_ext(context)))
                 }
             }
             None => {
@@ -638,7 +637,7 @@ impl AbiSerializer {
             serializer.reserve_value(value);
             ok!(serializer.write_value(value, context));
             let builder = ok!(serializer.finalize(context));
-            ok!(builder.build_ext(context.as_finalizer()))
+            ok!(builder.build_ext(context))
         };
         let target = self.require_builder(CellSliceSize { bits: 0, refs: 1 });
         target.store_reference(cell)
@@ -697,7 +696,7 @@ enum InlineOrRef<'a> {
 }
 
 impl Store for InlineOrRef<'_> {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         match self {
             Self::Inline(slice) => builder.store_slice(slice),
             Self::Ref(cell) => builder.store_reference(cell.clone()),
@@ -706,7 +705,7 @@ impl Store for InlineOrRef<'_> {
 }
 
 impl Store for PlainAbiValue {
-    fn store_into(&self, builder: &mut CellBuilder, f: &mut dyn Finalizer) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, f: &mut dyn CellContext) -> Result<(), Error> {
         match self {
             Self::Uint(bits, value) => write_int(*bits, Sign::Plus, value, builder),
             Self::Int(bits, value) => write_int(*bits, value.sign(), value.magnitude(), builder),

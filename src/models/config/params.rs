@@ -83,7 +83,7 @@ impl Store for WorkchainDescription {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         if !self.is_valid() {
             return Err(Error::InvalidData);
@@ -102,7 +102,7 @@ impl Store for WorkchainDescription {
         ok!(builder.store_u256(&self.zerostate_root_hash));
         ok!(builder.store_u256(&self.zerostate_file_hash));
         ok!(builder.store_u32(self.version));
-        self.format.store_into(builder, finalizer)
+        self.format.store_into(builder, context)
     }
 }
 
@@ -175,16 +175,16 @@ impl Store for WorkchainFormat {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         match self {
             Self::Basic(value) => {
                 ok!(builder.store_small_uint(0x1, 4));
-                value.store_into(builder, finalizer)
+                value.store_into(builder, context)
             }
             Self::Extended(value) => {
                 ok!(builder.store_small_uint(0x0, 4));
-                value.store_into(builder, finalizer)
+                value.store_into(builder, context)
             }
         }
     }
@@ -328,7 +328,7 @@ impl GasLimitsPrices {
 }
 
 impl Store for GasLimitsPrices {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         ok!(builder.store_u8(Self::TAG_FLAT_PFX));
         ok!(builder.store_u64(self.flat_gas_limit));
         ok!(builder.store_u64(self.flat_gas_price));
@@ -450,7 +450,7 @@ impl CatchainConfig {
 }
 
 impl Store for CatchainConfig {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         let flags = ((self.isolate_mc_validators as u8) << 1) | (self.shuffle_mc_validators as u8);
         ok!(builder.store_u8(Self::TAG_V2));
         ok!(builder.store_u8(flags));
@@ -512,7 +512,7 @@ impl ConsensusConfig {
 }
 
 impl Store for ConsensusConfig {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         let flags = self.new_catchain_ids as u8;
 
         ok!(builder.store_u8(Self::TAG_V2));
@@ -717,7 +717,7 @@ impl Store for ValidatorSet {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         let Ok(total) = u16::try_from(self.list.len()) else {
             return Err(Error::IntOverflow);
@@ -726,8 +726,7 @@ impl Store for ValidatorSet {
         // TODO: optimize
         let mut validators = Dict::<u16, ValidatorDescription>::new();
         for (i, item) in self.list.iter().enumerate() {
-            // TODO: use cell context instead of finalizer?
-            ok!(validators.set(i as u16, item));
+            ok!(validators.set_ext(i as u16, item, context));
         }
 
         ok!(builder.store_u8(Self::TAG_V2));
@@ -736,7 +735,7 @@ impl Store for ValidatorSet {
         ok!(builder.store_u16(total));
         ok!(builder.store_u16(self.main.get()));
         ok!(builder.store_u64(self.total_weight));
-        validators.store_into(builder, finalizer)
+        validators.store_into(builder, context)
     }
 }
 
@@ -757,7 +756,7 @@ impl<'a> Load<'a> for ValidatorSet {
             return Err(Error::InvalidData);
         }
 
-        let finalizer = &mut Cell::default_finalizer();
+        let context = &mut Cell::empty_context();
 
         let (mut total_weight, validators) = if with_total_weight {
             let total_weight = ok!(slice.load_u64());
@@ -765,7 +764,7 @@ impl<'a> Load<'a> for ValidatorSet {
             (total_weight, dict)
         } else {
             let dict = ok!(Dict::<u16, ValidatorDescription>::load_from_root_ext(
-                slice, finalizer
+                slice, context
             ));
             (0, dict)
         };
@@ -844,7 +843,7 @@ impl ValidatorDescription {
 }
 
 impl Store for ValidatorDescription {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         let with_mc_seqno = self.mc_seqno_since != 0;
 
         let tag = if with_mc_seqno {

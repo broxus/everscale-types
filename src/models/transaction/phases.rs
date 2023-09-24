@@ -46,26 +46,26 @@ impl Store for ComputePhase {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         match self {
             Self::Skipped(phase) => {
                 ok!(builder.store_bit_zero());
-                phase.store_into(builder, finalizer)
+                phase.store_into(builder, context)
             }
             Self::Executed(phase) => {
                 let cell = {
                     let mut builder = CellBuilder::new();
-                    ok!(phase.gas_used.store_into(&mut builder, finalizer));
-                    ok!(phase.gas_limit.store_into(&mut builder, finalizer));
-                    ok!(phase.gas_credit.store_into(&mut builder, finalizer));
+                    ok!(phase.gas_used.store_into(&mut builder, context));
+                    ok!(phase.gas_limit.store_into(&mut builder, context));
+                    ok!(phase.gas_credit.store_into(&mut builder, context));
                     ok!(builder.store_u8(phase.mode as u8));
                     ok!(builder.store_u32(phase.exit_code as u32));
-                    ok!(phase.exit_arg.store_into(&mut builder, finalizer));
+                    ok!(phase.exit_arg.store_into(&mut builder, context));
                     ok!(builder.store_u32(phase.vm_steps));
                     ok!(builder.store_u256(&phase.vm_init_state_hash));
                     ok!(builder.store_u256(&phase.vm_final_state_hash));
-                    ok!(builder.build_ext(finalizer))
+                    ok!(builder.build_ext(context))
                 };
 
                 let flags = 0b1000u8
@@ -73,7 +73,7 @@ impl Store for ComputePhase {
                     | ((phase.msg_state_used as u8) << 1)
                     | (phase.account_activated as u8);
                 ok!(builder.store_small_uint(flags, 4));
-                ok!(phase.gas_fees.store_into(builder, finalizer));
+                ok!(phase.gas_fees.store_into(builder, context));
                 builder.store_reference(cell)
             }
         }
@@ -161,7 +161,7 @@ pub enum ComputePhaseSkipReason {
 }
 
 impl Store for ComputePhaseSkipReason {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         let (tag, bits) = match self {
             Self::NoState => (0b00, 2),
             Self::BadState => (0b01, 2),
@@ -232,7 +232,7 @@ impl Store for ActionPhase {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         let flags = ((self.success as u8) << 2) | ((self.valid as u8) << 1) | self.no_funds as u8;
         let counts = ((self.total_actions as u64) << 48)
@@ -241,14 +241,14 @@ impl Store for ActionPhase {
             | self.messages_created as u64;
 
         ok!(builder.store_small_uint(flags, 3));
-        ok!(self.status_change.store_into(builder, finalizer));
-        ok!(self.total_fwd_fees.store_into(builder, finalizer));
-        ok!(self.total_action_fees.store_into(builder, finalizer));
+        ok!(self.status_change.store_into(builder, context));
+        ok!(self.total_fwd_fees.store_into(builder, context));
+        ok!(self.total_action_fees.store_into(builder, context));
         ok!(builder.store_u32(self.result_code as u32));
-        ok!(self.result_arg.store_into(builder, finalizer));
+        ok!(self.result_arg.store_into(builder, context));
         ok!(builder.store_u64(counts));
         ok!(builder.store_u256(&self.action_list_hash));
-        self.total_message_size.store_into(builder, finalizer)
+        self.total_message_size.store_into(builder, context)
     }
 }
 
@@ -302,17 +302,17 @@ impl Store for BouncePhase {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         match self {
             Self::NegativeFunds => builder.store_small_uint(0b00, 2),
             Self::NoFunds(phase) => {
                 ok!(builder.store_small_uint(0b01, 2));
-                phase.store_into(builder, finalizer)
+                phase.store_into(builder, context)
             }
             Self::Executed(phase) => {
                 ok!(builder.store_bit_one());
-                phase.store_into(builder, finalizer)
+                phase.store_into(builder, context)
             }
         }
     }
@@ -369,7 +369,7 @@ pub enum AccountStatusChange {
 }
 
 impl Store for AccountStatusChange {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         if *self == Self::Unchanged {
             builder.store_bit_zero()
         } else {

@@ -93,13 +93,13 @@ impl Store for DepthBalanceInfo {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         if !self.is_valid() {
             return Err(Error::IntOverflow);
         }
         ok!(builder.store_small_uint(self.split_depth, Self::SPLIT_DEPTH_BITS));
-        self.balance.store_into(builder, finalizer)
+        self.balance.store_into(builder, context)
     }
 }
 

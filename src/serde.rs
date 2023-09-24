@@ -55,7 +55,7 @@ impl Boc {
 }
 
 impl BocRepr {
-    /// Serializes type using default finalizer into an encoded BOC
+    /// Serializes the type into an encoded BOC using an empty cell context
     /// (as base64 for human readable serializers).
     pub fn serialize<S: Serializer, T>(data: &T, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -64,14 +64,14 @@ impl BocRepr {
     {
         use ::serde::ser::Error;
 
-        let mut finalizer = Cell::default_finalizer();
+        let context = &mut Cell::empty_context();
 
         let mut builder = CellBuilder::new();
-        if data.store_into(&mut builder, &mut finalizer).is_err() {
+        if data.store_into(&mut builder, context).is_err() {
             return Err(Error::custom("cell overflow"));
         }
 
-        let cell = match builder.build_ext(&mut finalizer) {
+        let cell = match builder.build_ext(context) {
             Ok(cell) => cell,
             Err(_) => return Err(Error::custom("failed to store into builder")),
         };
@@ -79,7 +79,7 @@ impl BocRepr {
         cell.as_ref().serialize(serializer)
     }
 
-    /// Deserializes type using default finalizer from an encoded BOC
+    /// Deserializes the type from an encoded BOC using an empty cell context
     /// (from base64 for human readable serializers).
     pub fn deserialize<'de, D, T>(deserializer: D) -> Result<T, D::Error>
     where

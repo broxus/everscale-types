@@ -82,7 +82,7 @@ impl Load<'_> for MerkleUpdate {
 }
 
 impl Store for MerkleUpdate {
-    fn store_into(&self, b: &mut CellBuilder, _: &mut dyn Finalizer) -> Result<(), Error> {
+    fn store_into(&self, b: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         if !b.has_capacity(Self::BITS, Self::REFS) {
             return Err(Error::CellOverflow);
         }
@@ -113,14 +113,14 @@ impl MerkleUpdate {
     }
 
     /// Tries to apply this Merkle update to the specified cell,
-    /// producing a new cell and using the default finalizer.
+    /// producing a new cell and using an empty cell context.
     pub fn apply(&self, old: &Cell) -> Result<Cell, Error> {
-        self.apply_ext(old, &mut Cell::default_finalizer())
+        self.apply_ext(old, &mut Cell::empty_context())
     }
 
     /// Tries to apply this Merkle update to the specified cell,
-    /// producing a new cell and using the specified finalizer.
-    pub fn apply_ext(&self, old: &Cell, finalizer: &mut dyn Finalizer) -> Result<Cell, Error> {
+    /// producing a new cell and using an empty cell context.
+    pub fn apply_ext(&self, old: &Cell, context: &mut dyn CellContext) -> Result<Cell, Error> {
         if old.as_ref().repr_hash() != &self.old_hash {
             return Err(Error::InvalidData);
         }
@@ -132,7 +132,7 @@ impl MerkleUpdate {
         struct Applier<'a> {
             old_cells: ahash::HashMap<HashBytes, Cell>,
             new_cells: ahash::HashMap<HashBytes, Cell>,
-            finalizer: &'a mut dyn Finalizer,
+            context: &'a mut dyn CellContext,
         }
 
         impl Applier<'_> {
@@ -180,7 +180,7 @@ impl MerkleUpdate {
 
                 _ = result.store_cell_data(cell);
 
-                result.build_ext(self.finalizer)
+                result.build_ext(self.context)
             }
         }
 
@@ -216,7 +216,7 @@ impl MerkleUpdate {
         let new = Applier {
             old_cells,
             new_cells: Default::default(),
-            finalizer,
+            context,
         }
         .run(self.new.as_ref(), 0)?;
 
@@ -310,13 +310,13 @@ where
         }
     }
 
-    /// Builds a Merkle update using the specified finalizer.
-    pub fn build_ext(self, finalizer: &mut dyn Finalizer) -> Result<MerkleUpdate, Error> {
+    /// Builds a Merkle update using the specified cell context.
+    pub fn build_ext(self, context: &mut dyn CellContext) -> Result<MerkleUpdate, Error> {
         BuilderImpl {
             old: self.old,
             new: self.new,
             filter: &self.filter,
-            finalizer,
+            context,
         }
         .build()
     }
@@ -326,9 +326,9 @@ impl<'a, F> MerkleUpdateBuilder<'a, F>
 where
     F: MerkleFilter,
 {
-    /// Builds a Merkle update using the default finalizer.
+    /// Builds a Merkle update using an empty cell context.
     pub fn build(self) -> Result<MerkleUpdate, Error> {
-        self.build_ext(&mut Cell::default_finalizer())
+        self.build_ext(&mut Cell::empty_context())
     }
 }
 
@@ -336,7 +336,7 @@ struct BuilderImpl<'a, 'b> {
     old: &'a DynCell,
     new: &'a DynCell,
     filter: &'b dyn MerkleFilter,
-    finalizer: &'b mut dyn Finalizer,
+    context: &'b mut dyn CellContext,
 }
 
 impl<'a: 'b, 'b> BuilderImpl<'a, 'b> {
@@ -420,7 +420,7 @@ impl<'a: 'b, 'b> BuilderImpl<'a, 'b> {
 
         // Handle the simplest case with empty Merkle update
         if old_hash == new_hash {
-            let pruned = ok!(make_pruned_branch(self.old, 0, self.finalizer));
+            let pruned = ok!(make_pruned_branch(self.old, 0, self.context));
             return Ok(MerkleUpdate {
                 old_hash: *old_hash,
                 new_hash: *old_hash,
@@ -438,7 +438,7 @@ impl<'a: 'b, 'b> BuilderImpl<'a, 'b> {
                 InvertedFilter(self.filter)
             )
             .track_pruned_branches()
-            .build_raw_ext(self.finalizer)
+            .build_raw_ext(self.context)
         };
 
         // Prepare cell diff resolver
@@ -457,7 +457,7 @@ impl<'a: 'b, 'b> BuilderImpl<'a, 'b> {
         // Create Merkle proof cell which contains only changed cells
         let old = ok! {
             MerkleProofBuilder::<_>::new(self.old, resolver.changed_cells)
-                .build_raw_ext(self.finalizer)
+                .build_raw_ext(self.context)
         };
 
         // Done
@@ -483,7 +483,7 @@ mod tests {
 
         let mut builder = CellBuilder::new();
         default
-            .store_into(&mut builder, &mut Cell::default_finalizer())
+            .store_into(&mut builder, &mut Cell::empty_context())
             .unwrap();
         let cell = builder.build().unwrap();
 
@@ -541,7 +541,7 @@ mod tests {
             // Test serialization
             let mut builder = CellBuilder::new();
             merkle_update
-                .store_into(&mut builder, &mut Cell::default_finalizer())
+                .store_into(&mut builder, &mut Cell::empty_context())
                 .unwrap();
             builder.build().unwrap();
         }

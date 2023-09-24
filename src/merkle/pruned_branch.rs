@@ -5,7 +5,7 @@ use crate::error::Error;
 pub fn make_pruned_branch(
     cell: &DynCell,
     merkle_depth: u8,
-    finalizer: &mut dyn Finalizer,
+    context: &mut dyn CellContext,
 ) -> Result<Cell, Error> {
     let descriptor = cell.descriptor();
     let cell_level_mask = descriptor.level_mask();
@@ -28,7 +28,7 @@ pub fn make_pruned_branch(
         _ = builder.store_u16(cell.depth(level));
     }
 
-    builder.build_ext(finalizer)
+    builder.build_ext(context)
 }
 
 #[cfg(test)]
@@ -45,7 +45,7 @@ mod test {
         };
 
         let pruned_branch =
-            make_pruned_branch(cell.as_ref(), 0, &mut Cell::default_finalizer()).unwrap();
+            make_pruned_branch(cell.as_ref(), 0, &mut Cell::empty_context()).unwrap();
         assert_eq!(cell.repr_hash(), pruned_branch.hash(0));
         assert_eq!(cell.depth(0), pruned_branch.depth(0));
 
@@ -54,7 +54,7 @@ mod test {
         assert_eq!(cell.depth(3), virtual_cell.depth(3));
 
         let virtual_pruned_branch =
-            make_pruned_branch(virtual_cell, 0, &mut Cell::default_finalizer()).unwrap();
+            make_pruned_branch(virtual_cell, 0, &mut Cell::empty_context()).unwrap();
         assert_eq!(pruned_branch.as_ref(), virtual_pruned_branch.as_ref());
     }
 }

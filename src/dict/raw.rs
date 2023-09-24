@@ -61,9 +61,9 @@ impl<const N: u16> Store for RawDict<N> {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<(), Error> {
-        self.0.store_into(builder, finalizer)
+        self.0.store_into(builder, context)
     }
 }
 
@@ -130,9 +130,9 @@ impl<const N: u16> RawDict<N> {
     #[inline]
     pub fn load_from_root_ext(
         slice: &mut CellSlice<'_>,
-        finalizer: &mut dyn Finalizer,
+        context: &mut dyn CellContext,
     ) -> Result<Self, Error> {
-        match dict_load_from_root(slice, N, finalizer) {
+        match dict_load_from_root(slice, N, context) {
             Ok(root) => Ok(Self(Some(root))),
             Err(e) => Err(e),
         }
@@ -142,7 +142,7 @@ impl<const N: u16> RawDict<N> {
     ///
     /// NOTE: Uses the default cell context.
     pub fn get<'a>(&'a self, key: CellSlice<'_>) -> Result<Option<CellSlice<'a>>, Error> {
-        dict_get(self.0.as_ref(), N, key, &mut Cell::default_cell_context())
+        dict_get(self.0.as_ref(), N, key, &mut Cell::empty_context())
     }
 
     /// Returns a `CellSlice` of the value corresponding to the key.
@@ -168,7 +168,7 @@ impl<const N: u16> RawDict<N> {
             DictBound::Max,
             false,
             signed,
-            &mut Cell::default_cell_context(),
+            &mut Cell::empty_context(),
         )
     }
 
@@ -186,7 +186,7 @@ impl<const N: u16> RawDict<N> {
             DictBound::Min,
             false,
             signed,
-            &mut Cell::default_cell_context(),
+            &mut Cell::empty_context(),
         )
     }
 
@@ -204,7 +204,7 @@ impl<const N: u16> RawDict<N> {
             DictBound::Max,
             true,
             signed,
-            &mut Cell::default_cell_context(),
+            &mut Cell::empty_context(),
         )
     }
 
@@ -222,7 +222,7 @@ impl<const N: u16> RawDict<N> {
             DictBound::Min,
             true,
             signed,
-            &mut Cell::default_cell_context(),
+            &mut Cell::empty_context(),
         )
     }
 
@@ -230,7 +230,7 @@ impl<const N: u16> RawDict<N> {
     ///
     /// NOTE: Uses the default cell context.
     pub fn get_owned(&self, key: CellSlice<'_>) -> Result<Option<CellSliceParts>, Error> {
-        dict_get_owned(self.0.clone(), N, key, &mut Cell::default_cell_context())
+        dict_get_owned(self.0.clone(), N, key, &mut Cell::empty_context())
     }
 
     /// Returns cell slice parts of the value corresponding to the key.
@@ -249,7 +249,7 @@ impl<const N: u16> RawDict<N> {
             N,
             DictBound::Min,
             signed,
-            &mut Cell::default_cell_context(),
+            &mut Cell::empty_context(),
         )
     }
 
@@ -260,7 +260,7 @@ impl<const N: u16> RawDict<N> {
             N,
             DictBound::Max,
             signed,
-            &mut Cell::default_cell_context(),
+            &mut Cell::empty_context(),
         )
     }
 
@@ -275,7 +275,7 @@ impl<const N: u16> RawDict<N> {
             N,
             bound,
             signed,
-            &mut Cell::default_cell_context(),
+            &mut Cell::empty_context(),
         )
     }
 
@@ -299,7 +299,7 @@ impl<const N: u16> RawDict<N> {
             N,
             DictBound::Min,
             signed,
-            &mut Cell::default_cell_context(),
+            &mut Cell::empty_context(),
         )
     }
 
@@ -313,7 +313,7 @@ impl<const N: u16> RawDict<N> {
             N,
             DictBound::Max,
             signed,
-            &mut Cell::default_cell_context(),
+            &mut Cell::empty_context(),
         )
     }
 
@@ -323,13 +323,7 @@ impl<const N: u16> RawDict<N> {
         bound: DictBound,
         signed: bool,
     ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
-        dict_find_bound_owned(
-            self.0.clone(),
-            N,
-            bound,
-            signed,
-            &mut Cell::default_cell_context(),
-        )
+        dict_find_bound_owned(self.0.clone(), N, bound, signed, &mut Cell::empty_context())
     }
 
     /// Finds the specified dict bound and returns a key and cell slice parts corresponding to the key.
@@ -348,7 +342,7 @@ impl<const N: u16> RawDict<N> {
             self.0.as_ref(),
             N,
             key,
-            &mut Cell::default_cell_context()
+            &mut Cell::empty_context()
         ))
         .is_some())
     }
@@ -517,67 +511,67 @@ impl<const N: u16> RawDict<N> {
 
     /// Sets the value associated with the key in the dictionary.
     ///
-    /// Use [`set_ext`] if you need to use a custom finalizer.
+    /// Use [`set_ext`] if you need to use a custom cell context.
     ///
     /// [`set_ext`]: RawDict::set_ext
     pub fn set<T: Store>(&mut self, key: CellSlice<'_>, value: T) -> Result<bool, Error> {
-        self.set_ext(key, &value, &mut Cell::default_cell_context())
+        self.set_ext(key, &value, &mut Cell::empty_context())
     }
 
     /// Sets the value associated with the key in the dictionary
     /// only if the key was already present in it.
     ///
-    /// Use [`replace_ext`] if you need to use a custom finalizer.
+    /// Use [`replace_ext`] if you need to use a custom cell context.
     ///
     /// [`replace_ext`]: RawDict::replace_ext
     pub fn replace<T: Store>(&mut self, key: CellSlice<'_>, value: T) -> Result<bool, Error> {
-        self.replace_ext(key, &value, &mut Cell::default_cell_context())
+        self.replace_ext(key, &value, &mut Cell::empty_context())
     }
 
     /// Sets the value associated with key in dictionary,
     /// but only if it is not already present.
     ///
-    /// Use [`add_ext`] if you need to use a custom finalizer.
+    /// Use [`add_ext`] if you need to use a custom cell context.
     ///
     /// [`add_ext`]: RawDict::add_ext
     pub fn add<T: Store>(&mut self, key: CellSlice<'_>, value: T) -> Result<bool, Error> {
-        self.add_ext(key, &value, &mut Cell::default_cell_context())
+        self.add_ext(key, &value, &mut Cell::empty_context())
     }
 
     /// Removes the value associated with key in dictionary.
     /// Returns an optional removed value as cell slice parts.
     ///
-    /// Use [`remove_ext`] if you need to use a custom finalizer.
+    /// Use [`remove_ext`] if you need to use a custom cell context.
     ///
     /// [`remove_ext`]: RawDict::remove_ext
     pub fn remove(&mut self, key: CellSlice<'_>) -> Result<Option<CellSliceParts>, Error> {
-        self.remove_ext(key, &mut Cell::default_cell_context())
+        self.remove_ext(key, &mut Cell::empty_context())
     }
 
     /// Removes the lowest key from the dict.
     /// Returns an optional removed key and value as cell slice parts.
     ///
-    /// Use [`remove_bound_ext`] if you need to use a custom finalizer.
+    /// Use [`remove_bound_ext`] if you need to use a custom context.
     ///
     /// [`remove_bound_ext`]: RawDict::remove_bound_ext
     pub fn remove_min(&mut self, signed: bool) -> Result<Option<DictOwnedEntry>, Error> {
-        self.remove_bound_ext(DictBound::Min, signed, &mut Cell::default_cell_context())
+        self.remove_bound_ext(DictBound::Min, signed, &mut Cell::empty_context())
     }
 
     /// Removes the largest key from the dict.
     /// Returns an optional removed key and value as cell slice parts.
     ///
-    /// Use [`remove_bound_ext`] if you need to use a custom finalizer.
+    /// Use [`remove_bound_ext`] if you need to use a custom cell context.
     ///
     /// [`remove_bound_ext`]: RawDict::remove_bound_ext
     pub fn remove_max(&mut self, signed: bool) -> Result<Option<DictOwnedEntry>, Error> {
-        self.remove_bound_ext(DictBound::Max, signed, &mut Cell::default_cell_context())
+        self.remove_bound_ext(DictBound::Max, signed, &mut Cell::empty_context())
     }
 
     /// Removes the specified dict bound.
     /// Returns an optional removed key and value as cell slice parts.
     ///
-    /// Use [`remove_bound_ext`] if you need to use a custom finalizer.
+    /// Use [`remove_bound_ext`] if you need to use a custom cell context.
     ///
     /// [`remove_bound_ext`]: RawDict::remove_bound_ext
     pub fn remove_bound(
@@ -585,7 +579,7 @@ impl<const N: u16> RawDict<N> {
         bound: DictBound,
         signed: bool,
     ) -> Result<Option<DictOwnedEntry>, Error> {
-        self.remove_bound_ext(bound, signed, &mut Cell::default_cell_context())
+        self.remove_bound_ext(bound, signed, &mut Cell::empty_context())
     }
 }
 
