@@ -360,8 +360,9 @@ pub fn dict_insert_owned(
             std::cmp::Ordering::Equal => {
                 // Check if we can replace the value
                 if !mode.can_replace() {
+                    // TODO: change mode to `LoadMode::Noop` if copy-on-write for libraries is not ok.
                     let value = (
-                        ok!(stack_or_last(&stack, &root, context, LoadMode::Full)),
+                        ok!(stack_or_last(&stack, &root, context, LoadMode::Resolve)),
                         remaining_data.range(),
                     );
                     // TODO: what is the desired behavior for root as a library?

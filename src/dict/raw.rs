@@ -1446,8 +1446,10 @@ mod tests {
         fn consume_gas(&mut self, cell: &DynCell, mode: LoadMode) {
             if mode.use_gas() {
                 self.used_gas += if self.loaded_cells.insert(*cell.repr_hash()) {
+                    println!("LOAD NEW");
                     Self::NEW_CELL_GAS
                 } else {
+                    println!("LOAD OLD");
                     Self::OLD_CELL_GAS
                 };
             }
@@ -1457,6 +1459,7 @@ mod tests {
     impl CellContext for SimpleContext {
         #[inline]
         fn finalize_cell(&mut self, cell: CellParts<'_>) -> Result<Cell, Error> {
+            println!("FINALIZE");
             self.used_gas += Self::BUILD_CELL_GAS;
             self.empty_context.finalize_cell(cell)
         }
@@ -1509,7 +1512,7 @@ mod tests {
         dict.get_ext(key.as_data_slice(), context)?.unwrap();
         assert_eq!(
             context.used_gas,
-            SimpleContext::OLD_CELL_GAS * 1 + SimpleContext::NEW_CELL_GAS * 2
+            SimpleContext::OLD_CELL_GAS + SimpleContext::NEW_CELL_GAS * 2
         );
 
         context.used_gas = 0;
@@ -1550,12 +1553,109 @@ mod tests {
         dict.get_owned_ext(key.as_data_slice(), context)?.unwrap();
         assert_eq!(
             context.used_gas,
-            SimpleContext::OLD_CELL_GAS * 1 + SimpleContext::NEW_CELL_GAS * 2
+            SimpleContext::OLD_CELL_GAS + SimpleContext::NEW_CELL_GAS * 2
         );
 
         context.used_gas = 0;
         dict.get_owned_ext(key.as_data_slice(), context)?.unwrap();
         assert_eq!(context.used_gas, SimpleContext::OLD_CELL_GAS * 3);
+
+        Ok(())
+    }
+
+    #[test]
+    fn dict_set_gas_usage() -> anyhow::Result<()> {
+        let target_gas = [
+            SimpleContext::BUILD_CELL_GAS,
+            SimpleContext::NEW_CELL_GAS + SimpleContext::BUILD_CELL_GAS * 3,
+            SimpleContext::NEW_CELL_GAS + SimpleContext::BUILD_CELL_GAS * 3,
+            SimpleContext::NEW_CELL_GAS * 2 + SimpleContext::BUILD_CELL_GAS * 4,
+            SimpleContext::NEW_CELL_GAS + SimpleContext::BUILD_CELL_GAS * 3,
+            SimpleContext::NEW_CELL_GAS * 2 + SimpleContext::BUILD_CELL_GAS * 4,
+            SimpleContext::NEW_CELL_GAS * 2 + SimpleContext::BUILD_CELL_GAS * 4,
+            SimpleContext::NEW_CELL_GAS * 3 + SimpleContext::BUILD_CELL_GAS * 5,
+            SimpleContext::NEW_CELL_GAS + SimpleContext::BUILD_CELL_GAS * 3,
+            SimpleContext::NEW_CELL_GAS * 2 + SimpleContext::BUILD_CELL_GAS * 4,
+        ];
+
+        // RawDict
+        let mut dict = RawDict::<32>::new();
+        for i in 0..10 {
+            let context = &mut SimpleContext::default();
+
+            let mut key = CellBuilder::new();
+            key.store_u32(i)?;
+
+            dict.set_ext(key.as_data_slice(), &i, context)?;
+
+            assert_eq!(context.used_gas, target_gas[i as usize]);
+
+            println!("===");
+        }
+
+        // Compare `dict_insert` and `dict_insert_owned`
+        let mut dict = None::<Cell>;
+        for i in 0..10 {
+            let mut key = CellBuilder::new();
+            key.store_u32(i)?;
+
+            let context = &mut SimpleContext::default();
+            let (expected_new_root, _) = crate::dict::dict_insert(
+                dict.as_ref(),
+                &mut key.as_data_slice(),
+                32,
+                &i,
+                SetMode::Set,
+                context,
+            )?;
+            assert_eq!(context.used_gas, target_gas[i as usize]);
+
+            println!("===");
+
+            let context = &mut SimpleContext::default();
+            let (new_root, _, _) = crate::dict::dict_insert_owned(
+                dict,
+                &mut key.as_data_slice(),
+                32,
+                &i,
+                SetMode::Set,
+                context,
+            )?;
+            assert_eq!(new_root, expected_new_root);
+            dict = new_root;
+
+            assert_eq!(context.used_gas, target_gas[i as usize]);
+
+            println!("===");
+        }
+
+        // Check `add` as noop
+        let mut key = CellBuilder::new();
+        key.store_u32(5)?;
+
+        let context = &mut SimpleContext::default();
+        crate::dict::dict_insert(
+            dict.as_ref(),
+            &mut key.as_data_slice(),
+            32,
+            &5u32,
+            SetMode::Add,
+            context,
+        )?;
+        assert_eq!(context.used_gas, SimpleContext::NEW_CELL_GAS * 5); // Equivalent to simple get
+
+        println!("===");
+
+        let context = &mut SimpleContext::default();
+        crate::dict::dict_insert_owned(
+            dict,
+            &mut key.as_data_slice(),
+            32,
+            &5u32,
+            SetMode::Add,
+            context,
+        )?;
+        assert_eq!(context.used_gas, SimpleContext::NEW_CELL_GAS * 5); // Equivalent to simple get
 
         Ok(())
     }
