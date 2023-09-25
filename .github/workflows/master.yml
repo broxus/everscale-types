@@ -21,6 +21,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: check
+          args: --features base64,serde,models,sync,abi
 
   test:
     name: Test Suite
@@ -40,6 +41,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
+          args: --features base64,serde,models,sync,abi
 
   lints:
     name: Lints
@@ -66,4 +68,4 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: -- -D warnings
+          args: --features base64,serde,models,sync,abi -- -D warnings
