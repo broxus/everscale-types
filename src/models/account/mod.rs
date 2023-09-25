@@ -148,6 +148,7 @@ impl OptionalAccount {
     }
 
     /// Account balance for all currencies.
+    #[cfg(feature = "sync")]
     pub fn balance(&self) -> &CurrencyCollection {
         static DEFAULT_VALANCE: CurrencyCollection = CurrencyCollection::ZERO;
 
