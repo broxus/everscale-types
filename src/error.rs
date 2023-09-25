@@ -36,6 +36,9 @@ pub enum Error {
     /// Underlying integer type does not fit into the target type.
     #[error("underlying integer is too large to fit in target type")]
     IntOverflow,
+    /// Helper error variant for cancelled operations.
+    #[error("operation cancelled")]
+    Cancelled,
 }
 
 /// Error type for integer parsing related errors.
