@@ -1564,7 +1564,195 @@ mod tests {
     }
 
     #[test]
-    fn dict_set_gas_usage() -> anyhow::Result<()> {
+    fn dict_remove_gas_usage() -> anyhow::Result<()> {
+        let mut dict = RawDict::<32>::new();
+        for i in 0..10 {
+            let mut key = CellBuilder::new();
+            key.store_u32(i)?;
+            dict.set(key.as_data_slice(), i)?;
+        }
+
+        // Noop remove
+        let mut key = CellBuilder::new();
+        key.store_u32(10)?;
+
+        let context = &mut SimpleContext::default();
+        assert!(dict.remove_ext(key.as_data_slice(), context)?.is_none());
+
+        assert_eq!(context.used_gas, SimpleContext::NEW_CELL_GAS * 2);
+
+        // Clear dict
+        let target_gas = [
+            SimpleContext::NEW_CELL_GAS * 6 + SimpleContext::BUILD_CELL_GAS * 4,
+            SimpleContext::NEW_CELL_GAS * 5 + SimpleContext::BUILD_CELL_GAS * 3,
+            SimpleContext::NEW_CELL_GAS * 5 + SimpleContext::BUILD_CELL_GAS * 3,
+            SimpleContext::NEW_CELL_GAS * 4 + SimpleContext::BUILD_CELL_GAS * 2,
+            SimpleContext::NEW_CELL_GAS * 5 + SimpleContext::BUILD_CELL_GAS * 3,
+            SimpleContext::NEW_CELL_GAS * 4 + SimpleContext::BUILD_CELL_GAS * 2,
+            SimpleContext::NEW_CELL_GAS * 4 + SimpleContext::BUILD_CELL_GAS * 2,
+            SimpleContext::NEW_CELL_GAS * 3 + SimpleContext::BUILD_CELL_GAS,
+            SimpleContext::NEW_CELL_GAS * 3 + SimpleContext::BUILD_CELL_GAS,
+            SimpleContext::NEW_CELL_GAS,
+        ];
+
+        for i in 0..10 {
+            println!("===");
+
+            let context = &mut SimpleContext::default();
+
+            let mut key = CellBuilder::new();
+            key.store_u32(i)?;
+
+            let removed = dict.remove_ext(key.as_data_slice(), context)?;
+            assert!(removed.is_some());
+
+            assert_eq!(context.used_gas, target_gas[i as usize]);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn dict_remove_bound() -> anyhow::Result<()> {
+        let make_dict = |range: std::ops::Range<i32>| {
+            let mut dict = RawDict::<32>::new();
+            for i in range {
+                let mut key = CellBuilder::new();
+                key.store_u32(i as u32)?;
+                dict.set(key.as_data_slice(), i)?;
+            }
+            Ok::<_, anyhow::Error>(dict)
+        };
+
+        let check_range =
+            |range: std::ops::Range<i32>, bound: DictBound, signed: bool, target_gas: &[u64]| {
+                let mut dict = make_dict(range.clone())?;
+                for &target_gas in target_gas {
+                    println!("=== {range:?} bound={bound:?} signed={signed} [non-owned]");
+                    let context = &mut SimpleContext::default();
+                    let (key, _) = dict.get_bound_ext(bound, signed, context)?.unwrap();
+                    let removed = dict.clone().remove_ext(key.as_data_slice(), context)?;
+                    assert!(removed.is_some());
+                    assert_eq!(context.used_gas, target_gas);
+
+                    println!("=== {range:?} bound={bound:?} signed={signed} [owned]");
+                    let context = &mut SimpleContext::default();
+                    let (key, _) = dict.get_bound_owned_ext(bound, signed, context)?.unwrap();
+                    let removed = dict.remove_ext(key.as_data_slice(), context)?;
+                    assert!(removed.is_some());
+                    assert_eq!(context.used_gas, target_gas);
+                }
+
+                Ok::<_, anyhow::Error>(())
+            };
+
+        // Unsigned MIN
+        let target_gas = [
+            SimpleContext::NEW_CELL_GAS * 6
+                + SimpleContext::OLD_CELL_GAS * 5
+                + SimpleContext::BUILD_CELL_GAS * 4,
+            SimpleContext::NEW_CELL_GAS * 5
+                + SimpleContext::OLD_CELL_GAS * 4
+                + SimpleContext::BUILD_CELL_GAS * 3,
+            SimpleContext::NEW_CELL_GAS * 5
+                + SimpleContext::OLD_CELL_GAS * 4
+                + SimpleContext::BUILD_CELL_GAS * 3,
+            SimpleContext::NEW_CELL_GAS * 4
+                + SimpleContext::OLD_CELL_GAS * 3
+                + SimpleContext::BUILD_CELL_GAS * 2,
+            SimpleContext::NEW_CELL_GAS * 5
+                + SimpleContext::OLD_CELL_GAS * 4
+                + SimpleContext::BUILD_CELL_GAS * 3,
+            SimpleContext::NEW_CELL_GAS * 4
+                + SimpleContext::OLD_CELL_GAS * 3
+                + SimpleContext::BUILD_CELL_GAS * 2,
+            SimpleContext::NEW_CELL_GAS * 4
+                + SimpleContext::OLD_CELL_GAS * 3
+                + SimpleContext::BUILD_CELL_GAS * 2,
+            SimpleContext::NEW_CELL_GAS * 3
+                + SimpleContext::OLD_CELL_GAS * 2
+                + SimpleContext::BUILD_CELL_GAS,
+            SimpleContext::NEW_CELL_GAS * 3
+                + SimpleContext::OLD_CELL_GAS * 2
+                + SimpleContext::BUILD_CELL_GAS,
+            SimpleContext::NEW_CELL_GAS + SimpleContext::OLD_CELL_GAS,
+        ];
+        check_range(0..10, DictBound::Min, false, &target_gas)?;
+
+        // Unsigned MAX
+        let target_gas = [
+            SimpleContext::NEW_CELL_GAS * 4
+                + SimpleContext::OLD_CELL_GAS * 3
+                + SimpleContext::BUILD_CELL_GAS * 2,
+            SimpleContext::NEW_CELL_GAS * 3
+                + SimpleContext::OLD_CELL_GAS * 2
+                + SimpleContext::BUILD_CELL_GAS,
+            SimpleContext::NEW_CELL_GAS * 5
+                + SimpleContext::OLD_CELL_GAS * 4
+                + SimpleContext::BUILD_CELL_GAS * 3,
+            SimpleContext::NEW_CELL_GAS * 4
+                + SimpleContext::OLD_CELL_GAS * 3
+                + SimpleContext::BUILD_CELL_GAS * 2,
+            SimpleContext::NEW_CELL_GAS * 4
+                + SimpleContext::OLD_CELL_GAS * 3
+                + SimpleContext::BUILD_CELL_GAS * 2,
+            SimpleContext::NEW_CELL_GAS * 3
+                + SimpleContext::OLD_CELL_GAS * 2
+                + SimpleContext::BUILD_CELL_GAS,
+            SimpleContext::NEW_CELL_GAS * 4
+                + SimpleContext::OLD_CELL_GAS * 3
+                + SimpleContext::BUILD_CELL_GAS * 2,
+            SimpleContext::NEW_CELL_GAS * 3
+                + SimpleContext::OLD_CELL_GAS * 2
+                + SimpleContext::BUILD_CELL_GAS,
+            SimpleContext::NEW_CELL_GAS * 3
+                + SimpleContext::OLD_CELL_GAS * 2
+                + SimpleContext::BUILD_CELL_GAS,
+            SimpleContext::NEW_CELL_GAS + SimpleContext::OLD_CELL_GAS,
+        ];
+        check_range(0..10, DictBound::Max, false, &target_gas)?;
+
+        // Signed MIN and MAX
+        let target_gas = [
+            SimpleContext::NEW_CELL_GAS * 4
+                + SimpleContext::OLD_CELL_GAS * 3
+                + SimpleContext::BUILD_CELL_GAS * 2,
+            SimpleContext::NEW_CELL_GAS * 5
+                + SimpleContext::OLD_CELL_GAS * 4
+                + SimpleContext::BUILD_CELL_GAS * 3,
+            SimpleContext::NEW_CELL_GAS * 4
+                + SimpleContext::OLD_CELL_GAS * 3
+                + SimpleContext::BUILD_CELL_GAS * 2,
+            SimpleContext::NEW_CELL_GAS * 4
+                + SimpleContext::OLD_CELL_GAS * 3
+                + SimpleContext::BUILD_CELL_GAS * 2,
+            SimpleContext::NEW_CELL_GAS * 3
+                + SimpleContext::OLD_CELL_GAS * 2
+                + SimpleContext::BUILD_CELL_GAS,
+            SimpleContext::NEW_CELL_GAS * 5
+                + SimpleContext::OLD_CELL_GAS * 4
+                + SimpleContext::BUILD_CELL_GAS * 3,
+            SimpleContext::NEW_CELL_GAS * 4
+                + SimpleContext::OLD_CELL_GAS * 3
+                + SimpleContext::BUILD_CELL_GAS * 2,
+            SimpleContext::NEW_CELL_GAS * 4
+                + SimpleContext::OLD_CELL_GAS * 3
+                + SimpleContext::BUILD_CELL_GAS * 2,
+            SimpleContext::NEW_CELL_GAS * 3
+                + SimpleContext::OLD_CELL_GAS * 2
+                + SimpleContext::BUILD_CELL_GAS,
+            SimpleContext::NEW_CELL_GAS + SimpleContext::OLD_CELL_GAS,
+        ];
+
+        // NOTE: same gas for balanced tree
+        check_range(-5..5, DictBound::Min, true, &target_gas)?;
+        check_range(-5..5, DictBound::Max, true, &target_gas)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn dict_insert_gas_usage() -> anyhow::Result<()> {
         let target_gas = [
             SimpleContext::BUILD_CELL_GAS,
             SimpleContext::NEW_CELL_GAS + SimpleContext::BUILD_CELL_GAS * 3,
