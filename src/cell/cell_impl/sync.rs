@@ -254,8 +254,15 @@ unsafe fn make_ordinary_cell(header: OrdinaryCellHeader, data: &[u8]) -> Cell {
     let size = (ARC_DATA_OFFSET + target_data_len + ALIGN - 1) & !(ALIGN - 1);
     let layout = Layout::from_size_align_unchecked(size, ALIGN).pad_to_align();
 
-    // Make ArcCell
-    make_arc_cell::<OrdinaryCellHeader, 0>(layout, header, data.as_ptr(), raw_data_len, vtable)
+    // Allocate Arc buffer
+    let bit_len = header.bit_len;
+    let ptr = make_arc_buffer::<OrdinaryCellHeader, 0>(layout, header, data.as_ptr(), raw_data_len);
+
+    // Add termination bit for ordinary cells on the allocated data while it is still mutable
+    CellParts::normalize_data(std::ptr::addr_of_mut!((*ptr).obj.data) as *mut u8, bit_len);
+
+    // Finalize Arc
+    make_arc_cell(std::ptr::addr_of!((*ptr).obj) as *const (), vtable)
 }
 
 unsafe fn make_pruned_branch(header: PrunedBranchHeader, data: &[u8]) -> Cell {
@@ -298,24 +305,25 @@ unsafe fn make_pruned_branch(header: PrunedBranchHeader, data: &[u8]) -> Cell {
     let size = (ARC_DATA_OFFSET + data_len + ALIGN - 1) & !(ALIGN - 1);
     let layout = Layout::from_size_align_unchecked(size, ALIGN).pad_to_align();
 
-    // Make ArcCell
-    make_arc_cell::<PrunedBranchHeader, { LENGTHS[0] }>(
+    // Allocate Arc buffer
+    let ptr = make_arc_buffer::<PrunedBranchHeader, { LENGTHS[0] }>(
         layout,
         header,
         data.as_ptr(),
         data_len,
-        vtable,
-    )
+    );
+
+    // Finalize Arc
+    make_arc_cell(std::ptr::addr_of!((*ptr).obj) as *const (), vtable)
 }
 
 #[inline]
-unsafe fn make_arc_cell<H, const N: usize>(
+unsafe fn make_arc_buffer<H, const N: usize>(
     layout: Layout,
     header: H,
     data_ptr: *const u8,
     data_len: usize,
-    vtable: *const (),
-) -> Cell
+) -> *mut ArcInner<AtomicUsize, HeaderWithData<H, N>>
 where
     HeaderWithData<H, N>: CellImpl,
 {
@@ -335,12 +343,12 @@ where
         std::ptr::addr_of_mut!((*ptr).obj.data) as *mut u8,
         data_len,
     );
+    ptr
+}
 
-    // Construct fat pointer with vtable info
-    let data = std::ptr::addr_of!((*ptr).obj) as *const ();
+#[inline]
+unsafe fn make_arc_cell(data: *const (), vtable: *const ()) -> Cell {
     let ptr: *const DynCell = std::mem::transmute([data, vtable]);
-
-    // Construct Arc
     Cell(Arc::from_raw(ptr))
 }
 

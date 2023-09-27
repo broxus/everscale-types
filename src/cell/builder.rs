@@ -902,83 +902,14 @@ impl CellBuilder {
     }
 
     /// Tries to build a new cell using the specified cell context.
-    pub fn build_ext(mut self, context: &mut dyn CellContext) -> Result<Cell, Error> {
-        debug_assert!(self.bit_len <= MAX_BIT_LEN);
-        debug_assert!(self.references.len() <= MAX_REF_COUNT);
-
-        #[cfg(feature = "stats")]
-        let mut stats = CellTreeStats {
-            bit_count: self.bit_len as u64,
-            cell_count: 1,
-        };
-
-        let mut children_mask = LevelMask::EMPTY;
-        for child in self.references.as_ref() {
-            let child = child.as_ref();
-            children_mask |= child.descriptor().level_mask();
-
-            #[cfg(feature = "stats")]
-            {
-                stats += child.stats();
-            }
-        }
-
-        let is_exotic = self.is_exotic;
-
-        let level_mask = 'mask: {
-            // NOTE: make only a brief check here, as it will raise a proper error in finalier
-            if is_exotic && self.bit_len >= 8 {
-                if let Some(ty) = CellType::from_byte_exotic(self.data[0]) {
-                    match ty {
-                        CellType::PrunedBranch => break 'mask LevelMask::new(self.data[1]),
-                        CellType::MerkleProof | CellType::MerkleUpdate => {
-                            break 'mask children_mask.virtualize(1)
-                        }
-                        CellType::LibraryReference => break 'mask LevelMask::EMPTY,
-                        _ => {}
-                    };
-                }
-            }
-
-            children_mask
-        };
-
-        let d1 = CellDescriptor::compute_d1(level_mask, is_exotic, self.references.len() as u8);
-        let d2 = CellDescriptor::compute_d2(self.bit_len);
-
-        let rem = self.bit_len % 8;
-        let last_byte = (self.bit_len / 8) as usize;
-        if rem > 0 {
-            // SAFETY: `last_byte` is in the valid range
-            let last_byte = unsafe { self.data.get_unchecked_mut(last_byte) };
-
-            // x0000000 - rem=1, tag_mask=01000000, data_mask=11000000
-            // xx000000 - rem=2, tag_mask=00100000, data_mask=11100000
-            // xxx00000 - rem=3, tag_mask=00010000, data_mask=11110000
-            // xxxx0000 - rem=4, tag_mask=00001000, data_mask=11111000
-            // xxxxx000 - rem=5, tag_mask=00000100, data_mask=11111100
-            // xxxxxx00 - rem=6, tag_mask=00000010, data_mask=11111110
-            // xxxxxxx0 - rem=7, tag_mask=00000001, data_mask=11111111
-            let tag_mask: u8 = 1 << (7 - rem);
-            let data_mask = !(tag_mask - 1);
-
-            // xxxxyyyy & data_mask -> xxxxy000 | tag_mask -> xxxx1000
-            *last_byte = (*last_byte & data_mask) | tag_mask;
-        }
-
-        let byte_len = (self.bit_len + 7) / 8;
-        let data = &self.data[..std::cmp::min(byte_len as usize, 128)];
-
-        let cell_parts = CellParts {
-            #[cfg(feature = "stats")]
-            stats,
-            bit_len: self.bit_len,
-            descriptor: CellDescriptor { d1, d2 },
-            children_mask,
-            references: self.references,
-            data,
-        };
-        context.finalize_cell(cell_parts)
+    pub fn build_ext(self, context: &mut dyn CellContext) -> Result<Cell, Error> {
+        build_impl(
+            &self.data,
+            self.bit_len,
+            self.is_exotic,
+            self.references,
+            context,
+        )
     }
 
     /// Tries to build a new cell using the default cell context.
@@ -1021,6 +952,69 @@ impl CellBuilder {
 
         DisplayData(self)
     }
+}
+
+pub fn build_impl(
+    data: &[u8; 128],
+    bit_len: u16,
+    is_exotic: bool,
+    references: ArrayVec<Cell, MAX_REF_COUNT>,
+    context: &mut dyn CellContext,
+) -> Result<Cell, Error> {
+    debug_assert!(bit_len <= MAX_BIT_LEN);
+    debug_assert!(references.len() <= MAX_REF_COUNT);
+
+    #[cfg(feature = "stats")]
+    let mut stats = CellTreeStats {
+        bit_count: bit_len as u64,
+        cell_count: 1,
+    };
+
+    let mut children_mask = LevelMask::EMPTY;
+    for child in references.as_ref() {
+        let child = child.as_ref();
+        children_mask |= child.descriptor().level_mask();
+
+        #[cfg(feature = "stats")]
+        {
+            stats += child.stats();
+        }
+    }
+
+    let level_mask = 'mask: {
+        // NOTE: make only a brief check here, as it will raise a proper error in finalier
+        if is_exotic && bit_len >= 8 {
+            if let Some(ty) = CellType::from_byte_exotic(data[0]) {
+                match ty {
+                    CellType::PrunedBranch => break 'mask LevelMask::new(data[1]),
+                    CellType::MerkleProof | CellType::MerkleUpdate => {
+                        break 'mask children_mask.virtualize(1)
+                    }
+                    CellType::LibraryReference => break 'mask LevelMask::EMPTY,
+                    _ => {}
+                };
+            }
+        }
+
+        children_mask
+    };
+
+    let d1 = CellDescriptor::compute_d1(level_mask, is_exotic, references.len() as u8);
+    let d2 = CellDescriptor::compute_d2(bit_len);
+
+    let byte_len = (bit_len + 7) / 8;
+    let data = &data[..std::cmp::min(byte_len as usize, 128)];
+
+    let cell_parts = CellParts {
+        #[cfg(feature = "stats")]
+        stats,
+        bit_len,
+        descriptor: CellDescriptor { d1, d2 },
+        children_mask,
+        references,
+        data,
+    };
+    context.finalize_cell(cell_parts)
 }
 
 /// Builder for constructing cell references array.

@@ -244,8 +244,15 @@ unsafe fn make_ordinary_cell(header: OrdinaryCellHeader, data: &[u8]) -> Cell {
     let size = (RC_DATA_OFFSET + target_data_len + ALIGN - 1) & !(ALIGN - 1);
     let layout = Layout::from_size_align_unchecked(size, ALIGN).pad_to_align();
 
-    // Make RcCell
-    make_rc_cell::<OrdinaryCellHeader, 0>(layout, header, data.as_ptr(), raw_data_len, vtable)
+    // Allocate Rc buffer
+    let bit_len = header.bit_len;
+    let ptr = make_rc_buffer::<OrdinaryCellHeader, 0>(layout, header, data.as_ptr(), raw_data_len);
+
+    // Add termination bit for ordinary cells on the allocated data while it is still mutable
+    CellParts::normalize_data(std::ptr::addr_of_mut!((*ptr).obj.data) as *mut u8, bit_len);
+
+    // Finalize Rc
+    make_rc_cell(std::ptr::addr_of!((*ptr).obj) as *const (), vtable)
 }
 
 unsafe fn make_pruned_branch(header: PrunedBranchHeader, data: &[u8]) -> Cell {
@@ -288,24 +295,25 @@ unsafe fn make_pruned_branch(header: PrunedBranchHeader, data: &[u8]) -> Cell {
     let size = (RC_DATA_OFFSET + data_len + ALIGN - 1) & !(ALIGN - 1);
     let layout = Layout::from_size_align_unchecked(size, ALIGN).pad_to_align();
 
-    // Make RcCell
-    make_rc_cell::<PrunedBranchHeader, { LENGTHS[0] }>(
+    // Allocate Rc buffer
+    let ptr = make_rc_buffer::<PrunedBranchHeader, { LENGTHS[0] }>(
         layout,
         header,
         data.as_ptr(),
         data_len,
-        vtable,
-    )
+    );
+
+    // Finalize Rc
+    make_rc_cell(std::ptr::addr_of!((*ptr).obj) as *const (), vtable)
 }
 
 #[inline]
-unsafe fn make_rc_cell<H, const N: usize>(
+unsafe fn make_rc_buffer<H, const N: usize>(
     layout: Layout,
     header: H,
     data_ptr: *const u8,
     data_len: usize,
-    vtable: *const (),
-) -> Cell
+) -> *mut RcBox<std::cell::Cell<usize>, HeaderWithData<H, N>>
 where
     HeaderWithData<H, N>: CellImpl,
 {
@@ -328,12 +336,12 @@ where
         std::ptr::addr_of_mut!((*ptr).obj.data) as *mut u8,
         data_len,
     );
+    ptr
+}
 
-    // Construct fat pointer with vtable info
-    let data = std::ptr::addr_of!((*ptr).obj) as *const ();
+#[inline]
+unsafe fn make_rc_cell(data: *const (), vtable: *const ()) -> Cell {
     let ptr: *const DynCell = std::mem::transmute([data, vtable]);
-
-    // Construct Rc
     Cell(Rc::from_raw(ptr))
 }
 

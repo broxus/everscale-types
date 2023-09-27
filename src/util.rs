@@ -1,6 +1,9 @@
 //! General stuff.
 
 use std::mem::MaybeUninit;
+use std::num::NonZeroU8;
+
+use crate::cell::CellParts;
 
 /// Brings [unlikely](core::intrinsics::unlikely) to stable rust.
 #[inline(always)]
@@ -239,14 +242,13 @@ impl std::fmt::Display for Bitstring<'_> {
         let bytes = &self.bytes[..byte_len];
 
         let rem = bit_len % 8;
-        let (bytes, last_byte) = match bytes.split_last() {
-            Some((last_byte, bytes)) if rem != 0 => {
-                let tag_mask: u8 = 1 << (7 - rem);
-                let data_mask = !(tag_mask - 1);
-                let last_byte = (*last_byte & data_mask) | tag_mask;
-                (bytes, Some(last_byte))
+        let (bytes, last_byte) = 'bytes: {
+            if let Some((last_byte, bytes)) = bytes.split_last() {
+                if let Some(rem) = NonZeroU8::new(rem as u8) {
+                    break 'bytes (bytes, Some(CellParts::add_termination_bit(*last_byte, rem)));
+                }
             }
-            _ => (bytes, None),
+            (bytes, None)
         };
 
         let mut chunk = [0u8; CHUNK_LEN * 2];

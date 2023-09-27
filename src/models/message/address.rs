@@ -1,3 +1,4 @@
+use std::num::NonZeroU8;
 use std::str::FromStr;
 
 use crate::cell::*;
@@ -507,18 +508,14 @@ impl std::fmt::Display for Anycast {
             }
         }
 
-        if rem != 0 {
-            let tag_mask: u8 = 1 << (7 - rem);
-            let data_mask = !(tag_mask - 1);
-
+        if let Some(rem) = NonZeroU8::new(rem as u8) {
             let mut byte = self
                 .rewrite_prefix
                 .get((depth / 8) as usize)
                 .copied()
                 .unwrap_or_default();
 
-            // xxxxyyyy & data_mask -> xxxxy000 | tag_mask -> xxxx1000
-            byte = (byte & data_mask) | tag_mask;
+            byte = CellParts::add_termination_bit(byte, rem);
 
             result[byte_len * 2] = HEX_CHARS_LOWER[(byte >> 4) as usize];
             result[byte_len * 2 + 1] = HEX_CHARS_LOWER[(byte & 0x0f) as usize];

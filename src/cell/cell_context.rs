@@ -1,3 +1,5 @@
+use std::num::NonZeroU8;
+
 use sha2::digest::Digest;
 
 use crate::cell::{Cell, CellDescriptor, CellType, DynCell, HashBytes, LevelMask, MAX_REF_COUNT};
@@ -72,7 +74,7 @@ pub struct CellParts<'a> {
     /// with the descriptor.
     pub references: ArrayVec<Cell, MAX_REF_COUNT>,
 
-    /// Cell data slice.
+    /// Cell data slice WITHOUT termination bit.
     pub data: &'a [u8],
 }
 
@@ -177,7 +179,7 @@ impl<'a> CellParts<'a> {
             hasher.update([descriptor.d1, descriptor.d2]);
 
             if level == 0 {
-                hasher.update(self.data);
+                Self::update_hasher_with_data(self.data, self.bit_len, &mut hasher);
             } else {
                 // SAFETY: new hash is added on each iteration, so there will
                 // definitely be a hash, when level>0
@@ -207,5 +209,47 @@ impl<'a> CellParts<'a> {
         }
 
         Ok(hashes)
+    }
+
+    /// Adds a termination bit to the byte with the specified remainder.
+    pub const fn add_termination_bit(byte: u8, rem: std::num::NonZeroU8) -> u8 {
+        // x0000000 - rem=1, tag_mask=01000000, data_mask=11000000
+        // xx000000 - rem=2, tag_mask=00100000, data_mask=11100000
+        // xxx00000 - rem=3, tag_mask=00010000, data_mask=11110000
+        // xxxx0000 - rem=4, tag_mask=00001000, data_mask=11111000
+        // xxxxx000 - rem=5, tag_mask=00000100, data_mask=11111100
+        // xxxxxx00 - rem=6, tag_mask=00000010, data_mask=11111110
+        // xxxxxxx0 - rem=7, tag_mask=00000001, data_mask=11111111
+        let tag_mask: u8 = 1 << (7 - rem.get());
+        let data_mask = !(tag_mask - 1);
+
+        // xxxxyyyy & data_mask -> xxxxy000 | tag_mask -> xxxx1000
+        (byte & data_mask) | tag_mask
+    }
+
+    /// Adds a termination bit to the last byte at the specified position.
+    ///
+    /// # Safety
+    ///
+    /// The following must be true:
+    pub(crate) unsafe fn normalize_data(data: *mut u8, bit_len: u16) {
+        if let Some(rem) = NonZeroU8::new((bit_len % 8) as u8) {
+            let last_byte = data.add((bit_len / 8) as usize);
+            *last_byte = Self::add_termination_bit(*last_byte, rem)
+        }
+    }
+
+    fn update_hasher_with_data(mut data: &[u8], bit_len: u16, hasher: &mut sha2::Sha256) {
+        let mut last_byte = None::<u8>;
+        if let Some((last, prefix)) = data.split_last() {
+            if let Some(rem) = NonZeroU8::new((bit_len % 8) as u8) {
+                last_byte = Some(Self::add_termination_bit(*last, rem));
+                data = prefix;
+            }
+        }
+        hasher.update(data);
+        if let Some(last_byte) = last_byte {
+            hasher.update([last_byte]);
+        }
     }
 }
