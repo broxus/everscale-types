@@ -197,7 +197,7 @@ impl ExactSize for CellSliceParts {
 }
 
 /// Indices of the slice data and refs windows.
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub struct CellSliceRange {
     bits_start: u16,
     bits_end: u16,
@@ -335,6 +335,15 @@ impl CellSliceRange {
             true
         } else {
             false
+        }
+    }
+
+    /// Tries to advance the start of data and refs windows.
+    pub fn advance(&mut self, bits: u16, refs: u8) -> Result<(), Error> {
+        if self.try_advance(bits, refs) {
+            Ok(())
+        } else {
+            Err(Error::CellUnderflow)
         }
     }
 
@@ -604,11 +613,7 @@ impl<'a> CellSlice<'a> {
 
     /// Tries to advance the start of data and refs windows.
     pub fn advance(&mut self, bits: u16, refs: u8) -> Result<(), Error> {
-        if self.range.try_advance(bits, refs) {
-            Ok(())
-        } else {
-            Err(Error::CellUnderflow)
-        }
+        self.range.advance(bits, refs)
     }
 
     /// Compares two slices by their data window **content** and refs.
