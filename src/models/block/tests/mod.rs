@@ -5,7 +5,7 @@ fn serialize_any<T: Store>(data: T) -> Cell {
     CellBuilder::build_from(data).unwrap()
 }
 
-fn check_block(boc: &[u8]) -> Cell {
+fn check_block(boc: &[u8], expected_shards: Option<Vec<ShardIdent>>) -> Cell {
     let boc = Boc::decode(boc).unwrap();
     let block = boc.parse::<Block>().unwrap();
     println!("block: {block:#?}");
@@ -51,14 +51,20 @@ fn check_block(boc: &[u8]) -> Cell {
     );
 
     let custom = extra.load_custom().unwrap();
+    assert_eq!(expected_shards.is_some(), custom.is_some());
     if let Some(custom) = &custom {
         println!("custom: {custom:#?}");
 
+        let expected_shards = expected_shards.unwrap();
+
         let shards = custom.shards.get_workchain_shards(0).unwrap().unwrap();
+        let mut shard_ids = Vec::new();
         for entry in shards.raw_iter() {
             let (shard, _value) = entry.unwrap();
             println!("shard: {shard:?}");
+            shard_ids.push(shard);
         }
+        assert_eq!(expected_shards, shard_ids);
 
         for entry in custom.shards.iter() {
             let (shard, value) = entry.unwrap();
@@ -86,22 +92,40 @@ fn check_block(boc: &[u8]) -> Cell {
 
 #[test]
 fn masterchain_block() {
-    check_block(include_bytes!("mc_simple_block.boc"));
+    check_block(
+        include_bytes!("mc_simple_block.boc"),
+        Some(vec![ShardIdent::new(0, ShardIdent::PREFIX_FULL).unwrap()]),
+    );
 }
 
 #[test]
 fn masterchain_key_block() {
-    check_block(include_bytes!("mc_key_block.boc"));
+    check_block(
+        include_bytes!("mc_key_block.boc"),
+        Some(vec![ShardIdent::new(0, ShardIdent::PREFIX_FULL).unwrap()]),
+    );
+}
+
+#[test]
+fn masterchain_block_with_shards() {
+    check_block(
+        include_bytes!("mc_block_with_shards.boc"),
+        Some(vec![
+            ShardIdent::new(0, 0x4000000000000000).unwrap(),
+            ShardIdent::new(0, 0xa000000000000000).unwrap(),
+            ShardIdent::new(0, 0xe000000000000000).unwrap(),
+        ]),
+    );
 }
 
 #[test]
 fn shard_block_empty() {
-    check_block(include_bytes!("empty_shard_block.boc"));
+    check_block(include_bytes!("empty_shard_block.boc"), None);
 }
 
 #[test]
 fn shard_block_with_messages() {
-    check_block(include_bytes!("simple_shard_block.boc"));
+    check_block(include_bytes!("simple_shard_block.boc"), None);
 }
 
 #[test]

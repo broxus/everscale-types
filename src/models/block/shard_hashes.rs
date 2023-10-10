@@ -987,7 +987,7 @@ impl<'a> Iterator for WorkchainShardsTreeRawIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         fn build_shard_prefix(segments: &[IterSegment<'_>]) -> u64 {
             let mut result = ShardIdent::PREFIX_FULL;
-            for segment in segments {
+            for segment in segments.iter().rev() {
                 result = (ShardIdent::PREFIX_FULL * segment.is_right as u64) | result >> 1;
             }
             result
