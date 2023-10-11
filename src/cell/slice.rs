@@ -813,7 +813,7 @@ impl<'a> CellSlice<'a> {
                     // Some bits are not equal
                     x => {
                         // Number of leading zeros is the number of equal bits
-                        return prefix_len + x.leading_zeros() as u16;
+                        return std::cmp::min(prefix_len + x.leading_zeros() as u16, max_bit_len);
                     }
                 }
             }
@@ -1842,6 +1842,42 @@ mod tests {
             .get_prefix(5, 0)
             .longest_common_data_prefix(&slice2.get_prefix(5, 0));
         assert_eq!(prefix.remaining_bits(), 5);
+
+        Ok(())
+    }
+
+    #[test]
+    fn unaligned_longest_common_data_prefix() -> anyhow::Result<()> {
+        let raw_key =
+            Boc::decode_base64("te6ccgEBAQEAJAAAQ0gBfkBkwI7RPE0/VFMj7yvbvFrpvOMEPDQHDlGWFIELM9s=")?;
+
+        let unaligned = {
+            let mut raw_key = raw_key.as_slice()?;
+            raw_key.try_advance(4, 0);
+            raw_key.get_prefix(267, 0)
+        };
+        let aligned = CellBuilder::build_from(unaligned)?;
+        let aligned = aligned.as_slice()?;
+
+        assert_eq!(
+            unaligned.cmp_by_content(&aligned)?,
+            std::cmp::Ordering::Equal
+        );
+
+        let prefix = Boc::decode_base64("te6ccgEBAwEAjgACB4HQAsACAQCBvwFNima9rQU2tAaEHK+4fSc/aaYcTkT20uyfZuGbZjVMAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAIAgb8RUsb7kteM/ARjNwkzPPYoytZRb4Ic9epNxxLMl/2h7AAAAAAAAAAAAAAAAAAAAADMzMzMzMzMzMzMzMzMzMzO")?;
+        let prefix = {
+            let mut prefix = prefix.as_slice()?;
+            prefix.try_advance(11, 0);
+            prefix.get_prefix(14, 0)
+        };
+
+        let lcp_unaligned = unaligned.longest_common_data_prefix(&prefix);
+        let lcp_aligned = aligned.longest_common_data_prefix(&prefix);
+
+        assert_eq!(
+            lcp_unaligned.cmp_by_content(&lcp_aligned)?,
+            std::cmp::Ordering::Equal
+        );
 
         Ok(())
     }
