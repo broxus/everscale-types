@@ -162,7 +162,7 @@ impl<const N: u16> RawDict<N> {
         signed: bool,
     ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
         dict_find_owned(
-            self.0.clone(),
+            self.0.as_ref(),
             N,
             key,
             DictBound::Max,
@@ -180,7 +180,7 @@ impl<const N: u16> RawDict<N> {
         signed: bool,
     ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
         dict_find_owned(
-            self.0.clone(),
+            self.0.as_ref(),
             N,
             key,
             DictBound::Min,
@@ -198,7 +198,7 @@ impl<const N: u16> RawDict<N> {
         signed: bool,
     ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
         dict_find_owned(
-            self.0.clone(),
+            self.0.as_ref(),
             N,
             key,
             DictBound::Max,
@@ -216,7 +216,7 @@ impl<const N: u16> RawDict<N> {
         signed: bool,
     ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
         dict_find_owned(
-            self.0.clone(),
+            self.0.as_ref(),
             N,
             key,
             DictBound::Min,
@@ -230,7 +230,7 @@ impl<const N: u16> RawDict<N> {
     ///
     /// NOTE: Uses the default cell context.
     pub fn get_owned(&self, key: CellSlice<'_>) -> Result<Option<CellSliceParts>, Error> {
-        dict_get_owned(self.0.clone(), N, key, &mut Cell::empty_context())
+        dict_get_owned(self.0.as_ref(), N, key, &mut Cell::empty_context())
     }
 
     /// Returns cell slice parts of the value corresponding to the key.
@@ -239,7 +239,7 @@ impl<const N: u16> RawDict<N> {
         key: CellSlice<'_>,
         context: &mut dyn CellContext,
     ) -> Result<Option<CellSliceParts>, Error> {
-        dict_get_owned(self.0.clone(), N, key, context)
+        dict_get_owned(self.0.as_ref(), N, key, context)
     }
 
     /// Returns the lowest key and a value corresponding to the key.
@@ -295,7 +295,7 @@ impl<const N: u16> RawDict<N> {
         signed: bool,
     ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
         dict_find_bound_owned(
-            self.0.clone(),
+            self.0.as_ref(),
             N,
             DictBound::Min,
             signed,
@@ -309,7 +309,7 @@ impl<const N: u16> RawDict<N> {
         signed: bool,
     ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
         dict_find_bound_owned(
-            self.0.clone(),
+            self.0.as_ref(),
             N,
             DictBound::Max,
             signed,
@@ -323,7 +323,13 @@ impl<const N: u16> RawDict<N> {
         bound: DictBound,
         signed: bool,
     ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
-        dict_find_bound_owned(self.0.clone(), N, bound, signed, &mut Cell::empty_context())
+        dict_find_bound_owned(
+            self.0.as_ref(),
+            N,
+            bound,
+            signed,
+            &mut Cell::empty_context(),
+        )
     }
 
     /// Finds the specified dict bound and returns a key and cell slice parts corresponding to the key.
@@ -333,7 +339,7 @@ impl<const N: u16> RawDict<N> {
         signed: bool,
         context: &mut dyn CellContext,
     ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
-        dict_find_bound_owned(self.0.clone(), N, bound, signed, context)
+        dict_find_bound_owned(self.0.as_ref(), N, bound, signed, context)
     }
 
     /// Returns `true` if the dictionary contains a value for the specified key.
@@ -354,16 +360,7 @@ impl<const N: u16> RawDict<N> {
         value: &dyn Store,
         context: &mut dyn CellContext,
     ) -> Result<bool, Error> {
-        let (new_root, changed) = ok!(dict_insert(
-            self.0.as_ref(),
-            &mut key,
-            N,
-            &value,
-            SetMode::Set,
-            context
-        ));
-        self.0 = new_root;
-        Ok(changed)
+        dict_insert(&mut self.0, &mut key, N, &value, SetMode::Set, context)
     }
 
     /// Sets the value associated with the key in the dictionary
@@ -374,16 +371,7 @@ impl<const N: u16> RawDict<N> {
         value: &dyn Store,
         context: &mut dyn CellContext,
     ) -> Result<bool, Error> {
-        let (new_root, changed) = ok!(dict_insert(
-            self.0.as_ref(),
-            &mut key,
-            N,
-            value,
-            SetMode::Replace,
-            context
-        ));
-        self.0 = new_root;
-        Ok(changed)
+        dict_insert(&mut self.0, &mut key, N, value, SetMode::Replace, context)
     }
 
     /// Sets the value associated with key in dictionary,
@@ -394,16 +382,7 @@ impl<const N: u16> RawDict<N> {
         value: &dyn Store,
         context: &mut dyn CellContext,
     ) -> Result<bool, Error> {
-        let (new_root, changed) = ok!(dict_insert(
-            self.0.as_ref(),
-            &mut key,
-            N,
-            value,
-            SetMode::Add,
-            context
-        ));
-        self.0 = new_root;
-        Ok(changed)
+        dict_insert(&mut self.0, &mut key, N, value, SetMode::Add, context)
     }
 
     /// Removes the value associated with key in dictionary.
@@ -413,15 +392,7 @@ impl<const N: u16> RawDict<N> {
         mut key: CellSlice<'_>,
         context: &mut dyn CellContext,
     ) -> Result<Option<CellSliceParts>, Error> {
-        let (dict, removed) = ok!(dict_remove_owned(
-            self.0.as_ref(),
-            &mut key,
-            N,
-            false,
-            context
-        ));
-        self.0 = dict;
-        Ok(removed)
+        dict_remove_owned(&mut self.0, &mut key, N, false, context)
     }
 
     /// Removes the specified dict bound.
@@ -432,15 +403,7 @@ impl<const N: u16> RawDict<N> {
         signed: bool,
         context: &mut dyn CellContext,
     ) -> Result<Option<DictOwnedEntry>, Error> {
-        let (dict, removed) = ok!(dict_remove_bound_owned(
-            self.0.clone(),
-            N,
-            bound,
-            signed,
-            context
-        ));
-        self.0 = dict;
-        Ok(removed)
+        dict_remove_bound_owned(&mut self.0, N, bound, signed, context)
     }
 
     /// Gets an iterator over the entries of the dictionary, sorted by key.
@@ -1788,8 +1751,9 @@ mod tests {
             key.store_u32(i)?;
 
             let context = &mut SimpleContext::default();
-            let (expected_new_root, _) = crate::dict::dict_insert(
-                dict.as_ref(),
+            let mut old_root = dict.clone();
+            dict_insert(
+                &mut dict,
                 &mut key.as_data_slice(),
                 32,
                 &i,
@@ -1801,16 +1765,16 @@ mod tests {
             println!("===");
 
             let context = &mut SimpleContext::default();
-            let (new_root, _, _) = crate::dict::dict_insert_owned(
-                dict,
+            let expected_new_root = dict.clone();
+            crate::dict::dict_insert_owned(
+                &mut old_root,
                 &mut key.as_data_slice(),
                 32,
                 &i,
                 SetMode::Set,
                 context,
             )?;
-            assert_eq!(new_root, expected_new_root);
-            dict = new_root;
+            assert_eq!(dict, expected_new_root);
 
             assert_eq!(context.used_gas, target_gas[i as usize]);
 
@@ -1822,8 +1786,8 @@ mod tests {
         key.store_u32(5)?;
 
         let context = &mut SimpleContext::default();
-        crate::dict::dict_insert(
-            dict.as_ref(),
+        dict_insert(
+            &mut dict,
             &mut key.as_data_slice(),
             32,
             &5u32,
@@ -1836,7 +1800,7 @@ mod tests {
 
         let context = &mut SimpleContext::default();
         crate::dict::dict_insert_owned(
-            dict,
+            &mut dict,
             &mut key.as_data_slice(),
             32,
             &5u32,
