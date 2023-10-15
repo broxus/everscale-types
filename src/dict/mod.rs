@@ -1,11 +1,11 @@
 //! Dictionary implementation.
 
-use crate::cell::*;
-use crate::error::Error;
-
 pub use aug::*;
 pub use raw::*;
 pub use typed::*;
+
+use crate::cell::*;
+use crate::error::Error;
 
 mod aug;
 mod raw;
@@ -82,18 +82,18 @@ impl SetMode {
 /// Removes the value associated with key in dictionary.
 /// Returns a tuple with a new dictionary cell and an optional removed value.
 pub fn dict_remove_owned(
-    root: Option<&Cell>,
+    dict: &mut Option<Cell>,
     key: &mut CellSlice,
     key_bit_len: u16,
     allow_subtree: bool,
     context: &mut dyn CellContext,
-) -> Result<(Option<Cell>, Option<CellSliceParts>), Error> {
+) -> Result<Option<CellSliceParts>, Error> {
     if !allow_subtree && key.remaining_bits() != key_bit_len {
         return Err(Error::CellUnderflow);
     }
 
-    let Some(root) = root else {
-        return Ok((None, None));
+    let Some(root) = &dict else {
+        return Ok(None);
     };
 
     // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok
@@ -116,7 +116,7 @@ pub fn dict_remove_owned(
             std::cmp::Ordering::Equal => break remaining_data.range(),
             // LCP is less than prefix, an edge to slice was found
             std::cmp::Ordering::Less if lcp.remaining_bits() < prefix.remaining_bits() => {
-                return Ok((Some(root.clone()), None))
+                return Ok(None)
             }
             // The key contains the entire prefix, but there are still some bits left
             std::cmp::Ordering::Less => {
@@ -150,7 +150,7 @@ pub fn dict_remove_owned(
     };
 
     // Rebuild the leaf node
-    let (mut leaf, removed) = if let Some(last) = stack.pop() {
+    let (leaf, removed) = if let Some(last) = stack.pop() {
         let index = last.next_branch as u8;
 
         // Load value branch
@@ -193,12 +193,13 @@ pub fn dict_remove_owned(
         // Return the new cell and the removed one
         (leaf, (value, removed))
     } else {
-        return Ok((None, Some((root.clone(), removed))));
+        let value = root.clone();
+        *dict = None;
+        return Ok(Some((value, removed)));
     };
 
-    leaf = ok!(rebuild_dict_from_stack(stack, leaf, context));
-
-    Ok((Some(leaf), Some(removed)))
+    *dict = Some(ok!(rebuild_dict_from_stack(stack, leaf, context)));
+    Ok(Some(removed))
 }
 
 /// Inserts the value associated with key in dictionary
@@ -206,30 +207,30 @@ pub fn dict_remove_owned(
 ///
 /// Returns a tuple with a new dict root, and changed flag.
 pub fn dict_insert(
-    root: Option<&Cell>,
+    dict: &mut Option<Cell>,
     key: &mut CellSlice,
     key_bit_len: u16,
     value: &dyn Store,
     mode: SetMode,
     context: &mut dyn CellContext,
-) -> Result<(Option<Cell>, bool), Error> {
+) -> Result<bool, Error> {
     if key.remaining_bits() != key_bit_len {
         return Err(Error::CellUnderflow);
     }
 
-    let mut data = match root.as_ref() {
+    let mut data = match dict.as_ref() {
         // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok.
         Some(data) => ok!(context.load_dyn_cell(data.as_ref(), LoadMode::Full)),
         None if mode.can_add() => {
-            let data = ok!(make_leaf(key, key_bit_len, value, context));
-            return Ok((Some(data), true));
+            *dict = Some(ok!(make_leaf(key, key_bit_len, value, context)));
+            return Ok(true);
         }
-        None => return Ok((None, false)),
+        None => return Ok(false),
     };
 
     let mut stack = Vec::<Segment>::new();
 
-    let mut leaf = loop {
+    let leaf = loop {
         let mut remaining_data = ok!(data.as_slice());
 
         // Read the next part of the key from the current data
@@ -243,7 +244,7 @@ pub fn dict_insert(
                 // Check if we can replace the value
                 if !mode.can_replace() {
                     // TODO: what is the desired behavior for root as a library?
-                    return Ok((root.cloned(), false));
+                    return Ok(false);
                 }
                 // Replace the existing value
                 break ok!(make_leaf(prefix, key.remaining_bits(), value, context));
@@ -253,7 +254,7 @@ pub fn dict_insert(
                 // Check if we can add a new value
                 if !mode.can_add() {
                     // TODO: what is the desired behavior for root as a library?
-                    return Ok((root.cloned(), false));
+                    return Ok(false);
                 }
                 break ok!(split_edge(
                     &remaining_data,
@@ -297,9 +298,8 @@ pub fn dict_insert(
         }
     };
 
-    leaf = ok!(rebuild_dict_from_stack(stack, leaf, context));
-
-    Ok((Some(leaf), true))
+    *dict = Some(ok!(rebuild_dict_from_stack(stack, leaf, context)));
+    Ok(true)
 }
 
 /// Inserts the value associated with key in dictionary
@@ -307,27 +307,26 @@ pub fn dict_insert(
 ///
 /// Returns a tuple with a new dict root, changed flag and the previous value.
 pub fn dict_insert_owned(
-    root: Option<Cell>,
+    dict: &mut Option<Cell>,
     key: &mut CellSlice,
     key_bit_len: u16,
     value: &dyn Store,
     mode: SetMode,
     context: &mut dyn CellContext,
-) -> Result<(Option<Cell>, bool, Option<CellSliceParts>), Error> {
-    fn stack_or_last(
+) -> Result<(bool, Option<CellSliceParts>), Error> {
+    fn last(
         stack: &[Segment],
-        root: &Cell,
         context: &mut dyn CellContext,
         mode: LoadMode,
-    ) -> Result<Cell, Error> {
+    ) -> Result<Option<Cell>, Error> {
         match stack.last() {
             Some(Segment { data, next_branch }) => {
                 match data.reference_cloned(*next_branch as u8) {
-                    Some(cell) => context.load_cell(cell, mode),
+                    Some(cell) => context.load_cell(cell, mode).map(Some),
                     None => Err(Error::CellUnderflow),
                 }
             }
-            None => Ok(root.clone()),
+            None => Ok(None),
         }
     }
 
@@ -335,14 +334,14 @@ pub fn dict_insert_owned(
         return Err(Error::CellUnderflow);
     }
 
-    let root = match root {
+    let root = match &dict {
         // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok.
-        Some(data) => ok!(context.load_cell(data, LoadMode::Full)),
+        Some(data) => ok!(context.load_cell(data.clone(), LoadMode::Full)),
         None if mode.can_add() => {
-            let data = ok!(make_leaf(key, key_bit_len, value, context));
-            return Ok((Some(data), true, None));
+            *dict = Some(ok!(make_leaf(key, key_bit_len, value, context)));
+            return Ok((true, None));
         }
-        None => return Ok((None, false, None)),
+        None => return Ok((false, None)),
     };
     let mut data = root.as_ref();
     let mut stack = Vec::<Segment>::new();
@@ -362,11 +361,12 @@ pub fn dict_insert_owned(
                 if !mode.can_replace() {
                     // TODO: change mode to `LoadMode::Noop` if copy-on-write for libraries is not ok.
                     let value = (
-                        ok!(stack_or_last(&stack, &root, context, LoadMode::Resolve)),
+                        ok!(last(&stack, context, LoadMode::Resolve))
+                            .unwrap_or_else(|| root.clone()),
                         remaining_data.range(),
                     );
                     // TODO: what is the desired behavior for root as a library?
-                    return Ok((Some(root.clone()), false, Some(value)));
+                    return Ok((false, Some(value)));
                 }
                 // Replace the existing value
                 break (
@@ -379,7 +379,7 @@ pub fn dict_insert_owned(
                 // Check if we can add a new value
                 if !mode.can_add() {
                     // TODO: what is the desired behavior for root as a library?
-                    return Ok((Some(root.clone()), false, None));
+                    return Ok((false, None));
                 }
                 break (
                     ok!(split_edge(
@@ -427,22 +427,25 @@ pub fn dict_insert_owned(
     };
 
     let value = match value_range {
-        Some(range) => Some((
+        Some(range) => {
             // TODO: change mode to `LoadMode::Noop` if copy-on-write for libraries is not ok
-            ok!(stack_or_last(&stack, &root, context, LoadMode::Resolve)),
-            range,
-        )),
-        None => None,
+            let last = ok!(last(&stack, context, LoadMode::Resolve));
+            leaf = ok!(rebuild_dict_from_stack(stack, leaf, context));
+            Some((last.unwrap_or(root), range))
+        }
+        None => {
+            leaf = ok!(rebuild_dict_from_stack(stack, leaf, context));
+            None
+        }
     };
 
-    leaf = ok!(rebuild_dict_from_stack(stack, leaf, context));
-
-    Ok((Some(leaf), true, value))
+    *dict = Some(leaf);
+    Ok((true, value))
 }
 
 /// Returns a `CellSlice` of the value corresponding to the key.
 pub fn dict_get<'a: 'b, 'b>(
-    root: Option<&'a Cell>,
+    dict: Option<&'a Cell>,
     key_bit_len: u16,
     mut key: CellSlice<'b>,
     context: &mut dyn CellContext,
@@ -451,7 +454,7 @@ pub fn dict_get<'a: 'b, 'b>(
         return Err(Error::CellUnderflow);
     }
 
-    let mut data = match root {
+    let mut data = match dict {
         Some(data) => ok!(context
             .load_dyn_cell(data.as_ref(), LoadMode::Full)
             .and_then(CellSlice::new)),
@@ -495,7 +498,7 @@ pub fn dict_get<'a: 'b, 'b>(
 
 /// Returns cell slice parts of the value corresponding to the key.
 pub fn dict_get_owned(
-    root: Option<Cell>,
+    dict: Option<&Cell>,
     key_bit_len: u16,
     mut key: CellSlice<'_>,
     context: &mut dyn CellContext,
@@ -504,8 +507,8 @@ pub fn dict_get_owned(
         return Err(Error::CellUnderflow);
     }
 
-    let root = match root {
-        Some(cell) => ok!(context.load_cell(cell, LoadMode::Full)),
+    let root = match dict {
+        Some(cell) => ok!(context.load_cell(cell.clone(), LoadMode::Full)),
         None => return Ok(None),
     };
     let mut data = ok!(root.as_slice());
@@ -553,7 +556,10 @@ pub fn dict_get_owned(
                 };
                 (cell, data.range())
             }
-            None => (root.clone(), data.range()),
+            None => {
+                let range = data.range();
+                (root, range)
+            }
         })
     } else {
         None
@@ -562,7 +568,7 @@ pub fn dict_get_owned(
 
 /// Returns cell slice parts of the value corresponding to the key.
 pub fn dict_find_owned(
-    root: Option<Cell>,
+    dict: Option<&Cell>,
     key_bit_len: u16,
     mut key: CellSlice<'_>,
     towards: DictBound,
@@ -579,8 +585,8 @@ pub fn dict_find_owned(
         Divergence(Branch),
     }
 
-    let root = match root {
-        Some(data) => ok!(context.load_cell(data, LoadMode::Full)),
+    let root = match dict {
+        Some(data) => ok!(context.load_cell(data.clone(), LoadMode::Full)),
         None => return Ok(None),
     };
 
@@ -756,13 +762,13 @@ pub fn dict_find_owned(
 
 /// Finds the specified dict bound and returns a key and a value corresponding to the key.
 pub fn dict_find_bound<'a: 'b, 'b>(
-    root: Option<&'a Cell>,
+    dict: Option<&'a Cell>,
     mut key_bit_len: u16,
     bound: DictBound,
     signed: bool,
     context: &mut dyn CellContext,
 ) -> Result<Option<(CellBuilder, CellSlice<'b>)>, Error> {
-    let mut data = match root {
+    let mut data = match dict {
         Some(data) => ok!(context
             .load_dyn_cell(data.as_ref(), LoadMode::Full)
             .and_then(CellSlice::new)),
@@ -810,14 +816,14 @@ pub fn dict_find_bound<'a: 'b, 'b>(
 
 /// Finds the specified dict bound and returns a key and cell slice parts corresponding to the key.
 pub fn dict_find_bound_owned(
-    root: Option<Cell>,
+    dict: Option<&Cell>,
     mut key_bit_len: u16,
     bound: DictBound,
     signed: bool,
     context: &mut dyn CellContext,
 ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
-    let root = match root {
-        Some(data) => ok!(context.load_cell(data, LoadMode::Full)),
+    let root = match dict {
+        Some(data) => ok!(context.load_cell(data.clone(), LoadMode::Full)),
         None => return Ok(None),
     };
     let mut data = ok!(root.as_slice());
@@ -878,16 +884,16 @@ pub fn dict_find_bound_owned(
 
 /// Removes the specified dict bound and returns a removed key and cell slice parts.
 pub fn dict_remove_bound_owned(
-    root: Option<Cell>,
+    dict: &mut Option<Cell>,
     mut key_bit_len: u16,
     bound: DictBound,
     signed: bool,
     context: &mut dyn CellContext,
-) -> Result<(Option<Cell>, Option<DictOwnedEntry>), Error> {
-    let root = match root {
+) -> Result<Option<DictOwnedEntry>, Error> {
+    let root = match &dict {
         // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok
-        Some(data) => ok!(context.load_cell(data, LoadMode::Full)),
-        None => return Ok((None, None)),
+        Some(data) => ok!(context.load_cell(data.clone(), LoadMode::Full)),
+        None => return Ok(None),
     };
     let mut data = root.as_ref();
 
@@ -934,7 +940,7 @@ pub fn dict_remove_bound_owned(
     };
 
     // Rebuild the leaf node
-    let (mut leaf, removed) = if let Some(last) = stack.pop() {
+    let (leaf, removed) = if let Some(last) = stack.pop() {
         let index = last.next_branch as u8;
 
         // Load value branch
@@ -976,12 +982,12 @@ pub fn dict_remove_bound_owned(
         // Return the new cell and the removed one
         (leaf, (value, removed))
     } else {
-        return Ok((None, Some((key, (root.clone(), removed)))));
+        *dict = None;
+        return Ok(Some((key, (root, removed))));
     };
 
-    leaf = ok!(rebuild_dict_from_stack(stack, leaf, context));
-
-    Ok((Some(leaf), Some((key, removed))))
+    *dict = Some(ok!(rebuild_dict_from_stack(stack, leaf, context)));
+    Ok(Some((key, removed)))
 }
 
 // Creates a leaf node

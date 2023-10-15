@@ -482,7 +482,7 @@ where
                 ok!(key.store_into(&mut builder, context));
                 // TODO: add `dict_find` with non-owned return type
                 ok!(dict_find_owned(
-                    root.clone(),
+                    root.as_ref(),
                     K::BITS,
                     builder.as_data_slice(),
                     towards,
@@ -574,14 +574,13 @@ where
         signed: bool,
         context: &mut dyn CellContext,
     ) -> Result<Option<(K, CellSliceParts)>, Error> {
-        let (dict, removed) = ok!(dict_remove_bound_owned(
-            self.root.clone(),
+        let removed = ok!(dict_remove_bound_owned(
+            &mut self.root,
             K::BITS,
             bound,
             signed,
             context
         ));
-        self.root = dict;
         Ok(match removed {
             Some((key, value)) => match K::from_raw_data(key.raw_data()) {
                 Some(key) => Some((key, value)),
@@ -609,27 +608,19 @@ where
         Q: Borrow<K>,
     {
         pub fn remove_raw_ext_impl<K>(
-            root: &Option<Cell>,
+            root: &mut Option<Cell>,
             key: &K,
             context: &mut dyn CellContext,
-        ) -> Result<(Option<Cell>, Option<CellSliceParts>), Error>
+        ) -> Result<Option<CellSliceParts>, Error>
         where
             K: Store + DictKey,
         {
             let mut builder = CellBuilder::new();
             ok!(key.store_into(&mut builder, &mut Cell::empty_context()));
-            dict_remove_owned(
-                root.as_ref(),
-                &mut builder.as_data_slice(),
-                K::BITS,
-                false,
-                context,
-            )
+            dict_remove_owned(root, &mut builder.as_data_slice(), K::BITS, false, context)
         }
 
-        let (dict, removed) = ok!(remove_raw_ext_impl(&self.root, key.borrow(), context));
-        self.root = dict;
-        Ok(removed)
+        remove_raw_ext_impl(&mut self.root, key.borrow(), context)
     }
 
     /// Gets an iterator over the raw entries of the dictionary, sorted by key.
@@ -741,20 +732,16 @@ where
         K: Store + DictKey,
         V: Store,
     {
-        let (new_root, changed) = {
-            let mut key_builder = CellBuilder::new();
-            ok!(key.store_into(&mut key_builder, &mut Cell::empty_context()));
-            ok!(dict_insert(
-                self.root.as_ref(),
-                &mut key_builder.as_data_slice(),
-                K::BITS,
-                value,
-                mode,
-                context
-            ))
-        };
-        self.root = new_root;
-        Ok(changed)
+        let mut key_builder = CellBuilder::new();
+        ok!(key.store_into(&mut key_builder, &mut Cell::empty_context()));
+        dict_insert(
+            &mut self.root,
+            &mut key_builder.as_data_slice(),
+            K::BITS,
+            value,
+            mode,
+            context,
+        )
     }
 }
 

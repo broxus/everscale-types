@@ -557,15 +557,14 @@ impl AbiSerializer {
                 InlineOrRef::Ref(ok!(value.build_ext(context)))
             };
 
-            let (new_dict, _) = ok!(dict::dict_insert(
-                dict.as_ref(),
+            ok!(dict::dict_insert(
+                &mut dict,
                 &mut key_builder.as_data_slice(),
                 key_bits,
                 &value,
                 dict::SetMode::Set,
                 context,
             ));
-            dict = new_dict;
 
             ok!(key_builder.rewind(key_builder.bit_len()));
         }
