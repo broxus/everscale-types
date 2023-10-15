@@ -677,6 +677,18 @@ impl<'a> CellSlice<'a> {
         }
     }
 
+    /// Shrinks the slice down to a prefix of the specified length.
+    pub fn shrink(&mut self, bits: Option<u16>, refs: Option<u8>) -> Result<(), Error> {
+        let bits = bits.unwrap_or_else(|| self.remaining_bits());
+        let refs = refs.unwrap_or_else(|| self.remaining_refs());
+        if self.has_remaining(bits, refs) {
+            *self = self.get_prefix(bits, refs);
+            Ok(())
+        } else {
+            Err(Error::CellUnderflow)
+        }
+    }
+
     /// Returns a subslice with the data prefix removed.
     ///
     /// If the slice starts with `prefix`, returns the subslice after the prefix, wrapped in `Some`.
