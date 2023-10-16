@@ -676,6 +676,7 @@ pub fn dict_find_owned(
                 let remaining_bits = key.remaining_bits();
                 let prefix_len = key_bit_len - remaining_bits;
                 original_key_range = original_key_range.get_prefix(prefix_len, 0);
+                let _compatibility_gas = ok!(context.load_dyn_cell(data, LoadMode::UseGas));
                 break 'fork (data, remaining_bits, None);
             }
         }
