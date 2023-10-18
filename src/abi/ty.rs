@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::hash::Hash;
 use std::num::NonZeroU8;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -6,6 +7,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use super::error::{ParseAbiTypeError, ParseNamedAbiTypeError};
+use crate::abi::WithoutName;
 use crate::cell::{CellTreeStats, MAX_BIT_LEN, MAX_REF_COUNT};
 use crate::models::{IntAddr, StdAddr};
 use crate::num::Tokens;
@@ -154,6 +156,25 @@ impl From<(usize, AbiType)> for NamedAbiType {
     #[inline]
     fn from((index, ty): (usize, AbiType)) -> Self {
         Self::from_index(index, ty)
+    }
+}
+
+impl PartialEq for WithoutName<NamedAbiType> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        WithoutName::wrap(&self.0.ty).eq(WithoutName::wrap(&other.0.ty))
+    }
+}
+
+impl Hash for WithoutName<NamedAbiType> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        WithoutName::wrap(&self.0.ty).hash(state);
+    }
+}
+
+impl std::borrow::Borrow<WithoutName<AbiType>> for WithoutName<NamedAbiType> {
+    fn borrow(&self) -> &WithoutName<AbiType> {
+        WithoutName::wrap(&self.0.ty)
     }
 }
 
@@ -604,6 +625,74 @@ impl std::fmt::Display for DisplayAbiTypeSimple<'_> {
             AbiType::Optional(ty) => write!(f, "optional({})", ty.display_simple()),
             AbiType::Ref(ty) => write!(f, "ref({})", ty.display_simple()),
             ty => std::fmt::Display::fmt(ty, f),
+        }
+    }
+}
+
+impl PartialEq for WithoutName<AbiType> {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.0, &other.0) {
+            (AbiType::Uint(a), AbiType::Uint(b)) => a.eq(b),
+            (AbiType::Int(a), AbiType::Int(b)) => a.eq(b),
+            (AbiType::VarUint(a), AbiType::VarUint(b)) => a.eq(b),
+            (AbiType::VarInt(a), AbiType::VarInt(b)) => a.eq(b),
+            (AbiType::Bool, AbiType::Bool) => true,
+            (AbiType::Cell, AbiType::Cell) => true,
+            (AbiType::Address, AbiType::Address) => true,
+            (AbiType::Bytes, AbiType::Bytes) => true,
+            (AbiType::FixedBytes(a), AbiType::FixedBytes(b)) => a.eq(b),
+            (AbiType::String, AbiType::String) => true,
+            (AbiType::Token, AbiType::Token) => true,
+            (AbiType::Tuple(a), AbiType::Tuple(b)) => {
+                WithoutName::wrap_slice(a.as_ref()).eq(WithoutName::wrap_slice(b.as_ref()))
+            }
+            (AbiType::Array(a), AbiType::Array(b)) => {
+                WithoutName::wrap(a.as_ref()).eq(WithoutName::wrap(b.as_ref()))
+            }
+            (AbiType::FixedArray(a, an), AbiType::FixedArray(b, bn)) => {
+                WithoutName::wrap(a.as_ref()).eq(WithoutName::wrap(b.as_ref())) && an.eq(bn)
+            }
+            (AbiType::Map(ak, av), AbiType::Map(bk, bv)) => {
+                ak.eq(bk) && WithoutName::wrap(av.as_ref()).eq(WithoutName::wrap(bv.as_ref()))
+            }
+            (AbiType::Optional(a), AbiType::Optional(b)) => {
+                WithoutName::wrap(a.as_ref()).eq(WithoutName::wrap(b.as_ref()))
+            }
+            (AbiType::Ref(a), AbiType::Ref(b)) => {
+                WithoutName::wrap(a.as_ref()).eq(WithoutName::wrap(b.as_ref()))
+            }
+            _ => false,
+        }
+    }
+}
+
+impl Hash for WithoutName<AbiType> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(&self.0).hash(state);
+        match &self.0 {
+            AbiType::Uint(x) => x.hash(state),
+            AbiType::Int(x) => x.hash(state),
+            AbiType::VarUint(x) => x.hash(state),
+            AbiType::VarInt(x) => x.hash(state),
+            AbiType::Bool => {}
+            AbiType::Cell => {}
+            AbiType::Address => {}
+            AbiType::Bytes => {}
+            AbiType::FixedBytes(x) => x.hash(state),
+            AbiType::String => {}
+            AbiType::Token => {}
+            AbiType::Tuple(x) => WithoutName::wrap_slice(x.as_ref()).hash(state),
+            AbiType::Array(x) => WithoutName::wrap(x.as_ref()).hash(state),
+            AbiType::FixedArray(x, n) => {
+                WithoutName::wrap(x.as_ref()).hash(state);
+                n.hash(state);
+            }
+            AbiType::Map(k, v) => {
+                k.hash(state);
+                WithoutName::wrap(v.as_ref()).hash(state);
+            }
+            AbiType::Optional(x) => WithoutName::wrap(x.as_ref()).hash(state),
+            AbiType::Ref(x) => WithoutName::wrap(x.as_ref()).hash(state),
         }
     }
 }

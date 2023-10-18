@@ -9,11 +9,153 @@ use bytes::Bytes;
 use num_bigint::{BigInt, BigUint};
 use num_traits::ToPrimitive;
 
-use super::{AbiType, AbiValue, NamedAbiType, NamedAbiValue, PlainAbiType, PlainAbiValue};
+use super::{
+    AbiType, AbiValue, NamedAbiType, NamedAbiValue, PlainAbiType, PlainAbiValue, WithoutName,
+};
 use crate::cell::{Cell, HashBytes};
 use crate::num::*;
 
 use crate::models::message::{IntAddr, StdAddr, VarAddr};
+
+/// ABI entity wrapper.
+pub trait IgnoreName {
+    /// Wrapped ABI entity.
+    type Unnamed<'a>
+    where
+        Self: 'a;
+
+    /// Wraps an ABI entity into [`WithoutName`].
+    fn ignore_name(&self) -> Self::Unnamed<'_>;
+}
+
+impl<T: IgnoreName> IgnoreName for &'_ T {
+    type Unnamed<'a> = T::Unnamed<'a> where Self: 'a;
+
+    #[inline]
+    fn ignore_name(&self) -> Self::Unnamed<'_> {
+        T::ignore_name(self)
+    }
+}
+
+impl<T> IgnoreName for Vec<T>
+where
+    [T]: IgnoreName,
+{
+    type Unnamed<'a> = <[T] as IgnoreName>::Unnamed<'a> where Self: 'a;
+
+    #[inline]
+    fn ignore_name(&self) -> Self::Unnamed<'_> {
+        <[T] as IgnoreName>::ignore_name(self.as_slice())
+    }
+}
+
+impl<T: IgnoreName> IgnoreName for Box<T> {
+    type Unnamed<'a> = T::Unnamed<'a> where Self: 'a;
+
+    #[inline]
+    fn ignore_name(&self) -> Self::Unnamed<'_> {
+        T::ignore_name(self.as_ref())
+    }
+}
+
+impl<T: IgnoreName> IgnoreName for Arc<T> {
+    type Unnamed<'a> = T::Unnamed<'a> where Self: 'a;
+
+    #[inline]
+    fn ignore_name(&self) -> Self::Unnamed<'_> {
+        T::ignore_name(self.as_ref())
+    }
+}
+
+impl<T: IgnoreName> IgnoreName for Rc<T> {
+    type Unnamed<'a> = T::Unnamed<'a> where Self: 'a;
+
+    #[inline]
+    fn ignore_name(&self) -> Self::Unnamed<'_> {
+        T::ignore_name(self.as_ref())
+    }
+}
+
+impl<T: IgnoreName> IgnoreName for Option<T> {
+    type Unnamed<'a> = Option<T::Unnamed<'a>> where Self: 'a;
+
+    #[inline]
+    fn ignore_name(&self) -> Self::Unnamed<'_> {
+        self.as_ref().map(|t| T::ignore_name(t))
+    }
+}
+
+impl IgnoreName for AbiType {
+    type Unnamed<'a> = &'a WithoutName<AbiType>;
+
+    #[inline]
+    fn ignore_name(&self) -> Self::Unnamed<'_> {
+        WithoutName::wrap(self)
+    }
+}
+
+impl IgnoreName for [AbiType] {
+    type Unnamed<'a> = &'a [WithoutName<AbiType>];
+
+    #[inline]
+    fn ignore_name(&self) -> Self::Unnamed<'_> {
+        WithoutName::wrap_slice(self)
+    }
+}
+
+impl IgnoreName for NamedAbiType {
+    type Unnamed<'a> = &'a WithoutName<NamedAbiType>;
+
+    #[inline]
+    fn ignore_name(&self) -> Self::Unnamed<'_> {
+        WithoutName::wrap(self)
+    }
+}
+
+impl IgnoreName for [NamedAbiType] {
+    type Unnamed<'a> = &'a [WithoutName<NamedAbiType>];
+
+    #[inline]
+    fn ignore_name(&self) -> Self::Unnamed<'_> {
+        WithoutName::wrap_slice(self)
+    }
+}
+
+impl IgnoreName for AbiValue {
+    type Unnamed<'a> = &'a WithoutName<AbiValue>;
+
+    #[inline]
+    fn ignore_name(&self) -> Self::Unnamed<'_> {
+        WithoutName::wrap(self)
+    }
+}
+
+impl IgnoreName for [AbiValue] {
+    type Unnamed<'a> = &'a [WithoutName<AbiValue>];
+
+    #[inline]
+    fn ignore_name(&self) -> Self::Unnamed<'_> {
+        WithoutName::wrap_slice(self)
+    }
+}
+
+impl IgnoreName for NamedAbiValue {
+    type Unnamed<'a> = &'a WithoutName<NamedAbiValue>;
+
+    #[inline]
+    fn ignore_name(&self) -> Self::Unnamed<'_> {
+        WithoutName::wrap(self)
+    }
+}
+
+impl IgnoreName for [NamedAbiValue] {
+    type Unnamed<'a> = &'a [WithoutName<NamedAbiValue>];
+
+    #[inline]
+    fn ignore_name(&self) -> Self::Unnamed<'_> {
+        WithoutName::wrap_slice(self)
+    }
+}
 
 /// A type with a known ABI type.
 pub trait WithAbiType {
@@ -991,6 +1133,8 @@ impl<T: FromAbi> FromAbi for Rc<T> {
 
 #[cfg(test)]
 mod tests {
+    use ahash::HashSet;
+
     use crate::prelude::CellFamily;
 
     use super::*;
@@ -1010,5 +1154,28 @@ mod tests {
         let abi = (123u32, 321u32, true, (Cell::empty_cell(), None::<bool>));
 
         assert_eq!(abi.into_abi(), target_abi);
+    }
+
+    #[test]
+    fn entities_without_name() {
+        let only_signatures = HashSet::from_iter(
+            [
+                u32::abi_type().named("u32"),
+                bool::abi_type().named("bool"),
+                <(u32, bool)>::abi_type().named("(u32,bool)"),
+            ]
+            .map(WithoutName),
+        );
+
+        assert!(only_signatures.contains(u32::abi_type().named("qwe").ignore_name()));
+        assert!(only_signatures.contains(u32::abi_type().ignore_name()));
+
+        assert!(only_signatures.contains(bool::abi_type().named("asd").ignore_name()));
+        assert!(only_signatures.contains(bool::abi_type().ignore_name()));
+
+        assert!(only_signatures.contains(<(u32, bool)>::abi_type().named("zxc").ignore_name()));
+        assert!(only_signatures.contains(<(u32, bool)>::abi_type().ignore_name()));
+
+        assert!(!only_signatures.contains(u64::abi_type().ignore_name()));
     }
 }

@@ -6,7 +6,7 @@ use anyhow::Result;
 use bytes::Bytes;
 use num_bigint::{BigInt, BigUint};
 
-use super::{ty::*, IntoAbi, IntoPlainAbi, WithAbiType, WithPlainAbiType};
+use super::{ty::*, IntoAbi, IntoPlainAbi, WithAbiType, WithPlainAbiType, WithoutName};
 use crate::abi::error::AbiError;
 use crate::cell::{Cell, CellFamily};
 use crate::models::IntAddr;
@@ -102,6 +102,19 @@ impl NamedAbiType {
             name: self.name.clone(),
             value: self.ty.make_default_value(),
         }
+    }
+}
+
+impl PartialEq for WithoutName<NamedAbiValue> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        WithoutName::wrap(&self.0.value).eq(WithoutName::wrap(&other.0.value))
+    }
+}
+
+impl std::borrow::Borrow<WithoutName<AbiValue>> for WithoutName<NamedAbiValue> {
+    fn borrow(&self) -> &WithoutName<AbiValue> {
+        WithoutName::wrap(&self.0.value)
     }
 }
 
@@ -421,6 +434,48 @@ impl AbiType {
             }
             AbiType::Optional(ty) => AbiValue::Optional(ty.clone(), None),
             AbiType::Ref(ty) => AbiValue::Ref(Box::new(ty.make_default_value())),
+        }
+    }
+}
+
+impl PartialEq for WithoutName<AbiValue> {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.0, &other.0) {
+            (AbiValue::Uint(an, a), AbiValue::Uint(bn, b)) => an.eq(bn) && a.eq(b),
+            (AbiValue::Int(an, a), AbiValue::Int(bn, b)) => an.eq(bn) && a.eq(b),
+            (AbiValue::VarUint(an, a), AbiValue::VarUint(bn, b)) => an.eq(bn) && a.eq(b),
+            (AbiValue::VarInt(an, a), AbiValue::VarInt(bn, b)) => an.eq(bn) && a.eq(b),
+            (AbiValue::Bool(a), AbiValue::Bool(b)) => a.eq(b),
+            (AbiValue::Cell(a), AbiValue::Cell(b)) => a.eq(b),
+            (AbiValue::Address(a), AbiValue::Address(b)) => a.eq(b),
+            (AbiValue::Bytes(a), AbiValue::Bytes(b)) => a.eq(b),
+            (AbiValue::FixedBytes(a), AbiValue::FixedBytes(b)) => a.eq(b),
+            (AbiValue::String(a), AbiValue::String(b)) => a.eq(b),
+            (AbiValue::Token(a), AbiValue::Token(b)) => a.eq(b),
+            (AbiValue::Tuple(a), AbiValue::Tuple(b)) => {
+                WithoutName::wrap_slice(a.as_slice()).eq(WithoutName::wrap_slice(b.as_slice()))
+            }
+            (AbiValue::Array(at, av), AbiValue::Array(bt, bv))
+            | (AbiValue::FixedArray(at, av), AbiValue::FixedArray(bt, bv)) => {
+                WithoutName::wrap(at.as_ref()).eq(WithoutName::wrap(bt.as_ref()))
+                    && WithoutName::wrap_slice(av.as_slice())
+                        .eq(WithoutName::wrap_slice(bv.as_slice()))
+            }
+            (AbiValue::Map(akt, avt, a), AbiValue::Map(bkt, bvt, b)) => {
+                akt.eq(bkt)
+                    && WithoutName::wrap(avt.as_ref()).eq(WithoutName::wrap(bvt.as_ref()))
+                    && WithoutName::wrap(a).eq(WithoutName::wrap(b))
+            }
+            (AbiValue::Optional(at, a), AbiValue::Optional(bt, b)) => {
+                WithoutName::wrap(at.as_ref()).eq(WithoutName::wrap(bt.as_ref()))
+                    && a.as_deref()
+                        .map(WithoutName::wrap)
+                        .eq(&b.as_deref().map(WithoutName::wrap))
+            }
+            (AbiValue::Ref(a), AbiValue::Ref(b)) => {
+                WithoutName::wrap(a.as_ref()).eq(WithoutName::wrap(b.as_ref()))
+            }
+            _unused => false,
         }
     }
 }
