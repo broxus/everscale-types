@@ -265,7 +265,7 @@ macro_rules! impl_var_uints {
 
     (@impl $(#[doc = $doc:expr])* $vis:vis $ident:ident $inner:ty, $max_bytes:literal) => {
         $(#[doc = $doc])*
-        #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+        #[derive(Debug, Default, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
         #[repr(transparent)]
         $vis struct $ident($inner);
 
@@ -480,7 +480,7 @@ impl<'a> Load<'a> for Tokens {
 /// Variable-length 248-bit integer.
 ///
 /// Stored as 5 bits of `len` (`0..=31`), followed by `len` bytes.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, Hash, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct VarUint248([u128; 2]);
 
@@ -637,7 +637,7 @@ macro_rules! impl_small_uints {
 
     (@impl $(#[doc = $doc:expr])* $vis:vis $ident:ident, $bits:literal) => {
         $(#[doc = $doc])*
-        #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+        #[derive(Debug, Default, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
         #[repr(transparent)]
         $vis struct $ident(u16);
 
@@ -773,7 +773,7 @@ impl_small_uints! {
 }
 
 /// Account split depth. Fixed-length 5-bit integer of range `1..=30`
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Ord, PartialOrd)]
 #[repr(transparent)]
 pub struct SplitDepth(NonZeroU8);
 

@@ -7,7 +7,7 @@ use crate::num::*;
 use crate::util::*;
 
 /// Internal message address.
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub enum IntAddr {
     /// Standard internal address.
     Std(StdAddr),
@@ -151,7 +151,7 @@ impl<'a> Load<'a> for IntAddr {
 }
 
 /// Standard internal address.
-#[derive(Debug, Default, Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Default, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct StdAddr {
     /// Optional anycast info.
     pub anycast: Option<Box<Anycast>>,
@@ -345,7 +345,7 @@ impl crate::dict::DictKey for StdAddr {
 }
 
 /// Variable-length internal address.
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct VarAddr {
     /// Optional anycast info.
     pub anycast: Option<Box<Anycast>>,
@@ -416,7 +416,7 @@ impl Store for VarAddr {
 /// addr_none$00 = MsgAddressExt;
 /// addr_extern$01 len:(## 9) external_address:(bits len) = MsgAddressExt;
 /// ```
-#[derive(Debug, Default, Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Default, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct ExtAddr {
     /// Number of bits stored in data.
     pub data_bit_len: Uint9,
@@ -452,7 +452,7 @@ impl ExtAddr {
 /// ```text
 /// anycast_info$_ depth:(#<= 30) { depth >= 1 } rewrite_pfx:(bits depth) = Anycast;
 /// ```
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Anycast {
     /// Prefix length in bits.
     pub depth: SplitDepth,
