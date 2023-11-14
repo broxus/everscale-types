@@ -1144,11 +1144,11 @@ pub trait FromAbiIter<T> {
 impl<T, I> FromAbiIter<T> for I
 where
     T: WithAbiType,
-    I: Iterator<Item = AbiValue>,
+    I: Iterator<Item = NamedAbiValue>,
 {
     fn next_value<V: FromAbi>(&mut self) -> Result<V> {
         match Iterator::next(self) {
-            Some(value) => V::from_abi(value),
+            Some(item) => V::from_abi(item.value),
             None => Err(anyhow::Error::from(
                 crate::abi::error::AbiError::TypeMismatch {
                     expected: T::abi_type().to_string().into_boxed_str(),
