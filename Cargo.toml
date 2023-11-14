@@ -70,3 +70,6 @@ venom = []
 
 [profile.release]
 debug = true
+
+[package.metadata.docs.rs]
+features = ["base64", "serde", "models", "sync", "stats", "abi"]
