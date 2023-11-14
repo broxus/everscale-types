@@ -9,7 +9,8 @@ pub use self::contract::{
 };
 pub use self::signature::{extend_signature_with_id, sign_with_signature_id};
 pub use self::traits::{
-    FromAbi, FromPlainAbi, IgnoreName, IntoAbi, IntoPlainAbi, WithAbiType, WithPlainAbiType,
+    FromAbi, FromAbiIter, FromPlainAbi, IgnoreName, IntoAbi, IntoPlainAbi, WithAbiType,
+    WithPlainAbiType,
 };
 pub use self::ty::{AbiHeaderType, AbiType, NamedAbiType, PlainAbiType};
 pub use self::value::{AbiHeader, AbiValue, NamedAbiValue, PlainAbiValue};

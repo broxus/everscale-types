@@ -1131,6 +1131,34 @@ impl<T: FromAbi> FromAbi for Rc<T> {
     }
 }
 
+/// A wrapper around ABI values iterator that converts
+/// each item using the [`FromAbi`] trait.
+///
+/// It should be used to parse fields as tuple items
+/// for some struct `T` (which must implement [`WithAbiType`]).
+pub trait FromAbiIter<T> {
+    /// Advances the iterator and returns the next value.
+    fn next_value<V: FromAbi>(&mut self) -> Result<V>;
+}
+
+impl<T, I> FromAbiIter<T> for I
+where
+    T: WithAbiType,
+    I: Iterator<Item = AbiValue>,
+{
+    fn next_value<V: FromAbi>(&mut self) -> Result<V> {
+        match Iterator::next(self) {
+            Some(value) => V::from_abi(value),
+            None => Err(anyhow::Error::from(
+                crate::abi::error::AbiError::TypeMismatch {
+                    expected: T::abi_type().to_string().into_boxed_str(),
+                    ty: Box::from("tuple part"),
+                },
+            )),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use ahash::HashSet;
