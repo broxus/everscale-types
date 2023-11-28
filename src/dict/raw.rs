@@ -1,11 +1,12 @@
 use crate::cell::*;
+use crate::dict::make_leaf;
 use crate::error::Error;
 use crate::util::{unlikely, IterStatus};
 
 use super::{
-    dict_find_bound, dict_find_bound_owned, dict_find_owned, dict_get, dict_get_owned, dict_insert,
-    dict_load_from_root, dict_remove_bound_owned, dict_remove_owned, read_label, DictBound,
-    DictOwnedEntry, SetMode,
+    dict_find_bound, dict_find_bound_owned, dict_find_owned, dict_get, dict_get_owned,
+    dict_get_subdict, dict_insert, dict_load_from_root, dict_remove_bound_owned, dict_remove_owned,
+    dict_split, read_label, split_edge, Branch, DictBound, DictOwnedEntry, SetMode,
 };
 
 /// Dictionary with fixed length keys (where `N` is a number of bits in each key).
@@ -170,6 +171,14 @@ impl<const N: u16> RawDict<N> {
             signed,
             &mut Cell::empty_context(),
         )
+    }
+
+    pub fn get_subdict<'a>(
+        &'a self,
+        mut prefix: CellSlice<'a>,
+        context: &mut dyn CellContext,
+    ) -> Result<Option<Cell>, Error> {
+        dict_get_subdict(self.0.as_ref(), N, &mut prefix, context)
     }
 
     /// Computes the maximal key in dictionary that is lexicographically smaller than `key`,
@@ -404,6 +413,14 @@ impl<const N: u16> RawDict<N> {
         context: &mut dyn CellContext,
     ) -> Result<Option<DictOwnedEntry>, Error> {
         dict_remove_bound_owned(&mut self.0, N, bound, signed, context)
+    }
+
+    ///Split dictionary to 2 dictionaries on a root level
+    pub fn split(
+        &self,
+        context: &mut dyn CellContext,
+    ) -> Result<(Option<Cell>, Option<Cell>), Error> {
+        dict_split(self.0.as_ref(), context)
     }
 
     /// Gets an iterator over the entries of the dictionary, sorted by key.
@@ -1196,6 +1213,8 @@ struct ValuesSegment<'a> {
 
 #[cfg(test)]
 mod tests {
+    use base64::display;
+
     use super::*;
     use crate::prelude::*;
 
@@ -1304,9 +1323,70 @@ mod tests {
     }
 
     #[test]
+    fn dict_split() -> anyhow::Result<()> {
+        let mut dict = RawDict::<32>::new();
+
+        for i in 0u32..10 {
+            let key = CellBuilder::build_from(i << 15)?;
+            println!("ADDIN KEY: {}", key.display_data());
+            dict.add(key.as_slice()?, i)?;
+        }
+
+        let context = &mut SimpleContext::default();
+
+        match dict.split(context).unwrap() {
+            (Some(left), Some(right)) => {
+                println!("LEFT: {}", left.display_tree());
+                println!("RIGHT: {}", right.display_tree());
+            }
+            (Some(left), None) => {
+                println!("ONLY LEFT: {}", left.display_tree());
+            }
+            (None, Some(right)) => {
+                println!("ONLY RIGHT: {}", right.display_tree());
+            }
+            (None, None) => {
+                println!("BOTH BRANCHES ARE EMPTY");
+            }
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn dict_get_subdict() -> anyhow::Result<()> {
+        let mut dict = RawDict::<32>::new();
+        for i in 0u32..4 {
+            //let key = i % 2;
+            let key = CellBuilder::build_from(i)?;
+            println!("ADDING KEY {}", key.display_data());
+            dict.add(key.as_slice()?, i)?;
+        }
+
+        let cell = dict.root().as_ref().unwrap();
+        let boc = Boc::encode_base64(cell);
+
+        println!("{}", boc);
+
+        let key = CellBuilder::build_from(1u16 << 8)?;
+
+        println!("KEY: {}", key.display_data());
+
+        let context = &mut SimpleContext::default();
+
+        let value: Cell = dict.get_subdict(key.as_slice()?, context)?.unwrap();
+
+        print!("{}", value.display_tree());
+
+        Ok(())
+    }
+
+    #[test]
     fn dict_get() -> anyhow::Result<()> {
         let boc =
             Boc::decode_base64("te6ccgECOwEAASoAAQHAAQIBIBACAgEgAwMCASAEBAIBIAUFAgEgBgYCASAHBwIBIAgIAgEgCQkCASAoCgIBIAsZAgEgDBsCASArDQIBIA4fAgEgLQ8CASAuIQIBIBERAgEgEhICASATEwIBIBQUAgEgFRUCASAWFgIBIBcXAgEgKBgCASAaGQIBIBsbAgEgHRsCASAcHAIBIB8fAgEgKx4CASAiHwIBICAgAgEgISECASAlJQIBIC0jAgEgLiQCASAvJQIBIDMmAgFiNicCAUg4OAIBICkpAgEgKioCASArKwIBICwsAgEgLS0CASAuLgIBIC8vAgEgMzACAWI2MQIBIDcyAAnWAAAmbwIBIDQ0AgEgNTUCASA2NgIBIDc3AgEgODgCASA5OQIBIDo6AAnQAAAmbw==")?;
+
+        println!("BOC: {}", boc.display_tree());
 
         let dict = boc.parse::<RawDict<32>>()?;
 

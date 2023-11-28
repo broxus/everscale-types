@@ -31,6 +31,35 @@ A set of primitive types and utilities for the Everscale blockchain.
 Heavily inspired by [`ton-labs-types`](https://github.com/tonlabs/ton-labs-types),
 but with much more emphasis on speed.
 
+## Basic usage
+
+Get `Cell` from `Vec<u8>` representation of bytes
+```rust
+use everscale_types::boc::Boc;
+
+let cell: Cell = Boc::decode(bytes)?;
+```
+Get specific everscale type from `Cell`
+```rust
+use everscale_types::models::BlockProof;
+
+let proof: BlockProof = cell.parse::<BlockProof>()?;
+```
+Same usage for virtualized cell
+```rust
+use everscale_types::prelude::DynCell;
+use everscale_types::models::Block;
+
+let virt_cell: &DynCell = cell.virtualize();
+let block = virt_cell.parse::<Block>()?;
+```
+
+Get `Cell` from `&DynCell`
+```rust
+
+
+```
+
 ## Development
 
 ### How to bench
