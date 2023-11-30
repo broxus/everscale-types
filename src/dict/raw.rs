@@ -1,12 +1,11 @@
 use crate::cell::*;
-use crate::dict::make_leaf;
 use crate::error::Error;
 use crate::util::{unlikely, IterStatus};
 
 use super::{
     dict_find_bound, dict_find_bound_owned, dict_find_owned, dict_get, dict_get_owned,
     dict_get_subdict, dict_insert, dict_load_from_root, dict_remove_bound_owned, dict_remove_owned,
-    dict_split, read_label, split_edge, Branch, DictBound, DictOwnedEntry, SetMode,
+    dict_split, read_label, DictBound, DictOwnedEntry, SetMode,
 };
 
 /// Dictionary with fixed length keys (where `N` is a number of bits in each key).

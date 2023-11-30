@@ -224,14 +224,14 @@ where
         self.dict.get(key)
     }
 
-    pub fn set<Q, E, T>(&mut self, key: Q, aug: E, value: T) -> Result<(), Error>
-    where
-        Q: Borrow<K>,
-        E: Borrow<A>,
-        T: Borrow<V>,
-    {
-        self.add_ext(key, aug, value, &mut Cell::empty_context())
-    }
+    // pub fn set<Q, E, T>(&mut self, key: Q, aug: E, value: T) -> Result<(), Error>
+    // where
+    //     Q: Borrow<K>,
+    //     E: Borrow<A>,
+    //     T: Borrow<V>,
+    // {
+    //     self.add_ext(key, aug, value, &mut Cell::empty_context())
+    // }
 }
 
 // TODO: add support for `extra` in edges

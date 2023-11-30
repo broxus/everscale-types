@@ -209,7 +209,7 @@ pub fn aug_dict_insert(
     extra: &dyn Store,
     value: &dyn Store,
     mode: SetMode,
-    callback: &fn(
+    comparator: fn(
         left: &CellSlice,
         right: &CellSlice,
         builder: &mut CellBuilder,
@@ -225,22 +225,24 @@ pub fn aug_dict_insert(
         // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok.
         Some(data) => ok!(context.load_dyn_cell(data.as_ref(), LoadMode::Full)),
         None if mode.can_add() => {
-            *dict = Some(ok!(make_leaf_with_extra(
+            let (cell, _) = ok!(make_leaf_with_extra(
                 key,
                 key_bit_len,
                 value,
                 extra,
                 context
-            )));
+            ));
+            *dict = Some(cell);
             return Ok(true);
         }
         None => return Ok(false),
     };
 
-    let mut stack = Vec::<Segment>::new();
+    let mut stack = Vec::<AugSegment>::new();
 
-    let leaf = loop {
+    let (leaf, extra_range) = loop {
         let mut remaining_data = ok!(data.as_slice());
+        let kbl = key.remaining_bits();
 
         // Read the next part of the key from the current data
         let prefix = &mut ok!(read_label(&mut remaining_data, key.remaining_bits()));
@@ -271,13 +273,15 @@ pub fn aug_dict_insert(
                     // TODO: what is the desired behavior for root as a library?
                     return Ok(false);
                 }
-                break ok!(split_edge(
-                    &remaining_data,
+                break ok!(split_aug_edge(
+                    &mut remaining_data,
                     prefix,
                     &lcp,
                     key,
                     value,
-                    context
+                    extra,
+                    comparator,
+                    context,
                 ));
             }
             // The key contains the entire prefix, but there are still some bits left
@@ -303,7 +307,11 @@ pub fn aug_dict_insert(
                 };
 
                 // Push an intermediate edge to the stack
-                stack.push(Segment { data, next_branch });
+                stack.push(AugSegment {
+                    data,
+                    next_branch,
+                    key_bit_len: kbl,
+                });
                 data = child;
             }
             std::cmp::Ordering::Greater => {
@@ -313,7 +321,13 @@ pub fn aug_dict_insert(
         }
     };
 
-    *dict = Some(ok!(rebuild_dict_from_stack(stack, leaf, context)));
+    *dict = Some(ok!(rebuild_dict_from_stack_with_comparator(
+        stack,
+        leaf,
+        extra_range,
+        context,
+        comparator
+    )));
 
     Ok(true)
 }
@@ -1282,12 +1296,23 @@ fn make_leaf_with_extra(
     value: &dyn Store,
     extra: &dyn Store,
     context: &mut dyn CellContext,
-) -> Result<Cell, Error> {
+) -> Result<(Cell, CellSliceRange), Error> {
     let mut builder = CellBuilder::new();
     ok!(write_label(key, key_bit_len, &mut builder));
+    let bits_offset = key.bits_offset();
+    let refs_offset = key.refs_offset();
+
     ok!(extra.store_into(&mut builder, context));
+
+    let extra_bits = key.bits_offset() - bits_offset;
+    let extra_refs = key.refs_offset() - refs_offset;
+
     ok!(value.store_into(&mut builder, context));
-    builder.build_ext(context)
+
+    let cell = ok!(builder.build_ext(context));
+    let mut extra_range = CellSliceRange::full(cell.as_ref());
+    extra_range.try_advance(bits_offset, refs_offset);
+    Ok((cell, extra_range.get_prefix(extra_bits, extra_refs)))
 }
 
 // Creates a leaf node
@@ -1301,6 +1326,81 @@ fn make_leaf(
     ok!(write_label(key, key_bit_len, &mut builder));
     ok!(value.store_into(&mut builder, context));
     builder.build_ext(context)
+}
+
+fn split_aug_edge(
+    data: &mut CellSlice,
+    prefix: &mut CellSlice,
+    lcp: &CellSlice,
+    key: &mut CellSlice,
+    value: &dyn Store,
+    mut extra: &dyn Store,
+    comparator: fn(
+        left: &CellSlice,
+        right: &CellSlice,
+        builder: &mut CellBuilder,
+        context: &mut dyn CellContext,
+    ) -> Result<(), Error>,
+    context: &mut dyn CellContext,
+) -> Result<(Cell, CellSliceRange), Error> {
+    // Advance the key
+    let prev_key_bit_len = key.remaining_bits();
+    if !key.try_advance(lcp.remaining_bits() + 1, 0) {
+        return Err(Error::CellUnderflow);
+    }
+
+    let mut old_extra = ok!(read_extra(data));
+
+    // Read the next bit from the data
+    prefix.try_advance(lcp.remaining_bits(), 0);
+    let old_to_right = ok!(prefix.load_bit());
+
+    // Create a leaf for the old value
+    let (mut left, _) = ok!(make_leaf_with_extra(
+        prefix,
+        key.remaining_bits(),
+        data,
+        &old_extra,
+        context
+    ));
+    // Create a leaf for the new value
+    let (mut right, new_extra_range) = ok!(make_leaf_with_extra(
+        key,
+        key.remaining_bits(),
+        value,
+        extra,
+        context
+    ));
+
+    let right_clone = right.clone();
+
+    let mut new_extra = ok!(new_extra_range.apply(&right_clone));
+
+    // The part that starts with 1 goes to the right cell
+    if old_to_right {
+        std::mem::swap(&mut left, &mut right);
+        std::mem::swap(&mut old_extra, &mut new_extra);
+    }
+
+    // Create fork edge
+    let mut builder = CellBuilder::new();
+    ok!(write_label(lcp, prev_key_bit_len, &mut builder));
+
+    let bits_offset = key.bits_offset();
+    let refs_offset = key.refs_offset();
+
+    comparator(&old_extra, &new_extra, &mut builder, context);
+
+    let extra_bits = key.bits_offset() - bits_offset;
+    let extra_refs = key.refs_offset() - refs_offset;
+
+    ok!(builder.store_reference(left));
+    ok!(builder.store_reference(right));
+    let cell = ok!(builder.build_ext(context));
+
+    let mut extra_range = CellSliceRange::full(cell.as_ref());
+    extra_range.try_advance(bits_offset, refs_offset);
+    Ok((cell, extra_range.get_prefix(extra_bits, extra_refs)))
 }
 
 // Splits an edge or leaf
@@ -1407,6 +1507,98 @@ pub fn dict_load_from_root(
     builder.build_ext(context)
 }
 
+fn rebuild_dict_from_stack_with_comparator(
+    mut segments: Vec<AugSegment<'_>>,
+    mut leaf: Cell,
+    mut extra_range: CellSliceRange,
+    context: &mut dyn CellContext,
+    comparator: fn(
+        left: &CellSlice,
+        right: &CellSlice,
+        builder: &mut CellBuilder,
+        context: &mut dyn CellContext,
+    ) -> Result<(), Error>,
+) -> Result<Cell, Error> {
+    // Rebuild the tree starting from leaves
+    while let Some(last) = segments.pop() {
+        // Load the opposite branch
+        let (left, right, is_left) = match last.next_branch {
+            Branch::Left => match last.data.reference_cloned(1) {
+                Some(cell) => (cell, leaf, false),
+                None => return Err(Error::CellUnderflow),
+            },
+            Branch::Right => match last.data.reference_cloned(0) {
+                Some(cell) => (leaf, cell, true),
+                None => return Err(Error::CellUnderflow),
+            },
+        };
+
+        let mut leaf_slice = if is_left {
+            ok!(left.as_slice())
+        } else {
+            ok!(right.as_slice())
+        };
+
+        leaf_slice.try_advance(extra_range.bits_offset(), extra_range.refs_offset());
+        let extra_slice =
+            leaf_slice.get_prefix(extra_range.remaining_bits(), extra_range.remaining_refs());
+
+        let mut last_slice = ok!(last.data.as_slice());
+        let last_label = ok!(read_label(&mut last_slice, last.key_bit_len));
+
+        //getting ancestor key_bit_length according to last
+        let accestor_kbl = last.key_bit_len - last_label.remaining_bits() - 1;
+
+        ////Reading extra of the second ancesestor of `last``
+        let mut opposite_cell_slice = if !is_left {
+            ok!(left.as_slice())
+        } else {
+            ok!(right.as_slice())
+        };
+
+        let _ = ok!(read_label(&mut opposite_cell_slice, accestor_kbl));
+        let opposite_extra = ok!(read_extra(&mut opposite_cell_slice));
+
+        let mut builder = CellBuilder::new();
+        let _ = last_label.store_into(&mut builder, context);
+
+        let bits_offset = builder.bit_len();
+        let refs_offset = builder.reference_count();
+
+        if is_left {
+            ok!(comparator(
+                &opposite_extra,
+                &extra_slice,
+                &mut builder,
+                context
+            ));
+        } else {
+            ok!(comparator(
+                &extra_slice,
+                &opposite_extra,
+                &mut builder,
+                context
+            ));
+        }
+
+        let extra_bits = builder.bit_len() - bits_offset;
+        let extra_refs = builder.reference_count() - refs_offset;
+
+        ok!(builder.store_reference(left));
+        ok!(builder.store_reference(right));
+
+        let new_leaf = ok!(builder.build_ext(context));
+
+        let mut new_extra_range = CellSliceRange::full(new_leaf.as_ref());
+        new_extra_range.try_advance(bits_offset, refs_offset);
+        extra_range = new_extra_range.get_prefix(extra_bits, extra_refs);
+
+        leaf = new_leaf;
+    }
+
+    Ok(leaf)
+}
+
 fn rebuild_dict_from_stack(
     mut segments: Vec<Segment<'_>>,
     mut leaf: Cell,
@@ -1440,6 +1632,12 @@ fn rebuild_dict_from_stack(
 struct Segment<'a> {
     data: &'a DynCell,
     next_branch: Branch,
+}
+
+struct AugSegment<'a> {
+    data: &'a DynCell,
+    next_branch: Branch,
+    key_bit_len: u16,
 }
 
 fn write_label(key: &CellSlice, key_bit_len: u16, label: &mut CellBuilder) -> Result<(), Error> {
@@ -1531,6 +1729,19 @@ fn read_label<'a>(label: &mut CellSlice<'a>, key_bit_len: u16) -> Result<CellSli
         read_hml_long(label, bits_for_len)
     } else {
         read_hml_same(label, bits_for_len)
+    }
+}
+
+fn read_extra<'a>(label_remaining: &mut CellSlice<'a>) -> Result<CellSlice<'a>, Error> {
+    let mut len = 0;
+    while ok!(label_remaining.load_bit()) {
+        len += 1;
+    }
+    let result = *label_remaining;
+    if label_remaining.try_advance(len, 0) {
+        Ok(result.get_prefix(len, 0))
+    } else {
+        Err(Error::CellUnderflow)
     }
 }
 
