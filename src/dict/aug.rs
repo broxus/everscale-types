@@ -1,6 +1,7 @@
 use std::borrow::Borrow;
 use std::marker::PhantomData;
 
+use super::{aug_dict_insert, SetMode};
 use crate::cell::*;
 use crate::error::*;
 use crate::util::*;
@@ -223,69 +224,233 @@ where
     {
         self.dict.get(key)
     }
-
-    // pub fn set<Q, E, T>(&mut self, key: Q, aug: E, value: T) -> Result<(), Error>
-    // where
-    //     Q: Borrow<K>,
-    //     E: Borrow<A>,
-    //     T: Borrow<V>,
-    // {
-    //     self.add_ext(key, aug, value, &mut Cell::empty_context())
-    // }
 }
 
 // TODO: add support for `extra` in edges
 
-// impl<K, A, V> AugDict<K, A, V>
-// where
-//     K: Store + DictKey,
-//     A: Store,
-//     V: Store,
-// {
-//     /// Sets the augmented value associated with the key in the dictionary.
-//     ///
-//     /// Use [`set_ext`] if you need to use a custom cell context.
-//     ///
-//     /// [`set_ext`]: AugDict::set_ext
-//     pub fn set<Q, E, T>(&mut self, key: Q, aug: E, value: T) -> Result<(), Error>
-//     where
-//         Q: Borrow<K>,
-//         E: Borrow<A>,
-//         T: Borrow<V>,
-//     {
-//         self.set_ext(key, aug, value, &mut Cell::empty_context())
-//     }
+impl<K, A, V> AugDict<K, A, V>
+where
+    K: Store + DictKey,
+    A: Store,
+    V: Store,
+{
+    /// Sets the augmented value associated with the key in the aug dictionary.
+    ///
+    /// Use [`set_ext`] if you need to use a custom cell context.
+    ///
+    /// [`set_ext`]: AugDict::set_ext
+    pub fn set<Q, E, T>(
+        &mut self,
+        key: Q,
+        aug: E,
+        value: T,
+        extra_comparator: fn(
+            left: &CellSlice,
+            right: &CellSlice,
+            builder: &mut CellBuilder,
+            context: &mut dyn CellContext,
+        ) -> Result<(), Error>,
+    ) -> Result<bool, Error>
+    where
+        Q: Borrow<K>,
+        E: Borrow<A>,
+        T: Borrow<V>,
+    {
+        self.set_ext(
+            key,
+            aug,
+            value,
+            extra_comparator,
+            &mut Cell::empty_context(),
+        )
+    }
 
-//     /// Sets the augmented value associated with the key in the dictionary
-//     /// only if the key was already present in it.
-//     ///
-//     /// Use [`replace_ext`] if you need to use a custom cell context.
-//     ///
-//     /// [`replace_ext`]: AugDict::replace_ext
-//     pub fn replace<Q, E, T>(&mut self, key: Q, aug: E, value: T) -> Result<(), Error>
-//     where
-//         Q: Borrow<K>,
-//         E: Borrow<A>,
-//         T: Borrow<V>,
-//     {
-//         self.replace_ext(key, aug, value, &mut Cell::empty_context())
-//     }
+    /// Sets the value associated with the key in the dictionary.
+    pub fn set_ext<Q, E, T>(
+        &mut self,
+        key: Q,
+        aug: E,
+        value: T,
+        extra_comparator: fn(
+            left: &CellSlice,
+            right: &CellSlice,
+            builder: &mut CellBuilder,
+            context: &mut dyn CellContext,
+        ) -> Result<(), Error>,
+        context: &mut dyn CellContext,
+    ) -> Result<bool, Error>
+    where
+        Q: Borrow<K>,
+        E: Borrow<A>,
+        T: Borrow<V>,
+    {
+        self.insert_impl(
+            key.borrow(),
+            value.borrow(),
+            aug.borrow(),
+            SetMode::Set,
+            extra_comparator,
+            context,
+        )
+    }
 
-//     /// Sets the value associated with key in dictionary,
-//     /// but only if it is not already present.
-//     ///
-//     /// Use [`add_ext`] if you need to use a custom cell context.
-//     ///
-//     /// [`add_ext`]: AugDict::add_ext
-//     pub fn add<Q, E, T>(&mut self, key: Q, aug: E, value: T) -> Result<(), Error>
-//     where
-//         Q: Borrow<K>,
-//         E: Borrow<A>,
-//         T: Borrow<V>,
-//     {
-//         self.add_ext(key, aug, value, &mut Cell::empty_context())
-//     }
-// }
+    /// Sets the augmented value associated with the key in the aug dictionary
+    /// only if the key was already present in it.
+    ///
+    /// Use [`replace_ext`] if you need to use a custom cell context.
+    ///
+    /// [`replace_ext`]: AugDict::replace_ext
+    pub fn replace<Q, E, T>(
+        &mut self,
+        key: Q,
+        aug: E,
+        value: T,
+        extra_comparator: fn(
+            left: &CellSlice,
+            right: &CellSlice,
+            builder: &mut CellBuilder,
+            context: &mut dyn CellContext,
+        ) -> Result<(), Error>,
+    ) -> Result<bool, Error>
+    where
+        Q: Borrow<K>,
+        E: Borrow<A>,
+        T: Borrow<V>,
+    {
+        self.replace_ext(
+            key,
+            aug,
+            value,
+            extra_comparator,
+            &mut Cell::empty_context(),
+        )
+    }
+
+    /// Sets the value associated with the key in the dictionary
+    /// only if the key was already present in it.
+    pub fn replace_ext<Q, E, T>(
+        &mut self,
+        key: Q,
+        aug: E,
+        value: T,
+        extra_comparator: fn(
+            left: &CellSlice,
+            right: &CellSlice,
+            builder: &mut CellBuilder,
+            context: &mut dyn CellContext,
+        ) -> Result<(), Error>,
+        context: &mut dyn CellContext,
+    ) -> Result<bool, Error>
+    where
+        Q: Borrow<K>,
+        E: Borrow<A>,
+        T: Borrow<V>,
+    {
+        self.insert_impl(
+            key.borrow(),
+            value.borrow(),
+            aug.borrow(),
+            SetMode::Replace,
+            extra_comparator,
+            context,
+        )
+    }
+
+    /// Sets the value associated with key in aug dictionary,
+    /// but only if it is not already present.
+    ///
+    /// Use [`add_ext`] if you need to use a custom cell context.
+    ///
+    /// [`add_ext`]: AugDict::add_ext
+    pub fn add<Q, E, T>(
+        &mut self,
+        key: Q,
+        aug: E,
+        value: T,
+        extra_comparator: fn(
+            left: &CellSlice,
+            right: &CellSlice,
+            builder: &mut CellBuilder,
+            context: &mut dyn CellContext,
+        ) -> Result<(), Error>,
+    ) -> Result<bool, Error>
+    where
+        Q: Borrow<K>,
+        E: Borrow<A>,
+        T: Borrow<V>,
+    {
+        self.add_ext(
+            key,
+            aug,
+            value,
+            extra_comparator,
+            &mut Cell::empty_context(),
+        )
+    }
+
+    /// Sets the value associated with key in dictionary,
+    /// but only if it is not already present.
+    pub fn add_ext<Q, E, T>(
+        &mut self,
+        key: Q,
+        aug: E,
+        value: T,
+        extra_comparator: fn(
+            left: &CellSlice,
+            right: &CellSlice,
+            builder: &mut CellBuilder,
+            context: &mut dyn CellContext,
+        ) -> Result<(), Error>,
+        context: &mut dyn CellContext,
+    ) -> Result<bool, Error>
+    where
+        Q: Borrow<K>,
+        E: Borrow<A>,
+        T: Borrow<V>,
+    {
+        self.insert_impl(
+            key.borrow(),
+            value.borrow(),
+            aug.borrow(),
+            SetMode::Add,
+            extra_comparator,
+            context,
+        )
+    }
+
+    fn insert_impl(
+        &mut self,
+        key: &K,
+        value: &V,
+        extra: &A,
+        mode: SetMode,
+        comparator: fn(
+            left: &CellSlice,
+            right: &CellSlice,
+            builder: &mut CellBuilder,
+            context: &mut dyn CellContext,
+        ) -> Result<(), Error>,
+        context: &mut dyn CellContext,
+    ) -> Result<bool, Error>
+    where
+        K: Store + DictKey,
+        A: Store,
+        V: Store,
+    {
+        let mut key_builder = CellBuilder::new();
+        ok!(key.store_into(&mut key_builder, &mut Cell::empty_context()));
+        aug_dict_insert(
+            &mut self.dict.root,
+            &mut key_builder.as_data_slice(),
+            K::BITS,
+            value,
+            extra,
+            mode,
+            comparator,
+            context,
+        )
+    }
+}
 
 impl<K, A, V> AugDict<K, A, V>
 where
