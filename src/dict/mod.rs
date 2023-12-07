@@ -860,19 +860,13 @@ pub fn dict_get_subdict<'a: 'b, 'b>(
                     .and_then(CellSlice::new)),
                 None => return Ok(None),
             };
-            println!("CELL DATA: {}", data.display_data());
             let mut i = 0;
 
             // Try to find the required root
             let subtree = loop {
                 // Read the key part written in the current edge
-                println!("ITERATION {} prefix {}", i, prefix.display_data());
                 let label = &mut ok!(read_label(&mut data, prefix.remaining_bits()));
-                println!("ITERATION {} label {}", i, label.display_data());
-
                 let lcp = prefix.longest_common_data_prefix(label);
-                println!("ITERATION {} lcp {}", i, lcp.display_data());
-
                 match lcp.remaining_bits().cmp(&prefix.remaining_bits()) {
                     std::cmp::Ordering::Equal => {
                         //found exact key
@@ -889,11 +883,6 @@ pub fn dict_get_subdict<'a: 'b, 'b>(
                         let value = ok!(CellBuilder::new().build_ext(context));
                         let split_edge =
                             ok!(split_edge(&data, label, &lcp, prefix, &value, context));
-                        println!(
-                            "ITERATION {} cmp less lcp less. Cell: {}",
-                            i,
-                            split_edge.display_data()
-                        );
                         break split_edge;
                     }
                     std::cmp::Ordering::Less => {
@@ -906,7 +895,6 @@ pub fn dict_get_subdict<'a: 'b, 'b>(
                             Err(e) => return Err(e),
                         };
 
-                        println!("ITERATION {} cmp less next_branch: {:?}", i, next_branch);
                         let child = match data.cell().reference(next_branch as u8) {
                             // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok
                             Some(cell) => ok!(context
@@ -914,9 +902,6 @@ pub fn dict_get_subdict<'a: 'b, 'b>(
                                 .and_then(CellSlice::new)),
                             None => return Err(Error::CellUnderflow),
                         };
-
-                        println!("ITERATION {} cmp less child: {}", i, child.display_data());
-
                         data = child;
                     }
                     std::cmp::Ordering::Greater => {
@@ -1359,44 +1344,47 @@ pub fn dict_remove_bound_owned(
 
 /// Splits one dectionary into two
 /// Returns two optional dictionaries as CellSlice representation
-pub fn dict_split<'a>(
-    dict: Option<&'a Cell>,
+pub fn dict_split(
+    dict: Option<&'_ Cell>,
+    key_bit_len: u16,
     context: &mut dyn CellContext,
 ) -> Result<(Option<Cell>, Option<Cell>), Error> {
-    let data = match dict {
+    let mut remaining_data = match dict {
         Some(data) => ok!(context
             .load_dyn_cell(data.as_ref(), LoadMode::Full)
             .and_then(CellSlice::new)),
         None => return Ok((None, None)),
     };
 
-    let left_child = match data.cell().reference_cloned(0u8) {
-        Some(cell) => {
-            let cell = ok!(context
-                .load_cell(cell, LoadMode::Full)
-                //.and_then(CellSlice::new));
-            );
-            Some(cell)
+    let parent_label = ok!(read_label(&mut remaining_data, key_bit_len));
+
+    let left_child = match remaining_data.get_reference_cloned(0u8) {
+        Ok(left_child) => {
+            let mut new_left = CellBuilder::new();
+            ok!(new_left.store_slice(parent_label));
+            ok!(new_left.store_bit(false));
+            ok!(new_left.store_slice(ok!(left_child.as_slice())));
+            Some(ok!(new_left.build()))
         }
-        None => None,
+        Err(_) => None,
     };
 
-    let right_child = match data.cell().reference_cloned(1u8) {
-        Some(cell) => {
-            let cell = ok!(context
-                .load_cell(cell, LoadMode::Full)
-                //.and_then(Cell::new)
-            );
-            Some(cell)
+    let right_child = match remaining_data.get_reference_cloned(0u8) {
+        Ok(right_child) => {
+            let mut new_right = CellBuilder::new();
+            ok!(new_right.store_slice(parent_label));
+            ok!(new_right.store_bit(false));
+            ok!(new_right.store_slice(ok!(right_child.as_slice())));
+            Some(ok!(new_right.build()))
         }
-        None => None,
+        Err(_) => None,
     };
 
     Ok((left_child, right_child))
 }
 
 ///Merges two dictionaries into one (left)
-pub fn dict_merge<'a>(
+pub fn dict_merge(
     left: &mut Option<Cell>,
     right: &Option<Cell>,
     key_bit_length: u16,
@@ -1785,7 +1773,6 @@ struct AugSegment<'a> {
 
 fn write_label(key: &CellSlice, key_bit_len: u16, label: &mut CellBuilder) -> Result<(), Error> {
     if key_bit_len == 0 || key.is_data_empty() {
-        println!("LABEL EMPTY: {}", label.display_data());
         return write_hml_empty(label);
     }
 
@@ -1800,7 +1787,6 @@ fn write_label(key: &CellSlice, key_bit_len: u16, label: &mut CellBuilder) -> Re
     if hml_same_len < hml_long_len && hml_same_len < hml_short_len {
         if let Some(bit) = key.test_uniform() {
             ok!(write_hml_same(bit, remaining_bits, bits_for_len, label));
-            println!("LABEL SAME: {}", label.display_data());
             return Ok(());
         }
     }
@@ -1814,7 +1800,6 @@ fn write_label(key: &CellSlice, key_bit_len: u16, label: &mut CellBuilder) -> Re
     }
 
     ok!(label.store_slice_data(key));
-    println!("LABEL FINAL: {}", label.display_data());
     Ok(())
 }
 

@@ -172,6 +172,7 @@ impl<const N: u16> RawDict<N> {
         )
     }
 
+    /// Get subdict of dictionary by specified key prefix
     pub fn get_subdict<'a>(
         &'a self,
         mut prefix: CellSlice<'a>,
@@ -419,7 +420,7 @@ impl<const N: u16> RawDict<N> {
         &self,
         context: &mut dyn CellContext,
     ) -> Result<(Option<Cell>, Option<Cell>), Error> {
-        dict_split(self.0.as_ref(), context)
+        dict_split(self.0.as_ref(), N, context)
     }
 
     /// Gets an iterator over the entries of the dictionary, sorted by key.
@@ -1327,7 +1328,6 @@ mod tests {
 
         for i in 0u32..10 {
             let key = CellBuilder::build_from(i << 15)?;
-            println!("ADDIN KEY: {}", key.display_data());
             dict.add(key.as_slice()?, i)?;
         }
 
@@ -1488,10 +1488,8 @@ mod tests {
         fn consume_gas(&mut self, cell: &DynCell, mode: LoadMode) {
             if mode.use_gas() {
                 self.used_gas += if self.loaded_cells.insert(*cell.repr_hash()) {
-                    println!("LOAD NEW");
                     Self::NEW_CELL_GAS
                 } else {
-                    println!("LOAD OLD");
                     Self::OLD_CELL_GAS
                 };
             }
@@ -1501,7 +1499,6 @@ mod tests {
     impl CellContext for SimpleContext {
         #[inline]
         fn finalize_cell(&mut self, cell: CellParts<'_>) -> Result<Cell, Error> {
-            println!("FINALIZE");
             self.used_gas += Self::BUILD_CELL_GAS;
             self.empty_context.finalize_cell(cell)
         }
