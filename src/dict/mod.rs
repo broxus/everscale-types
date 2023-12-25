@@ -785,7 +785,7 @@ pub fn dict_find_bound<'a: 'b, 'b>(
         let prefix = ok!(read_label(&mut data, key_bit_len));
         #[allow(clippy::needless_borrow)]
         if !prefix.is_data_empty() {
-            ok!(key.store_slice_data(&prefix));
+            ok!(key.store_slice_data(prefix));
         }
 
         match key_bit_len.checked_sub(prefix.remaining_bits()) {
@@ -839,7 +839,7 @@ pub fn dict_find_bound_owned(
         let prefix = ok!(read_label(&mut data, key_bit_len));
         #[allow(clippy::needless_borrow)]
         if !prefix.is_data_empty() {
-            ok!(key.store_slice_data(&prefix));
+            ok!(key.store_slice_data(prefix));
         }
 
         match key_bit_len.checked_sub(prefix.remaining_bits()) {
