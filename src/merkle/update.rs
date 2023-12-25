@@ -247,6 +247,188 @@ impl MerkleUpdate {
         }
     }
 
+    /// Computes the removed cells diff using the original cell.
+    pub fn compute_removed_cells<'a>(
+        &self,
+        old: &'a DynCell,
+    ) -> Result<ahash::HashMap<&'a HashBytes, u32>, Error> {
+        use std::collections::hash_map;
+
+        // A helper to combine two children iterators
+        struct BiIter<'a, 'b> {
+            original: &'a DynCell,
+            update: &'b DynCell,
+            index: u8,
+            max: u8,
+        }
+
+        impl<'a, 'b> BiIter<'a, 'b> {
+            fn new(original: &'a DynCell, update: &'b DynCell) -> Self {
+                let max = original.descriptor().reference_count();
+                Self {
+                    original,
+                    update,
+                    index: 0,
+                    max,
+                }
+            }
+        }
+
+        impl<'a, 'b> Iterator for BiIter<'a, 'b> {
+            /// A pair of original cell and update cell.
+            type Item = (&'a DynCell, &'b DynCell);
+
+            fn next(&mut self) -> Option<Self::Item> {
+                if self.index >= self.max {
+                    None
+                } else {
+                    let item = self
+                        .original
+                        .reference(self.index)
+                        .zip(self.update.reference(self.index));
+                    self.index += 1;
+                    item
+                }
+            }
+        }
+
+        if old.repr_hash() != &self.old_hash {
+            return Err(Error::InvalidData);
+        }
+
+        if self.old_hash == self.new_hash {
+            // No cells were removed
+            return Ok(Default::default());
+        }
+
+        let mut new_cells = ahash::HashSet::default();
+        let mut merkle_depth = 0u8;
+
+        // Traverse new cells
+        {
+            let mut visited = ahash::HashSet::default();
+            visited.insert(self.new.repr_hash());
+            new_cells.insert(self.new.hash(0));
+            merkle_depth += self.new.descriptor().is_merkle() as u8;
+            let mut stack = vec![self.new.references()];
+
+            'outer: while let Some(iter) = stack.last_mut() {
+                for child in &mut *iter {
+                    if !visited.insert(child.repr_hash()) {
+                        continue;
+                    }
+
+                    // Track used cells
+                    new_cells.insert(child.hash(merkle_depth));
+
+                    // Unchanged cells (as pruned branches) must be presented in the old tree
+                    let descriptor = child.descriptor();
+                    if descriptor.is_pruned_branch() {
+                        continue;
+                    }
+
+                    // Increase the current merkle depth if needed
+                    merkle_depth += descriptor.is_merkle() as u8;
+                    // And proceed to processing this child
+                    stack.push(child.references());
+                    continue 'outer;
+                }
+
+                merkle_depth -= iter.cell().descriptor().is_merkle() as u8;
+                stack.pop();
+            }
+
+            // NOTE: `stack` will not be reused due to a different item type
+        }
+
+        debug_assert_eq!(merkle_depth, 0);
+
+        // Traverse old cells
+        let mut result = ahash::HashMap::default();
+
+        let old_update = self.old.as_ref();
+        result.insert(old.repr_hash(), 1);
+        merkle_depth += old_update.descriptor().is_merkle() as u8;
+
+        let mut stack = Vec::new();
+        if !new_cells.contains(old.repr_hash()) {
+            stack.push(BiIter::new(old, old_update));
+        }
+
+        let mut substack = vec![];
+
+        fn traverse_subtree<'a>(
+            root: &'a DynCell,
+            new_cells: &ahash::HashSet<&HashBytes>,
+            stack: &mut Vec<RefsIter<'a>>,
+            result: &mut ahash::HashMap<&'a HashBytes, u32>,
+        ) {
+            stack.clear();
+            stack.push(root.references());
+
+            'outer: while let Some(iter) = stack.last_mut() {
+                for child in iter {
+                    let hash = child.repr_hash();
+                    match result.entry(hash) {
+                        hash_map::Entry::Occupied(mut entry) => {
+                            *entry.get_mut() += 1;
+                            continue;
+                        }
+                        hash_map::Entry::Vacant(entry) => {
+                            entry.insert(1);
+                        }
+                    }
+
+                    if new_cells.contains(hash) || child.reference_count() == 0 {
+                        continue;
+                    }
+
+                    stack.push(child.references());
+                    continue 'outer;
+                }
+                stack.pop();
+            }
+        }
+
+        'outer: while let Some(item) = stack.last_mut() {
+            for (original_child, update_child) in &mut *item {
+                let hash = original_child.repr_hash();
+                match result.entry(hash) {
+                    hash_map::Entry::Occupied(mut entry) => {
+                        *entry.get_mut() += 1;
+                        continue;
+                    }
+                    hash_map::Entry::Vacant(entry) => {
+                        entry.insert(1);
+                    }
+                }
+
+                if new_cells.contains(hash) {
+                    continue;
+                }
+
+                let descriptor = update_child.descriptor();
+                if descriptor.is_pruned_branch() {
+                    traverse_subtree(original_child, &new_cells, &mut substack, &mut result);
+                    continue;
+                }
+
+                // Increase the current merkle depth if needed
+                merkle_depth += descriptor.is_merkle() as u8;
+                // And proceed to processing this child
+                stack.push(BiIter::new(original_child, update_child));
+                continue 'outer;
+            }
+
+            merkle_depth -= item.update.descriptor().is_merkle() as u8;
+            stack.pop();
+        }
+
+        debug_assert_eq!(merkle_depth, 0);
+
+        Ok(result)
+    }
+
     fn find_old_cells(&self) -> Result<ahash::HashSet<&HashBytes>, Error> {
         let mut visited = ahash::HashSet::default();
         let mut old_cells = ahash::HashSet::default();
@@ -290,13 +472,10 @@ impl MerkleUpdate {
 
         debug_assert_eq!(merkle_depth, 0);
 
-        // Reset temp state
-        visited.clear();
-        stack.clear();
-
         // Traverse new cells
 
         // Insert root
+        visited.clear();
         visited.insert(self.new.repr_hash());
         stack.push(self.new.references());
         merkle_depth += self.new.descriptor().is_merkle() as u8;
@@ -526,6 +705,24 @@ mod tests {
     use super::*;
     use crate::prelude::*;
 
+    fn visit_all_cells(cell: &Cell) -> ahash::HashSet<&HashBytes> {
+        let mut result = ahash::HashSet::default();
+
+        let mut stack = vec![cell.as_ref()];
+        while let Some(cell) = stack.pop() {
+            let repr_hash = cell.repr_hash();
+            if !result.insert(repr_hash) {
+                continue;
+            }
+
+            for child in cell.references() {
+                stack.push(child);
+            }
+        }
+
+        result
+    }
+
     #[test]
     fn correct_store_load() {
         let default = MerkleUpdate::default();
@@ -542,27 +739,8 @@ mod tests {
 
     #[test]
     fn dict_merkle_update() {
-        fn visit_all_cells(cell: &Cell) -> ahash::HashSet<&HashBytes> {
-            let mut result = ahash::HashSet::default();
-
-            let mut stack = vec![cell.as_ref()];
-            while let Some(cell) = stack.pop() {
-                let repr_hash = cell.repr_hash();
-                if !result.insert(repr_hash) {
-                    continue;
-                }
-
-                for child in cell.references() {
-                    stack.push(child);
-                }
-            }
-
-            result
-        }
-
         // Create dict with keys 0..10
         let mut dict = Dict::<u32, u32>::new();
-
         for i in 0..10 {
             dict.add(i, i * 10).unwrap();
         }
@@ -597,5 +775,86 @@ mod tests {
 
         let after_apply = merkle_update.apply(&old_dict_cell).unwrap();
         assert_eq!(after_apply.as_ref(), new_dict_cell.as_ref());
+    }
+
+    #[test]
+    fn dict_removed_cells_diff() {
+        // Create dict with keys 0..10
+        let mut dict = Dict::<u32, u32>::new();
+        for i in 0..10 {
+            dict.add(i, 0).unwrap();
+        }
+
+        // Serialize old dict
+        let old_dict_cell = CellBuilder::build_from(&dict).unwrap();
+        let old_dict_hashes = visit_all_cells(&old_dict_cell);
+
+        // Serialize new dict
+        dict.set(0, 1).unwrap();
+        let new_dict_cell = CellBuilder::build_from(dict).unwrap();
+
+        assert_ne!(old_dict_cell.as_ref(), new_dict_cell.as_ref());
+
+        // Create merkle update
+        let merkle_update = MerkleUpdate::create(
+            old_dict_cell.as_ref(),
+            new_dict_cell.as_ref(),
+            old_dict_hashes,
+        )
+        .build()
+        .unwrap();
+
+        // Test diff
+        let mut refs_for_both = RefsStorage::default();
+        refs_for_both.store_cell(old_dict_cell.as_ref());
+        refs_for_both.store_cell(new_dict_cell.as_ref());
+
+        let mut only_new_refs = RefsStorage::default();
+        only_new_refs.store_cell(new_dict_cell.as_ref());
+
+        let mut removed = merkle_update
+            .compute_removed_cells(old_dict_cell.as_ref())
+            .unwrap();
+        refs_for_both.refs.retain(|hash, refs| {
+            if let Some(diff) = removed.remove(hash) {
+                *refs -= diff;
+            }
+            *refs != 0
+        });
+        assert_eq!(removed.len(), 0);
+        assert_eq!(only_new_refs.refs, refs_for_both.refs);
+    }
+
+    #[derive(Default)]
+    struct RefsStorage<'a> {
+        refs: ahash::HashMap<&'a HashBytes, u32>,
+    }
+
+    impl<'a> RefsStorage<'a> {
+        fn store_cell(&mut self, root: &'a DynCell) {
+            use std::collections::hash_map;
+
+            *self.refs.entry(root.repr_hash()).or_default() += 1;
+
+            let mut stack = vec![root.references()];
+            'outer: while let Some(iter) = stack.last_mut() {
+                for child in iter {
+                    let hash = child.repr_hash();
+                    match self.refs.entry(hash) {
+                        hash_map::Entry::Occupied(mut entry) => {
+                            *entry.get_mut() += 1;
+                            continue;
+                        }
+                        hash_map::Entry::Vacant(entry) => {
+                            entry.insert(1);
+                        }
+                    }
+
+                    stack.push(child.references());
+                    continue 'outer;
+                }
+                stack.pop();
+            }
+        }
     }
 }
