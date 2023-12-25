@@ -577,6 +577,7 @@ impl<'a: 'b, 'b> BuilderImpl<'a, 'b> {
                 InvertedFilter(self.filter)
             )
             .track_pruned_branches()
+            .allow_different_root(true)
             .build_raw_ext(self.context)
         };
 
@@ -596,6 +597,7 @@ impl<'a: 'b, 'b> BuilderImpl<'a, 'b> {
         // Create Merkle proof cell which contains only changed cells
         let old = ok! {
             MerkleProofBuilder::<_>::new(self.old, resolver.changed_cells)
+                .allow_different_root(true)
                 .build_raw_ext(self.context)
         };
 
@@ -703,6 +705,48 @@ mod tests {
         // Serialize new dict
         dict.set(0, 1).unwrap();
         let new_dict_cell = CellBuilder::build_from(dict).unwrap();
+
+        assert_ne!(old_dict_cell.as_ref(), new_dict_cell.as_ref());
+
+        // Create merkle update
+        let merkle_update = MerkleUpdate::create(
+            old_dict_cell.as_ref(),
+            new_dict_cell.as_ref(),
+            old_dict_hashes,
+        )
+        .build()
+        .unwrap();
+
+        // Test diff
+        let mut refs_for_both = RefsStorage::default();
+        refs_for_both.store_cell(old_dict_cell.as_ref());
+        refs_for_both.store_cell(new_dict_cell.as_ref());
+
+        let mut only_new_refs = RefsStorage::default();
+        only_new_refs.store_cell(new_dict_cell.as_ref());
+
+        let diff = merkle_update
+            .compute_removed_cells(old_dict_cell.as_ref())
+            .unwrap();
+        assert!(refs_for_both.remove_batch(diff));
+
+        assert_eq!(only_new_refs.refs, refs_for_both.refs);
+    }
+
+    #[test]
+    fn dict_removed_all_cells_diff() {
+        // Create dict with keys 0..10
+        let mut dict = Dict::<u32, u32>::new();
+        for i in 0..10 {
+            dict.add(i, 0).unwrap();
+        }
+
+        // Serialize old dict
+        let old_dict_cell = CellBuilder::build_from(&dict).unwrap();
+        let old_dict_hashes = visit_all_cells(&old_dict_cell);
+
+        // Serialize new dict
+        let new_dict_cell = CellBuilder::build_from(Dict::<u32, u32>::new()).unwrap();
 
         assert_ne!(old_dict_cell.as_ref(), new_dict_cell.as_ref());
 
