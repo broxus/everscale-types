@@ -199,6 +199,7 @@ impl MerkleProof {
 pub struct MerkleProofBuilder<'a, F> {
     root: &'a DynCell,
     filter: F,
+    allow_different_root: bool,
 }
 
 impl<'a, F> MerkleProofBuilder<'a, F>
@@ -208,7 +209,17 @@ where
     /// Creates a new Merkle proof builder for the tree with the specified root,
     /// using cells determined by filter.
     pub fn new(root: &'a DynCell, f: F) -> Self {
-        Self { root, filter: f }
+        Self {
+            root,
+            filter: f,
+            allow_different_root: false,
+        }
+    }
+
+    /// Mark whether the different root is ok for this proof.
+    pub fn allow_different_root(mut self, allow: bool) -> Self {
+        self.allow_different_root = allow;
+        self
     }
 
     /// Extends the builder to additionally save all hashes
@@ -217,6 +228,7 @@ where
         MerkleProofExtBuilder {
             root: self.root,
             filter: self.filter,
+            allow_different_root: self.allow_different_root,
         }
     }
 
@@ -239,6 +251,7 @@ where
             cells: Default::default(),
             pruned_branches: None,
             context,
+            allow_different_root: self.allow_different_root,
         }
         .build()
     }
@@ -258,6 +271,15 @@ where
 pub struct MerkleProofExtBuilder<'a, F> {
     root: &'a DynCell,
     filter: F,
+    allow_different_root: bool,
+}
+
+impl<'a, F> MerkleProofExtBuilder<'a, F> {
+    /// Mark whether the different root is ok for this proof.
+    pub fn allow_different_root(mut self, allow: bool) -> Self {
+        self.allow_different_root = allow;
+        self
+    }
 }
 
 impl<'a, F> MerkleProofExtBuilder<'a, F>
@@ -276,6 +298,7 @@ where
             cells: Default::default(),
             pruned_branches: Some(&mut pruned_branches),
             context,
+            allow_different_root: self.allow_different_root,
         };
         let cell = ok!(builder.build());
         Ok((cell, pruned_branches))
@@ -288,6 +311,7 @@ struct BuilderImpl<'a, 'b, S = ahash::RandomState> {
     cells: HashMap<&'a HashBytes, Cell, S>,
     pruned_branches: Option<&'b mut HashMap<&'a HashBytes, bool, S>>,
     context: &'b mut dyn CellContext,
+    allow_different_root: bool,
 }
 
 impl<'a, 'b, S> BuilderImpl<'a, 'b, S>
@@ -302,7 +326,9 @@ where
             children: CellRefsBuilder,
         }
 
-        if self.filter.check(self.root.repr_hash()) == FilterAction::Skip {
+        if !self.allow_different_root
+            && self.filter.check(self.root.repr_hash()) == FilterAction::Skip
+        {
             return Err(Error::EmptyProof);
         }
 
