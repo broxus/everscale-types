@@ -267,7 +267,6 @@ impl MerkleUpdate {
 
         // Compute a list of all hashes in the `new` merkle update tree
         {
-            // TODO: check if `new_cells` set can be used instead of `visited`
             let mut visited = ahash::HashSet::default();
             let mut merkle_depth = self.new.descriptor().is_merkle() as u8;
             let mut stack = vec![self.new.references()];
@@ -335,6 +334,116 @@ impl MerkleUpdate {
                 continue 'outer;
             }
             stack.pop();
+        }
+
+        Ok(result)
+    }
+
+    /// Computes the removed cells diff across multiple Merkle updates.
+    pub fn compute_combined_removed_cells<'a>(
+        updates: &[(&MerkleUpdate, &'a DynCell)],
+    ) -> Result<ahash::HashMap<&'a HashBytes, u32>, Error> {
+        use std::collections::hash_map;
+
+        let mut new_cells = ahash::HashSet::default();
+
+        // Compute a list of all hashes in the `new` merkle update trees
+        {
+            let mut visited = ahash::HashSet::default();
+            let mut stack = Vec::new();
+
+            for &(merkle_update, _) in updates {
+                new_cells.insert(merkle_update.new.hash(0));
+
+                let mut merkle_depth = merkle_update.new.descriptor().is_merkle() as u8;
+
+                visited.clear();
+                visited.insert(merkle_update.new.repr_hash());
+
+                stack.push(merkle_update.new.references());
+                'outer: while let Some(iter) = stack.last_mut() {
+                    for child in &mut *iter {
+                        if !visited.insert(child.repr_hash()) {
+                            continue;
+                        }
+
+                        // Track new cells
+                        new_cells.insert(child.hash(merkle_depth));
+
+                        // Unchanged cells (as pruned branches) must be presented in the old tree
+                        let descriptor = child.descriptor();
+                        if descriptor.is_pruned_branch() {
+                            continue;
+                        }
+
+                        // Increase the current merkle depth if needed
+                        merkle_depth += descriptor.is_merkle() as u8;
+                        // And proceed to processing this child
+                        stack.push(child.references());
+                        continue 'outer;
+                    }
+
+                    merkle_depth -= iter.cell().descriptor().is_merkle() as u8;
+                    stack.pop();
+                }
+
+                debug_assert_eq!(merkle_depth, 0);
+            }
+        }
+
+        // Traverse old cells
+        let mut result = ahash::HashMap::default();
+        let mut stack = Vec::new();
+
+        for &(merkle_update, old) in updates {
+            if old.repr_hash() != &merkle_update.old_hash
+                || old.repr_hash() != merkle_update.old.hash(0)
+            {
+                return Err(Error::InvalidData);
+            }
+
+            if merkle_update.old_hash == merkle_update.new_hash {
+                // No cells were removed
+                continue;
+            }
+
+            match result.entry(old.repr_hash()) {
+                hash_map::Entry::Occupied(mut entry) => {
+                    *entry.get_mut() += 1;
+                    continue;
+                }
+                hash_map::Entry::Vacant(entry) => {
+                    entry.insert(1);
+                }
+            }
+
+            if !new_cells.contains(old.repr_hash()) {
+                stack.push(old.references());
+            }
+
+            'outer: while let Some(iter) = stack.last_mut() {
+                for child in &mut *iter {
+                    let hash = child.repr_hash();
+                    match result.entry(hash) {
+                        hash_map::Entry::Occupied(mut entry) => {
+                            *entry.get_mut() += 1;
+                            continue;
+                        }
+                        hash_map::Entry::Vacant(entry) => {
+                            entry.insert(1);
+                        }
+                    }
+
+                    // Skip empty or used subtrees
+                    if child.reference_count() == 0 || new_cells.contains(hash) {
+                        continue;
+                    }
+
+                    stack.push(child.references());
+                    continue 'outer;
+                }
+                stack.pop();
+            }
         }
 
         Ok(result)
