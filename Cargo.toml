@@ -67,6 +67,7 @@ abi = [
     "models",
 ]
 venom = []
+tycho = []
 
 [profile.release]
 debug = true

@@ -49,6 +49,9 @@ impl_dict_key! {
     [u8; 20] => 160 => |d| d[..20].try_into().unwrap(),
     [u8; 32] => 256 => |d| d[..32].try_into().unwrap(),
     HashBytes => 256 => |d| HashBytes(d[..32].try_into().unwrap()),
+     (u64, u32) => 96 => |d| {
+        (u64::from_be_bytes(d[..8].try_into().unwrap()), u32::from_be_bytes(d[8..12].try_into().unwrap()))
+    },
 }
 
 /// Dictionary insertion mode.

@@ -81,6 +81,9 @@ pub struct ShardStateUnsplit {
     pub min_ref_mc_seqno: u32,
     /// Output messages queue info.
     pub out_msg_queue_info: Cell,
+    #[cfg(feature = "tycho")]
+    /// Externals processed up to (Anchor, len)
+    pub externals_processed_upto: Dict<u32, u64>,
     /// Whether this state was produced before the shards split.
     pub before_split: bool,
     /// Reference to the dictionary with shard accounts.
@@ -124,6 +127,12 @@ impl ShardStateUnsplit {
             None => Ok(None),
         }
     }
+
+    #[cfg(feature = "tycho")]
+    /// Tries to load OutMsgQueueInfo data.
+    pub fn load_out_msg_queue_info(&self) -> Result<OutMsgQueueInfo, Error> {
+        self.out_msg_queue_info.as_ref().parse()
+    }
 }
 
 impl Store for ShardStateUnsplit {
@@ -140,6 +149,10 @@ impl Store for ShardStateUnsplit {
             ok!(self.total_validator_fees.store_into(&mut builder, context));
             ok!(self.libraries.store_into(&mut builder, context));
             ok!(self.master_ref.store_into(&mut builder, context));
+            #[cfg(feature = "tycho")]
+            ok!(self
+                .externals_processed_upto
+                .store_into(&mut builder, context));
             ok!(builder.build_ext(context))
         };
 
@@ -211,7 +224,6 @@ impl<'a> Load<'a> for ShardStateUnsplit {
             },
             gen_lt: ok!(slice.load_u64()),
             min_ref_mc_seqno: ok!(slice.load_u32()),
-            out_msg_queue_info,
             before_split: ok!(slice.load_bit()),
             accounts,
             overload_history: ok!(child_slice.load_u64()),
@@ -220,6 +232,9 @@ impl<'a> Load<'a> for ShardStateUnsplit {
             total_validator_fees: ok!(CurrencyCollection::load_from(child_slice)),
             libraries: ok!(Dict::load_from(child_slice)),
             master_ref: ok!(Option::<BlockRef>::load_from(child_slice)),
+            #[cfg(feature = "tycho")]
+            externals_processed_upto: ok!(Dict::load_from(child_slice)),
+            out_msg_queue_info,
             #[allow(unused_labels)]
             custom: 'custom: {
                 #[cfg(feature = "venom")]
@@ -276,6 +291,32 @@ impl<'a> Load<'a> for LibDescr {
         Ok(Self {
             lib: ok!(slice.load_reference_cloned()),
             publishers: ok!(Dict::load_from_root_ext(slice, &mut Cell::empty_context())),
+        })
+    }
+}
+
+/// Out message queue info
+#[derive(Clone, Debug, Eq, PartialEq, Default)]
+pub struct OutMsgQueueInfo {
+    ///  Dict (shard, seq_no): processed up to info
+    proc_info: Dict<(u64, u32), ProcessedUpto>,
+}
+
+/// Processed up to info
+#[derive(Clone, Debug, Eq, PartialEq, Default)]
+pub struct ProcessedUpto {
+    ///  Last msg lt
+    pub last_msg_lt: u64,
+    /// Last msg hash
+    pub last_msg_hash: HashBytes,
+    /// Original shard
+    pub original_shard: Option<u64>,
+}
+
+impl<'a> Load<'a> for OutMsgQueueInfo {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
+        Ok(Self {
+            proc_info: ok!(Dict::load_from_root_ext(slice, &mut Cell::empty_context())),
         })
     }
 }
