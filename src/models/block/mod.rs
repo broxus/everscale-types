@@ -145,6 +145,64 @@ impl<'a> Load<'a> for Block {
     }
 }
 
+/// Block info builder.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct BlockInfoBuilder<T> {
+    inner: BlockInfo,
+    phantom_data: std::marker::PhantomData<T>,
+}
+
+impl BlockInfoBuilder<()> {
+    /// Creates a new block info builder.
+    pub fn new() -> Self {
+        Self {
+            inner: BlockInfo {
+                version: 0,
+                after_merge: false,
+                before_split: false,
+                after_split: false,
+                want_split: false,
+                want_merge: false,
+                key_block: false,
+                flags: 0,
+                seqno: 0,
+                vert_seqno: 0,
+                shard: Default::default(),
+                gen_utime: 0,
+                #[cfg(feature = "venom")]
+                gen_utime_ms: 0,
+                start_lt: 0,
+                end_lt: 0,
+                gen_validator_list_hash_short: 0,
+                gen_catchain_seqno: 0,
+                min_ref_mc_seqno: 0,
+                prev_key_block_seqno: 0,
+                gen_software: Default::default(),
+                master_ref: None,
+                prev_ref: Default::default(),
+                prev_vert_ref: None,
+            },
+            phantom_data: std::marker::PhantomData,
+        }
+    }
+
+    /// Set previous block reference.
+    pub fn set_prev_ref(mut self, prev_ref: BlockRef) -> BlockInfoBuilder<BlockRef> {
+        self.inner.prev_ref = CellBuilder::build_from(&prev_ref).unwrap();
+        BlockInfoBuilder {
+            inner: self.inner,
+            phantom_data: std::marker::PhantomData,
+        }
+    }
+}
+
+impl BlockInfoBuilder<BlockRef> {
+    /// Builds the block info.
+    pub fn build(self) -> BlockInfo {
+        self.inner
+    }
+}
+
 /// Block info.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct BlockInfo {
