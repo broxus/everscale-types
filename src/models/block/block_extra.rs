@@ -62,8 +62,8 @@ impl BlockExtraBuilder<()> {
         in_msg_description: MessageDescription,
         out_msg_description: MessageDescription,
     ) -> BlockExtraBuilder<BlockExtra> {
-        self.inner.in_msg_description = CellBuilder::build_from(&in_msg_description).unwrap();
-        self.inner.out_msg_description = CellBuilder::build_from(&out_msg_description).unwrap();
+        self.inner.in_msg_description = CellBuilder::build_from(in_msg_description).unwrap();
+        self.inner.out_msg_description = CellBuilder::build_from(out_msg_description).unwrap();
         BlockExtraBuilder {
             inner: self.inner,
             phantom_data: std::marker::PhantomData,
@@ -208,11 +208,11 @@ impl BlockExtra {
 #[cfg(feature = "tycho")]
 /// Message description.
 #[derive(Debug, Clone)]
-struct MessageDescription {
+pub struct MessageDescription {
     /// Message id.
     id: HashBytes,
     /// Workchain id.
-    workchain: i32,
+    workchain: i8,
     /// Prefix.
     prefix: u64,
 }
@@ -222,7 +222,7 @@ impl<'a> Load<'a> for MessageDescription {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         Ok(Self {
             id: ok!(slice.load_u256()),
-            workchain: ok!(slice.load_i32()),
+            workchain: ok!(slice.load_u8()) as i8,
             prefix: ok!(slice.load_u64()),
         })
     }
@@ -236,8 +236,9 @@ impl Store for MessageDescription {
         _context: &mut dyn CellContext,
     ) -> Result<(), Error> {
         ok!(builder.store_u256(&self.id));
-        ok!(builder.store_i32(self.workchain));
+        ok!(builder.store_u8(self.workchain as u8));
         ok!(builder.store_u64(self.prefix));
+        Ok(())
     }
 }
 
@@ -408,6 +409,29 @@ pub struct ShardFees {
     pub fees: CurrencyCollection,
     /// `AugDict` root extra part.
     pub create: CurrencyCollection,
+}
+
+impl ShardFees {
+    #[cfg(feature = "tycho")]
+    /// Tries to load Incoming message description.
+    pub fn load_root(&self) -> Option<Result<ShardIdentifier, Error>> {
+        self.root.as_ref().map(|root| root.parse())
+    }
+    #[cfg(feature = "tycho")]
+    /// Set root description.
+    pub fn set_root(&mut self, root: ShardIdentifier) {
+        self.root = Some(CellBuilder::build_from(root).unwrap());
+    }
+}
+
+#[cfg(feature = "tycho")]
+/// Shard identifier with full prefix.
+#[derive(Clone, Debug, Default, Store, Load)]
+pub struct ShardIdentifier {
+    /// Workchain id.
+    pub workchain: i8,
+    /// Shard prefix.
+    pub prefix: u64,
 }
 
 /// Block signature pair.
