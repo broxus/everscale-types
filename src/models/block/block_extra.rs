@@ -12,6 +12,72 @@ use crate::models::Lazy;
 use super::ShardBlockRefs;
 use super::ShardHashes;
 
+/// Block info builder.
+#[derive(Debug, Clone)]
+pub struct BlockExtraBuilder<T> {
+    inner: BlockExtra,
+    phantom_data: std::marker::PhantomData<T>,
+}
+
+impl BlockExtraBuilder<()> {
+    #[cfg(not(feature = "venom"))]
+    /// Creates a new block info builder.
+    pub fn new(account_blocks: Lazy<AugDict<HashBytes, CurrencyCollection, AccountBlock>>) -> Self {
+        Self {
+            inner: BlockExtra {
+                in_msg_description: Default::default(),
+                out_msg_description: Default::default(),
+                account_blocks,
+                rand_seed: HashBytes::ZERO,
+                created_by: HashBytes::ZERO,
+                custom: None,
+            },
+            phantom_data: std::marker::PhantomData,
+        }
+    }
+    #[cfg(feature = "venom")]
+    /// Creates a new block info builder.
+    pub fn new(
+        account_blocks: Lazy<AugDict<HashBytes, CurrencyCollection, AccountBlock>>,
+        shard_block_refs: ShardBlockRefs,
+    ) -> Self {
+        Self {
+            inner: BlockExtra {
+                in_msg_description: Default::default(),
+                out_msg_description: Default::default(),
+                account_blocks,
+                rand_seed: HashBytes::ZERO,
+                created_by: HashBytes::ZERO,
+                custom: None,
+                shard_block_refs,
+            },
+            phantom_data: std::marker::PhantomData,
+        }
+    }
+
+    #[cfg(feature = "tycho")]
+    /// Set incoming and outgoing message description.
+    pub fn set_msg_descriptions(
+        mut self,
+        in_msg_description: MessageDescription,
+        out_msg_description: MessageDescription,
+    ) -> BlockExtraBuilder<BlockExtra> {
+        self.inner.in_msg_description = CellBuilder::build_from(&in_msg_description).unwrap();
+        self.inner.out_msg_description = CellBuilder::build_from(&out_msg_description).unwrap();
+        BlockExtraBuilder {
+            inner: self.inner,
+            phantom_data: std::marker::PhantomData,
+        }
+    }
+}
+
+impl BlockExtraBuilder<BlockExtra> {
+    /// Builds the block info.
+    pub fn build(self) -> BlockExtra {
+        self.inner
+    }
+}
+
 /// Block content.
 #[derive(Debug, Clone)]
 pub struct BlockExtra {
@@ -124,6 +190,54 @@ impl BlockExtra {
             },
             None => Ok(None),
         }
+    }
+
+    #[cfg(feature = "tycho")]
+    /// Tries to load Incoming message description.
+    pub fn load_in_msg_description(&self) -> Result<MessageDescription, Error> {
+        self.in_msg_description.as_ref().parse()
+    }
+
+    #[cfg(feature = "tycho")]
+    /// Tries to load Outgoing message description.
+    pub fn load_out_msg_description(&self) -> Result<MessageDescription, Error> {
+        self.out_msg_description.as_ref().parse()
+    }
+}
+
+#[cfg(feature = "tycho")]
+/// Message description.
+#[derive(Debug, Clone)]
+struct MessageDescription {
+    /// Message id.
+    id: HashBytes,
+    /// Workchain id.
+    workchain: i32,
+    /// Prefix.
+    prefix: u64,
+}
+#[cfg(feature = "tycho")]
+
+impl<'a> Load<'a> for MessageDescription {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
+        Ok(Self {
+            id: ok!(slice.load_u256()),
+            workchain: ok!(slice.load_i32()),
+            prefix: ok!(slice.load_u64()),
+        })
+    }
+}
+
+#[cfg(feature = "tycho")]
+impl Store for MessageDescription {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder,
+        _context: &mut dyn CellContext,
+    ) -> Result<(), Error> {
+        ok!(builder.store_u256(&self.id));
+        ok!(builder.store_i32(self.workchain));
+        ok!(builder.store_u64(self.prefix));
     }
 }
 
