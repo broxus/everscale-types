@@ -188,11 +188,17 @@ impl BlockInfoBuilder<()> {
 
     /// Set previous block reference.
     pub fn set_prev_ref(mut self, prev_ref: BlockRef) -> BlockInfoBuilder<BlockRef> {
-        self.inner.prev_ref = CellBuilder::build_from(&prev_ref).unwrap();
+        self.inner.prev_ref = CellBuilder::build_from(prev_ref).unwrap();
         BlockInfoBuilder {
             inner: self.inner,
             phantom_data: std::marker::PhantomData,
         }
+    }
+}
+
+impl Default for BlockInfoBuilder<()> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
