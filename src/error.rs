@@ -39,6 +39,12 @@ pub enum Error {
     /// Helper error variant for cancelled operations.
     #[error("operation cancelled")]
     Cancelled,
+    /// Unsupported address type.
+    #[error("unsupported address type")]
+    UnsupportedAddressType,
+    /// Invalid argument.
+    #[error("invalid argument - `{0}`")]
+    InvalidArg(String),
 }
 
 /// Error type for integer parsing related errors.
