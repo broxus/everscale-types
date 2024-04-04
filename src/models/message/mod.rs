@@ -11,6 +11,8 @@ pub use self::address::*;
 
 mod address;
 
+mod envelope_message;
+mod in_message;
 #[cfg(test)]
 mod tests;
 

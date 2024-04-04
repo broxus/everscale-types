@@ -1,13 +1,8 @@
 use std::cmp::Ordering;
 
 use crate::cell::*;
-use crate::error::{Error, ParseAddrError};
-use crate::models::block::ShardIdent;
-use crate::models::{
-    Block, CurrencyCollection, Lazy, Message, MsgInfo, ShardIdentifier, Transaction,
-};
-use crate::num::*;
-use crate::util::*;
+use crate::error::Error;
+use crate::models::{Lazy, Message, MsgInfo};
 
 /// Intermediate address
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -50,7 +45,7 @@ impl IntermediateAddress {
         match self {
             IntermediateAddress::Simple(simple) => Ok(simple.workchain()),
             IntermediateAddress::Ext(ext) => Ok(ext.workchain()),
-            _ => return Err(Error::UnsupportedAddressType),
+            _ => Err(Error::UnsupportedAddressType),
         }
     }
 
@@ -59,7 +54,7 @@ impl IntermediateAddress {
         match self {
             IntermediateAddress::Simple(simple) => Ok(simple.address_prefix()),
             IntermediateAddress::Ext(ext) => Ok(ext.address_prefix()),
-            _ => return Err(Error::UnsupportedAddressType),
+            _ => Err(Error::UnsupportedAddressType),
         }
     }
 }
@@ -117,20 +112,17 @@ impl<'a> Load<'a> for IntermediateAddress {
         if slice.load_bit()? {
             if slice.load_bit()? {
                 // tag = 11
-                let mut addr = IntermediateAddressExt::default();
-                addr.load_from(slice)?;
-                IntermediateAddress::Ext(addr)
+                let addr = IntermediateAddressExt::load_from(slice)?;
+                Ok(IntermediateAddress::Ext(addr))
             } else {
                 // tag = $10
-                let mut addr = IntermediateAddressSimple::default();
-                addr.load_from(slice)?;
-                IntermediateAddress::Simple(addr)
+                let addr = IntermediateAddressSimple::load_from(slice)?;
+                Ok(IntermediateAddress::Simple(addr))
             }
         } else {
             // tag = $0
-            let mut addr = IntermediateAddressRegular::default();
-            addr.load_from(slice)?;
-            IntermediateAddress::Regular(addr)
+            let addr = IntermediateAddressRegular::load_from(slice)?;
+            Ok(IntermediateAddress::Regular(addr))
         }
     }
 }
@@ -269,7 +261,7 @@ impl IntermediateAddressExt {
 }
 
 /// Message envelope
-#[derive(Clone, Default, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MsgEnvelope<'a> {
     /// current address
     cur_addr: IntermediateAddress,
@@ -283,7 +275,10 @@ pub struct MsgEnvelope<'a> {
 
 impl<'a> MsgEnvelope<'a> {
     /// Create Envelope with message and remaining forward fee
-    pub fn with_message_and_fee(message: &Message, fwd_fee_remaining: u128) -> Result<Self, Error> {
+    pub fn with_message_and_fee(
+        message: &'a Message,
+        fwd_fee_remaining: u128,
+    ) -> Result<Self, Error> {
         if let MsgInfo::Int(_) = message.info {
             Ok(Self::with_routing(
                 Lazy::new(message).unwrap(),
@@ -292,9 +287,9 @@ impl<'a> MsgEnvelope<'a> {
                 IntermediateAddress::full_dest(),
             ))
         } else {
-            return Err(Error::InvalidArg(
+            Err(Error::InvalidArg(
                 "MsgEnvelope can be made only for internal messages".to_string(),
-            ));
+            ))
         }
     }
 
@@ -329,7 +324,7 @@ impl<'a> MsgEnvelope<'a> {
     }
 
     /// Write message struct to envelope
-    pub fn write_message(&mut self, value: &Message) -> Result<(), Error> {
+    pub fn write_message(&mut self, value: &'a Message) -> Result<(), Error> {
         self.message = Lazy::new(value).unwrap();
         Ok(())
     }
@@ -382,12 +377,12 @@ impl<'a> MsgEnvelope<'a> {
         if let MsgInfo::Int(int_msg_info) = message.info {
             let src = int_msg_info.src;
             let dst = int_msg_info.dst;
-            return Ok(src.get_workchain_id() == dst.get_workchain_id());
+            Ok(src.workchain() == dst.workchain())
         } else {
-            return Err(Error::InvalidArg(format!(
-                "Message with hash {:x} is not internal",
-                self.message_cell().repr_hash()
-            )));
+            Err(Error::InvalidArg(format!(
+                "Message with hash {:x?} is not internal",
+                self.message_cell().repr_hash().0
+            )))
         }
     }
 }
