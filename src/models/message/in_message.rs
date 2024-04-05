@@ -40,6 +40,7 @@ const MSG_DISCARD_TR: u8 = 0b00000111;
 /// Inbound message
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum InMsg<'a> {
+    /// None
     #[default]
     None,
     /// Inbound external messages
@@ -405,8 +406,11 @@ impl<'a> Load<'a> for InMsgExternal<'a> {
 /// Final message
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct InMsgFinal<'a> {
+    /// Envelope message
     in_msg: Lazy<MsgEnvelope<'a>>,
+    /// Transaction
     transaction: Lazy<Transaction>,
+    /// Forward fee
     pub fwd_fee: u128,
 }
 

@@ -16,25 +16,29 @@ pub enum IntermediateAddress {
 }
 
 impl IntermediateAddress {
+    ///  Use src bits
     pub fn use_src_bits(use_src_bits: u8) -> Result<Self, Error> {
         let ia = IntermediateAddressRegular::with_use_src_bits(use_src_bits)?;
         Ok(IntermediateAddress::Regular(ia))
     }
 
+    /// Use dest bits
     pub fn use_dest_bits(use_dest_bits: u8) -> Result<Self, Error> {
         let ia = IntermediateAddressRegular::with_use_dest_bits(use_dest_bits)?;
         Ok(IntermediateAddress::Regular(ia))
     }
-
+    /// Full src
     pub fn full_src() -> Self {
         let src = IntermediateAddressRegular::with_use_dest_bits(0).unwrap();
         IntermediateAddress::Regular(src)
     }
 
+    /// Full dest
     pub fn full_dest() -> Self {
         let dest = IntermediateAddressRegular::with_use_src_bits(0).unwrap();
         IntermediateAddress::Regular(dest)
     }
+    /// Any masterchain
     pub fn any_masterchain() -> Self {
         let master = IntermediateAddressSimple::with_addr(-1, 0x8000000000000000);
         IntermediateAddress::Simple(master)
@@ -134,6 +138,7 @@ pub struct IntermediateAddressRegular {
     use_dest_bits: u8,
 }
 
+/// Full address bits
 pub static FULL_BITS: u8 = 96;
 
 impl IntermediateAddressRegular {
@@ -226,7 +231,9 @@ impl IntermediateAddressSimple {
 /// Intermediate Extended address
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Store, Load)]
 pub struct IntermediateAddressExt {
+    /// Workchain ID
     pub workchain: i8,
+    /// Address prefix
     pub address_prefix: u64,
 }
 

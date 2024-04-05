@@ -5,6 +5,7 @@ use crate::num::Uint15;
 
 use crate::models::config::{BlockchainConfig, ValidatorDescription};
 use crate::models::currency::CurrencyCollection;
+#[cfg(feature = "tycho")]
 use crate::models::in_message::InMsg;
 use crate::models::transaction::{HashUpdate, Transaction};
 use crate::models::Lazy;
