@@ -5,6 +5,7 @@ use crate::num::Uint15;
 
 use crate::models::config::{BlockchainConfig, ValidatorDescription};
 use crate::models::currency::CurrencyCollection;
+use crate::models::in_message::InMsg;
 use crate::models::transaction::{HashUpdate, Transaction};
 use crate::models::Lazy;
 
@@ -320,6 +321,32 @@ pub struct McBlockExtra {
 impl McBlockExtra {
     const TAG_V1: u16 = 0xcca5;
     const TAG_V2: u16 = 0xdc75;
+
+    // #[cfg(feature = "tycho")]
+    // /// Tries to load recover create message
+    // pub fn load_recover_create_msg(&self) -> Option<Result<InMsg, Error>> {
+    //     self.recover_create_msg
+    //         .clone()
+    //         .map(|msg| msg.as_ref().parse())
+    // }
+    //
+    // #[cfg(feature = "tycho")]
+    // /// Tries to load mint message
+    // pub fn load_mint_msg(&self) -> Option<Result<InMsg, Error>> {
+    //     self.mint_msg.clone().map(|msg| msg.as_ref().parse())
+    // }
+
+    #[cfg(feature = "tycho")]
+    /// Set recover create message
+    pub fn set_recover_create_msg(mut self, recover_create_msg: InMsg) {
+        self.recover_create_msg = Some(CellBuilder::build_from(recover_create_msg).unwrap());
+    }
+
+    #[cfg(feature = "tycho")]
+    /// Set mint message
+    pub fn set_mint_msg(mut self, mint_msg: InMsg) {
+        self.mint_msg = Some(CellBuilder::build_from(mint_msg).unwrap());
+    }
 }
 
 impl Store for McBlockExtra {
