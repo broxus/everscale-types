@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 
 use crate::cell::*;
 use crate::error::Error;
-use crate::models::{Lazy, Message, MsgInfo};
+use crate::models::{Lazy, Message, MsgInfo, OwnedMessage};
 
 /// Intermediate address
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -319,8 +319,13 @@ impl<'a> MsgEnvelope<'a> {
     }
 
     /// Read message struct from envelope
-    pub fn read_message(&self) -> Result<Message, Error> {
+    pub fn read_message(&'a self) -> Result<Message<'a>, Error> {
         self.message.load()
+    }
+
+    /// Read owned message struct from envelope
+    pub fn read_owned_message(&'a self) -> Result<OwnedMessage, Error> {
+        self.message.clone().cast_into::<OwnedMessage>().load()
     }
 
     /// Write message struct to envelope
