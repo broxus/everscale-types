@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 
 use crate::cell::*;
 use crate::error::Error;
-use crate::models::{Lazy, Message, MsgInfo, OwnedMessage};
+use crate::models::{Message, MsgInfo, OwnedMessage};
 
 /// Intermediate address
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -47,18 +47,18 @@ impl IntermediateAddress {
     /// Get workchain
     pub fn workchain(&self) -> Result<i8, Error> {
         match self {
-            IntermediateAddress::Simple(simple) => Ok(simple.workchain()),
-            IntermediateAddress::Ext(ext) => Ok(ext.workchain()),
-            _ => Err(Error::UnsupportedAddressType),
+            IntermediateAddress::Simple(simple) => Ok(simple.workchain),
+            IntermediateAddress::Ext(ext) => Ok(ext.workchain),
+            _ => Err(Error::InvalidData),
         }
     }
 
     /// Get prefix
     pub fn prefix(&self) -> Result<u64, Error> {
         match self {
-            IntermediateAddress::Simple(simple) => Ok(simple.address_prefix()),
-            IntermediateAddress::Ext(ext) => Ok(ext.address_prefix()),
-            _ => Err(Error::UnsupportedAddressType),
+            IntermediateAddress::Simple(simple) => Ok(simple.address_prefix),
+            IntermediateAddress::Ext(ext) => Ok(ext.address_prefix),
+            _ => Err(Error::InvalidData),
         }
     }
 }
@@ -135,7 +135,7 @@ impl<'a> Load<'a> for IntermediateAddress {
 #[derive(Clone, Default, Debug, PartialEq, Eq, Hash, Store, Load)]
 pub struct IntermediateAddressRegular {
     /// Use dest bits
-    use_dest_bits: u8,
+    pub use_dest_bits: u8,
 }
 
 /// Full address bits
@@ -145,10 +145,7 @@ impl IntermediateAddressRegular {
     /// Create with use src bits
     pub fn with_use_src_bits(use_src_bits: u8) -> Result<Self, Error> {
         if use_src_bits > FULL_BITS {
-            return Err(Error::InvalidArg(format!(
-                "use_src_bits must be <= {}",
-                FULL_BITS
-            )));
+            return Err(Error::InvalidData);
         }
         Ok(IntermediateAddressRegular {
             use_dest_bits: FULL_BITS - use_src_bits,
@@ -158,10 +155,7 @@ impl IntermediateAddressRegular {
     /// Create with use dest bits
     pub fn with_use_dest_bits(use_dest_bits: u8) -> Result<Self, Error> {
         if use_dest_bits > FULL_BITS {
-            return Err(Error::InvalidArg(format!(
-                "use_dest_bits must be <= {}",
-                FULL_BITS
-            )));
+            return Err(Error::InvalidData);
         }
         Ok(IntermediateAddressRegular { use_dest_bits })
     }
@@ -171,18 +165,10 @@ impl IntermediateAddressRegular {
         FULL_BITS - self.use_dest_bits
     }
 
-    /// Get use dest bits
-    pub fn use_dest_bits(&self) -> u8 {
-        self.use_dest_bits
-    }
-
     /// Set use src bits
     pub fn set_use_src_bits(&mut self, use_src_bits: u8) -> Result<(), Error> {
         if use_src_bits > FULL_BITS {
-            return Err(Error::InvalidArg(format!(
-                "use_src_bits must be <= {}",
-                FULL_BITS
-            )));
+            return Err(Error::InvalidData);
         }
         self.use_dest_bits = FULL_BITS - use_src_bits;
         Ok(())
@@ -206,26 +192,6 @@ impl IntermediateAddressSimple {
             address_prefix,
         }
     }
-
-    /// Get workchain
-    pub const fn workchain(&self) -> i8 {
-        self.workchain
-    }
-
-    /// Get address prefix
-    pub const fn address_prefix(&self) -> u64 {
-        self.address_prefix
-    }
-
-    /// Set workchain
-    pub fn set_workchain(&mut self, workchain: i8) {
-        self.workchain = workchain;
-    }
-
-    /// Set address prefix
-    pub fn set_address_prefix(&mut self, address_prefix: u64) {
-        self.address_prefix = address_prefix;
-    }
 }
 
 /// Intermediate Extended address
@@ -245,65 +211,26 @@ impl IntermediateAddressExt {
             address_prefix,
         }
     }
-
-    /// Get workchain
-    pub const fn workchain(&self) -> i8 {
-        self.workchain
-    }
-
-    /// Get address prefix
-    pub const fn address_prefix(&self) -> u64 {
-        self.address_prefix
-    }
-
-    /// Set workchain
-    pub fn set_workchain_id(&mut self, workchain: i8) {
-        self.workchain = workchain;
-    }
-
-    /// Set address prefix
-    pub fn set_address_prefix(&mut self, address_prefix: u64) {
-        self.address_prefix = address_prefix;
-    }
 }
 
 /// Message envelope
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MsgEnvelope<'a> {
+pub struct MsgEnvelope {
     /// current address
-    cur_addr: IntermediateAddress,
+    pub cur_addr: IntermediateAddress,
     /// next address
-    next_addr: IntermediateAddress,
+    pub next_addr: IntermediateAddress,
     /// forward fee remaining
-    fwd_fee_remaining: u128,
+    pub fwd_fee_remaining: u128,
     /// message
-    message: Lazy<Message<'a>>,
+    pub message: Cell,
 }
 
-impl<'a> MsgEnvelope<'a> {
-    /// Create Envelope with message and remaining forward fee
-    pub fn with_message_and_fee(
-        message: &'a Message,
-        fwd_fee_remaining: u128,
-    ) -> Result<Self, Error> {
-        if let MsgInfo::Int(_) = message.info {
-            Ok(Self::with_routing(
-                Lazy::new(message).unwrap(),
-                fwd_fee_remaining,
-                IntermediateAddress::full_dest(),
-                IntermediateAddress::full_dest(),
-            ))
-        } else {
-            Err(Error::InvalidArg(
-                "MsgEnvelope can be made only for internal messages".to_string(),
-            ))
-        }
-    }
-
+impl MsgEnvelope {
     /// Create Envelope with message cell and remaining forward fee
     pub fn with_message_cell_and_fee(cell: Cell, fwd_fee_remaining: u128) -> Self {
         Self::with_routing(
-            Lazy::load_from(&mut cell.as_slice().unwrap()).unwrap(),
+            cell,
             fwd_fee_remaining,
             IntermediateAddress::full_dest(),
             IntermediateAddress::full_dest(),
@@ -312,7 +239,7 @@ impl<'a> MsgEnvelope<'a> {
 
     /// Create Envelope with message and remaining forward fee and routing settings
     pub fn with_routing(
-        message: Lazy<Message<'a>>,
+        message: Cell,
         fwd_fee_remaining: u128,
         cur_addr: IntermediateAddress,
         next_addr: IntermediateAddress,
@@ -325,35 +252,34 @@ impl<'a> MsgEnvelope<'a> {
         }
     }
 
-    /// Read message struct from envelope
-    pub fn read_message(&'a self) -> Result<Message<'a>, Error> {
-        self.message.load()
+    /// Load message struct from envelope
+    pub fn load_message(&self) -> Result<Message, Error> {
+        Message::load_from(&mut self.message.as_slice()?)
     }
 
-    /// Read owned message struct from envelope
-    pub fn read_owned_message(&'a self) -> Result<OwnedMessage, Error> {
-        self.message.clone().cast_into::<OwnedMessage>().load()
+    /// Load owned message struct from envelope
+    pub fn load_owned_message(&self) -> Result<OwnedMessage, Error> {
+        OwnedMessage::load_from(&mut self.message.as_slice()?)
     }
 
-    /// Write message struct to envelope
-    pub fn write_message(&mut self, value: &'a Message) -> Result<(), Error> {
-        self.message = Lazy::new(value).unwrap();
+    /// Store message struct to envelope
+    pub fn store_message(&mut self, value: &Message) -> Result<(), Error> {
+        let mut builder = CellBuilder::new();
+        value
+            .store_into(&mut builder, &mut Cell::empty_context())
+            .unwrap();
+        self.message = builder.build()?;
         Ok(())
     }
 
     /// Return message cell from envelope
     pub fn message_cell(&self) -> Cell {
-        self.message.cell.clone()
+        self.message.clone()
     }
 
     /// Return message hash from envelope
     pub fn message_hash(&self) -> HashBytes {
-        *self.message.cell.repr_hash()
-    }
-
-    /// Get remaining fee of envelope
-    pub fn fwd_fee_remaining(&self) -> u128 {
-        self.fwd_fee_remaining
+        *self.message.repr_hash()
     }
 
     /// Collect transfer fee from envelope
@@ -361,47 +287,22 @@ impl<'a> MsgEnvelope<'a> {
         self.fwd_fee_remaining.checked_sub(fee).is_some()
     }
 
-    /// Set current address of envelope
-    pub fn set_cur_addr(&mut self, addr: IntermediateAddress) -> &mut Self {
-        self.cur_addr = addr;
-        self
-    }
-
-    /// Set next address of envelope
-    pub fn set_next_addr(&mut self, addr: IntermediateAddress) -> &mut Self {
-        self.next_addr = addr;
-        self
-    }
-
-    /// Get current address
-    pub fn cur_addr(&self) -> &IntermediateAddress {
-        &self.cur_addr
-    }
-
-    /// Get next address
-    pub fn next_addr(&self) -> &IntermediateAddress {
-        &self.next_addr
-    }
-
     /// is message route in one workchain
     pub fn same_workchain(&self) -> Result<bool, Error> {
-        let message = self.read_message()?;
+        let message = self.load_message()?;
         if let MsgInfo::Int(int_msg_info) = message.info {
             let src = int_msg_info.src;
             let dst = int_msg_info.dst;
             Ok(src.workchain() == dst.workchain())
         } else {
-            Err(Error::InvalidArg(format!(
-                "Message with hash {:x?} is not internal",
-                self.message_cell().repr_hash().0
-            )))
+            Err(Error::InvalidData)
         }
     }
 }
 
 const MSG_ENVELOPE_TAG: u32 = 0x4;
 
-impl<'a> Store for MsgEnvelope<'a> {
+impl Store for MsgEnvelope {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
@@ -412,12 +313,12 @@ impl<'a> Store for MsgEnvelope<'a> {
         self.cur_addr.store_into(builder, context)?;
         self.next_addr.store_into(builder, context)?;
         ok!(builder.store_u128(self.fwd_fee_remaining));
-        ok!(builder.store_reference(self.message.cell.clone()));
+        ok!(builder.store_reference(self.message.clone()));
         Ok(())
     }
 }
 
-impl<'a> Load<'a> for MsgEnvelope<'a> {
+impl<'a> Load<'a> for MsgEnvelope {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let tag = ok!(slice.load_u32());
         if tag != MSG_ENVELOPE_TAG {
@@ -428,7 +329,7 @@ impl<'a> Load<'a> for MsgEnvelope<'a> {
             cur_addr: IntermediateAddress::load_from(slice)?,
             next_addr: IntermediateAddress::load_from(slice)?,
             fwd_fee_remaining: ok!(slice.load_u128()),
-            message: Lazy::load_from(slice)?,
+            message: ok!(slice.load_reference_cloned()),
         })
     }
 }

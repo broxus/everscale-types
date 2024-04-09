@@ -38,26 +38,23 @@ const MSG_DISCARD_FIN: u8 = 0b00000110;
 const MSG_DISCARD_TR: u8 = 0b00000111;
 
 /// Inbound message
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub enum InMsg<'a> {
-    /// None
-    #[default]
-    None,
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum InMsg {
     /// Inbound external messages
-    External(InMsgExternal<'a>),
+    External(InMsgExternal),
     /// Internal messages with destinations in this block
-    Immediate(InMsgFinal<'a>),
+    Immediate(InMsgFinal),
     /// Immediately routed internal messages
-    Final(InMsgFinal<'a>),
+    Final(InMsgFinal),
     /// Transit internal messages
-    Transit(InMsgTransit<'a>),
+    Transit(InMsgTransit),
     /// Discarded internal messages with destinations in this block
-    DiscardedFinal(InMsgDiscardedFinal<'a>),
+    DiscardedFinal(InMsgDiscardedFinal),
     /// Discarded transit internal messages
-    DiscardedTransit(InMsgDiscardedTransit<'a>),
+    DiscardedTransit(InMsgDiscardedTransit),
 }
 
-impl<'a> fmt::Display for InMsg<'a> {
+impl fmt::Display for InMsg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let msg_hash = *self.message_cell().unwrap_or_default().repr_hash();
         let tr_hash = *self.transaction_cell().unwrap_or_default().repr_hash();
@@ -68,42 +65,36 @@ impl<'a> fmt::Display for InMsg<'a> {
             InMsg::Final(x) => write!(f, "InMsgFinal  message hash: {:x?} transaction hash: {:x?} fee: {}", msg_hash, tr_hash, x.fwd_fee),
             InMsg::DiscardedFinal(x) => write!(f, "InMsgDiscardedFinal message hash: {:x?} transaction hash: {} fee: {}", msg_hash, x.transaction_id, x.fwd_fee),
             InMsg::DiscardedTransit(x) => write!(f, "InMsgDiscardedTransit message hash: {:x?} transaction hash: {:x?} fee: {} proof: {:x?}", msg_hash, x.transaction_id, x.fwd_fee, x.proof_delivered.repr_hash()),
-            InMsg::None => write!(f, "InMsgNone")
         }
     }
 }
 
-impl<'a> InMsg<'a> {
+impl InMsg {
     /// Create external
-    pub fn external(msg_cell: Cell, tr_cell: Cell) -> InMsg<'a> {
+    pub fn external(msg_cell: Cell, tr_cell: Cell) -> InMsg {
         InMsg::External(InMsgExternal::with_cells(msg_cell, tr_cell))
     }
     /// Create Immediate
-    pub fn immediate(msg_cell: Cell, tr_cell: Cell, fwd_fee: u128) -> InMsg<'a> {
+    pub fn immediate(msg_cell: Cell, tr_cell: Cell, fwd_fee: u128) -> InMsg {
         InMsg::Immediate(InMsgFinal::with_cells(msg_cell, tr_cell, fwd_fee))
     }
     /// Create Final
-    pub fn final_msg(msg_cell: Cell, tr_cell: Cell, fwd_fee: u128) -> InMsg<'a> {
+    pub fn final_msg(msg_cell: Cell, tr_cell: Cell, fwd_fee: u128) -> InMsg {
         InMsg::Final(InMsgFinal::with_cells(msg_cell, tr_cell, fwd_fee))
     }
     /// Create Transit
-    pub fn transit(in_msg_cell: Cell, out_msg_cell: Cell, fwd_fee: u128) -> InMsg<'a> {
+    pub fn transit(in_msg_cell: Cell, out_msg_cell: Cell, fwd_fee: u128) -> InMsg {
         InMsg::Transit(InMsgTransit::with_cells(in_msg_cell, out_msg_cell, fwd_fee))
     }
     /// Create DiscardedFinal
-    pub fn discarded_final(env_cell: Cell, tr_id: u64, fwd_fee: u128) -> InMsg<'a> {
+    pub fn discarded_final(env_cell: Cell, tr_id: u64, fwd_fee: u128) -> InMsg {
         InMsg::DiscardedFinal(InMsgDiscardedFinal::with_cells(env_cell, tr_id, fwd_fee))
     }
     /// Create DiscardedTransit
-    pub fn discarded_transit(env_cell: Cell, tr_id: u64, fwd_fee: u128, proof: Cell) -> InMsg<'a> {
+    pub fn discarded_transit(env_cell: Cell, tr_id: u64, fwd_fee: u128, proof: Cell) -> InMsg {
         InMsg::DiscardedTransit(InMsgDiscardedTransit::with_cells(
             env_cell, tr_id, fwd_fee, proof,
         ))
-    }
-
-    /// Check if is valid message
-    pub fn is_valid(&self) -> bool {
-        self != &InMsg::None
     }
 
     /// Get tag
@@ -115,22 +106,20 @@ impl<'a> InMsg<'a> {
             InMsg::Transit(_) => MSG_IMPORT_TR,
             InMsg::DiscardedFinal(_) => MSG_DISCARD_FIN,
             InMsg::DiscardedTransit(_) => MSG_DISCARD_TR,
-            InMsg::None => 8,
         }
     }
 
     /// Get transaction from inbound message
     /// Transaction exist only in External, IHR, Immediate and Final inbound messages.
     /// For other messages function returned None
-    pub fn read_transaction(&self) -> Result<Option<Transaction>, Error> {
+    pub fn load_transaction(&self) -> Result<Option<Transaction>, Error> {
         Ok(match self {
-            InMsg::External(ref x) => Some(x.read_transaction()?),
-            InMsg::Immediate(ref x) => Some(x.read_transaction()?),
-            InMsg::Final(ref x) => Some(x.read_transaction()?),
+            InMsg::External(ref x) => Some(x.load_transaction()?),
+            InMsg::Immediate(ref x) => Some(x.load_transaction()?),
+            InMsg::Final(ref x) => Some(x.load_transaction()?),
             InMsg::Transit(ref _x) => None,
             InMsg::DiscardedFinal(ref _x) => None,
             InMsg::DiscardedTransit(ref _x) => None,
-            InMsg::None => return Err(Error::InvalidArg("Wrong message type".to_string())),
         })
     }
 
@@ -145,33 +134,30 @@ impl<'a> InMsg<'a> {
             InMsg::Transit(ref _x) => None,
             InMsg::DiscardedFinal(ref _x) => None,
             InMsg::DiscardedTransit(ref _x) => None,
-            InMsg::None => None,
         }
     }
 
     /// Get message
-    pub fn read_message(&'a self) -> Result<OwnedMessage, Error> {
+    pub fn load_message(&self) -> Result<OwnedMessage, Error> {
         match self {
-            InMsg::External(x) => x.read_owned_message(),
-            InMsg::Immediate(x) => x.read_envelope_in_message(),
-            InMsg::Final(x) => x.read_envelope_in_message(),
-            InMsg::Transit(x) => x.read_envelope_in_message(),
-            InMsg::DiscardedFinal(x) => x.read_envelope_in_message(),
-            InMsg::DiscardedTransit(x) => x.read_envelope_in_message(),
-            InMsg::None => Err(Error::InvalidArg("Wrong message type".to_string())),
+            InMsg::External(x) => x.load_owned_message(),
+            InMsg::Immediate(x) => x.load_envelope_in_message(),
+            InMsg::Final(x) => x.load_envelope_in_message(),
+            InMsg::Transit(x) => x.load_envelope_in_message(),
+            InMsg::DiscardedFinal(x) => x.load_envelope_in_message(),
+            InMsg::DiscardedTransit(x) => x.load_envelope_in_message(),
         }
     }
 
     /// Get message cell
     pub fn message_cell(&self) -> Result<Cell, Error> {
         Ok(match self {
-            InMsg::External(ref x) => x.message_cell(),
-            InMsg::Immediate(ref x) => x.read_envelope_message()?.message_cell(),
-            InMsg::Final(ref x) => x.read_envelope_message()?.message_cell(),
-            InMsg::Transit(ref x) => x.read_in_message()?.message_cell(),
-            InMsg::DiscardedFinal(ref x) => x.read_envelope_message()?.message_cell(),
-            InMsg::DiscardedTransit(ref x) => x.read_envelope_message()?.message_cell(),
-            InMsg::None => return Err(Error::InvalidArg("Wrong message type".to_string())),
+            InMsg::External(ref x) => x.msg.clone(),
+            InMsg::Immediate(ref x) => x.load_envelope_message()?.message_cell(),
+            InMsg::Final(ref x) => x.load_envelope_message()?.message_cell(),
+            InMsg::Transit(ref x) => x.load_in_message()?.message_cell(),
+            InMsg::DiscardedFinal(ref x) => x.load_envelope_message()?.message_cell(),
+            InMsg::DiscardedTransit(ref x) => x.load_envelope_message()?.message_cell(),
         })
     }
 
@@ -184,20 +170,18 @@ impl<'a> InMsg<'a> {
             InMsg::Transit(ref x) => Some(x.in_envelope_message_cell()),
             InMsg::DiscardedFinal(ref x) => Some(x.envelope_message_cell()),
             InMsg::DiscardedTransit(ref x) => Some(x.envelope_message_cell()),
-            InMsg::None => None,
         }
     }
 
     /// Get in envelope message
-    pub fn read_in_msg_envelope(&self) -> Result<Option<MsgEnvelope>, Error> {
+    pub fn load_in_msg_envelope(&self) -> Result<Option<MsgEnvelope>, Error> {
         Ok(match self {
             InMsg::External(_) => None,
-            InMsg::Immediate(ref x) => Some(x.read_envelope_message()?),
-            InMsg::Final(ref x) => Some(x.read_envelope_message()?),
-            InMsg::Transit(ref x) => Some(x.read_in_message()?),
-            InMsg::DiscardedFinal(ref x) => Some(x.read_envelope_message()?),
-            InMsg::DiscardedTransit(ref x) => Some(x.read_envelope_message()?),
-            InMsg::None => return Err(Error::InvalidArg("Wrong message type".to_string())),
+            InMsg::Immediate(ref x) => Some(x.load_envelope_message()?),
+            InMsg::Final(ref x) => Some(x.load_envelope_message()?),
+            InMsg::Transit(ref x) => Some(x.load_in_message()?),
+            InMsg::DiscardedFinal(ref x) => Some(x.load_envelope_message()?),
+            InMsg::DiscardedTransit(ref x) => Some(x.load_envelope_message()?),
         })
     }
 
@@ -210,26 +194,24 @@ impl<'a> InMsg<'a> {
             InMsg::Transit(ref x) => Some(x.out_envelope_message_cell()),
             InMsg::DiscardedFinal(_) => None,
             InMsg::DiscardedTransit(_) => None,
-            InMsg::None => None,
         }
     }
 
     /// Get out envelope message
-    pub fn read_out_msg_envelope(&self) -> Result<Option<MsgEnvelope>, Error> {
+    pub fn load_out_msg_envelope(&self) -> Result<Option<MsgEnvelope>, Error> {
         match self {
             InMsg::External(_) => Ok(None),
             InMsg::Immediate(_) => Ok(None),
             InMsg::Final(_) => Ok(None),
-            InMsg::Transit(ref x) => Some(x.read_out_message()).transpose(),
+            InMsg::Transit(ref x) => Some(x.load_out_message()).transpose(),
             InMsg::DiscardedFinal(_) => Ok(None),
             InMsg::DiscardedTransit(_) => Ok(None),
-            InMsg::None => Err(Error::InvalidArg("Wrong message type".to_string())),
         }
     }
 
     /// Get fee
     pub fn get_fee(&self) -> Result<ImportFees, Error> {
-        let msg = self.read_message()?;
+        let msg = self.load_message()?;
         let info = match msg.info {
             MsgInfo::Int(info) => info,
             _ => return Ok(ImportFees::default()),
@@ -241,24 +223,20 @@ impl<'a> InMsg<'a> {
                 fees.fees_collected = info.fwd_fee.into_inner();
             }
             InMsg::Final(ref x) => {
-                let env = x.read_envelope_message()?;
-                if env.fwd_fee_remaining() != *x.fwd_fee() {
-                    return Err(Error::InvalidArg(
-                        "fwd_fee_remaining not equal to fwd_fee".to_string(),
-                    ));
+                let env = x.load_envelope_message()?;
+                if env.fwd_fee_remaining != *x.fwd_fee() {
+                    return Err(Error::InvalidData);
                 }
-                fees.fees_collected = env.fwd_fee_remaining();
+                fees.fees_collected = env.fwd_fee_remaining;
                 //
                 // fees.value_imported = info.value.clone();
                 // fees.value_imported.grams.add(env.fwd_fee_remaining())?;
                 // fees.value_imported.grams.add(&header.ihr_fee)?;
             }
             InMsg::Transit(ref x) => {
-                let env = x.read_in_message()?;
-                if env.fwd_fee_remaining() < *x.transit_fee() {
-                    return Err(Error::InvalidArg(
-                        "fwd_fee_remaining less than transit_fee".to_string(),
-                    ));
+                let env = x.load_in_message()?;
+                if env.fwd_fee_remaining < *x.transit_fee() {
+                    return Err(Error::InvalidData);
                 }
 
                 fees.fees_collected = *x.transit_fee();
@@ -277,13 +255,12 @@ impl<'a> InMsg<'a> {
 
                 // fees.value_imported.grams = info.fwd_fee;
             }
-            InMsg::None => return Err(Error::InvalidArg("Wrong InMsg type".to_string())),
         }
         Ok(fees)
     }
 }
 
-impl<'a> Store for InMsg<'a> {
+impl Store for InMsg {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
@@ -314,13 +291,12 @@ impl<'a> Store for InMsg<'a> {
                 ok!(builder.store_u8(MSG_DISCARD_TR));
                 ok!(x.store_into(builder, context));
             }
-            InMsg::None => {} // Due to ChildCell it is need sometimes to serialize default InMsg
         }
         Ok(())
     }
 }
 
-impl<'a> Load<'a> for InMsg<'a> {
+impl<'a> Load<'a> for InMsg {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let tag = ok!(slice.load_u8());
         match tag {
@@ -334,70 +310,65 @@ impl<'a> Load<'a> for InMsg<'a> {
             MSG_DISCARD_TR => Ok(InMsg::DiscardedTransit(InMsgDiscardedTransit::load_from(
                 slice,
             )?)),
-            tag => Err(Error::InvalidArg(format!("Wrong InMsg type - {tag}"))),
+            _tag => Err(Error::InvalidData),
         }
     }
 }
 
 /// External message
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct InMsgExternal<'a> {
+pub struct InMsgExternal {
     /// Message
-    msg: Lazy<Message<'a>>,
+    pub msg: Cell,
     /// Transaction
-    transaction: Lazy<Transaction>,
+    pub transaction: Lazy<Transaction>,
 }
 
-impl<'a> InMsgExternal<'a> {
+impl InMsgExternal {
     /// Create from message and transaction
     pub fn with_cells(msg_cell: Cell, tr_cell: Cell) -> Self {
         InMsgExternal {
-            msg: Lazy::load_from(&mut msg_cell.as_slice().unwrap()).unwrap(),
+            msg: msg_cell,
             transaction: Lazy::load_from(&mut tr_cell.as_slice().unwrap()).unwrap(),
         }
     }
 
-    /// Read message
-    pub fn read_message(&'a self) -> Result<Message<'a>, Error> {
-        self.msg.load()
+    /// Load message
+    pub fn load_message(&self) -> Result<Message, Error> {
+        Message::load_from(&mut self.msg.as_slice()?)
     }
 
-    /// Read owned message struct from envelope
-    pub fn read_owned_message(&'a self) -> Result<OwnedMessage, Error> {
-        self.msg.clone().cast_into::<OwnedMessage>().load()
+    /// Load owned message struct from envelope
+    pub fn load_owned_message(&self) -> Result<OwnedMessage, Error> {
+        OwnedMessage::load_from(&mut self.msg.as_slice()?)
     }
 
-    /// Read message cell
-    pub fn message_cell(&self) -> Cell {
-        self.msg.cell.clone()
-    }
-
-    /// Read transaction
-    pub fn read_transaction(&self) -> Result<Transaction, Error> {
+    /// Load transaction
+    pub fn load_transaction(&self) -> Result<Transaction, Error> {
         self.transaction.load()
     }
 
-    /// Read transaction cell
+    /// Load transaction cell
     pub fn transaction_cell(&self) -> Cell {
         self.transaction.cell.clone()
     }
 }
 
-impl<'a> Store for InMsgExternal<'a> {
+impl Store for InMsgExternal {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
         _context: &mut dyn CellContext,
     ) -> Result<(), Error> {
-        ok!(builder.store_reference(self.msg.cell.clone()));
+        ok!(builder.store_reference(self.msg.clone()));
         ok!(builder.store_reference(self.transaction.cell.clone()));
         Ok(())
     }
 }
 
-impl<'a> Load<'a> for InMsgExternal<'a> {
+impl<'a> Load<'a> for InMsgExternal {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        let msg = ok!(Lazy::load_from(slice));
+        let msg = ok!(slice.load_reference_cloned());
         let transaction = ok!(Lazy::load_from(slice));
         Ok(Self { msg, transaction })
     }
@@ -405,16 +376,16 @@ impl<'a> Load<'a> for InMsgExternal<'a> {
 
 /// Final message
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct InMsgFinal<'a> {
+pub struct InMsgFinal {
     /// Envelope message
-    in_msg: Lazy<MsgEnvelope<'a>>,
+    pub in_msg: Lazy<MsgEnvelope>,
     /// Transaction
-    transaction: Lazy<Transaction>,
+    pub transaction: Lazy<Transaction>,
     /// Forward fee
     pub fwd_fee: u128,
 }
 
-impl<'a> InMsgFinal<'a> {
+impl InMsgFinal {
     /// Create from message and transaction and forward fee
     pub fn with_cells(msg_cell: Cell, tr_cell: Cell, fwd_fee: u128) -> Self {
         InMsgFinal {
@@ -424,43 +395,43 @@ impl<'a> InMsgFinal<'a> {
         }
     }
 
-    /// Read envelope message
-    pub fn read_envelope_message(&'a self) -> Result<MsgEnvelope<'a>, Error> {
+    /// Load envelope message
+    pub fn load_envelope_message(&self) -> Result<MsgEnvelope, Error> {
         self.in_msg.load()
     }
 
-    /// Read envelope in message
-    pub fn read_envelope_in_message(&'a self) -> Result<OwnedMessage, Error> {
-        self.in_msg.load().and_then(|s| s.read_owned_message())
+    /// Load envelope in message
+    pub fn load_envelope_in_message(&self) -> Result<OwnedMessage, Error> {
+        self.in_msg.load().and_then(|s| s.load_owned_message())
     }
 
-    /// Read envelope message cell
+    /// Load envelope message cell
     pub fn envelope_message_cell(&self) -> Cell {
         self.in_msg.cell.clone()
     }
 
-    /// Read message hash
+    /// Load message hash
     pub fn envelope_message_hash(&self) -> HashBytes {
         *self.in_msg.cell.repr_hash()
     }
 
-    /// Read transaction
-    pub fn read_transaction(&self) -> Result<Transaction, Error> {
+    /// Load transaction
+    pub fn load_transaction(&self) -> Result<Transaction, Error> {
         self.transaction.load()
     }
 
-    /// Read transaction cell
+    /// Load transaction cell
     pub fn transaction_cell(&self) -> Cell {
         self.transaction.cell.clone()
     }
 
-    /// Read forward fee
+    /// Load forward fee
     pub fn fwd_fee(&self) -> &u128 {
         &self.fwd_fee
     }
 }
 
-impl<'a> Store for InMsgFinal<'a> {
+impl Store for InMsgFinal {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
@@ -473,7 +444,7 @@ impl<'a> Store for InMsgFinal<'a> {
     }
 }
 
-impl<'a> Load<'a> for InMsgFinal<'a> {
+impl<'a> Load<'a> for InMsgFinal {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let in_msg = ok!(Lazy::load_from(slice));
         let transaction = ok!(Lazy::load_from(slice));
@@ -488,16 +459,16 @@ impl<'a> Load<'a> for InMsgFinal<'a> {
 
 /// In message transit
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct InMsgTransit<'a> {
+pub struct InMsgTransit {
     /// In message
-    in_msg: Lazy<MsgEnvelope<'a>>,
+    in_msg: Lazy<MsgEnvelope>,
     /// Out message
-    out_msg: Lazy<MsgEnvelope<'a>>,
+    out_msg: Lazy<MsgEnvelope>,
     /// Transit fee
     pub transit_fee: u128,
 }
 
-impl<'a> InMsgTransit<'a> {
+impl InMsgTransit {
     /// Create from in message, out message and transit fee
     pub fn with_cells(in_msg_cell: Cell, out_msg_cell: Cell, transit_fee: u128) -> Self {
         Self {
@@ -507,48 +478,48 @@ impl<'a> InMsgTransit<'a> {
         }
     }
 
-    /// Read in message
-    pub fn read_in_message(&'a self) -> Result<MsgEnvelope<'a>, Error> {
+    /// Load in message
+    pub fn load_in_message(&self) -> Result<MsgEnvelope, Error> {
         self.in_msg.load()
     }
 
-    /// Read in message cell
+    /// Load in message cell
     pub fn in_envelope_message_cell(&self) -> Cell {
         self.in_msg.cell.clone()
     }
 
-    /// Read in message hash
+    /// Load in message hash
     pub fn in_envelope_message_hash(&self) -> HashBytes {
         *self.in_msg.cell.repr_hash()
     }
 
-    /// Read envelope owned message
-    pub fn read_envelope_in_message(&'a self) -> Result<OwnedMessage, Error> {
-        self.in_msg.load().and_then(|s| s.read_owned_message())
+    /// Load envelope owned message
+    pub fn load_envelope_in_message(&self) -> Result<OwnedMessage, Error> {
+        self.in_msg.load().and_then(|s| s.load_owned_message())
     }
 
-    /// Read out message
-    pub fn read_out_message(&'a self) -> Result<MsgEnvelope<'a>, Error> {
+    /// Load out message
+    pub fn load_out_message(&self) -> Result<MsgEnvelope, Error> {
         self.out_msg.load()
     }
 
-    /// Read out message cell
+    /// Load out message cell
     pub fn out_envelope_message_cell(&self) -> Cell {
         self.out_msg.cell.clone()
     }
 
-    /// Read out message hash
+    /// Load out message hash
     pub fn out_envelope_message_hash(&self) -> HashBytes {
         *self.out_msg.cell.repr_hash()
     }
 
-    /// Read transit fee
+    /// Load transit fee
     pub fn transit_fee(&self) -> &u128 {
         &self.transit_fee
     }
 }
 
-impl<'a> Store for InMsgTransit<'a> {
+impl Store for InMsgTransit {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
@@ -561,7 +532,7 @@ impl<'a> Store for InMsgTransit<'a> {
     }
 }
 
-impl<'a> Load<'a> for InMsgTransit<'a> {
+impl<'a> Load<'a> for InMsgTransit {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let in_msg = ok!(Lazy::load_from(slice));
         let out_msg = ok!(Lazy::load_from(slice));
@@ -576,16 +547,16 @@ impl<'a> Load<'a> for InMsgTransit<'a> {
 
 /// In message discarded final
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct InMsgDiscardedFinal<'a> {
+pub struct InMsgDiscardedFinal {
     /// In message
-    in_msg: Lazy<MsgEnvelope<'a>>,
+    in_msg: Lazy<MsgEnvelope>,
     /// Transaction id
     pub transaction_id: u64,
     /// Forward fee
     pub fwd_fee: u128,
 }
 
-impl<'a> InMsgDiscardedFinal<'a> {
+impl InMsgDiscardedFinal {
     /// Create from in message, transaction id and forward fee
     pub fn with_cells(in_msg_cell: Cell, transaction_id: u64, fee: u128) -> Self {
         Self {
@@ -595,43 +566,43 @@ impl<'a> InMsgDiscardedFinal<'a> {
         }
     }
 
-    /// Read in message
-    pub fn read_envelope_message(&'a self) -> Result<MsgEnvelope<'a>, Error> {
+    /// Load in message
+    pub fn load_envelope_message(&self) -> Result<MsgEnvelope, Error> {
         self.in_msg.load()
     }
 
-    /// Read envelope owned message
-    pub fn read_envelope_in_message(&'a self) -> Result<OwnedMessage, Error> {
-        self.in_msg.load().and_then(|s| s.read_owned_message())
+    /// Load envelope owned message
+    pub fn load_envelope_in_message(&self) -> Result<OwnedMessage, Error> {
+        self.in_msg.load().and_then(|s| s.load_owned_message())
     }
 
-    /// Read in message cell
+    /// Load in message cell
     pub fn envelope_message_cell(&self) -> Cell {
         self.in_msg.cell.clone()
     }
 
-    /// Read in message hash
+    /// Load in message hash
     pub fn envelope_message_hash(&self) -> HashBytes {
         *self.in_msg.cell.repr_hash()
     }
 
-    /// Read in message cell
+    /// Load in message cell
     pub fn message_cell(&self) -> Result<Cell, Error> {
-        Ok(self.read_envelope_message()?.message_cell())
+        Ok(self.load_envelope_message()?.message_cell())
     }
 
-    /// Read transaction id
+    /// Load transaction id
     pub fn transaction_id(&self) -> u64 {
         self.transaction_id
     }
 
-    /// Read forward fee
+    /// Load forward fee
     pub fn fwd_fee(&self) -> &u128 {
         &self.fwd_fee
     }
 }
 
-impl<'a> Store for InMsgDiscardedFinal<'a> {
+impl Store for InMsgDiscardedFinal {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
@@ -644,7 +615,7 @@ impl<'a> Store for InMsgDiscardedFinal<'a> {
     }
 }
 
-impl<'a> Load<'a> for InMsgDiscardedFinal<'a> {
+impl<'a> Load<'a> for InMsgDiscardedFinal {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let in_msg = ok!(Lazy::load_from(slice));
         let transaction_id = ok!(slice.load_u64());
@@ -659,9 +630,9 @@ impl<'a> Load<'a> for InMsgDiscardedFinal<'a> {
 
 /// In message discarded transit
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct InMsgDiscardedTransit<'a> {
+pub struct InMsgDiscardedTransit {
     /// In message
-    in_msg: Lazy<MsgEnvelope<'a>>,
+    in_msg: Lazy<MsgEnvelope>,
     /// Transaction id
     transaction_id: u64,
     /// Forward fee
@@ -670,7 +641,7 @@ pub struct InMsgDiscardedTransit<'a> {
     proof_delivered: Cell,
 }
 
-impl<'a> InMsgDiscardedTransit<'a> {
+impl InMsgDiscardedTransit {
     /// Create from in message, transaction id, forward fee and proof
     pub fn with_cells(in_msg_cell: Cell, transaction_id: u64, fee: u128, proof: Cell) -> Self {
         InMsgDiscardedTransit {
@@ -681,48 +652,48 @@ impl<'a> InMsgDiscardedTransit<'a> {
         }
     }
 
-    /// Read in message
-    pub fn read_envelope_message(&'a self) -> Result<MsgEnvelope<'a>, Error> {
+    /// Load in message
+    pub fn load_envelope_message(&self) -> Result<MsgEnvelope, Error> {
         self.in_msg.load()
     }
 
-    /// Read envelope owned message
-    pub fn read_envelope_in_message(&'a self) -> Result<OwnedMessage, Error> {
-        self.in_msg.load().and_then(|s| s.read_owned_message())
+    /// Load envelope owned message
+    pub fn load_envelope_in_message(&self) -> Result<OwnedMessage, Error> {
+        self.in_msg.load().and_then(|s| s.load_owned_message())
     }
 
-    /// Read in message cell
+    /// Load in message cell
     pub fn envelope_message_cell(&self) -> Cell {
         self.in_msg.cell.clone()
     }
 
-    /// Read in message hash
+    /// Load in message hash
     pub fn envelope_message_hash(&self) -> HashBytes {
         *self.in_msg.cell.repr_hash()
     }
 
-    /// Read in message cell
+    /// Load in message cell
     pub fn message_cell(&self) -> Result<Cell, Error> {
-        Ok(self.read_envelope_message()?.message_cell())
+        Ok(self.load_envelope_message()?.message_cell())
     }
 
-    /// Read transaction id
+    /// Load transaction id
     pub fn transaction_id(&self) -> u64 {
         self.transaction_id
     }
 
-    /// Read forward fee
+    /// Load forward fee
     pub fn fwd_fee(&self) -> &u128 {
         &self.fwd_fee
     }
 
-    /// Read proof delivered
+    /// Load proof delivered
     pub fn proof_delivered(&self) -> &Cell {
         &self.proof_delivered
     }
 }
 
-impl<'a> Store for InMsgDiscardedTransit<'a> {
+impl Store for InMsgDiscardedTransit {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
@@ -736,7 +707,7 @@ impl<'a> Store for InMsgDiscardedTransit<'a> {
     }
 }
 
-impl<'a> Load<'a> for InMsgDiscardedTransit<'a> {
+impl<'a> Load<'a> for InMsgDiscardedTransit {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let in_msg = ok!(Lazy::load_from(slice));
         let transaction_id = ok!(slice.load_u64());
