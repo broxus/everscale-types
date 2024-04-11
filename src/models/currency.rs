@@ -2,6 +2,7 @@
 
 use crate::cell::*;
 use crate::dict::{AugDictSkipValue, Dict};
+use crate::error::Error;
 use crate::num::{Tokens, VarUint248};
 
 /// Amounts collection.
@@ -17,6 +18,63 @@ impl Default for CurrencyCollection {
     #[inline]
     fn default() -> Self {
         Self::ZERO
+    }
+}
+
+/// AddSub trait
+pub trait AddSub {
+    /// sub
+    fn sub(&mut self, other: &Self) -> Result<bool, Error>;
+    /// add
+    fn add(&mut self, other: &Self) -> Result<bool, Error>;
+}
+
+impl AddSub for CurrencyCollection {
+    fn sub(&mut self, other: &Self) -> Result<bool, Error> {
+        let option = self.tokens.checked_sub(other.tokens);
+        match option {
+            Some(t) => self.tokens = t,
+            None => return Ok(false),
+        }
+        for other_value in other.other.as_dict().iter() {
+            let (hash, other_value) = other_value?;
+            if let Some(self_value) = self.other.0.get(&hash)? {
+                if self_value >= other_value {
+                    let (_, self_lo) = self_value.into_words();
+                    let (_, other_lo) = other_value.into_words();
+                    let new_value = match self_lo.checked_sub(other_lo) {
+                        None => return Ok(false),
+                        Some(new_value) => new_value,
+                    };
+                    let new_value = VarUint248::new(new_value);
+                    self.other.0.set(&hash, new_value)?;
+                } else {
+                    return Ok(false);
+                }
+            }
+        }
+        return Ok(true);
+    }
+    fn add(&mut self, other: &Self) -> Result<bool, Error> {
+        let option = self.tokens.checked_add(other.tokens);
+        match option {
+            Some(t) => self.tokens = t,
+            None => return Ok(false),
+        }
+        for other_value in other.other.as_dict().iter() {
+            let (hash, other_value) = other_value?;
+            if let Some(self_value) = self.other.0.get(&hash)? {
+                let (_, self_lo) = self_value.into_words();
+                let (_, other_lo) = other_value.into_words();
+                let new_value = match self_lo.checked_add(other_lo) {
+                    None => return Ok(false),
+                    Some(new_value) => new_value,
+                };
+                let new_value = VarUint248::new(new_value);
+                self.other.0.set(&hash, new_value)?;
+            }
+        }
+        return Ok(true);
     }
 }
 
