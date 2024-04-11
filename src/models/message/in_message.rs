@@ -316,7 +316,7 @@ impl<'a> Load<'a> for InMsg {
 }
 
 /// External message
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Store, Load)]
 pub struct InMsgExternal {
     /// Message
     pub msg: Cell,
@@ -354,28 +354,8 @@ impl InMsgExternal {
     }
 }
 
-impl Store for InMsgExternal {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder,
-        _context: &mut dyn CellContext,
-    ) -> Result<(), Error> {
-        ok!(builder.store_reference(self.msg.clone()));
-        ok!(builder.store_reference(self.transaction.cell.clone()));
-        Ok(())
-    }
-}
-
-impl<'a> Load<'a> for InMsgExternal {
-    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        let msg = ok!(slice.load_reference_cloned());
-        let transaction = ok!(Lazy::load_from(slice));
-        Ok(Self { msg, transaction })
-    }
-}
-
 /// Final message
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Store, Load)]
 pub struct InMsgFinal {
     /// Envelope message
     pub in_msg: Lazy<MsgEnvelope>,
@@ -431,34 +411,8 @@ impl InMsgFinal {
     }
 }
 
-impl Store for InMsgFinal {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder,
-        _context: &mut dyn CellContext,
-    ) -> Result<(), Error> {
-        ok!(builder.store_reference(self.in_msg.cell.clone()));
-        ok!(builder.store_reference(self.transaction.cell.clone()));
-        ok!(builder.store_u128(self.fwd_fee));
-        Ok(())
-    }
-}
-
-impl<'a> Load<'a> for InMsgFinal {
-    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        let in_msg = ok!(Lazy::load_from(slice));
-        let transaction = ok!(Lazy::load_from(slice));
-        let fwd_fee = ok!(slice.load_u128());
-        Ok(Self {
-            in_msg,
-            transaction,
-            fwd_fee,
-        })
-    }
-}
-
 /// In message transit
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Store, Load)]
 pub struct InMsgTransit {
     /// In message
     in_msg: Lazy<MsgEnvelope>,
@@ -519,34 +473,8 @@ impl InMsgTransit {
     }
 }
 
-impl Store for InMsgTransit {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder,
-        _context: &mut dyn CellContext,
-    ) -> Result<(), Error> {
-        ok!(builder.store_reference(self.in_msg.cell.clone()));
-        ok!(builder.store_reference(self.out_msg.cell.clone()));
-        ok!(builder.store_u128(self.transit_fee));
-        Ok(())
-    }
-}
-
-impl<'a> Load<'a> for InMsgTransit {
-    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        let in_msg = ok!(Lazy::load_from(slice));
-        let out_msg = ok!(Lazy::load_from(slice));
-        let transit_fee = ok!(slice.load_u128());
-        Ok(Self {
-            in_msg,
-            out_msg,
-            transit_fee,
-        })
-    }
-}
-
 /// In message discarded final
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Store, Load)]
 pub struct InMsgDiscardedFinal {
     /// In message
     in_msg: Lazy<MsgEnvelope>,
@@ -602,34 +530,8 @@ impl InMsgDiscardedFinal {
     }
 }
 
-impl Store for InMsgDiscardedFinal {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder,
-        _context: &mut dyn CellContext,
-    ) -> Result<(), Error> {
-        ok!(builder.store_reference(self.in_msg.cell.clone()));
-        ok!(builder.store_u64(self.transaction_id));
-        ok!(builder.store_u128(self.fwd_fee));
-        Ok(())
-    }
-}
-
-impl<'a> Load<'a> for InMsgDiscardedFinal {
-    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        let in_msg = ok!(Lazy::load_from(slice));
-        let transaction_id = ok!(slice.load_u64());
-        let fwd_fee = ok!(slice.load_u128());
-        Ok(Self {
-            in_msg,
-            transaction_id,
-            fwd_fee,
-        })
-    }
-}
-
 /// In message discarded transit
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Store, Load)]
 pub struct InMsgDiscardedTransit {
     /// In message
     in_msg: Lazy<MsgEnvelope>,
@@ -690,34 +592,5 @@ impl InMsgDiscardedTransit {
     /// Load proof delivered
     pub fn proof_delivered(&self) -> &Cell {
         &self.proof_delivered
-    }
-}
-
-impl Store for InMsgDiscardedTransit {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder,
-        _context: &mut dyn CellContext,
-    ) -> Result<(), Error> {
-        ok!(builder.store_reference(self.in_msg.cell.clone()));
-        ok!(builder.store_u64(self.transaction_id));
-        ok!(builder.store_u128(self.fwd_fee));
-        ok!(builder.store_reference(self.proof_delivered.clone()));
-        Ok(())
-    }
-}
-
-impl<'a> Load<'a> for InMsgDiscardedTransit {
-    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        let in_msg = ok!(Lazy::load_from(slice));
-        let transaction_id = ok!(slice.load_u64());
-        let fwd_fee = ok!(slice.load_u128());
-        let proof_delivered = ok!(slice.load_reference_cloned());
-        Ok(Self {
-            in_msg,
-            transaction_id,
-            fwd_fee,
-            proof_delivered,
-        })
     }
 }
