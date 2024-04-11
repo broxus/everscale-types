@@ -68,6 +68,11 @@ impl ShardAccounts {
     pub fn raw_iter(&self) -> ShardAccountsRawIter<'_> {
         ShardAccountsRawIter::new(self.0.dict().root())
     }
+
+    /// Gets Depth Balance Info
+    pub fn root_extra(&self) -> &DepthBalanceInfo {
+        self.0.root_extra()
+    }
 }
 
 /// Intermediate balance info.
