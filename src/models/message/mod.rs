@@ -15,6 +15,8 @@ mod address;
 pub mod envelope_message;
 /// In message
 pub mod in_message;
+/// Out message
+pub mod out_message;
 #[cfg(test)]
 mod tests;
 
