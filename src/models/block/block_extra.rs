@@ -5,8 +5,9 @@ use crate::num::Uint15;
 
 use crate::models::config::{BlockchainConfig, ValidatorDescription};
 use crate::models::currency::CurrencyCollection;
-#[cfg(feature = "tycho")]
+use crate::models::in_message::ImportFees;
 use crate::models::in_message::InMsg;
+use crate::models::out_message::OutMsg;
 use crate::models::transaction::{HashUpdate, Transaction};
 use crate::models::Lazy;
 
@@ -61,8 +62,8 @@ impl BlockExtraBuilder<()> {
     /// Set incoming and outgoing message description.
     pub fn set_msg_descriptions(
         mut self,
-        in_msg_description: MessageDescription,
-        out_msg_description: MessageDescription,
+        in_msg_description: InMsgDescr,
+        out_msg_description: OutMsgDescr,
     ) -> BlockExtraBuilder<BlockExtra> {
         self.inner.in_msg_description = CellBuilder::build_from(in_msg_description).unwrap();
         self.inner.out_msg_description = CellBuilder::build_from(out_msg_description).unwrap();
@@ -79,6 +80,9 @@ impl BlockExtraBuilder<BlockExtra> {
         self.inner
     }
 }
+
+pub(super) type InMsgDescr = AugDict<HashBytes, ImportFees, InMsg>;
+pub(super) type OutMsgDescr = AugDict<HashBytes, CurrencyCollection, OutMsg>;
 
 /// Block content.
 #[derive(Debug, Clone)]
@@ -196,51 +200,14 @@ impl BlockExtra {
 
     #[cfg(feature = "tycho")]
     /// Tries to load Incoming message description.
-    pub fn load_in_msg_description(&self) -> Result<MessageDescription, Error> {
+    pub fn load_in_msg_description(&self) -> Result<InMsgDescr, Error> {
         self.in_msg_description.as_ref().parse()
     }
 
     #[cfg(feature = "tycho")]
     /// Tries to load Outgoing message description.
-    pub fn load_out_msg_description(&self) -> Result<MessageDescription, Error> {
+    pub fn load_out_msg_description(&self) -> Result<OutMsgDescr, Error> {
         self.out_msg_description.as_ref().parse()
-    }
-}
-
-#[cfg(feature = "tycho")]
-/// Message description.
-#[derive(Debug, Clone)]
-pub struct MessageDescription {
-    /// Message id.
-    id: HashBytes,
-    /// Workchain id.
-    workchain: i8,
-    /// Prefix.
-    prefix: u64,
-}
-#[cfg(feature = "tycho")]
-
-impl<'a> Load<'a> for MessageDescription {
-    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        Ok(Self {
-            id: ok!(slice.load_u256()),
-            workchain: ok!(slice.load_u8()) as i8,
-            prefix: ok!(slice.load_u64()),
-        })
-    }
-}
-
-#[cfg(feature = "tycho")]
-impl Store for MessageDescription {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder,
-        _context: &mut dyn CellContext,
-    ) -> Result<(), Error> {
-        ok!(builder.store_u256(&self.id));
-        ok!(builder.store_u8(self.workchain as u8));
-        ok!(builder.store_u64(self.prefix));
-        Ok(())
     }
 }
 
