@@ -1,8 +1,3 @@
-use std::collections::BinaryHeap;
-use std::fmt::{Debug, Formatter};
-
-use itertools::Itertools;
-
 use crate::cell::*;
 use crate::dict::{self, Dict, DictKey};
 use crate::error::Error;
@@ -17,6 +12,33 @@ use crate::util::*;
 pub struct ShardHashes(Dict<i32, Cell>);
 
 impl ShardHashes {
+    /// Tries to construct a [`ShardHashes`] from an iterator over the shards.
+    /// The iterator must contain a list of all shards for each workchain.
+    pub fn from_shards<'a, I>(iter: I) -> Result<Self, Error>
+    where
+        I: IntoIterator<Item = (&'a ShardIdent, &'a ShardDescription)>,
+    {
+        let mut groups = ahash::HashMap::<i32, Vec<_>>::default();
+        for (ident, descr) in iter {
+            groups
+                .entry(ident.workchain())
+                .or_default()
+                .push((ident, descr));
+        }
+
+        for shards in groups.values_mut() {
+            shards.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
+        }
+
+        let mut result = Dict::new();
+        for (wc, shards) in groups {
+            let cell = ok!(WorkchainShardHashes::try_build_raw(&shards));
+            ok!(result.set(wc, cell));
+        }
+
+        Ok(Self(result))
+    }
+
     /// Gets an iterator over the entries of the shard description trees, sorted by
     /// shard ident. The iterator element is `Result<(ShardIdent, ShardDescription)>`.
     ///
@@ -60,148 +82,6 @@ impl ShardHashes {
     pub fn contains_workchain<Q>(&self, workchain: i32) -> Result<bool, Error> {
         self.0.contains_key(workchain)
     }
-
-    /// # Arguments
-    /// * `iter` - An iterator over the shards grouped by workchain. All the existing shards and workchains must be present.
-    /// returns Err if some shards are missing.
-    pub fn from_shards<I>(iter: I) -> Result<Self, Error>
-    where
-        I: IntoIterator<Item = (ShardIdent, ShardDescription)>,
-    {
-        let mut result = Dict::new();
-
-        let mut shards = iter
-            .into_iter()
-            .into_group_map_by(|(shard, _)| shard.workchain());
-        shards
-            .iter_mut()
-            .for_each(|(_, v)| v.sort_unstable_by(|(a, _), (b, _)| a.cmp(b)));
-        for (wc, shards) in &(shards) {
-            let btree = BinTree::from_slice(shards.iter().map(|(a, b)| (*a, b)))
-                .ok_or(Error::UnbalancedTreeElements(*wc))?;
-            btree.validate().ok_or(Error::UnbalancedTreeElements(*wc))?;
-            let cell = btree.write_to_cell()?;
-            result.set(*wc, cell)?;
-        }
-
-        Ok(Self(result))
-    }
-}
-
-enum BinTree<T> {
-    Leaf((ShardIdent, T)),
-    Fork(Box<BinTree<T>>, Box<BinTree<T>>),
-}
-
-impl<T> BinTree<T> {
-    // Constructs a binary tree from a slice of ShardIdent.
-    fn from_slice<I>(it: I) -> Option<BinTree<T>>
-    where
-        I: IntoIterator<Item = (ShardIdent, T)>,
-    {
-        let mut heap = BinaryHeap::new();
-        // Convert each ShardIdent into a Leaf and add it to the heap.
-        for ident in it.into_iter() {
-            heap.push(BinTree::Leaf(ident));
-        }
-        from_sorted_slice_inner(&mut heap)
-    }
-
-    fn depth(&self) -> u8 {
-        match self {
-            BinTree::Leaf(d) => d.0.depth(),
-            BinTree::Fork(left, right) => std::cmp::max(left.depth(), right.depth()),
-        }
-    }
-
-    fn validate(&self) -> Option<ShardIdent> {
-        match self {
-            BinTree::Leaf(leaf) => Some(leaf.0),
-            BinTree::Fork(left, right) => {
-                let left_shard = left.validate()?.merge()?;
-                let right_shard = right.validate()?.merge()?;
-                if left_shard == right_shard {
-                    Some(left_shard)
-                } else {
-                    None
-                }
-            }
-        }
-    }
-}
-impl<T> Debug for BinTree<T> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            BinTree::Leaf((shard_ident, _)) => write!(f, "Leaf({})", shard_ident),
-            BinTree::Fork(left, right) => write!(f, "Fork({:?}, {:?})", left, right),
-        }
-    }
-}
-
-impl<T> Ord for BinTree<T> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.depth().cmp(&other.depth())
-    }
-}
-
-impl<T> PartialOrd for BinTree<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl<T> PartialEq for BinTree<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.depth() == other.depth()
-    }
-}
-
-impl<T> Eq for BinTree<T> {}
-
-impl<T> BinTree<T>
-where
-    T: Store,
-{
-    fn write_to_cell(&self) -> Result<Cell, Error> {
-        match self {
-            BinTree::Leaf(l) => {
-                let mut builder = CellBuilder::new();
-                ok!(builder.store_bit_zero());
-                ok!(l.1.store_into(&mut builder, &mut Cell::empty_context()));
-                builder.build()
-            }
-            BinTree::Fork(l, r) => {
-                let left_cell = ok!(l.write_to_cell());
-                let right_cell = ok!(r.write_to_cell());
-                let mut builder = CellBuilder::new();
-                ok!(builder.store_reference(left_cell));
-                ok!(builder.store_reference(right_cell));
-                builder.build()
-            }
-        }
-    }
-}
-
-fn from_sorted_slice_inner<T>(heap: &mut BinaryHeap<BinTree<T>>) -> Option<BinTree<T>> {
-    if heap.is_empty() {
-        return None;
-    }
-
-    // Continuously merge trees until only one remains.
-    while heap.len() > 1 {
-        // heap has at least two elements, so it is safe to unwrap twice.
-        let left_tree = heap.pop().unwrap();
-        let right_tree = heap.pop().unwrap();
-
-        // Merge the two trees into a new Fork node.
-        let merged_tree = BinTree::Fork(Box::new(left_tree), Box::new(right_tree));
-
-        // Push the merged tree back into the heap.
-        heap.push(merged_tree);
-    }
-
-    // Return the last remaining tree in the heap.
-    heap.pop() // This is safe and will always return Some(tree) due to the loop condition.
 }
 
 /// A tree of the most recent descriptions for all currently existing shards
@@ -256,6 +136,90 @@ impl WorkchainShardHashes {
     /// returning an error.
     pub fn raw_values(&self) -> WorkchainShardsTreeRawValuesIter<'_> {
         WorkchainShardsTreeRawValuesIter::new(self.workchain, self.root.as_ref())
+    }
+
+    fn try_build_raw(shards: &[(&ShardIdent, &ShardDescription)]) -> Result<Cell, Error> {
+        fn make_leaf(descr: &ShardDescription, cx: &mut dyn CellContext) -> Result<Cell, Error> {
+            let mut builder = CellBuilder::new();
+            ok!(builder.store_bit_zero());
+            ok!(descr.store_into(&mut builder, cx));
+            builder.build_ext(cx)
+        }
+
+        fn make_edge(left: Cell, right: Cell, cx: &mut dyn CellContext) -> Result<Cell, Error> {
+            let mut builder = CellBuilder::new();
+            ok!(builder.store_bit_one());
+            ok!(builder.store_reference(left));
+            ok!(builder.store_reference(right));
+            builder.build_ext(cx)
+        }
+
+        #[inline]
+        fn read_shard(
+            iter: &mut std::slice::Iter<(&ShardIdent, &ShardDescription)>,
+            cx: &mut dyn CellContext,
+        ) -> Result<(ShardIdent, Cell), Error> {
+            match iter.next() {
+                Some((&ident, descr)) => {
+                    let cell = make_leaf(descr, cx)?;
+                    Ok((ident, cell))
+                }
+                None => Err(Error::Unbalanced),
+            }
+        }
+
+        let shards = &mut shards.iter();
+        let cx = &mut Cell::empty_context();
+
+        let first = ok!(read_shard(shards, cx));
+        if first.0.is_full() {
+            return Ok(first.1);
+        }
+
+        if first.0.is_right_child() {
+            return Err(Error::Unbalanced);
+        }
+
+        let mut stack = vec![first];
+        'outer: loop {
+            // Get next leaf from the iterator
+            let (mut next_shard, mut next_cell) = ok!(read_shard(shards, cx));
+
+            // Repeat until we make a root
+            loop {
+                if next_shard.is_left_child() {
+                    stack.push((next_shard, next_cell));
+                    continue 'outer;
+                }
+
+                // Pop left child
+                let Some((left_shard, left_cell)) = stack.pop() else {
+                    break 'outer;
+                };
+
+                // Compute common parent shard
+                let parent_shard = match (left_shard.merge(), next_shard.merge()) {
+                    (Some(left_parent), Some(right_parent)) if left_parent == right_parent => {
+                        left_parent
+                    }
+                    _ => break 'outer,
+                };
+
+                // Create parent cell
+                let parent_cell = ok!(make_edge(left_cell, next_cell, cx));
+
+                // Break if parent shard is a root
+                if parent_shard.is_full() {
+                    return Ok(parent_cell);
+                }
+
+                // Otherwise use parent shard as next child
+                next_shard = parent_shard;
+                next_cell = parent_cell;
+            }
+        }
+
+        Err(Error::Unbalanced)
     }
 }
 
@@ -1202,8 +1166,11 @@ impl Copy for IterSegment<'_> {}
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
+
     use super::*;
     use crate::boc::BocRepr;
+
     #[test]
     fn shard_hashes_serde() {
         let root = ShardIdent::new_full(0);
@@ -1232,59 +1199,69 @@ mod test {
             proof_chain: None,
         };
         // arbitrary order
-        let input = [left_right, right, left_left]
-            .into_iter()
-            .map(|x| (x, empty_info.clone()));
-
-        let hashes = ShardHashes::from_shards(input).unwrap();
+        let input = HashMap::from([
+            (left_right, empty_info.clone()),
+            (right, empty_info.clone()),
+            (left_left, empty_info.clone()),
+        ]);
+        let hashes = ShardHashes::from_shards(&input).unwrap();
         let serialized = BocRepr::encode(&hashes).unwrap();
         let deserialized = BocRepr::decode(serialized).unwrap();
         assert_eq!(hashes, deserialized);
 
         // one missing
-        let input = vec![
+        let input = HashMap::from([
             (right, empty_info.clone()),
             (left_right, empty_info.clone()),
-        ];
-        let hashes = ShardHashes::from_shards(input);
+        ]);
+        let hashes = ShardHashes::from_shards(&input);
         assert!(hashes.is_err());
 
         // unsplitted
-        let input = vec![(root, empty_info.clone())];
-        let hashes = ShardHashes::from_shards(input).unwrap();
+        let input = HashMap::from([(root, empty_info.clone())]);
+        let hashes = ShardHashes::from_shards(&input).unwrap();
         let serialized = BocRepr::encode(&hashes).unwrap();
         let deserialized = BocRepr::decode(serialized).unwrap();
         assert_eq!(hashes, deserialized);
 
-        let input = [left, right].into_iter().map(|x| (x, empty_info.clone()));
-        let hashes = ShardHashes::from_shards(input).unwrap();
+        let input = HashMap::from([(left, empty_info.clone()), (right, empty_info.clone())]);
+        let hashes = ShardHashes::from_shards(&input).unwrap();
         let serialized = BocRepr::encode(&hashes).unwrap();
         let deserialized = BocRepr::decode(serialized).unwrap();
         assert_eq!(hashes, deserialized);
 
         let master = ShardIdent::new_full(-1);
 
-        let input = [master, left, right]
-            .into_iter()
-            .map(|x| (x, empty_info.clone()));
-        let hashes = ShardHashes::from_shards(input).unwrap();
+        let input = HashMap::from([
+            (master, empty_info.clone()),
+            (left, empty_info.clone()),
+            (right, empty_info.clone()),
+        ]);
+        let hashes = ShardHashes::from_shards(&input).unwrap();
         let serialized = BocRepr::encode(&hashes).unwrap();
         let deserialized = BocRepr::decode(serialized).unwrap();
         assert_eq!(hashes, deserialized);
 
-        let input = [master, right, left_left, left_right]
-            .into_iter()
-            .map(|x| (x, empty_info.clone()));
-        let hashes = ShardHashes::from_shards(input).unwrap();
+        let input = HashMap::from([
+            (master, empty_info.clone()),
+            (right, empty_info.clone()),
+            (left_left, empty_info.clone()),
+            (left_right, empty_info.clone()),
+        ]);
+        let hashes = ShardHashes::from_shards(&input).unwrap();
         let serialized = BocRepr::encode(&hashes).unwrap();
         let deserialized = BocRepr::decode(serialized).unwrap();
         assert_eq!(hashes, deserialized);
 
         // left is extra
-        let input = [master, left, right, left_left, left_right]
-            .into_iter()
-            .map(|x| (x, empty_info.clone()));
-        let hashes = ShardHashes::from_shards(input);
+        let input = HashMap::from([
+            (master, empty_info.clone()),
+            (left, empty_info.clone()),
+            (right, empty_info.clone()),
+            (left_left, empty_info.clone()),
+            (left_right, empty_info.clone()),
+        ]);
+        let hashes = ShardHashes::from_shards(&input);
         assert!(hashes.is_err());
     }
 }

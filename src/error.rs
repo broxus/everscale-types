@@ -39,9 +39,9 @@ pub enum Error {
     /// Helper error variant for cancelled operations.
     #[error("operation cancelled")]
     Cancelled,
-    #[error("Not enough bits for balanaced shard hashes in {} workchain", _0)]
-    /// Not enough shard hashes for `ShardHashes`
-    UnbalancedTreeElements(i32),
+    /// Presented structure is unbalanced.
+    #[error("unbalanced structure")]
+    Unbalanced,
 }
 
 /// Error type for integer parsing related errors.

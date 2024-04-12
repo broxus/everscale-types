@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use super::*;
 use crate::prelude::*;
 
@@ -74,8 +76,12 @@ fn check_block(boc: &[u8], expected_shards: Option<Vec<ShardIdent>>) -> Cell {
             "origin encoded {}",
             BocRepr::encode_base64(&custom.shards).unwrap()
         );
-        let shards = custom.shards.iter().map(|x| x.unwrap()).collect::<Vec<_>>();
-        let encoded = ShardHashes::from_shards(shards.iter().cloned()).unwrap();
+        let shards = custom
+            .shards
+            .iter()
+            .map(|x| x.unwrap())
+            .collect::<HashMap<_, _>>();
+        let encoded = ShardHashes::from_shards(&shards).unwrap();
         println!("encoded {}", BocRepr::encode_base64(&encoded).unwrap());
 
         let parsed = encoded.iter().collect::<Result<Vec<_>, _>>().unwrap();

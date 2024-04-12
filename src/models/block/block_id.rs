@@ -403,21 +403,6 @@ impl ShardIdent {
     const fn prefix_tag_mask(&self) -> u64 {
         !(self.prefix) + 1
     }
-
-    /// Returns how deep shard is split
-    pub fn depth(&self) -> u8 {
-        fn depth_inner(depth: &mut u8, ident: &ShardIdent) {
-            if let Some(m) = ident.merge() {
-                *depth += 1;
-                depth_inner(depth, &m);
-            }
-        }
-
-        let mut depth = 0;
-        depth_inner(&mut depth, self);
-        depth
-        //Self::MAX_SPLIT_DEPTH - (63 - self.prefix.leading_zeros() as u8) todo: replace with this?
-    }
 }
 
 impl Store for ShardIdent {

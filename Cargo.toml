@@ -40,7 +40,6 @@ thiserror = "1.0"
 tl-proto = { version = "0.4", optional = true }
 
 everscale-types-proc = { version = "=0.1.4", path = "proc" }
-itertools = "0.12.1"
 
 [dev-dependencies]
 anyhow = "1.0"
