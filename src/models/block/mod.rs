@@ -187,11 +187,32 @@ impl BlockInfoBuilder<()> {
     }
 
     /// Set previous block reference.
-    pub fn set_prev_ref(mut self, prev_ref: BlockRef) -> BlockInfoBuilder<BlockRef> {
-        self.inner.prev_ref = CellBuilder::build_from(prev_ref).unwrap();
-        BlockInfoBuilder {
-            inner: self.inner,
-            phantom_data: std::marker::PhantomData,
+    pub fn set_prev_ref(mut self, prev_ref: PrevBlockRef) -> BlockInfoBuilder<PrevBlockRef> {
+        match prev_ref {
+            PrevBlockRef::Single(block) => {
+                self.inner.prev_ref = CellBuilder::build_from(block).unwrap();
+                BlockInfoBuilder {
+                    inner: self.inner,
+                    phantom_data: std::marker::PhantomData,
+                }
+            }
+            PrevBlockRef::AfterMerge { left, right } => {
+                let cell = {
+                    let mut builder = CellBuilder::new();
+                    left.store_into(&mut builder, &mut Cell::empty_context())
+                        .unwrap();
+                    right
+                        .store_into(&mut builder, &mut Cell::empty_context())
+                        .unwrap();
+                    builder.build_ext(&mut Cell::empty_context()).unwrap()
+                };
+
+                self.inner.prev_ref = cell;
+                BlockInfoBuilder {
+                    inner: self.inner,
+                    phantom_data: std::marker::PhantomData,
+                }
+            }
         }
     }
 }
@@ -202,7 +223,7 @@ impl Default for BlockInfoBuilder<()> {
     }
 }
 
-impl BlockInfoBuilder<BlockRef> {
+impl BlockInfoBuilder<PrevBlockRef> {
     /// Builds the block info.
     pub fn build(self) -> BlockInfo {
         self.inner
