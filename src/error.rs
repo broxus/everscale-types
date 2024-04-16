@@ -39,6 +39,9 @@ pub enum Error {
     /// Helper error variant for cancelled operations.
     #[error("operation cancelled")]
     Cancelled,
+    /// Presented structure is unbalanced.
+    #[error("unbalanced structure")]
+    Unbalanced,
 }
 
 /// Error type for integer parsing related errors.

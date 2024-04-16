@@ -486,6 +486,18 @@ pub struct BlockRef {
     pub file_hash: HashBytes,
 }
 
+impl BlockRef {
+    /// Converts a `BlockRef` to a `BlockId` given a shard identifier.
+    pub fn as_block_id(&self, shard: ShardIdent) -> BlockId {
+        BlockId {
+            shard,
+            seqno: self.seqno,
+            root_hash: self.root_hash,
+            file_hash: self.file_hash,
+        }
+    }
+}
+
 /// Tokens flow info.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ValueFlow {

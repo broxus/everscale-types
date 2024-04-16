@@ -36,6 +36,17 @@ impl<T: Store + ?Sized> Store for &T {
     }
 }
 
+impl<T: Store + ?Sized> Store for &mut T {
+    #[inline]
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder,
+        context: &mut dyn CellContext,
+    ) -> Result<(), Error> {
+        <T as Store>::store_into(self, builder, context)
+    }
+}
+
 impl<T: Store + ?Sized> Store for Box<T> {
     #[inline]
     fn store_into(
@@ -523,44 +534,52 @@ impl CellBuilder {
 
     /// Tries to store 32 bytes in the cell,
     /// returning `false` if there is not enough remaining capacity.
-    pub fn store_u256(&mut self, value: &HashBytes) -> Result<(), Error> {
-        if self.bit_len + 256 <= MAX_BIT_LEN {
-            let q = (self.bit_len / 8) as usize;
-            let r = self.bit_len % 8;
-            unsafe {
-                let data_ptr = self.data.as_mut_ptr().add(q);
-                debug_assert!(q + 32 + usize::from(r > 0) <= 128);
-                if r == 0 {
-                    // Just append data
-                    std::ptr::copy_nonoverlapping(value.as_ptr(), data_ptr, 32);
-                } else {
-                    // Interpret 32 bytes as two u128
-                    let [mut hi, mut lo]: [u128; 2] = std::mem::transmute_copy(value);
+    #[inline]
+    pub fn store_u256<T>(&mut self, value: &T) -> Result<(), Error>
+    where
+        T: AsRef<[u8; 32]>,
+    {
+        fn store_u256_impl(builder: &mut CellBuilder, value: &[u8; 32]) -> Result<(), Error> {
+            if builder.bit_len + 256 <= MAX_BIT_LEN {
+                let q = (builder.bit_len / 8) as usize;
+                let r = builder.bit_len % 8;
+                unsafe {
+                    let data_ptr = builder.data.as_mut_ptr().add(q);
+                    debug_assert!(q + 32 + usize::from(r > 0) <= 128);
+                    if r == 0 {
+                        // Just append data
+                        std::ptr::copy_nonoverlapping(value.as_ptr(), data_ptr, 32);
+                    } else {
+                        // Interpret 32 bytes as two u128
+                        let [mut hi, mut lo]: [u128; 2] = std::mem::transmute_copy(value);
 
-                    // Numbers are in big endian order, swap bytes on little endian arch
-                    #[cfg(target_endian = "little")]
-                    {
-                        hi = hi.swap_bytes();
-                        lo = lo.swap_bytes();
+                        // Numbers are in big endian order, swap bytes on little endian arch
+                        #[cfg(target_endian = "little")]
+                        {
+                            hi = hi.swap_bytes();
+                            lo = lo.swap_bytes();
+                        }
+
+                        let shift = 8 - r;
+
+                        // Append high bits to the last byte
+                        *data_ptr |= (hi >> (128 - shift)) as u8;
+                        // Make shifted bytes
+                        let hi: [u8; 16] = ((hi << shift) | (lo >> (128 - shift))).to_be_bytes();
+                        let lo: [u8; 16] = (lo << shift).to_be_bytes();
+                        // Write shifted bytes
+                        std::ptr::copy_nonoverlapping(hi.as_ptr(), data_ptr.add(1), 16);
+                        std::ptr::copy_nonoverlapping(lo.as_ptr(), data_ptr.add(17), 16);
                     }
-
-                    let shift = 8 - r;
-
-                    // Append high bits to the last byte
-                    *data_ptr |= (hi >> (128 - shift)) as u8;
-                    // Make shifted bytes
-                    let hi: [u8; 16] = ((hi << shift) | (lo >> (128 - shift))).to_be_bytes();
-                    let lo: [u8; 16] = (lo << shift).to_be_bytes();
-                    // Write shifted bytes
-                    std::ptr::copy_nonoverlapping(hi.as_ptr(), data_ptr.add(1), 16);
-                    std::ptr::copy_nonoverlapping(lo.as_ptr(), data_ptr.add(17), 16);
-                }
-            };
-            self.bit_len += 256;
-            Ok(())
-        } else {
-            Err(Error::CellOverflow)
+                };
+                builder.bit_len += 256;
+                Ok(())
+            } else {
+                Err(Error::CellOverflow)
+            }
         }
+
+        store_u256_impl(self, value.as_ref())
     }
 
     /// Tries to store `u8` in the cell (but only the specified number of bits),
