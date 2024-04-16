@@ -1,11 +1,10 @@
 use crate::cell::*;
 use crate::dict::{self, Dict, DictKey};
 use crate::error::Error;
-use crate::num::Tokens;
-use crate::util::*;
-
 use crate::models::block::block_id::{BlockId, ShardIdent};
 use crate::models::currency::CurrencyCollection;
+use crate::num::Tokens;
+use crate::util::*;
 
 /// A tree of the most recent descriptions for all currently existing shards
 /// for all workchains except the masterchain.
@@ -13,6 +12,33 @@ use crate::models::currency::CurrencyCollection;
 pub struct ShardHashes(Dict<i32, Cell>);
 
 impl ShardHashes {
+    /// Tries to construct a [`ShardHashes`] from an iterator over the shards.
+    /// The iterator must contain a list of all shards for each workchain.
+    pub fn from_shards<'a, I>(iter: I) -> Result<Self, Error>
+    where
+        I: IntoIterator<Item = (&'a ShardIdent, &'a ShardDescription)>,
+    {
+        let mut groups = ahash::HashMap::<i32, Vec<_>>::default();
+        for (ident, descr) in iter {
+            groups
+                .entry(ident.workchain())
+                .or_default()
+                .push((ident, descr));
+        }
+
+        for shards in groups.values_mut() {
+            shards.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
+        }
+
+        let mut result = Dict::new();
+        for (wc, shards) in groups {
+            let cell = ok!(WorkchainShardHashes::try_build_raw(&shards));
+            ok!(result.set(wc, cell));
+        }
+
+        Ok(Self(result))
+    }
+
     /// Gets an iterator over the entries of the shard description trees, sorted by
     /// shard ident. The iterator element is `Result<(ShardIdent, ShardDescription)>`.
     ///
@@ -110,6 +136,90 @@ impl WorkchainShardHashes {
     /// returning an error.
     pub fn raw_values(&self) -> WorkchainShardsTreeRawValuesIter<'_> {
         WorkchainShardsTreeRawValuesIter::new(self.workchain, self.root.as_ref())
+    }
+
+    fn try_build_raw(shards: &[(&ShardIdent, &ShardDescription)]) -> Result<Cell, Error> {
+        fn make_leaf(descr: &ShardDescription, cx: &mut dyn CellContext) -> Result<Cell, Error> {
+            let mut builder = CellBuilder::new();
+            ok!(builder.store_bit_zero());
+            ok!(descr.store_into(&mut builder, cx));
+            builder.build_ext(cx)
+        }
+
+        fn make_edge(left: Cell, right: Cell, cx: &mut dyn CellContext) -> Result<Cell, Error> {
+            let mut builder = CellBuilder::new();
+            ok!(builder.store_bit_one());
+            ok!(builder.store_reference(left));
+            ok!(builder.store_reference(right));
+            builder.build_ext(cx)
+        }
+
+        #[inline]
+        fn read_shard(
+            iter: &mut std::slice::Iter<(&ShardIdent, &ShardDescription)>,
+            cx: &mut dyn CellContext,
+        ) -> Result<(ShardIdent, Cell), Error> {
+            match iter.next() {
+                Some((&ident, descr)) => {
+                    let cell = make_leaf(descr, cx)?;
+                    Ok((ident, cell))
+                }
+                None => Err(Error::Unbalanced),
+            }
+        }
+
+        let shards = &mut shards.iter();
+        let cx = &mut Cell::empty_context();
+
+        let first = ok!(read_shard(shards, cx));
+        if first.0.is_full() {
+            return Ok(first.1);
+        }
+
+        if first.0.is_right_child() {
+            return Err(Error::Unbalanced);
+        }
+
+        let mut stack = vec![first];
+        'outer: loop {
+            // Get next leaf from the iterator
+            let (mut next_shard, mut next_cell) = ok!(read_shard(shards, cx));
+
+            // Repeat until we make a root
+            loop {
+                if next_shard.is_left_child() {
+                    stack.push((next_shard, next_cell));
+                    continue 'outer;
+                }
+
+                // Pop left child
+                let Some((left_shard, left_cell)) = stack.pop() else {
+                    break 'outer;
+                };
+
+                // Compute common parent shard
+                let parent_shard = match (left_shard.merge(), next_shard.merge()) {
+                    (Some(left_parent), Some(right_parent)) if left_parent == right_parent => {
+                        left_parent
+                    }
+                    _ => break 'outer,
+                };
+
+                // Create parent cell
+                let parent_cell = ok!(make_edge(left_cell, next_cell, cx));
+
+                // Break if parent shard is a root
+                if parent_shard.is_full() {
+                    return Ok(parent_cell);
+                }
+
+                // Otherwise use parent shard as next child
+                next_shard = parent_shard;
+                next_cell = parent_cell;
+            }
+        }
+
+        Err(Error::Unbalanced)
     }
 }
 
@@ -1053,3 +1163,105 @@ struct IterSegment<'a> {
 }
 
 impl Copy for IterSegment<'_> {}
+
+#[cfg(test)]
+mod test {
+    use std::collections::HashMap;
+
+    use super::*;
+    use crate::boc::BocRepr;
+
+    #[test]
+    fn shard_hashes_serde() {
+        let root = ShardIdent::new_full(0);
+        let (left, right) = root.split().unwrap();
+        let (left_left, left_right) = left.split().unwrap();
+        let empty_info = ShardDescription {
+            seqno: 0,
+            reg_mc_seqno: 0,
+            start_lt: 0,
+            end_lt: 0,
+            root_hash: Default::default(),
+            file_hash: Default::default(),
+            before_split: false,
+            before_merge: false,
+            want_split: false,
+            want_merge: false,
+            nx_cc_updated: false,
+            next_catchain_seqno: 0,
+            next_validator_shard: 0,
+            min_ref_mc_seqno: 0,
+            gen_utime: 0,
+            split_merge_at: None,
+            fees_collected: Default::default(),
+            funds_created: Default::default(),
+            copyleft_rewards: Default::default(),
+            proof_chain: None,
+        };
+        // arbitrary order
+        let input = HashMap::from([
+            (left_right, empty_info.clone()),
+            (right, empty_info.clone()),
+            (left_left, empty_info.clone()),
+        ]);
+        let hashes = ShardHashes::from_shards(&input).unwrap();
+        let serialized = BocRepr::encode(&hashes).unwrap();
+        let deserialized = BocRepr::decode(serialized).unwrap();
+        assert_eq!(hashes, deserialized);
+
+        // one missing
+        let input = HashMap::from([
+            (right, empty_info.clone()),
+            (left_right, empty_info.clone()),
+        ]);
+        let hashes = ShardHashes::from_shards(&input);
+        assert!(hashes.is_err());
+
+        // unsplitted
+        let input = HashMap::from([(root, empty_info.clone())]);
+        let hashes = ShardHashes::from_shards(&input).unwrap();
+        let serialized = BocRepr::encode(&hashes).unwrap();
+        let deserialized = BocRepr::decode(serialized).unwrap();
+        assert_eq!(hashes, deserialized);
+
+        let input = HashMap::from([(left, empty_info.clone()), (right, empty_info.clone())]);
+        let hashes = ShardHashes::from_shards(&input).unwrap();
+        let serialized = BocRepr::encode(&hashes).unwrap();
+        let deserialized = BocRepr::decode(serialized).unwrap();
+        assert_eq!(hashes, deserialized);
+
+        let master = ShardIdent::new_full(-1);
+
+        let input = HashMap::from([
+            (master, empty_info.clone()),
+            (left, empty_info.clone()),
+            (right, empty_info.clone()),
+        ]);
+        let hashes = ShardHashes::from_shards(&input).unwrap();
+        let serialized = BocRepr::encode(&hashes).unwrap();
+        let deserialized = BocRepr::decode(serialized).unwrap();
+        assert_eq!(hashes, deserialized);
+
+        let input = HashMap::from([
+            (master, empty_info.clone()),
+            (right, empty_info.clone()),
+            (left_left, empty_info.clone()),
+            (left_right, empty_info.clone()),
+        ]);
+        let hashes = ShardHashes::from_shards(&input).unwrap();
+        let serialized = BocRepr::encode(&hashes).unwrap();
+        let deserialized = BocRepr::decode(serialized).unwrap();
+        assert_eq!(hashes, deserialized);
+
+        // left is extra
+        let input = HashMap::from([
+            (master, empty_info.clone()),
+            (left, empty_info.clone()),
+            (right, empty_info.clone()),
+            (left_left, empty_info.clone()),
+            (left_right, empty_info.clone()),
+        ]);
+        let hashes = ShardHashes::from_shards(&input);
+        assert!(hashes.is_err());
+    }
+}

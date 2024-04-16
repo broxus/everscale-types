@@ -27,6 +27,40 @@ impl StorageUsed {
         bits: VarUint56::ZERO,
         public_cells: VarUint56::ZERO,
     };
+
+    /// Computes a total storage usage stats.
+    ///
+    /// `cell_limit` is the maximum number of unique cells to visit.
+    /// If the limit is reached, the function will return [`Error::Cancelled`].
+    pub fn compute(account: &Account, cell_limit: usize) -> Result<Self, Error> {
+        let cell = {
+            let cx = &mut Cell::empty_context();
+            let mut storage = CellBuilder::new();
+            storage.store_u64(account.last_trans_lt)?;
+            account.balance.store_into(&mut storage, cx)?;
+            account.state.store_into(&mut storage, cx)?;
+            if account.init_code_hash.is_some() {
+                account.init_code_hash.store_into(&mut storage, cx)?;
+            }
+            storage.build_ext(cx)?
+        };
+
+        let Some(res) = cell.compute_unique_stats(cell_limit) else {
+            return Err(Error::Cancelled);
+        };
+
+        let res = Self {
+            cells: VarUint56::new(res.cell_count),
+            bits: VarUint56::new(res.bit_count),
+            public_cells: Default::default(),
+        };
+
+        if res.cells.is_valid() || !res.bits.is_valid() {
+            return Err(Error::IntOverflow);
+        }
+
+        Ok(res)
+    }
 }
 
 /// Amount of unique cells and bits.

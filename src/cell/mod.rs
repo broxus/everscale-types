@@ -604,10 +604,38 @@ impl AsRef<[u8; 32]> for HashBytes {
     }
 }
 
-impl std::borrow::Borrow<[u8; 32]> for HashBytes {
+impl AsRef<[u8]> for HashBytes {
     #[inline(always)]
-    fn borrow(&self) -> &[u8; 32] {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
+impl AsMut<[u8; 32]> for HashBytes {
+    #[inline(always)]
+    fn as_mut(&mut self) -> &mut [u8; 32] {
+        &mut self.0
+    }
+}
+
+impl AsMut<[u8]> for HashBytes {
+    #[inline(always)]
+    fn as_mut(&mut self) -> &mut [u8] {
+        self.0.as_mut()
+    }
+}
+
+impl std::borrow::Borrow<[u8]> for HashBytes {
+    #[inline(always)]
+    fn borrow(&self) -> &[u8] {
         &self.0
+    }
+}
+
+impl std::borrow::BorrowMut<[u8]> for HashBytes {
+    #[inline(always)]
+    fn borrow_mut(&mut self) -> &mut [u8] {
+        &mut self.0
     }
 }
 
@@ -698,7 +726,7 @@ impl FromStr for HashBytes {
 impl std::fmt::Display for HashBytes {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut output = [0u8; 64];
-        hex::encode_to_slice(self.as_ref(), &mut output).ok();
+        hex::encode_to_slice(self, &mut output).ok();
 
         // SAFETY: output is guaranteed to contain only [0-9a-f]
         let output = unsafe { std::str::from_utf8_unchecked(&output) };
@@ -710,6 +738,28 @@ impl std::fmt::Debug for HashBytes {
     #[inline(always)]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(self, f)
+    }
+}
+
+impl<I> std::ops::Index<I> for HashBytes
+where
+    [u8; 32]: std::ops::Index<I>,
+{
+    type Output = <[u8; 32] as std::ops::Index<I>>::Output;
+
+    #[inline]
+    fn index(&self, index: I) -> &Self::Output {
+        std::ops::Index::index(&self.0, index)
+    }
+}
+
+impl<I> std::ops::IndexMut<I> for HashBytes
+where
+    [u8; 32]: std::ops::IndexMut<I>,
+{
+    #[inline]
+    fn index_mut(&mut self, index: I) -> &mut Self::Output {
+        std::ops::IndexMut::index_mut(&mut self.0, index)
     }
 }
 

@@ -190,23 +190,43 @@ impl MerkleUpdate {
             let old_cell_hashes = ok!(self.find_old_cells());
 
             let mut visited = ahash::HashSet::default();
-            let mut stack = Vec::new();
             let mut old_cells = ahash::HashMap::default();
 
-            stack.push((old.clone(), 0));
-            while let Some((cell, mut merkle_depth)) = stack.pop() {
-                if !visited.insert(*cell.as_ref().repr_hash()) {
-                    continue;
+            // Insert root
+            let mut merkle_depth = 0u8;
+
+            visited.insert(old.repr_hash());
+            old_cells.insert(*old.hash(merkle_depth), old.clone());
+            merkle_depth += old.descriptor().is_merkle() as u8;
+            let mut stack = vec![old.references()];
+
+            'outer: while let Some(iter) = stack.last_mut() {
+                let cloned = iter.clone().cloned();
+                for (child_ref, child) in std::iter::zip(&mut *iter, cloned) {
+                    if !visited.insert(child_ref.repr_hash()) {
+                        continue;
+                    }
+
+                    let hash = child_ref.hash(merkle_depth);
+                    if !old_cell_hashes.contains(hash) {
+                        // Skip new cells
+                        continue;
+                    }
+
+                    // Store an owned cell with original merkle depth
+                    old_cells.insert(*hash, child);
+
+                    // Increase the current merkle depth if needed
+                    merkle_depth += child_ref.descriptor().is_merkle() as u8;
+                    // And proceed to processing this child
+                    stack.push(child_ref.references());
+                    continue 'outer;
                 }
 
-                let hash = cell.as_ref().hash(merkle_depth);
-                if old_cell_hashes.contains(hash) {
-                    merkle_depth += cell.as_ref().descriptor().is_merkle() as u8;
-                    for child in cell.as_ref().references().cloned() {
-                        stack.push((child, merkle_depth));
-                    }
-                    old_cells.insert(*hash, cell);
-                }
+                // Decrease the current merkle depth if needed
+                merkle_depth -= iter.cell().descriptor().is_merkle() as u8;
+                // And return to the previous depth
+                stack.pop();
             }
 
             old_cells
@@ -227,62 +247,181 @@ impl MerkleUpdate {
         }
     }
 
+    /// Computes the removed cells diff using the original cell.
+    pub fn compute_removed_cells<'a>(
+        &self,
+        old: &'a DynCell,
+    ) -> Result<ahash::HashMap<&'a HashBytes, u32>, Error> {
+        use std::collections::hash_map;
+
+        if old.repr_hash() != &self.old_hash || self.old.hash(0) != old.repr_hash() {
+            return Err(Error::InvalidData);
+        }
+
+        if self.old_hash == self.new_hash {
+            // No cells were removed
+            return Ok(Default::default());
+        }
+
+        let mut new_cells = ahash::HashSet::default();
+
+        // Compute a list of all hashes in the `new` merkle update tree
+        {
+            // TODO: check if `new_cells` set can be used instead of `visited`
+            let mut visited = ahash::HashSet::default();
+            let mut merkle_depth = self.new.descriptor().is_merkle() as u8;
+            let mut stack = vec![self.new.references()];
+
+            visited.insert(self.new.repr_hash());
+            new_cells.insert(self.new.hash(0));
+
+            'outer: while let Some(iter) = stack.last_mut() {
+                for child in &mut *iter {
+                    if !visited.insert(child.repr_hash()) {
+                        continue;
+                    }
+
+                    // Track new cells
+                    new_cells.insert(child.hash(merkle_depth));
+
+                    // Unchanged cells (as pruned branches) must be presented in the old tree
+                    let descriptor = child.descriptor();
+                    if descriptor.is_pruned_branch() {
+                        continue;
+                    }
+
+                    // Increase the current merkle depth if needed
+                    merkle_depth += descriptor.is_merkle() as u8;
+                    // And proceed to processing this child
+                    stack.push(child.references());
+                    continue 'outer;
+                }
+
+                merkle_depth -= iter.cell().descriptor().is_merkle() as u8;
+                stack.pop();
+            }
+
+            debug_assert_eq!(merkle_depth, 0);
+        }
+
+        // Traverse old cells
+        let mut result = ahash::HashMap::default();
+        result.insert(old.repr_hash(), 1);
+
+        let mut stack = Vec::new();
+        if !new_cells.contains(old.repr_hash()) {
+            stack.push(old.references());
+        }
+
+        'outer: while let Some(iter) = stack.last_mut() {
+            for child in &mut *iter {
+                let hash = child.repr_hash();
+                match result.entry(hash) {
+                    hash_map::Entry::Occupied(mut entry) => {
+                        *entry.get_mut() += 1;
+                        continue;
+                    }
+                    hash_map::Entry::Vacant(entry) => {
+                        entry.insert(1);
+                    }
+                }
+
+                // Skip empty or used subtrees
+                if child.reference_count() == 0 || new_cells.contains(hash) {
+                    continue;
+                }
+
+                stack.push(child.references());
+                continue 'outer;
+            }
+            stack.pop();
+        }
+
+        Ok(result)
+    }
+
     fn find_old_cells(&self) -> Result<ahash::HashSet<&HashBytes>, Error> {
         let mut visited = ahash::HashSet::default();
         let mut old_cells = ahash::HashSet::default();
 
         // Traverse old cells
-        let mut stack = vec![(self.old.as_ref(), 0)];
-        while let Some((cell, mut merkle_depth)) = stack.pop() {
-            // Skip visited cells
-            if !visited.insert(cell.repr_hash()) {
-                continue;
+        let mut merkle_depth = 0u8;
+
+        // Insert root
+        visited.insert(self.old.repr_hash());
+        old_cells.insert(self.old.hash(merkle_depth));
+        merkle_depth += self.old.descriptor().is_merkle() as u8;
+        let mut stack = vec![self.old.references()];
+
+        'outer: while let Some(iter) = stack.last_mut() {
+            for child in &mut *iter {
+                if !visited.insert(child.repr_hash()) {
+                    continue;
+                }
+
+                // Store cell with original merkle depth
+                old_cells.insert(child.hash(merkle_depth));
+
+                // Skip children for pruned branches
+                let descriptor = child.descriptor();
+                if descriptor.is_pruned_branch() {
+                    continue;
+                }
+
+                // Increase the current merkle depth if needed
+                merkle_depth += descriptor.is_merkle() as u8;
+                // And proceed to processing this child
+                stack.push(child.references());
+                continue 'outer;
             }
 
-            // Store cell with original merkle depth
-            old_cells.insert(cell.hash(merkle_depth));
-
-            // Skip children for pruned branches
-            let descriptor = cell.descriptor();
-            if descriptor.is_pruned_branch() {
-                continue;
-            }
-
-            // Traverse children as virtualized cells
-            merkle_depth += descriptor.is_merkle() as u8;
-            for child in cell.references() {
-                stack.push((child, merkle_depth));
-            }
+            // Decrease the current merkle depth if needed
+            merkle_depth -= iter.cell().descriptor().is_merkle() as u8;
+            // And return to the previous depth
+            stack.pop();
         }
 
-        // Reset temp state
-        visited.clear();
-        stack.clear();
+        debug_assert_eq!(merkle_depth, 0);
 
         // Traverse new cells
-        stack.push((self.new.as_ref(), 0));
-        while let Some((cell, mut merkle_depth)) = stack.pop() {
-            // Skip visited cells
-            if !visited.insert(cell.repr_hash()) {
-                continue;
+
+        // Insert root
+        visited.clear();
+        visited.insert(self.new.repr_hash());
+        stack.push(self.new.references());
+        merkle_depth += self.new.descriptor().is_merkle() as u8;
+
+        'outer: while let Some(iter) = stack.last_mut() {
+            for child in &mut *iter {
+                // Skip visited cells
+                if !visited.insert(child.repr_hash()) {
+                    continue;
+                }
+
+                // Unchanged cells (as pruned branches) must be presented in the old tree
+                let descriptor = child.descriptor();
+                if descriptor.is_pruned_branch() {
+                    if descriptor.level_mask().level() == merkle_depth + 1
+                        && !old_cells.contains(child.hash(merkle_depth))
+                    {
+                        return Err(Error::InvalidData);
+                    }
+                } else {
+                    // Increase the current merkle depth if needed
+                    merkle_depth += descriptor.is_merkle() as u8;
+                    // And proceed to processing this child
+                    stack.push(child.references());
+                    continue 'outer;
+                }
             }
 
-            // Unchanged cells (as pruned branches) must be presented in the old tree
-            let descriptor = cell.descriptor();
-            if descriptor.is_pruned_branch() {
-                if descriptor.level_mask().level() == merkle_depth + 1
-                    && !old_cells.contains(cell.hash(merkle_depth))
-                {
-                    return Err(Error::InvalidData);
-                }
-            } else {
-                // Traverse children as virtualized cells
-                merkle_depth += descriptor.is_merkle() as u8;
-                for child in cell.references() {
-                    stack.push((child, merkle_depth));
-                }
-            }
+            // Decrease the current merkle depth if needed
+            merkle_depth -= iter.cell().descriptor().is_merkle() as u8;
+            // And return to the previous depth
+            stack.pop();
         }
+
+        debug_assert_eq!(merkle_depth, 0);
 
         // Done
         Ok(old_cells)
@@ -438,6 +577,7 @@ impl<'a: 'b, 'b> BuilderImpl<'a, 'b> {
                 InvertedFilter(self.filter)
             )
             .track_pruned_branches()
+            .allow_different_root(true)
             .build_raw_ext(self.context)
         };
 
@@ -457,6 +597,7 @@ impl<'a: 'b, 'b> BuilderImpl<'a, 'b> {
         // Create Merkle proof cell which contains only changed cells
         let old = ok! {
             MerkleProofBuilder::<_>::new(self.old, resolver.changed_cells)
+                .allow_different_root(true)
                 .build_raw_ext(self.context)
         };
 
@@ -477,6 +618,24 @@ mod tests {
     use super::*;
     use crate::prelude::*;
 
+    fn visit_all_cells(cell: &Cell) -> ahash::HashSet<&HashBytes> {
+        let mut result = ahash::HashSet::default();
+
+        let mut stack = vec![cell.as_ref()];
+        while let Some(cell) = stack.pop() {
+            let repr_hash = cell.repr_hash();
+            if !result.insert(repr_hash) {
+                continue;
+            }
+
+            for child in cell.references() {
+                stack.push(child);
+            }
+        }
+
+        result
+    }
+
     #[test]
     fn correct_store_load() {
         let default = MerkleUpdate::default();
@@ -493,27 +652,8 @@ mod tests {
 
     #[test]
     fn dict_merkle_update() {
-        fn visit_all_cells(cell: &Cell) -> ahash::HashSet<&HashBytes> {
-            let mut result = ahash::HashSet::default();
-
-            let mut stack = vec![cell.as_ref()];
-            while let Some(cell) = stack.pop() {
-                let repr_hash = cell.repr_hash();
-                if !result.insert(repr_hash) {
-                    continue;
-                }
-
-                for child in cell.references() {
-                    stack.push(child);
-                }
-            }
-
-            result
-        }
-
         // Create dict with keys 0..10
         let mut dict = Dict::<u32, u32>::new();
-
         for i in 0..10 {
             dict.add(i, i * 10).unwrap();
         }
@@ -548,5 +688,133 @@ mod tests {
 
         let after_apply = merkle_update.apply(&old_dict_cell).unwrap();
         assert_eq!(after_apply.as_ref(), new_dict_cell.as_ref());
+    }
+
+    #[test]
+    fn dict_removed_cells_diff() {
+        // Create dict with keys 0..10
+        let mut dict = Dict::<u32, u32>::new();
+        for i in 0..10 {
+            dict.add(i, 0).unwrap();
+        }
+
+        // Serialize old dict
+        let old_dict_cell = CellBuilder::build_from(&dict).unwrap();
+        let old_dict_hashes = visit_all_cells(&old_dict_cell);
+
+        // Serialize new dict
+        dict.set(0, 1).unwrap();
+        let new_dict_cell = CellBuilder::build_from(dict).unwrap();
+
+        assert_ne!(old_dict_cell.as_ref(), new_dict_cell.as_ref());
+
+        // Create merkle update
+        let merkle_update = MerkleUpdate::create(
+            old_dict_cell.as_ref(),
+            new_dict_cell.as_ref(),
+            old_dict_hashes,
+        )
+        .build()
+        .unwrap();
+
+        // Test diff
+        let mut refs_for_both = RefsStorage::default();
+        refs_for_both.store_cell(old_dict_cell.as_ref());
+        refs_for_both.store_cell(new_dict_cell.as_ref());
+
+        let mut only_new_refs = RefsStorage::default();
+        only_new_refs.store_cell(new_dict_cell.as_ref());
+
+        let diff = merkle_update
+            .compute_removed_cells(old_dict_cell.as_ref())
+            .unwrap();
+        assert!(refs_for_both.remove_batch(diff));
+
+        assert_eq!(only_new_refs.refs, refs_for_both.refs);
+    }
+
+    #[test]
+    fn dict_removed_all_cells_diff() {
+        // Create dict with keys 0..10
+        let mut dict = Dict::<u32, u32>::new();
+        for i in 0..10 {
+            dict.add(i, 0).unwrap();
+        }
+
+        // Serialize old dict
+        let old_dict_cell = CellBuilder::build_from(&dict).unwrap();
+        let old_dict_hashes = visit_all_cells(&old_dict_cell);
+
+        // Serialize new dict
+        let new_dict_cell = CellBuilder::build_from(Dict::<u32, u32>::new()).unwrap();
+
+        assert_ne!(old_dict_cell.as_ref(), new_dict_cell.as_ref());
+
+        // Create merkle update
+        let merkle_update = MerkleUpdate::create(
+            old_dict_cell.as_ref(),
+            new_dict_cell.as_ref(),
+            old_dict_hashes,
+        )
+        .build()
+        .unwrap();
+
+        // Test diff
+        let mut refs_for_both = RefsStorage::default();
+        refs_for_both.store_cell(old_dict_cell.as_ref());
+        refs_for_both.store_cell(new_dict_cell.as_ref());
+
+        let mut only_new_refs = RefsStorage::default();
+        only_new_refs.store_cell(new_dict_cell.as_ref());
+
+        let diff = merkle_update
+            .compute_removed_cells(old_dict_cell.as_ref())
+            .unwrap();
+        assert!(refs_for_both.remove_batch(diff));
+
+        assert_eq!(only_new_refs.refs, refs_for_both.refs);
+    }
+
+    #[derive(Default)]
+    struct RefsStorage<'a> {
+        refs: ahash::HashMap<&'a HashBytes, u32>,
+    }
+
+    impl<'a> RefsStorage<'a> {
+        fn store_cell(&mut self, root: &'a DynCell) {
+            use std::collections::hash_map;
+
+            *self.refs.entry(root.repr_hash()).or_default() += 1;
+
+            let mut stack = vec![root.references()];
+            'outer: while let Some(iter) = stack.last_mut() {
+                for child in iter {
+                    let hash = child.repr_hash();
+                    match self.refs.entry(hash) {
+                        hash_map::Entry::Occupied(mut entry) => {
+                            *entry.get_mut() += 1;
+                            continue;
+                        }
+                        hash_map::Entry::Vacant(entry) => {
+                            entry.insert(1);
+                        }
+                    }
+
+                    stack.push(child.references());
+                    continue 'outer;
+                }
+                stack.pop();
+            }
+        }
+
+        fn remove_batch(&mut self, mut batch: ahash::HashMap<&'a HashBytes, u32>) -> bool {
+            self.refs.retain(|hash, refs| {
+                if let Some(diff) = batch.remove(hash) {
+                    *refs -= diff;
+                }
+                *refs != 0
+            });
+            batch.is_empty()
+        }
     }
 }
