@@ -12,7 +12,7 @@ impl Serialize for HashBytes {
     {
         if serializer.is_human_readable() {
             let mut output = [0u8; 64];
-            hex::encode_to_slice(&self.0, &mut output).ok();
+            hex::encode_to_slice(self.0.as_slice(), &mut output).ok();
 
             // SAFETY: output is guaranteed to contain only [0-9a-f]
             let output = unsafe { std::str::from_utf8_unchecked(&output) };

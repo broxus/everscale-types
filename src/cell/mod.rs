@@ -763,7 +763,7 @@ where
     }
 }
 
-#[cfg(feature = "rand")]
+#[cfg(any(feature = "rand", test))]
 impl rand::distributions::Distribution<HashBytes> for rand::distributions::Standard {
     #[inline]
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> HashBytes {

@@ -6,6 +6,10 @@ use crate::cell::*;
 use crate::error::{Error, ParseIntError};
 use crate::util::unlikely;
 
+pub use self::varuint248::VarUint248;
+
+mod varuint248;
+
 macro_rules! impl_ops {
     ($ident:ident, $inner:ty) => {
         impl From<$ident> for $inner {
@@ -253,6 +257,44 @@ macro_rules! impl_ops {
                 self.0 <<= rhs;
             }
         }
+
+        #[cfg(feature = "serde")]
+        impl serde::Serialize for $ident {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                self.0.serialize(serializer)
+            }
+        }
+
+        #[cfg(feature = "serde")]
+        impl<'de> serde::Deserialize<'de> for $ident {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                use serde::de::{Error, Unexpected};
+
+                struct Expected;
+
+                impl serde::de::Expected for Expected {
+                    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                        f.write_str(stringify!($ident))
+                    }
+                }
+
+                let res = Self::new(ok!(<$inner>::deserialize(deserializer)));
+                if res.is_valid() {
+                    Ok(res)
+                } else {
+                    Err(D::Error::invalid_type(
+                        Unexpected::Other("big number"),
+                        &Expected,
+                    ))
+                }
+            }
+        }
     };
 }
 
@@ -477,157 +519,6 @@ impl<'a> Load<'a> for Tokens {
     }
 }
 
-/// Variable-length 248-bit integer.
-///
-/// Stored as 5 bits of `len` (`0..=31`), followed by `len` bytes.
-#[derive(Debug, Default, Clone, Copy, Hash, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct VarUint248([u128; 2]);
-
-impl VarUint248 {
-    /// The multiplicative identity for this integer type, i.e. `1`.
-    pub const ONE: Self = Self([0; 2]);
-
-    /// The smallest value that can be represented by this integer type.
-    pub const MIN: Self = Self::new(1);
-
-    /// The largest value that can be represented by this integer type.
-    pub const MAX: Self = Self::from_words(u128::MAX >> 8, u128::MAX);
-
-    /// The number of data bits that the length occupies.
-    pub const LEN_BITS: u16 = 5;
-
-    /// The maximum number of data bits that this struct occupies.
-    pub const MAX_BITS: u16 = Self::LEN_BITS + 31 * 8;
-
-    /// Creates a new integer value from a primitive integer.
-    #[inline]
-    pub const fn new(value: u128) -> Self {
-        Self::from_words(0, value)
-    }
-
-    /// Constructs self from a pair of high and low underlying integers.
-    #[inline]
-    pub const fn from_words(hi: u128, lo: u128) -> Self {
-        #[cfg(target_endian = "little")]
-        {
-            Self([lo, hi])
-        }
-        #[cfg(target_endian = "big")]
-        {
-            Self([hi, lo])
-        }
-    }
-
-    /// Returns a tuple of high and low underlying integers.
-    #[inline]
-    pub const fn into_words(self) -> (u128, u128) {
-        #[cfg(target_endian = "little")]
-        {
-            (self.0[1], self.0[0])
-        }
-        #[cfg(target_endian = "big")]
-        {
-            (self.0[0], self.0[1])
-        }
-    }
-
-    /// Returns `true` if an underlying primitive integer is zero.
-    #[inline]
-    pub const fn is_zero(&self) -> bool {
-        self.0[0] == 0 && self.0[1] == 0
-    }
-
-    /// Returns `true` if an underlying primitive integer fits into the repr.
-    #[inline]
-    pub const fn is_valid(&self) -> bool {
-        self.into_words().0 <= (u128::MAX >> 8)
-    }
-
-    /// Returns number of data bits that this struct occupies.
-    /// Returns `None` if an underlying primitive integer is too large.
-    pub const fn bit_len(&self) -> Option<u16> {
-        let bytes = (32 - self.leading_zeros() / 8) as u8;
-        if unlikely(bytes > 31) {
-            None
-        } else {
-            Some(Self::LEN_BITS + bytes as u16 * 8)
-        }
-    }
-
-    /// Returns the number of leading zeros in the binary representation of self.
-    pub const fn leading_zeros(&self) -> u32 {
-        let (hi, lo) = self.into_words();
-        if hi == 0 {
-            128 + lo.leading_zeros()
-        } else {
-            hi.leading_zeros()
-        }
-    }
-}
-
-impl ExactSize for VarUint248 {
-    #[inline]
-    fn exact_size(&self) -> CellSliceSize {
-        CellSliceSize {
-            bits: self.bit_len().unwrap_or_default(),
-            refs: 0,
-        }
-    }
-}
-
-impl Ord for VarUint248 {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.into_words().cmp(&other.into_words())
-    }
-}
-
-impl PartialOrd for VarUint248 {
-    #[inline]
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Store for VarUint248 {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
-        let bytes = (32 - self.leading_zeros() / 8) as u8;
-        let mut bits = bytes as u16 * 8;
-
-        if unlikely(bytes > 31 || !builder.has_capacity(Self::LEN_BITS + bits, 0)) {
-            return Err(Error::CellOverflow);
-        }
-
-        ok!(builder.store_small_uint(bytes, Self::LEN_BITS));
-
-        let (hi, lo) = self.into_words();
-        if let Some(high_bits) = bits.checked_sub(128) {
-            ok!(store_u128(builder, hi, high_bits));
-            bits -= high_bits;
-        }
-        store_u128(builder, lo, bits)
-    }
-}
-
-impl<'a> Load<'a> for VarUint248 {
-    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        let mut bytes = ok!(slice.load_small_uint(Self::LEN_BITS));
-
-        let mut hi: u128 = 0;
-        if let Some(high_bytes) = bytes.checked_sub(16) {
-            if high_bytes > 0 {
-                hi = ok!(load_u128(slice, high_bytes));
-                bytes -= high_bytes;
-            }
-        }
-
-        match load_u128(slice, bytes) {
-            Ok(lo) => Ok(Self::from_words(hi, lo)),
-            Err(e) => Err(e),
-        }
-    }
-}
-
 macro_rules! impl_small_uints {
     ($($(#[doc = $doc:expr])* $vis:vis struct $ident:ident($bits:literal);)*) => {
         $(
@@ -839,6 +730,30 @@ impl<'a> Load<'a> for SplitDepth {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         match slice.load_small_uint(Self::BITS) {
             Ok(value) => Self::new(value),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for SplitDepth {
+    #[inline]
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.get().serialize(serializer)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for SplitDepth {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        match u8::deserialize(deserializer) {
+            Ok(value) => Self::new(value).map_err(serde::de::Error::custom),
             Err(e) => Err(e),
         }
     }
@@ -1067,31 +982,5 @@ mod tests {
     #[test]
     fn tokens_deserialization() {
         impl_deserialization_tests!(Tokens, 120, 0xabcdef89abcdefdeadbeeffafacafe);
-    }
-
-    #[test]
-    fn var_uint248_serialization() {
-        for i in 0..128 {
-            let lo = 1u128 << i;
-
-            let value = VarUint248::new(lo);
-            let cell = CellBuilder::build_from(value).unwrap();
-            assert_eq!(value.bit_len().unwrap(), cell.bit_len());
-        }
-    }
-
-    #[test]
-    fn var_uint248_deserialization() {
-        let mut lo: u128 = 0xababcdef89abcdefdeadbeeffafacafe;
-        for _ in 0..=128 {
-            let value = VarUint248::new(lo);
-
-            let cell = CellBuilder::build_from(value).unwrap();
-
-            let parsed_value = cell.parse::<VarUint248>().unwrap();
-            assert_eq!(parsed_value, value);
-
-            lo >>= 1;
-        }
     }
 }

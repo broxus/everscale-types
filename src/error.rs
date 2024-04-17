@@ -112,3 +112,11 @@ pub enum ParseBlockIdError {
     #[error("unexpected block id part")]
     UnexpectedPart,
 }
+
+/// Error type for global capability parsing related errors.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum ParseGlobalCapabilityError {
+    /// Tried to parse an unknown string.
+    #[error("unknown capability")]
+    UnknownCapability,
+}
