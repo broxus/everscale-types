@@ -827,24 +827,16 @@ mod tests {
         data.reverse();
 
         for (index, (key, aug, value)) in data.iter().enumerate() {
-            println!("index: {}", index);
-            println!("key: {}", key);
-            //new.add(key, key).unwrap();
 
             new_aug.add(key, aug, key, |l, r, bldr, ctx| {
                 let right = CurrencyCollection::load_from(&mut r.clone())?;
-                println!("done2");
                 let mut left = CurrencyCollection::load_from(&mut l.clone())?;
-                println!("done1");
                 left.tokens.checked_add(right.tokens);
                 left.store_into(bldr, ctx)?;
                 Ok(())
 
             }).unwrap();
         }
-
-        println!("{:?}", aug_dict);
-        println!("{:?}", new_aug);
 
     }
 }

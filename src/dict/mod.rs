@@ -467,7 +467,6 @@ pub fn aug_dict_insert(
         }
     };
 
-    println!("Rebuilding dict");
     *dict = Some(ok!(rebuild_dict_from_stack_with_comparator(
         stack,
         leaf,
@@ -475,7 +474,6 @@ pub fn aug_dict_insert(
         context,
         comparator
     )));
-    println!("{}", Boc::encode_base64(dict.clone().unwrap()));
 
     Ok(true)
 }
@@ -1509,25 +1507,19 @@ fn split_aug_edge(
     ok!(builder.store_reference(left.clone()));
     ok!(builder.store_reference(right.clone()));
 
-    let bits_offset = key.bits_offset();
-    let refs_offset = key.refs_offset();
+    let bits_offset = builder.bit_len();
+    let refs_offset = builder.reference_count();
 
     let mut left_clone = left.as_slice()?;
     let mut right_clone = right.as_slice()?;
-    //let mut right_clone = new_extra_range.apply(if old_to_right { &right)?;
 
     let _ = read_label(&mut left_clone, key.remaining_bits())?;
     let _ = read_label(&mut right_clone, key.remaining_bits())?;
 
-
-    println!("pre comparator");
     comparator(&mut left_clone, &mut right_clone, &mut builder, context)?;
-    println!("after comparator");
 
-
-    let extra_bits = key.bits_offset() - bits_offset;
-    let extra_refs = key.refs_offset() - refs_offset;
-
+    let extra_bits = builder.bit_len() - bits_offset;
+    let extra_refs = builder.reference_count() - refs_offset;
 
     let cell = ok!(builder.build_ext(context));
 
@@ -1666,29 +1658,14 @@ fn rebuild_dict_from_stack_with_comparator(
             },
         };
 
-        // let mut leaf_slice = if is_left {
-        //     ok!(left.as_slice())
-        // } else {
-        //     ok!(right.as_slice())
-        // };
         let mut last_slice = ok!(last.data.as_slice());
         let last_label = ok!(read_label(&mut last_slice, last.key_bit_len));
 
         //getting ancestor key_bit_length according to last
         let ancestor_kbl = last.key_bit_len - last_label.remaining_bits() - 1;
 
-        ////Reading extra of the second ancesestor of `last``
-        // let mut opposite_cell_slice = if !is_left {
-        //     ok!(left.as_slice())
-        // } else {
-        //     ok!(right.as_slice())
-        // };
-
-        //let _ = ok!((&mut opposite_cell_slice, accestor_kbl));
-        //let opposite_extra = ok!(read_extra(&mut opposite_cell_slice));
-
         let mut builder = CellBuilder::new();
-        let _ = last_label.store_into(&mut builder, context);
+        let _ = write_label(&last_label, ancestor_kbl, &mut builder);
         ok!(builder.store_reference(left.clone()));
         ok!(builder.store_reference(right.clone()));
 
@@ -1708,28 +1685,10 @@ fn rebuild_dict_from_stack_with_comparator(
                 context
             ));
 
-        // if is_left {
-        //     ok!(comparator(
-        //         &opposite_cell_slice,
-        //         &leaf_slice,
-        //         &mut builder,
-        //         context
-        //     ));
-        // } else {
-        //     ok!(comparator(
-        //         &leaf_slice,
-        //         &opposite_cell_slice,
-        //         &mut builder,
-        //         context
-        //     ));
-        // }
-
         let extra_bits = builder.bit_len() - bits_offset;
         let extra_refs = builder.reference_count() - refs_offset;
 
-
         let new_leaf = ok!(builder.build_ext(context));
-        println!("new leaf refs {}", new_leaf.reference_count());
 
         let mut new_extra_range = CellSliceRange::full(new_leaf.as_ref());
         new_extra_range.try_advance(bits_offset, refs_offset);
