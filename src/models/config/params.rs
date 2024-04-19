@@ -23,6 +23,7 @@ pub struct ConfigVotingSetup {
 
 /// Config proposal setup params.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[tlb(tag = "#36")]
 pub struct ConfigProposalSetup {
     /// The minimal number of voting rounds for the proposal.
@@ -45,6 +46,7 @@ pub struct ConfigProposalSetup {
 
 /// Workchain description.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct WorkchainDescription {
     /// Unix timestamp from which blocks can be produced.
     pub enabled_since: u32,
@@ -147,6 +149,8 @@ impl<'a> Load<'a> for WorkchainDescription {
 
 /// Workchain format description.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "ty"))]
 pub enum WorkchainFormat {
     /// Basic workchain format.
     Basic(WorkchainFormatBasic),
@@ -202,6 +206,7 @@ impl<'a> Load<'a> for WorkchainFormat {
 
 /// Basic workchain format description.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct WorkchainFormatBasic {
     /// VM version.
     pub vm_version: i32,
@@ -211,6 +216,7 @@ pub struct WorkchainFormatBasic {
 
 /// Extended workchain format description.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[tlb(validate_with = "Self::is_valid")]
 pub struct WorkchainFormatExtended {
     /// The minimal address length in bits.
@@ -235,6 +241,7 @@ impl WorkchainFormatExtended {
 
 /// Block creation reward.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[tlb(tag = "#6b")]
 pub struct BlockCreationRewards {
     /// Reward for each created masterchain block.
@@ -245,6 +252,7 @@ pub struct BlockCreationRewards {
 
 /// Validators election timings.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ElectionTimings {
     /// Validation round length in seconds.
     pub validators_elected_for: u32,
@@ -258,6 +266,7 @@ pub struct ElectionTimings {
 
 /// Range of number of validators.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ValidatorCountParams {
     /// The maximum number of validators.
     pub max_validators: u16,
@@ -269,6 +278,7 @@ pub struct ValidatorCountParams {
 
 /// Validator stake range and factor.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ValidatorStakeParams {
     /// The minimum validator stake.
     pub min_stake: Tokens,
@@ -282,6 +292,7 @@ pub struct ValidatorStakeParams {
 
 /// Storage prices for some interval.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[tlb(tag = "#cc")]
 pub struct StoragePrices {
     /// Unix timestamp since which this prices are used.
@@ -298,6 +309,7 @@ pub struct StoragePrices {
 
 /// Gas limits and prices.
 #[derive(Default, Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GasLimitsPrices {
     /// The price of gas unit.
     pub gas_price: u64,
@@ -380,6 +392,7 @@ impl<'a> Load<'a> for GasLimitsPrices {
 
 /// Block limits parameter.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[tlb(tag = "#c3", validate_with = "Self::is_valid")]
 pub struct BlockParamLimits {
     /// Value below which the parameter is considered underloaded.
@@ -399,6 +412,7 @@ impl BlockParamLimits {
 
 /// Block limits.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[tlb(tag = "#5d")]
 pub struct BlockLimits {
     /// Block size limits in bytes.
@@ -411,6 +425,7 @@ pub struct BlockLimits {
 
 /// Message forwarding prices.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[tlb(tag = "#ea")]
 pub struct MsgForwardPrices {
     /// Fixed price in addition to the dynamic part.
@@ -429,6 +444,7 @@ pub struct MsgForwardPrices {
 
 /// Catchain configuration params.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CatchainConfig {
     /// Exclude masterchain validators from a validators list for a base workchain.
     pub isolate_mc_validators: bool,
@@ -485,6 +501,7 @@ impl<'a> Load<'a> for CatchainConfig {
 
 /// Consensus configuration params.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ConsensusConfig {
     /// Allow new catchain ids.
     pub new_catchain_ids: bool,
@@ -558,6 +575,7 @@ impl<'a> Load<'a> for ConsensusConfig {
 
 /// Validator set.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ValidatorSet {
     /// Unix timestamp from which this set will be active.
     pub utime_since: u32,
@@ -810,6 +828,7 @@ impl<'a> Load<'a> for ValidatorSet {
 
 /// Validator description.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ValidatorDescription {
     /// Validator public key.
     pub public_key: HashBytes, // TODO: replace with everscale_crypto::ed25519::PublicKey ?

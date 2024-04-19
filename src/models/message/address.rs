@@ -150,6 +150,33 @@ impl<'a> Load<'a> for IntAddr {
     }
 }
 
+#[cfg(feature = "serde")]
+impl serde::Serialize for IntAddr {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::Std(addr) => addr.serialize(serializer),
+            Self::Var(_) => {
+                // TODO: impl serde for `VarAddr`
+                serializer.serialize_str("varaddr")
+            }
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for IntAddr {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // TODO: impl serde for `VarAddr`
+        StdAddr::deserialize(deserializer).map(IntAddr::Std)
+    }
+}
+
 /// Standard internal address.
 #[derive(Debug, Default, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct StdAddr {
@@ -341,6 +368,53 @@ impl crate::dict::DictKey for StdAddr {
         };
 
         Some(result)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for StdAddr {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        if serializer.is_human_readable() {
+            serializer.collect_str(self)
+        } else {
+            (self.workchain, &self.address).serialize(serializer)
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for StdAddr {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{Error, Visitor};
+
+        struct StdAddrVisitor;
+
+        impl<'de> Visitor<'de> for StdAddrVisitor {
+            type Value = StdAddr;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a standard address")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                StdAddr::from_str(v).map_err(E::custom)
+            }
+        }
+
+        if deserializer.is_human_readable() {
+            deserializer.deserialize_str(StdAddrVisitor)
+        } else {
+            <(i8, HashBytes)>::deserialize(deserializer)
+                .map(|(workchain, address)| Self::new(workchain, address))
+        }
     }
 }
 
