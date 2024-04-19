@@ -5,6 +5,7 @@ use crate::error::{Error, ParseBlockIdError};
 
 /// Full block id.
 #[derive(Debug, Default, Clone, Copy, Eq, Hash, PartialEq, Ord, PartialOrd, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BlockId {
     /// Block shard ident.
     pub shard: ShardIdent,
@@ -117,6 +118,7 @@ impl std::fmt::Display for BlockId {
 
 /// Short block id.
 #[derive(Debug, Default, Clone, Copy, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BlockIdShort {
     /// Block shard ident.
     pub shard: ShardIdent,
@@ -429,5 +431,87 @@ impl<'a> Load<'a> for ShardIdent {
         let prefix = (prefix_without_tag & (!tag + 1)) | tag;
 
         Ok(Self { workchain, prefix })
+    }
+}
+
+impl FromStr for ShardIdent {
+    type Err = ParseBlockIdError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut parts = s.split(':');
+        let workchain = match parts.next() {
+            Some(wc) => match wc.parse::<i32>() {
+                Ok(wc) => wc,
+                Err(_) => return Err(ParseBlockIdError::InvalidShardIdent),
+            },
+            None => return Err(ParseBlockIdError::Empty),
+        };
+
+        let shard = 'shard: {
+            if let Some(prefix) = parts.next() {
+                if let Ok(prefix) = u64::from_str_radix(prefix, 16) {
+                    if let Some(shard) = ShardIdent::new(workchain, prefix) {
+                        break 'shard shard;
+                    }
+                }
+            }
+            return Err(ParseBlockIdError::InvalidShardIdent);
+        };
+
+        Ok(shard)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for ShardIdent {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        if serializer.is_human_readable() {
+            serializer.collect_str(&self)
+        } else {
+            (self.workchain, self.prefix).serialize(serializer)
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ShardIdent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{Error, Unexpected, Visitor};
+
+        struct ShardIdentVisitor;
+
+        impl<'de> Visitor<'de> for ShardIdentVisitor {
+            type Value = ShardIdent;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a shard ident")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                ShardIdent::from_str(value).map_err(Error::custom)
+            }
+
+            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                let Ok(string) = std::str::from_utf8(v) else {
+                    return Err(Error::invalid_value(Unexpected::Bytes(v), &self));
+                };
+                self.visit_str(string)
+            }
+        }
+
+        if deserializer.is_human_readable() {
+            deserializer.deserialize_str(ShardIdentVisitor)
+        } else {
+            let (workchain, prefix): (i32, u64) = serde::Deserialize::deserialize(deserializer)?;
+            ShardIdent::new(workchain, prefix).ok_or_else(|| Error::custom("invalid shard prefix"))
+        }
     }
 }

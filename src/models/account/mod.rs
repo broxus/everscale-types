@@ -142,6 +142,7 @@ impl<'a> Load<'a> for AccountStatus {
 
 /// Shard accounts entry.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ShardAccount {
     /// Optional reference to account state.
     pub account: Lazy<OptionalAccount>,
