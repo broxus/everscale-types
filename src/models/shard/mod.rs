@@ -59,6 +59,52 @@ impl<'a> Load<'a> for ShardState {
     }
 }
 
+/// State of single shard builder.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ShardStateUnsplitBuilder<T> {
+    inner: ShardStateUnsplit,
+    phantom_data: std::marker::PhantomData<T>,
+}
+
+impl ShardStateUnsplitBuilder<()> {
+    /// Creates a new single shard state builder.
+    pub fn new(shard_ident: ShardIdent, accounts: Lazy<ShardAccounts>) -> Self {
+        Self {
+            inner: ShardStateUnsplit {
+                global_id: 0,
+                shard_ident,
+                seqno: 0,
+                vert_seqno: 0,
+                gen_utime: 0,
+                #[cfg(feature = "venom")]
+                gen_utime_ms: 0,
+                gen_lt: 0,
+                min_ref_mc_seqno: 0,
+                out_msg_queue_info: Default::default(),
+                #[cfg(feature = "tycho")]
+                externals_processed_upto: Default::default(),
+                before_split: false,
+                accounts,
+                overload_history: 0,
+                underload_history: 0,
+                total_balance: Default::default(),
+                total_validator_fees: Default::default(),
+                libraries: Default::default(),
+                master_ref: None,
+                custom: None,
+                #[cfg(feature = "venom")]
+                shard_block_refs: None,
+            },
+            phantom_data: std::marker::PhantomData,
+        }
+    }
+
+    /// Builds the single shard state.
+    pub fn build(self) -> ShardStateUnsplit {
+        self.inner
+    }
+}
+
 /// State of the single shard.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ShardStateUnsplit {
@@ -82,7 +128,7 @@ pub struct ShardStateUnsplit {
     /// Output messages queue info.
     pub out_msg_queue_info: Cell,
     #[cfg(feature = "tycho")]
-    /// Externals processed up to (Anchor, len)
+    /// Index of the highest externals processed from the anchors: (anchor, index)
     pub externals_processed_upto: Dict<u32, u64>,
     /// Whether this state was produced before the shards split.
     pub before_split: bool,
@@ -132,6 +178,13 @@ impl ShardStateUnsplit {
     /// Tries to load OutMsgQueueInfo data.
     pub fn load_out_msg_queue_info(&self) -> Result<OutMsgQueueInfo, Error> {
         self.out_msg_queue_info.as_ref().parse()
+    }
+    #[cfg(feature = "tycho")]
+    /// Tries to store OutMsgQueueInfo data to cell.
+    pub fn set_out_msg_queue_info(&mut self, value: &OutMsgQueueInfo) -> Result<(), Error> {
+        let cell = ok!(CellBuilder::build_from(value));
+        self.out_msg_queue_info = cell;
+        Ok(())
     }
 }
 
@@ -299,7 +352,7 @@ impl<'a> Load<'a> for LibDescr {
 #[derive(Clone, Debug, Eq, PartialEq, Default)]
 pub struct OutMsgQueueInfo {
     ///  Dict (shard, seq_no): processed up to info
-    proc_info: Dict<(u64, u32), ProcessedUpto>,
+    pub proc_info: Dict<(u64, u32), ProcessedUpto>,
 }
 
 /// Processed up to info
@@ -318,5 +371,15 @@ impl<'a> Load<'a> for OutMsgQueueInfo {
         Ok(Self {
             proc_info: ok!(Dict::load_from_root_ext(slice, &mut Cell::empty_context())),
         })
+    }
+}
+
+impl Store for OutMsgQueueInfo {
+    fn store_into(
+        &self,
+        builder: &mut CellBuilder,
+        context: &mut dyn CellContext,
+    ) -> Result<(), Error> {
+        self.proc_info.store_into(builder, context)
     }
 }

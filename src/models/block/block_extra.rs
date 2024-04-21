@@ -396,7 +396,7 @@ impl<'a> Load<'a> for McBlockExtra {
 }
 
 /// TEMP shard fees mapping sub.
-#[derive(Debug, Clone, Store, Load)]
+#[derive(Debug, Clone, Store, Load, Default)]
 pub struct ShardFees {
     /// Dictionary root.
     pub root: Option<Cell>,
