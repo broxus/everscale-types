@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 use std::marker::PhantomData;
 
-use super::{aug_dict_insert, aug_dict_remove_owned, dict_remove_owned, SetMode};
+use super::{aug_dict_insert, aug_dict_remove_owned, SetMode};
 use crate::cell::*;
 use crate::error::*;
 use crate::util::*;
@@ -779,10 +779,8 @@ impl<'a, K, A, V> Iterator for AugIter<'a, K, A, V>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::boc::BocRepr;
     use crate::models::{AccountBlock, CurrencyCollection};
     use crate::prelude::Boc;
-    use everscale_types::models::Block;
     use std::str::FromStr;
 
     // #[test]
@@ -872,22 +870,7 @@ mod tests {
                     Ok(())
                 })
                 .unwrap();
-
-
-            for i in new_aug.iter() {
-                match i {
-                    Ok((key,aug, value)) => {
-                        println!("{}", key);
-                    }
-                    Err(e) => {
-                        println!("{e:?}");
-                    }
-                }
-            }
         }
-
-        println!("-------------------------------");
-
 
         for i in new_aug.iter() {
             match i {
@@ -901,20 +884,23 @@ mod tests {
         }
 
 
+
         let mut builder = CellBuilder::new();
-        let bytes =  HashBytes::from_str("fd246a630c2578f00ffd68b7271094b32a542e1723b5133f9bca392bd4fff317").unwrap();
-        //let bytes1 = HashBytes::from_str("370d820fa9ab599a02566f3c269b5f8810beb20f3ce3aafdd63d3a9e090fd481").unwrap();
+
+
+
+        let bytes = HashBytes::from_str("370d820fa9ab599a02566f3c269b5f8810beb20f3ce3aafdd63d3a9e090fd481").unwrap();
 
 
 
 
-        // new_aug.remove(bytes, |l, r, bldr, ctx| {
-        //     let right = CurrencyCollection::load_from(&mut r.clone())?;
-        //     let mut left = CurrencyCollection::load_from(&mut l.clone())?;
-        //     left.tokens.checked_add(right.tokens);
-        //     left.store_into(bldr, ctx)?;
-        //     Ok(())
-        // }).unwrap();
+        new_aug.remove(bytes, |l, r, bldr, ctx| {
+            let right = CurrencyCollection::load_from(&mut r.clone())?;
+            let mut left = CurrencyCollection::load_from(&mut l.clone())?;
+            left.tokens.checked_add(right.tokens);
+            left.store_into(bldr, ctx)?;
+            Ok(())
+        }).unwrap();
 
         // new_aug.remove(bytes1, |l, r, bldr, ctx| {
         //     let right = CurrencyCollection::load_from(&mut r.clone())?;
@@ -924,18 +910,18 @@ mod tests {
         //     Ok(())
         // }).unwrap();
 
-        println!("-------------------------------");
+        println!(" AFTER REMOVE -------------------------------");
 
-        // for i in new_aug.iter() {
-        //     match i {
-        //         Ok((key,aug, value)) => {
-        //             println!("{}", key);
-        //         }
-        //         Err(e) => {
-        //             println!("{e:?}");
-        //         }
-        //     }
-        // }
+        for i in new_aug.iter() {
+            match i {
+                Ok((key,aug, value)) => {
+                    println!("{}", key);
+                }
+                Err(e) => {
+                    println!("{e:?}");
+                }
+            }
+        }
 
     }
 

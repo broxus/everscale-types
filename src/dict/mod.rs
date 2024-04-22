@@ -282,7 +282,7 @@ pub fn aug_dict_remove_owned(
     };
 
     // Rebuild the leaf node
-    let (leaf, removed, extra_range) = if let Some(last) = stack.pop() {
+    let (leaf, removed) = if let Some(last) = stack.pop() {
         let index = last.next_branch as u8;
 
         // Load value branch
@@ -310,8 +310,6 @@ pub fn aug_dict_remove_owned(
         };
 
         let opposite_label = ok!(read_label(&mut opposite, key.remaining_bits()));
-        let extra_range = opposite.range();
-        let opposite_extra = ok!(read_extra(&mut opposite));
 
         // Build an edge cell
         let mut builder = CellBuilder::new();
@@ -322,11 +320,11 @@ pub fn aug_dict_remove_owned(
             prev_key_bit_len,
             &mut builder
         ));
-        ok!(builder.store_slice(opposite_extra));
+        ok!(builder.store_slice(opposite));
         let leaf = ok!(builder.build_ext(context));
 
         // Return the new cell and the removed one
-        (leaf, (value, removed), extra_range)
+        (leaf, (value, removed))
     } else {
         let value = root.clone();
         *dict = None;
@@ -336,7 +334,6 @@ pub fn aug_dict_remove_owned(
     *dict = Some(ok!(rebuild_dict_from_stack_with_comparator(
         stack,
         leaf,
-        //extra_range,
         context,
         comparator
     )));
@@ -386,7 +383,7 @@ pub fn aug_dict_insert(
 
     let mut stack = Vec::<AugSegment>::new();
 
-    let (leaf, extra_range) = loop {
+    let (leaf, _) = loop {
         let mut remaining_data = ok!(data.as_slice());
         // Read the next part of the key from the current data
         let prefix = &mut ok!(read_label(&mut remaining_data, key.remaining_bits()));
@@ -466,7 +463,6 @@ pub fn aug_dict_insert(
     *dict = Some(ok!(rebuild_dict_from_stack_with_comparator(
         stack,
         leaf,
-        //extra_range,
         context,
         comparator
     )));
@@ -1509,10 +1505,10 @@ fn split_aug_edge(
     let mut left_slice = left.as_slice()?;
     let mut right_slice = right.as_slice()?;
 
-    ok!((&mut left_slice, key.remaining_bits()));
+    ok!(read_label(&mut left_slice, key.remaining_bits()));
     ok!(read_label(&mut right_slice, key.remaining_bits()));
 
-    comparator(&mut left_slice, &mut right_slice, &mut builder, context)?;
+    comparator(&left_slice, &right_slice, &mut builder, context)?;
 
     let extra_bits = builder.bit_len() - bits_offset;
     let extra_refs = builder.reference_count() - refs_offset;
@@ -1631,7 +1627,6 @@ pub fn dict_load_from_root(
 fn rebuild_dict_from_stack_with_comparator(
     mut segments: Vec<AugSegment<'_>>,
     mut leaf: Cell,
-    //mut extra_range: CellSliceRange,
     context: &mut dyn CellContext,
     comparator: fn(
         left: &CellSlice,
@@ -1654,19 +1649,14 @@ fn rebuild_dict_from_stack_with_comparator(
             },
         };
 
-        let mut last_data_slice = ok!(last.data.as_slice());
-        let mut last_label = ok!(read_label(&mut last_data_slice.clone(), last.key_bit_len));
+        let last_data_slice = ok!(last.data.as_slice());
+        let last_label = ok!(read_label(&mut last_data_slice.clone(), last.key_bit_len));
 
         //getting ancestor key_bit_length according to last
         let child_kbl = last.key_bit_len - last_label.remaining_bits() - 1;
 
         let mut builder = CellBuilder::new();
         ok!(write_label(&last_label, last.key_bit_len, &mut builder));
-        //ok!(builder.store_slice(&mut last_data_slice));
-        //?????
-        //ok!(builder.store_cell_data(last.data));
-        //let bits_offset = builder.bit_len();
-        //et refs_offset = builder.reference_count();
 
         let mut left_clone = left.as_slice()?;
         let mut right_clone = right.as_slice()?;
@@ -1677,14 +1667,8 @@ fn rebuild_dict_from_stack_with_comparator(
         ok!(comparator(&left_clone, &right_clone, &mut builder, context));
         ok!(builder.store_reference(left.clone()));
         ok!(builder.store_reference(right.clone()));
-        //let extra_bits = builder.bit_len() - bits_offset;
-        //let extra_refs = builder.reference_count() - refs_offset;
 
         let new_leaf = ok!(builder.build_ext(context));
-        //let mut new_extra_range = CellSliceRange::full(new_leaf.as_ref());
-        //new_extra_range.try_advance(bits_offset, refs_offset);
-        //extra_range = new_extra_range.get_prefix(extra_bits, extra_refs);
-
         leaf = new_leaf;
 
     }
@@ -1821,28 +1805,6 @@ fn read_label<'a>(label: &mut CellSlice<'a>, key_bit_len: u16) -> Result<CellSli
     }
 }
 
-fn read_extra<'a>(label_remaining: &mut CellSlice<'a>) -> Result<CellSlice<'a>, Error> {
-    let mut len = 0;
-    println!("PRELOAD BITS {:?}", label_remaining.range());
-    while label_remaining.load_bit().is_ok() {
-        len += 1;
-    }
-    let result = *label_remaining;
-    println!("EXTRA RESULT SLICE: {}", result.remaining_bits());
-    println!(
-        "EXTRA RESULT SLICE: len {}, refs: {}, bits{} ",
-        len,
-        label_remaining.remaining_refs(),
-        label_remaining.remaining_bits()
-    );
-    if label_remaining.try_advance(len, label_remaining.remaining_refs()) {
-        //println!("EXTRA RESULT SLICE: len {}, refs: {}, ", len, label_remaining.remaining_refs(), label_remaining.remaining_bits());
-        let cell_slice = result.get_prefix(len, label_remaining.remaining_refs());
-        Ok(cell_slice)
-    } else {
-        Err(Error::CellUnderflow)
-    }
-}
 
 fn write_hml_empty(label: &mut CellBuilder) -> Result<(), Error> {
     label.store_zeros(2)
