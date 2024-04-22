@@ -39,6 +39,20 @@ use everscale_types::boc::Boc;
 
 let cell: Cell = Boc::decode(bytes)?;
 ```
+
+Encode any model e.g.`MerkleProof` to `base64` BOC representation and vice versa
+```rust
+use everscale_types::boc::BocRepr;
+
+let cell = MerkleProof::create_for_cell(cell.as_ref(), EMPTY_CELL_HASH)
+            .build()
+            .unwrap();
+
+let encoded = BocRepr::encode_base64(&cell).unwrap();
+
+let decoded = Boc::decode_base64(encoded)?.as_ref().parse::<MerkleProof>()?:
+```
+
 Get specific everscale type from `Cell`
 ```rust
 use everscale_types::models::BlockProof;
@@ -54,10 +68,19 @@ let virt_cell: &DynCell = cell.virtualize();
 let block = virt_cell.parse::<Block>()?;
 ```
 
-Get `Cell` from `&DynCell`
+You can also use `CellBuilder` to create any `Cell`
 ```rust
+let mut builder = CellBuilder::new();
+builder.store_one();
+builder.store_u32(100u32)?
+builder.store_slice(slice)?;
+builder.store_raw(&[0xdd, 0x55], 10)?;
 
+// store references to another cells
+builder.store_reference(cell)?;
+builder.store_reference(another_cell)?;
 
+let final_cell = builder.build()?;
 ```
 
 ## Development

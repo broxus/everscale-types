@@ -902,13 +902,6 @@ mod tests {
             Ok(())
         }).unwrap();
 
-        // new_aug.remove(bytes1, |l, r, bldr, ctx| {
-        //     let right = CurrencyCollection::load_from(&mut r.clone())?;
-        //     let mut left = CurrencyCollection::load_from(&mut l.clone())?;
-        //     left.tokens.checked_add(right.tokens);
-        //     left.store_into(bldr, ctx)?;
-        //     Ok(())
-        // }).unwrap();
 
         println!(" AFTER REMOVE -------------------------------");
 
