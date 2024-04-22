@@ -1,6 +1,8 @@
 use std::num::NonZeroU32;
 
 use super::*;
+use crate::boc::BocRepr;
+use crate::models::ShardStateUnsplit;
 use crate::prelude::Boc;
 
 #[test]
@@ -299,4 +301,18 @@ fn prod_config() {
 
     // Current config
     check_config(include_bytes!("new_config.boc"));
+}
+
+#[test]
+fn test_config_param_7() {
+    let master_state =
+        BocRepr::decode::<ShardStateUnsplit, _>(&include_bytes!("test_state_2_master.boc"))
+            .unwrap();
+
+    let custom = master_state.load_custom().unwrap().unwrap();
+    let config = custom.config.get_raw(7).unwrap().unwrap();
+    println!(
+        "{}",
+        Boc::encode_base64(CellBuilder::build_from(config).unwrap())
+    );
 }

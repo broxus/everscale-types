@@ -70,7 +70,7 @@ impl ExactSize for CurrencyCollection {
 /// Dictionary with amounts for multiple currencies.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
 #[repr(transparent)]
-pub struct ExtraCurrencyCollection(Dict<HashBytes, VarUint248>);
+pub struct ExtraCurrencyCollection(Dict<u32, VarUint248>);
 
 impl Default for ExtraCurrencyCollection {
     #[inline]
@@ -96,19 +96,19 @@ impl ExtraCurrencyCollection {
     }
 
     /// Returns a reference to the underlying dictionary.
-    pub const fn as_dict(&self) -> &Dict<HashBytes, VarUint248> {
+    pub const fn as_dict(&self) -> &Dict<u32, VarUint248> {
         &self.0
     }
 
     /// Returns a mutable reference to the underlying dictionary.
-    pub fn as_dict_mut(&mut self) -> &mut Dict<HashBytes, VarUint248> {
+    pub fn as_dict_mut(&mut self) -> &mut Dict<u32, VarUint248> {
         &mut self.0
     }
 }
 
-impl From<Dict<HashBytes, VarUint248>> for ExtraCurrencyCollection {
+impl From<Dict<u32, VarUint248>> for ExtraCurrencyCollection {
     #[inline]
-    fn from(value: Dict<HashBytes, VarUint248>) -> Self {
+    fn from(value: Dict<u32, VarUint248>) -> Self {
         Self(value)
     }
 }
