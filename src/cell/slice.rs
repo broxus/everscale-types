@@ -621,8 +621,6 @@ impl<'a> CellSlice<'a> {
     /// NOTE: this method is quite computationally heavy as it compares the content
     /// of two potentially unaligned slices. Use it with caution or check by cell.
     pub fn cmp_by_content(&self, b: &CellSlice) -> Result<std::cmp::Ordering, Error> {
-        use std::cmp::Ordering;
-
         let a = self;
 
         // Fast check
@@ -634,7 +632,16 @@ impl<'a> CellSlice<'a> {
                 .cmp(&(b.remaining_bits(), b.remaining_refs())));
         }
 
-        // Slow patch
+        // Slow path
+        self.cmp_by_content_only(b)
+    }
+
+    pub(crate) fn cmp_by_content_only(&self, b: &CellSlice) -> Result<std::cmp::Ordering, Error> {
+        use std::cmp::Ordering;
+
+        let a = self;
+
+        // Slow path
         match (a.remaining_bits(), a.remaining_refs())
             .cmp(&(b.remaining_bits(), b.remaining_refs()))
         {
