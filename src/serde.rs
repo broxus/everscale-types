@@ -1,9 +1,79 @@
 use std::borrow::Cow;
 
-use ::serde::{Deserializer, Serialize, Serializer};
+use ::serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::boc::*;
 use crate::cell::*;
+
+impl Serialize for HashBytes {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if serializer.is_human_readable() {
+            let mut output = [0u8; 64];
+            hex::encode_to_slice(self.0.as_slice(), &mut output).ok();
+
+            // SAFETY: output is guaranteed to contain only [0-9a-f]
+            let output = unsafe { std::str::from_utf8_unchecked(&output) };
+            serializer.serialize_str(output)
+        } else {
+            serializer.serialize_bytes(&self.0)
+        }
+    }
+}
+
+impl<'a> Deserialize<'a> for HashBytes {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'a>,
+    {
+        use ::serde::de::{Error, Visitor};
+
+        struct HashBytesHexVisitor;
+
+        impl<'de> Visitor<'de> for HashBytesHexVisitor {
+            type Value = HashBytes;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("hex-encoded byte array of size 32")
+            }
+
+            fn visit_str<E: Error>(self, value: &str) -> Result<Self::Value, E> {
+                let mut result = HashBytes([0; 32]);
+                match hex::decode_to_slice(value, &mut result.0) {
+                    Ok(()) => Ok(result),
+                    Err(_) => Err(Error::invalid_value(
+                        serde::de::Unexpected::Str(value),
+                        &self,
+                    )),
+                }
+            }
+        }
+
+        pub struct HashBytesRawVisitor;
+
+        impl<'de> Visitor<'de> for HashBytesRawVisitor {
+            type Value = HashBytes;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_fmt(format_args!("a byte array of size 32"))
+            }
+
+            fn visit_bytes<E: Error>(self, v: &[u8]) -> Result<Self::Value, E> {
+                v.try_into()
+                    .map(HashBytes)
+                    .map_err(|_e| Error::invalid_length(v.len(), &self))
+            }
+        }
+
+        if deserializer.is_human_readable() {
+            deserializer.deserialize_str(HashBytesHexVisitor)
+        } else {
+            deserializer.deserialize_bytes(HashBytesRawVisitor)
+        }
+    }
+}
 
 impl Serialize for DynCell {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -168,6 +238,11 @@ mod tests {
     }
 
     #[derive(::serde::Serialize, ::serde::Deserialize)]
+    struct SerdeWithHashBytes {
+        some_hash: HashBytes,
+    }
+
+    #[derive(::serde::Serialize, ::serde::Deserialize)]
     struct SerdeWithCellContainer {
         #[serde(with = "Boc")]
         some_cell: Cell,
@@ -181,6 +256,18 @@ mod tests {
         merkle_proof: crate::merkle::MerkleProof,
         #[serde(with = "BocRepr")]
         merkle_update: crate::merkle::MerkleUpdate,
+    }
+
+    #[test]
+    fn hex_bytes() {
+        let hash: HashBytes = rand::random();
+
+        let test = format!(r#"{{"some_hash":"{hash}"}}"#);
+        let SerdeWithHashBytes { some_hash } = serde_json::from_str(&test).unwrap();
+        assert_eq!(some_hash, hash);
+
+        let serialized = serde_json::to_string(&SerdeWithHashBytes { some_hash }).unwrap();
+        assert_eq!(serialized, test);
     }
 
     #[test]

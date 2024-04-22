@@ -763,6 +763,14 @@ where
     }
 }
 
+#[cfg(any(feature = "rand", test))]
+impl rand::distributions::Distribution<HashBytes> for rand::distributions::Standard {
+    #[inline]
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> HashBytes {
+        HashBytes(rand::distributions::Standard.sample(rng))
+    }
+}
+
 /// Hash of an empty (0 bits of data, no refs) ordinary cell.
 pub static EMPTY_CELL_HASH: &HashBytes = HashBytes::wrap(&[
     0x96, 0xa2, 0x96, 0xd2, 0x24, 0xf2, 0x85, 0xc6, 0x7b, 0xee, 0x93, 0xc3, 0x0f, 0x8a, 0x30, 0x91,

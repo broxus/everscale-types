@@ -393,6 +393,23 @@ where
         Iter::new(&self.root)
     }
 
+    /// Gets an iterator over the entries of two dictionaries, sorted by key.
+    /// The iterator element type is `Result<(K, Option<V>, Option<V>)>`.
+    ///
+    /// If the dictionary is invalid, finishes after the first invalid element,
+    /// returning an error.
+    ///
+    /// # Performance
+    ///
+    /// In the current implementation, iterating over dictionary builds a key
+    /// for each element.
+    pub fn iter_union<'a>(&'a self, other: &'a Self) -> UnionIter<'_, K, V>
+    where
+        V: Load<'a>,
+    {
+        UnionIter::new(&self.root, &other.root)
+    }
+
     /// Gets an iterator over the keys of the dictionary, in sorted order.
     /// The iterator element type is `Result<K>`.
     ///
@@ -640,6 +657,20 @@ where
         RawIter::new(&self.root, K::BITS)
     }
 
+    /// Gets an iterator over the raw entries of two dictionaries, sorted by key.
+    /// The iterator element type is `Result<(CellBuilder, Option<CellSlice>, Option<CellSlice>)>`.
+    ///
+    /// If the dictionary is invalid, finishes after the first invalid element,
+    /// returning an error.
+    ///
+    /// # Performance
+    ///
+    /// In the current implementation, iterating over dictionary builds a key
+    /// for each element.
+    pub fn raw_iter_union<'a>(&'a self, other: &'a Self) -> UnionRawIter<'a> {
+        UnionRawIter::new(&self.root, &other.root, K::BITS)
+    }
+
     /// Gets an iterator over the raw keys of the dictionary, in sorted order.
     /// The iterator element type is `Result<CellBuilder>`.
     ///
@@ -808,6 +839,86 @@ where
                     match V::load_from(&mut value) {
                         Ok(value) => return Some(Ok((key, value))),
                         Err(e) => e,
+                    }
+                } else {
+                    Error::CellUnderflow
+                };
+                Err(self.inner.finish(err))
+            }
+            Err(e) => Err(e),
+        })
+    }
+}
+
+/// An iterator over the entries across two [`Dict`].
+///
+/// This struct is created by the [`iter_union`] method on [`Dict`].
+///
+/// [`iter_union`]: Dict::iter_union
+pub struct UnionIter<'a, K, V> {
+    inner: UnionRawIter<'a>,
+    _key: PhantomData<K>,
+    _value: PhantomData<V>,
+}
+
+impl<'a, K, V> UnionIter<'a, K, V>
+where
+    K: DictKey,
+{
+    /// Creates an iterator over the entries of a dictionary.
+    pub fn new(left_root: &'a Option<Cell>, right_root: &'a Option<Cell>) -> Self {
+        Self {
+            inner: UnionRawIter::new(left_root, right_root, K::BITS),
+            _key: PhantomData,
+            _value: PhantomData,
+        }
+    }
+
+    /// Changes the direction of the iterator to descending.
+    #[inline]
+    pub fn reversed(mut self) -> Self {
+        self.inner = self.inner.reversed();
+        self
+    }
+
+    /// Changes the behavior of the iterator to reverse the high bit.
+    #[inline]
+    pub fn signed(mut self) -> Self {
+        self.inner = self.inner.signed();
+        self
+    }
+}
+
+impl<'a, K, V> Iterator for UnionIter<'a, K, V>
+where
+    K: DictKey,
+    V: Load<'a>,
+{
+    type Item = Result<(K, Option<V>, Option<V>), Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        fn load_opt_value<'a, V: Load<'a>>(
+            value: &mut Option<CellSlice<'a>>,
+        ) -> Result<Option<V>, Error> {
+            match value {
+                Some(mut value) => match V::load_from(&mut value) {
+                    Ok(value) => Ok(Some(value)),
+                    Err(e) => Err(e),
+                },
+                None => Ok(None),
+            }
+        }
+
+        Some(match self.inner.next()? {
+            Ok((key, mut left_value, mut right_value)) => {
+                let err = if let Some(key) = K::from_raw_data(key.raw_data()) {
+                    match (
+                        load_opt_value(&mut left_value),
+                        load_opt_value(&mut right_value),
+                    ) {
+                        (Ok(left), Ok(right)) => return Some(Ok((key, left, right))),
+                        (Err(e), _) => e,
+                        (_, Err(e)) => e,
                     }
                 } else {
                     Error::CellUnderflow
@@ -1266,5 +1377,102 @@ mod tests {
         }
 
         test_big_dict(&values);
+    }
+
+    #[test]
+    fn dict_iter_union() -> anyhow::Result<()> {
+        let mut left = Dict::<i32, i32>::new();
+        let mut right = Dict::<i32, i32>::new();
+
+        // Fill
+        for i in -4i32..4 {
+            left.set(i, i)?;
+        }
+        for i in -2i32..6 {
+            right.set(i, i + 100)?;
+        }
+
+        fn compare_iter_values(
+            iter: UnionIter<'_, i32, i32>,
+            values: &[(i32, Option<i32>, Option<i32>)],
+        ) {
+            let mut values = values.iter();
+
+            for entry in iter {
+                let (key, left_value, right_value) = entry.unwrap();
+                assert_eq!(values.next(), Some(&(key, left_value, right_value)));
+            }
+            assert_eq!(values.next(), None);
+        }
+
+        // Unsigned
+        compare_iter_values(
+            left.iter_union(&right),
+            &[
+                (0, Some(0), Some(100)),
+                (1, Some(1), Some(101)),
+                (2, Some(2), Some(102)),
+                (3, Some(3), Some(103)),
+                (4, None, Some(104)),
+                (5, None, Some(105)),
+                (-4, Some(-4), None),
+                (-3, Some(-3), None),
+                (-2, Some(-2), Some(98)),
+                (-1, Some(-1), Some(99)),
+            ],
+        );
+
+        // Unsigned reversed
+        compare_iter_values(
+            left.iter_union(&right).reversed(),
+            &[
+                (-1, Some(-1), Some(99)),
+                (-2, Some(-2), Some(98)),
+                (-3, Some(-3), None),
+                (-4, Some(-4), None),
+                (5, None, Some(105)),
+                (4, None, Some(104)),
+                (3, Some(3), Some(103)),
+                (2, Some(2), Some(102)),
+                (1, Some(1), Some(101)),
+                (0, Some(0), Some(100)),
+            ],
+        );
+
+        // Signed
+        compare_iter_values(
+            left.iter_union(&right).signed(),
+            &[
+                (-4, Some(-4), None),
+                (-3, Some(-3), None),
+                (-2, Some(-2), Some(98)),
+                (-1, Some(-1), Some(99)),
+                (0, Some(0), Some(100)),
+                (1, Some(1), Some(101)),
+                (2, Some(2), Some(102)),
+                (3, Some(3), Some(103)),
+                (4, None, Some(104)),
+                (5, None, Some(105)),
+            ],
+        );
+
+        // Signed reversed
+        compare_iter_values(
+            left.iter_union(&right).signed().reversed(),
+            &[
+                (5, None, Some(105)),
+                (4, None, Some(104)),
+                (3, Some(3), Some(103)),
+                (2, Some(2), Some(102)),
+                (1, Some(1), Some(101)),
+                (0, Some(0), Some(100)),
+                (-1, Some(-1), Some(99)),
+                (-2, Some(-2), Some(98)),
+                (-3, Some(-3), None),
+                (-4, Some(-4), None),
+            ],
+        );
+
+        Ok(())
     }
 }

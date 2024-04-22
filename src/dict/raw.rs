@@ -422,6 +422,23 @@ impl<const N: u16> RawDict<N> {
         RawIter::new(&self.0, N)
     }
 
+    /// Gets an iterator over the entries of two dictionaries, sorted by key.
+    /// The iterator element type is
+    /// `Result<(CellBuilder, Option<CellSlice>, Option<CellSlice>)>`.
+    /// Where the first element is the key, the second is the value from the first dictionary,
+    /// and the third is the value from the second dictionary.
+    ///
+    /// If the dictionary is invalid, finishes after the first invalid element,
+    /// returning an error.
+    ///
+    /// # Performance
+    ///
+    /// In the current implementation, iterating over dictionary builds a key
+    /// for each element.
+    pub fn iter_union<'a>(&'a self, other: &'a RawDict<N>) -> UnionRawIter<'a> {
+        UnionRawIter::new(&self.0, &other.0, N)
+    }
+
     /// Gets an iterator over the owned entries of the dictionary, sorted by key.
     /// The iterator element type is `Result<(CellBuilder, CellSliceParts)>`.
     ///
@@ -862,6 +879,203 @@ struct IterSegment<'a> {
     data: CellSlice<'a>,
     remaining_bit_len: u16,
     prefix: Option<CellSlice<'a>>,
+}
+
+/// An iterator over the entries across two [`RawDict`] or two [`Dict`].
+///
+/// This struct is created by the [`iter_union`] method on [`RawDict`]
+/// or the [`raw_iter_union`] method on [`Dict`].
+///
+/// [`Dict`]: crate::dict::Dict
+/// [`iter_union`]: RawDict::iter_union
+/// [`raw_iter_union`]: crate::dict::Dict::raw_iter_union
+#[derive(Clone)]
+pub struct UnionRawIter<'a> {
+    left: RawIter<'a>,
+    left_peeked: Option<Box<(CellBuilder, CellSlice<'a>)>>,
+    left_finished: bool,
+    right: RawIter<'a>,
+    right_peeked: Option<Box<(CellBuilder, CellSlice<'a>)>>,
+    right_finished: bool,
+}
+
+impl<'a> UnionRawIter<'a> {
+    /// Creates an iterator over the entries of dictionaries.
+    pub fn new(left_root: &'a Option<Cell>, right_root: &'a Option<Cell>, bit_len: u16) -> Self {
+        Self::new_ext(left_root, right_root, bit_len, false, false)
+    }
+
+    /// Creates an iterator over the entries of dictionaries
+    ///  with explicit direction and behavior.
+    pub fn new_ext(
+        left_root: &'a Option<Cell>,
+        right_root: &'a Option<Cell>,
+        bit_len: u16,
+        reversed: bool,
+        signed: bool,
+    ) -> Self {
+        Self {
+            left: RawIter::new_ext(left_root, bit_len, reversed, signed),
+            left_peeked: None,
+            left_finished: false,
+            right: RawIter::new_ext(right_root, bit_len, reversed, signed),
+            right_peeked: None,
+            right_finished: false,
+        }
+    }
+
+    /// Changes the direction of the iterator to descending.
+    #[inline]
+    pub fn reversed(mut self) -> Self {
+        self.left.reversed = true;
+        self.right.reversed = true;
+        self
+    }
+
+    /// Changes the behavior of the iterator to reverse the high bit.
+    #[inline]
+    pub fn signed(mut self) -> Self {
+        self.left.signed = true;
+        self.right.signed = true;
+        self
+    }
+
+    /// Returns whether the iterator direction was reversed.
+    #[inline]
+    pub fn is_reversed(&self) -> bool {
+        self.left.reversed
+    }
+
+    /// Returns whether the iterator treats keys as signed integers.
+    #[inline]
+    pub fn is_signed(&self) -> bool {
+        self.left.signed
+    }
+
+    #[inline]
+    pub(crate) fn finish(&mut self, err: Error) -> Error {
+        self.left.status = IterStatus::Broken;
+        self.right.status = IterStatus::Broken;
+        err
+    }
+
+    fn peek<'p>(
+        iter: &mut RawIter<'a>,
+        finished: &mut bool,
+        peeked: &'p mut Option<Box<(CellBuilder, CellSlice<'a>)>>,
+    ) -> Result<Option<&'p (CellBuilder, CellSlice<'a>)>, Error> {
+        if !*finished && peeked.is_none() {
+            match iter.next() {
+                Some(Ok(next)) => {
+                    *peeked = Some(Box::new(next));
+                }
+                Some(Err(e)) => {
+                    *finished = true;
+                    return Err(e);
+                }
+                None => *finished = true,
+            }
+        }
+        Ok(peeked.as_deref())
+    }
+}
+
+impl<'a> Iterator for UnionRawIter<'a> {
+    type Item = Result<(CellBuilder, Option<CellSlice<'a>>, Option<CellSlice<'a>>), Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if unlikely(!self.left.status.is_valid() || !self.right.status.is_valid()) {
+            if !self.left.status.is_pruned() && !self.right.status.is_pruned() {
+                return None;
+            }
+
+            self.left.status = IterStatus::Broken;
+            self.right.status = IterStatus::Broken;
+            return Some(Err(Error::PrunedBranchAccess));
+        }
+
+        let reversed = self.is_reversed();
+        let signed = self.is_signed();
+
+        let left = match Self::peek(
+            &mut self.left,
+            &mut self.left_finished,
+            &mut self.left_peeked,
+        ) {
+            Ok(res) => res,
+            Err(e) => return Some(Err(self.finish(e))),
+        };
+
+        let right = match Self::peek(
+            &mut self.right,
+            &mut self.right_finished,
+            &mut self.right_peeked,
+        ) {
+            Ok(res) => res,
+            Err(e) => return Some(Err(self.finish(e))),
+        };
+
+        match (left, right) {
+            (None, None) => None,
+            (Some((left_key, left_value)), None) => {
+                let res = Some(Ok((left_key.clone(), Some(*left_value), None)));
+                self.left_peeked = None;
+                res
+            }
+            (None, Some((right_key, right_value))) => {
+                let res = Some(Ok((right_key.clone(), None, Some(*right_value))));
+                self.right_peeked = None;
+                res
+            }
+            (Some((left_key, left_value)), Some((right_key, right_value))) => {
+                let cmp = {
+                    let left_key = left_key.as_data_slice();
+                    let right_key = right_key.as_data_slice();
+
+                    let mut reversed = reversed;
+                    if signed {
+                        let left_is_neg = left_key.get_bit(0).ok().unwrap_or_default();
+                        let right_is_neg = right_key.get_bit(0).ok().unwrap_or_default();
+                        reversed ^= left_is_neg != right_is_neg;
+                    }
+
+                    let cmp = match left_key.cmp_by_content_only(&right_key) {
+                        Ok(cmp) => cmp,
+                        Err(e) => return Some(Err(self.finish(e))),
+                    };
+
+                    if reversed {
+                        cmp.reverse()
+                    } else {
+                        cmp
+                    }
+                };
+
+                match cmp {
+                    std::cmp::Ordering::Less => {
+                        let res = Some(Ok((left_key.clone(), Some(*left_value), None)));
+                        self.left_peeked = None;
+                        res
+                    }
+                    std::cmp::Ordering::Greater => {
+                        let res = Some(Ok((right_key.clone(), None, Some(*right_value))));
+                        self.right_peeked = None;
+                        res
+                    }
+                    std::cmp::Ordering::Equal => {
+                        let res = Some(Ok((
+                            left_key.clone(),
+                            Some(*left_value),
+                            Some(*right_value),
+                        )));
+                        self.left_peeked = None;
+                        self.right_peeked = None;
+                        res
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// An iterator over the keys of a [`RawDict`] or a [`Dict`].
@@ -1390,6 +1604,106 @@ mod tests {
         }
         assert!(values_ref.next().is_none());
         assert!(values_owned.next().is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn dict_iter_union() -> anyhow::Result<()> {
+        let mut left = RawDict::<32>::new();
+        let mut right = RawDict::<32>::new();
+
+        // Fill
+        for i in -4i32..4 {
+            let key = build_cell(|b| b.store_u32(i as _));
+            left.set(key.as_slice()?, i)?;
+        }
+        for i in -2i32..6 {
+            let key = build_cell(|b| b.store_u32(i as _));
+            right.set(key.as_slice()?, i + 100)?;
+        }
+
+        fn compare_iter_values(iter: UnionRawIter<'_>, values: &[(i32, Option<i32>, Option<i32>)]) {
+            let mut values = values.iter();
+
+            for entry in iter {
+                let (key, left_value, right_value) = entry.unwrap();
+                let key = key.as_data_slice().load_u32().unwrap() as i32;
+                let left_value = left_value.map(|v| v.get_u32(0).unwrap() as i32);
+                let right_value = right_value.map(|v| v.get_u32(0).unwrap() as i32);
+
+                assert_eq!(values.next(), Some(&(key, left_value, right_value)));
+            }
+            assert_eq!(values.next(), None);
+        }
+
+        // Unsigned
+        compare_iter_values(
+            left.iter_union(&right),
+            &[
+                (0, Some(0), Some(100)),
+                (1, Some(1), Some(101)),
+                (2, Some(2), Some(102)),
+                (3, Some(3), Some(103)),
+                (4, None, Some(104)),
+                (5, None, Some(105)),
+                (-4, Some(-4), None),
+                (-3, Some(-3), None),
+                (-2, Some(-2), Some(98)),
+                (-1, Some(-1), Some(99)),
+            ],
+        );
+
+        // Unsigned reversed
+        compare_iter_values(
+            left.iter_union(&right).reversed(),
+            &[
+                (-1, Some(-1), Some(99)),
+                (-2, Some(-2), Some(98)),
+                (-3, Some(-3), None),
+                (-4, Some(-4), None),
+                (5, None, Some(105)),
+                (4, None, Some(104)),
+                (3, Some(3), Some(103)),
+                (2, Some(2), Some(102)),
+                (1, Some(1), Some(101)),
+                (0, Some(0), Some(100)),
+            ],
+        );
+
+        // Signed
+        compare_iter_values(
+            left.iter_union(&right).signed(),
+            &[
+                (-4, Some(-4), None),
+                (-3, Some(-3), None),
+                (-2, Some(-2), Some(98)),
+                (-1, Some(-1), Some(99)),
+                (0, Some(0), Some(100)),
+                (1, Some(1), Some(101)),
+                (2, Some(2), Some(102)),
+                (3, Some(3), Some(103)),
+                (4, None, Some(104)),
+                (5, None, Some(105)),
+            ],
+        );
+
+        // Signed reversed
+        compare_iter_values(
+            left.iter_union(&right).signed().reversed(),
+            &[
+                (5, None, Some(105)),
+                (4, None, Some(104)),
+                (3, Some(3), Some(103)),
+                (2, Some(2), Some(102)),
+                (1, Some(1), Some(101)),
+                (0, Some(0), Some(100)),
+                (-1, Some(-1), Some(99)),
+                (-2, Some(-2), Some(98)),
+                (-3, Some(-3), None),
+                (-4, Some(-4), None),
+            ],
+        );
 
         Ok(())
     }

@@ -1,6 +1,7 @@
 //! Global version and capabilities.
 
 use crate::cell::{Load, Store};
+use crate::error::ParseGlobalCapabilityError;
 
 macro_rules! decl_global_capability {
     ($(#[doc = $doc:expr])* $vis:vis enum $ident:ident {$(
@@ -21,6 +22,25 @@ macro_rules! decl_global_capability {
                 Some(match bit_offset {
                     $($descr => Self::$field),*,
                     _ => return None,
+                })
+            }
+        }
+
+        impl std::fmt::Display for GlobalCapability {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(match self {
+                    $(Self::$field => stringify!($field),)*
+                })
+            }
+        }
+
+        impl std::str::FromStr for GlobalCapability {
+            type Err = ParseGlobalCapabilityError;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                Ok(match s {
+                    $(stringify!($field) => Self::$field,)*
+                    _ => return Err(ParseGlobalCapabilityError::UnknownCapability),
                 })
             }
         }
