@@ -71,7 +71,7 @@ let block = virt_cell.parse::<Block>()?;
 You can also use `CellBuilder` to create any `Cell`
 ```rust
 let mut builder = CellBuilder::new();
-builder.store_one();
+builder.store_bit_one()?;
 builder.store_u32(100u32)?
 builder.store_slice(slice)?;
 builder.store_raw(&[0xdd, 0x55], 10)?;
