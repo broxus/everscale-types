@@ -680,7 +680,6 @@ mod tests {
     use super::*;
     use crate::models::{AccountBlock, CurrencyCollection};
     use crate::prelude::Boc;
-    use std::str::FromStr;
 
     // #[test]
     // fn dict_set() {
@@ -758,12 +757,11 @@ mod tests {
         //let mut new: Dict<HashBytes, HashBytes> = Dict::new();
         data.reverse();
 
-        for (index, (key, aug, value)) in data.iter().enumerate() {
-            println!("\n added key {} ", key );
+        for (key, aug, _) in data.iter() {
             new_aug
                 .add(key, aug, key, |l, r, bldr, ctx| {
                     let right = CurrencyCollection::load_from(&mut r.clone())?;
-                    let mut left = CurrencyCollection::load_from(&mut l.clone())?;
+                    let left = CurrencyCollection::load_from(&mut l.clone())?;
                     left.tokens.checked_add(right.tokens);
                     left.store_into(bldr, ctx)?;
                     Ok(())
@@ -773,7 +771,7 @@ mod tests {
 
         for i in new_aug.iter() {
             match i {
-                Ok((key,aug, value)) => {
+                Ok((key,_, _)) => {
                     println!("{}", key);
                 }
                 Err(e) => {
@@ -782,12 +780,10 @@ mod tests {
             }
         }
 
-        let mut builder = CellBuilder::new();
-
-        for (index, (key, aug, value)) in data.iter().enumerate() {
+        for (key, _, _) in data.iter() {
             new_aug.remove(key, |l, r, bldr, ctx| {
                 let right = CurrencyCollection::load_from(&mut r.clone())?;
-                let mut left = CurrencyCollection::load_from(&mut l.clone())?;
+                let left = CurrencyCollection::load_from(&mut l.clone())?;
                 left.tokens.checked_add(right.tokens);
                 left.store_into(bldr, ctx)?;
                 Ok(())
@@ -798,7 +794,7 @@ mod tests {
 
         for i in new_aug.iter() {
             match i {
-                Ok((key,aug, value)) => {
+                Ok((key,_, _)) => {
                     println!("{}", key);
                 }
                 Err(e) => {

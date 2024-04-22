@@ -1213,7 +1213,6 @@ struct ValuesSegment<'a> {
 
 #[cfg(test)]
 mod tests {
-    use base64::display;
 
     use super::*;
     use crate::prelude::*;
