@@ -603,107 +603,6 @@ impl<K, A, V> AugDict<K, A, V>
     }
 }
 
-// impl<K, A, V> AugDict<K, A, V>
-// where
-//     K: Store + DictKey,
-//     A: Store,
-//     V: Store,
-// {
-//     /// Sets the value associated with the key in the dictionary.
-//     pub fn set_ext<Q, E, T>(
-//         &mut self,
-//         key: Q,
-//         aug: E,
-//         value: T,
-//         context: &mut dyn CellContext,
-//     ) -> Result<(), Error>
-//     where
-//         Q: Borrow<K>,
-//         E: Borrow<A>,
-//         T: Borrow<V>,
-//     {
-//         self.insert_impl(
-//             key.borrow(),
-//             aug.borrow(),
-//             value.borrow(),
-//             SetMode::Set,
-//             context,
-//         )
-//     }
-
-//     /// Sets the value associated with the key in the dictionary
-//     /// only if the key was already present in it.
-//     pub fn replace_ext<Q, E, T>(
-//         &mut self,
-//         key: Q,
-//         aug: E,
-//         value: T,
-//         context: &mut dyn CellContext,
-//     ) -> Result<(), Error>
-//     where
-//         Q: Borrow<K>,
-//         E: Borrow<A>,
-//         T: Borrow<V>,
-//     {
-//         self.insert_impl(
-//             key.borrow(),
-//             aug.borrow(),
-//             value.borrow(),
-//             SetMode::Replace,
-//             context,
-//         )
-//     }
-
-//     /// Sets the value associated with key in dictionary,
-//     /// but only if it is not already present.
-//     pub fn add_ext<Q, E, T>(
-//         &mut self,
-//         key: Q,
-//         aug: E,
-//         value: T,
-//         context: &mut dyn CellContext,
-//     ) -> Result<(), Error>
-//     where
-//         Q: Borrow<K>,
-//         E: Borrow<A>,
-//         T: Borrow<V>,
-//     {
-//         self.insert_impl(
-//             key.borrow(),
-//             aug.borrow(),
-//             value.borrow(),
-//             SetMode::Add,
-//             context,
-//         )
-//     }
-
-//     fn insert_impl(
-//         &mut self,
-//         key: &K,
-//         aug: &A,
-//         value: &V,
-//         mode: SetMode,
-//         context: &mut dyn CellContext,
-//     ) -> Result<(), Error>
-//     where
-//         K: Store + DictKey,
-//         A: Store,
-//         V: Store,
-//     {
-//         let key = ok!(serialize_entry(key, context));
-//         let value = ok!(serialize_aug_entry(aug, value, context));
-//         self.dict.root = ok!(dict_insert(
-//             &self.dict.root,
-//             &mut key.as_ref().as_slice(),
-//             K::BITS,
-//             &value.as_ref().as_slice(),
-//             mode,
-//             context,
-//         ));
-//         Ok(())
-//     }
-// }
-
 /// An iterator over the entries of an [`AugDict`].
 ///
 /// This struct is created by the [`iter`] method on [`AugDict`]. See its documentation for more.
@@ -883,27 +782,19 @@ mod tests {
             }
         }
 
-
-
         let mut builder = CellBuilder::new();
 
+        for (index, (key, aug, value)) in data.iter().enumerate() {
+            new_aug.remove(key, |l, r, bldr, ctx| {
+                let right = CurrencyCollection::load_from(&mut r.clone())?;
+                let mut left = CurrencyCollection::load_from(&mut l.clone())?;
+                left.tokens.checked_add(right.tokens);
+                left.store_into(bldr, ctx)?;
+                Ok(())
+            }).unwrap();
+        }
 
-
-        let bytes = HashBytes::from_str("370d820fa9ab599a02566f3c269b5f8810beb20f3ce3aafdd63d3a9e090fd481").unwrap();
-
-
-
-
-        new_aug.remove(bytes, |l, r, bldr, ctx| {
-            let right = CurrencyCollection::load_from(&mut r.clone())?;
-            let mut left = CurrencyCollection::load_from(&mut l.clone())?;
-            left.tokens.checked_add(right.tokens);
-            left.store_into(bldr, ctx)?;
-            Ok(())
-        }).unwrap();
-
-
-        println!(" AFTER REMOVE -------------------------------");
+        println!(" -- AFTER REMOVE --");
 
         for i in new_aug.iter() {
             match i {
