@@ -316,3 +316,22 @@ fn test_config_param_7() {
         Boc::encode_base64(CellBuilder::build_from(config).unwrap())
     );
 }
+
+#[test]
+fn serde() {
+    fn check_config(data: &[u8]) {
+        let data = Boc::decode(data).unwrap();
+
+        let original = data.parse::<BlockchainConfig>().unwrap();
+        let json = serde_json::to_string_pretty(&original).unwrap();
+
+        let parsed: BlockchainConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, original);
+    }
+
+    // Some old config from the network beginning
+    check_config(include_bytes!("old_config.boc"));
+
+    // Current config
+    check_config(include_bytes!("new_config.boc"));
+}

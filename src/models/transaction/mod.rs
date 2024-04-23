@@ -179,6 +179,8 @@ impl<'a> Load<'a> for Transaction {
 
 /// Detailed transaction info.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "ty"))]
 pub enum TxInfo {
     /// Ordinary transaction info.
     Ordinary(OrdinaryTxInfo),
@@ -226,6 +228,7 @@ impl<'a> Load<'a> for TxInfo {
 
 /// Ordinary transaction info.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OrdinaryTxInfo {
     /// Whether the credit phase was executed first
     /// (usually set when incoming message has `bounce: false`).
@@ -301,6 +304,7 @@ impl<'a> Load<'a> for OrdinaryTxInfo {
 
 /// Tick-tock transaction info.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TickTockTxInfo {
     /// Tick-tock transaction execution edge.
     pub kind: TickTock,
@@ -395,6 +399,7 @@ impl<'a> Load<'a> for TickTock {
 
 /// Account state hash update.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[tlb(tag = "#72")]
 pub struct HashUpdate {
     /// Old account state hash.

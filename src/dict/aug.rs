@@ -588,6 +588,64 @@ where
     }
 }
 
+#[cfg(feature = "serde")]
+impl<K, A, V> serde::Serialize for AugDict<K, A, V>
+where
+    K: serde::Serialize + Store + DictKey,
+    for<'a> A: serde::Serialize + Store + Load<'a>,
+    for<'a> V: serde::Serialize + Load<'a>,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::{Error, SerializeMap};
+
+        #[derive(serde::Serialize)]
+        struct AugDictHelper<'a, K, A, V>
+        where
+            K: serde::Serialize + Store + DictKey,
+            A: serde::Serialize + Store + Load<'a>,
+            V: serde::Serialize + Load<'a>,
+        {
+            #[serde(serialize_with = "serialize_dict_entries")]
+            entires: &'a AugDict<K, A, V>,
+            extra: &'a A,
+        }
+
+        fn serialize_dict_entries<'a, K, A, V, S>(
+            dict: &'a AugDict<K, A, V>,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+            K: serde::Serialize + Store + DictKey,
+            A: serde::Serialize + Store + Load<'a>,
+            V: serde::Serialize + Load<'a>,
+        {
+            let mut ser = serializer.serialize_map(None)?;
+            for ref entry in dict.iter() {
+                let (key, extra, value) = match entry {
+                    Ok(entry) => entry,
+                    Err(e) => return Err(Error::custom(e)),
+                };
+                ok!(ser.serialize_entry(key, &(extra, value)));
+            }
+            ser.end()
+        }
+
+        if serializer.is_human_readable() {
+            AugDictHelper {
+                entires: self,
+                extra: &self.extra,
+            }
+            .serialize(serializer)
+        } else {
+            crate::boc::BocRepr::serialize(self, serializer)
+        }
+    }
+}
+
 /// An iterator over the entries of an [`AugDict`].
 ///
 /// This struct is created by the [`iter`] method on [`AugDict`]. See its documentation for more.
@@ -781,7 +839,10 @@ mod tests {
         ) -> Result<(), Error> {
             let mut left = CurrencyCollection::load_from(left)?;
             let right = CurrencyCollection::load_from(right)?;
-            left.tokens = left.tokens.checked_add(right.tokens).ok_or(Error::IntOverflow)?;
+            left.tokens = left
+                .tokens
+                .checked_add(right.tokens)
+                .ok_or(Error::IntOverflow)?;
             left.store_into(b, cx)
         }
 

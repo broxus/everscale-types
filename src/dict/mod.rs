@@ -1530,8 +1530,8 @@ fn rebuild_dict_from_stack(
     Ok(leaf)
 }
 
-fn rebuild_aug_dict_from_stack<'a>(
-    mut segments: Vec<Segment<'a>>,
+fn rebuild_aug_dict_from_stack(
+    mut segments: Vec<Segment<'_>>,
     mut leaf: Cell,
     comparator: AugDictFn,
     context: &mut dyn CellContext,
