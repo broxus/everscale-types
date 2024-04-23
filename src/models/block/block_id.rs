@@ -473,6 +473,7 @@ impl serde::Serialize for ShardIdent {
     }
 }
 
+#[cfg(feature = "serde")]
 impl<'de> serde::Deserialize<'de> for ShardIdent {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where

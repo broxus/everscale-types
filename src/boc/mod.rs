@@ -1,7 +1,5 @@
 //! BOC (Bag Of Cells) implementation.
 
-use serde::Deserialize;
-
 use crate::cell::{Cell, CellBuilder, CellContext, CellFamily, DynCell, Load, Store};
 
 /// BOC decoder implementation.
@@ -71,7 +69,9 @@ impl OptionBoc {
     where
         D: serde::Deserializer<'de>,
     {
-        #[derive(serde::Deserialize)]
+        use serde::Deserialize;
+
+        #[derive(Deserialize)]
         #[repr(transparent)]
         struct Wrapper(#[serde(with = "Boc")] Cell);
 

@@ -880,10 +880,10 @@ pub struct ValidatorDescription {
     /// Validator weight in some units.
     pub weight: u64,
     /// Optional validator ADNL address.
-    #[serde(default)]
+    #[cfg_attr(feature = "serde", serde(default))]
     pub adnl_addr: Option<HashBytes>,
     /// Since which seqno this validator will be active.
-    #[serde(default)]
+    #[cfg_attr(feature = "serde", serde(default))]
     pub mc_seqno_since: u32,
 
     /// Total weight of the previous validators in the list.

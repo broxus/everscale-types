@@ -385,6 +385,7 @@ impl serde::Serialize for StdAddr {
     }
 }
 
+#[cfg(feature = "serde")]
 impl<'de> serde::Deserialize<'de> for StdAddr {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
