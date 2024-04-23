@@ -624,7 +624,7 @@ where
     where
         Q: Borrow<K>,
     {
-        pub fn remove_raw_ext_impl<K>(
+        fn remove_raw_ext_impl<K>(
             root: &mut Option<Cell>,
             key: &K,
             context: &mut dyn CellContext,
