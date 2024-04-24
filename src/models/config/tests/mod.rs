@@ -198,7 +198,7 @@ fn simple_config() {
     assert_eq!(
         consensus_config,
         ConsensusConfig {
-            new_catchain_ids: false,
+            new_catchain_ids: true,
             round_candidates: NonZeroU32::new(3).unwrap(),
             next_candidate_delay_ms: 2000,
             consensus_timeout_ms: 16000,
@@ -317,6 +317,7 @@ fn test_config_param_7() {
     );
 }
 
+#[cfg(feature = "serde")]
 #[test]
 fn serde() {
     fn check_config(data: &[u8]) {

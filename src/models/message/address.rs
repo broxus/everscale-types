@@ -528,7 +528,7 @@ impl std::fmt::Display for ExtAddr {
             bytes: &self.data,
             bit_len: self.data_bit_len.into_inner(),
         };
-        std::fmt::Display::fmt(&bitstring, f)
+        write!(f, ":{bitstring}")
     }
 }
 

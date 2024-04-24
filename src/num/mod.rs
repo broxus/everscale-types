@@ -10,6 +10,48 @@ pub use self::varuint248::VarUint248;
 
 mod varuint248;
 
+macro_rules! impl_serde {
+    ($ident:ident, $inner: ty) => {
+        #[cfg(feature = "serde")]
+        impl serde::Serialize for $ident {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                self.0.serialize(serializer)
+            }
+        }
+
+        #[cfg(feature = "serde")]
+        impl<'de> serde::Deserialize<'de> for $ident {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                use serde::de::{Error, Unexpected};
+
+                struct Expected;
+
+                impl serde::de::Expected for Expected {
+                    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                        f.write_str(stringify!($ident))
+                    }
+                }
+
+                let res = Self::new(ok!(<$inner>::deserialize(deserializer)));
+                if res.is_valid() {
+                    Ok(res)
+                } else {
+                    Err(D::Error::invalid_type(
+                        Unexpected::Other("big number"),
+                        &Expected,
+                    ))
+                }
+            }
+        }
+    };
+}
+
 macro_rules! impl_ops {
     ($ident:ident, $inner:ty) => {
         impl From<$ident> for $inner {
@@ -257,44 +299,6 @@ macro_rules! impl_ops {
                 self.0 <<= rhs;
             }
         }
-
-        #[cfg(feature = "serde")]
-        impl serde::Serialize for $ident {
-            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-            where
-                S: serde::Serializer,
-            {
-                self.0.serialize(serializer)
-            }
-        }
-
-        #[cfg(feature = "serde")]
-        impl<'de> serde::Deserialize<'de> for $ident {
-            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-            where
-                D: serde::Deserializer<'de>,
-            {
-                use serde::de::{Error, Unexpected};
-
-                struct Expected;
-
-                impl serde::de::Expected for Expected {
-                    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                        f.write_str(stringify!($ident))
-                    }
-                }
-
-                let res = Self::new(ok!(<$inner>::deserialize(deserializer)));
-                if res.is_valid() {
-                    Ok(res)
-                } else {
-                    Err(D::Error::invalid_type(
-                        Unexpected::Other("big number"),
-                        &Expected,
-                    ))
-                }
-            }
-        }
     };
 }
 
@@ -445,6 +449,70 @@ impl_var_uints! {
     ///
     /// Stored as 4 bits of `len` (`0..=15`), followed by `len` bytes.
     pub struct Tokens(u128[..15]);
+}
+
+impl_serde!(VarUint24, u32);
+impl_serde!(VarUint56, u64);
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for Tokens {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        if serializer.is_human_readable() {
+            serializer.collect_str(&self.0)
+        } else {
+            self.0.serialize(serializer)
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for Tokens {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{Error, Unexpected, Visitor};
+
+        struct Expected;
+
+        impl serde::de::Expected for Expected {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(stringify!($ident))
+            }
+        }
+
+        struct TokensVisitor;
+
+        impl<'de> Visitor<'de> for TokensVisitor {
+            type Value = u128;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a string with a number")
+            }
+
+            fn visit_str<E: Error>(self, v: &str) -> Result<Self::Value, E> {
+                v.parse().map_err(E::custom)
+            }
+        }
+
+        let res = Self::new(ok!(if deserializer.is_human_readable() {
+            deserializer.deserialize_str(TokensVisitor)
+        } else {
+            u128::deserialize(deserializer)
+        }));
+
+        if res.is_valid() {
+            Ok(res)
+        } else {
+            Err(D::Error::invalid_type(
+                Unexpected::Other("big number"),
+                &Expected,
+            ))
+        }
+    }
 }
 
 impl Store for VarUint24 {
@@ -662,6 +730,10 @@ impl_small_uints! {
     /// Fixed-length 15-bit integer.
     pub struct Uint15(15);
 }
+
+impl_serde!(Uint9, u16);
+impl_serde!(Uint12, u16);
+impl_serde!(Uint15, u16);
 
 /// Account split depth. Fixed-length 5-bit integer of range `1..=30`
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Ord, PartialOrd)]
