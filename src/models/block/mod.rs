@@ -224,6 +224,27 @@ impl Default for BlockInfoBuilder<()> {
 }
 
 impl BlockInfoBuilder<PrevBlockRef> {
+    /// Set the version and capabilities of the software that created this block.
+    pub fn with_gen_software(
+        mut self,
+        gen_software: Option<GlobalVersion>,
+    ) -> BlockInfoBuilder<BlockRef> {
+        match gen_software {
+            Some(gen_software) => {
+                self.inner.gen_software = gen_software;
+                self.inner.flags |= BlockInfo::FLAG_WITH_GEN_SOFTWARE;
+            }
+            None => {
+                self.inner.gen_software = Default::default();
+                self.inner.flags &= !BlockInfo::FLAG_WITH_GEN_SOFTWARE;
+            }
+        }
+        BlockInfoBuilder {
+            inner: self.inner,
+            phantom_data: std::marker::PhantomData,
+        }
+    }
+
     /// Builds the block info.
     pub fn build(self) -> BlockInfo {
         self.inner
@@ -292,6 +313,17 @@ impl BlockInfo {
     #[cfg(feature = "venom")]
     const TAG_V2: u32 = 0x9bc7a988;
     const FLAG_WITH_GEN_SOFTWARE: u8 = 0x1;
+
+    /// Set the version and capabilities of the software that created this block.
+    pub fn set_gen_software(&mut self, gen_software: Option<GlobalVersion>) {
+        if let Some(gen_software) = gen_software {
+            self.gen_software = gen_software;
+            self.flags |= BlockInfo::FLAG_WITH_GEN_SOFTWARE;
+        } else {
+            self.gen_software = Default::default();
+            self.flags &= !BlockInfo::FLAG_WITH_GEN_SOFTWARE;
+        }
+    }
 
     /// Tries to load a reference to the masterchain block.
     pub fn load_master_ref(&self) -> Result<Option<BlockRef>, Error> {
@@ -499,7 +531,7 @@ impl BlockRef {
 }
 
 /// Tokens flow info.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
 pub struct ValueFlow {
     /// Total amount transferred from the previous block.
     pub from_prev_block: CurrencyCollection,
