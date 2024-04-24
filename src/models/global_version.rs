@@ -368,6 +368,26 @@ impl IntoIterator for GlobalCapabilities {
     }
 }
 
+impl FromIterator<GlobalCapability> for GlobalCapabilities {
+    fn from_iter<T: IntoIterator<Item = GlobalCapability>>(iter: T) -> Self {
+        let mut res = GlobalCapabilities::default();
+        for item in iter {
+            res |= item;
+        }
+        res
+    }
+}
+
+impl<const N: usize> From<[GlobalCapability; N]> for GlobalCapabilities {
+    fn from(value: [GlobalCapability; N]) -> Self {
+        let mut res = GlobalCapabilities::default();
+        for item in value.iter() {
+            res |= *item;
+        }
+        res
+    }
+}
+
 #[cfg(feature = "serde")]
 impl serde::Serialize for GlobalCapabilities {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

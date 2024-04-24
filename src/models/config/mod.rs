@@ -267,8 +267,15 @@ impl BlockchainConfigParams {
     /// Updates a list with a history of all storage prices.
     ///
     /// Uses [`ConfigParam18`].
-    pub fn set_storage_prices(&mut self, prices: &Dict<u32, StoragePrices>) -> Result<bool, Error> {
-        self.set_raw(ConfigParam18::ID, ok!(CellBuilder::build_from(prices)))
+    pub fn set_storage_prices(&mut self, prices: &[StoragePrices]) -> Result<bool, Error> {
+        let mut dict = Dict::<u32, StoragePrices>::new();
+        for (i, prices) in prices.iter().enumerate() {
+            ok!(dict.set(i as u32, *prices));
+        }
+        self.set_raw(
+            ConfigParam18::ID,
+            ok!(CellBuilder::build_from(NonEmptyDict(dict))),
+        )
     }
 
     /// Returns gas limits and prices.
