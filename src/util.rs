@@ -2,6 +2,8 @@
 
 use std::mem::MaybeUninit;
 
+use crate::error::Error;
+
 /// Brings [unlikely](core::intrinsics::unlikely) to stable rust.
 #[inline(always)]
 pub(crate) const fn unlikely(b: bool) -> bool {
@@ -230,6 +232,72 @@ pub struct Bitstring<'a> {
     pub bit_len: u16,
 }
 
+impl Bitstring<'_> {
+    /// Parses a bitstring from a hex string.
+    ///
+    /// Returns the parsed data and the bit length.
+    /// Tag bit is removed if present.
+    pub fn from_hex_str(s: &str) -> Result<(Vec<u8>, u16), Error> {
+        fn hex_char(c: u8) -> Result<u8, Error> {
+            match c {
+                b'A'..=b'F' => Ok(c - b'A' + 10),
+                b'a'..=b'f' => Ok(c - b'a' + 10),
+                b'0'..=b'9' => Ok(c - b'0'),
+                _ => Err(Error::InvalidData),
+            }
+        }
+
+        if !s.is_ascii() || s.len() > 128 * 2 {
+            return Err(Error::InvalidData);
+        }
+
+        let s = s.as_bytes();
+        let (mut s, with_tag) = match s.strip_suffix(b"_") {
+            Some(s) => (s, true),
+            None => (s, false),
+        };
+
+        let mut half_byte = None;
+        if s.len() % 2 != 0 {
+            if let Some((last, prefix)) = s.split_last() {
+                half_byte = Some(ok!(hex_char(*last)));
+                s = prefix;
+            }
+        }
+
+        let Ok(mut data) = hex::decode(s) else {
+            return Err(Error::InvalidData);
+        };
+
+        let mut bit_len = data.len() as u16 * 8;
+        if let Some(half_byte) = half_byte {
+            bit_len += 4;
+            data.push(half_byte << 4);
+        }
+
+        if with_tag {
+            bit_len = data.len() as u16 * 8;
+            for byte in data.iter_mut().rev() {
+                if *byte == 0 {
+                    bit_len -= 8;
+                } else {
+                    let trailing = byte.trailing_zeros();
+                    bit_len -= 1 + trailing as u16;
+
+                    // NOTE: `trailing` is in range 0..=7,
+                    // so we must split the shift in two parts.
+                    *byte &= (0xff << trailing) << 1;
+                    break;
+                }
+            }
+
+            data.truncate((bit_len as usize + 7) / 8);
+        }
+
+        Ok((data, bit_len))
+    }
+}
+
 impl std::fmt::Display for Bitstring<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         const CHUNK_LEN: usize = 16;
@@ -335,6 +403,29 @@ pub(crate) fn debug_struct_field2_finish(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_bitstring_from_hex_str() {
+        let (data, bit_len) = Bitstring::from_hex_str("").unwrap();
+        assert_eq!(bit_len, 0);
+        assert!(data.is_empty());
+
+        let (data, bit_len) = Bitstring::from_hex_str("8_").unwrap();
+        assert_eq!(bit_len, 0);
+        assert!(data.is_empty());
+
+        let (data, bit_len) = Bitstring::from_hex_str("ded_").unwrap();
+        assert_eq!(bit_len, 11);
+        assert_eq!(data, vec![0xde, 0xc0]);
+
+        let (data, bit_len) = Bitstring::from_hex_str("b00b1e5").unwrap();
+        assert_eq!(bit_len, 28);
+        assert_eq!(data, vec![0xb0, 0x0b, 0x1e, 0x50]);
+
+        let (data, bit_len) = Bitstring::from_hex_str("b00b1e5_").unwrap();
+        assert_eq!(bit_len, 27);
+        assert_eq!(data, vec![0xb0, 0x0b, 0x1e, 0x40]);
+    }
 
     #[test]
     fn bitstring_zero_char_with_completion_tag() {

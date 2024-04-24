@@ -522,6 +522,77 @@ impl ExtAddr {
     }
 }
 
+impl std::fmt::Display for ExtAddr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let bitstring = Bitstring {
+            bytes: &self.data,
+            bit_len: self.data_bit_len.into_inner(),
+        };
+        std::fmt::Display::fmt(&bitstring, f)
+    }
+}
+
+impl FromStr for ExtAddr {
+    type Err = ParseAddrError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() {
+            return Err(ParseAddrError::Empty);
+        }
+
+        let Some(s) = s.strip_prefix(':') else {
+            return Err(ParseAddrError::UnexpectedPart);
+        };
+
+        let Ok((data, bit_len)) = Bitstring::from_hex_str(s) else {
+            return Err(ParseAddrError::InvalidAccountId);
+        };
+
+        ExtAddr::new(bit_len, data).ok_or(ParseAddrError::UnexpectedPart)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for ExtAddr {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        if serializer.is_human_readable() {
+            serializer.collect_str(self)
+        } else {
+            (self.data_bit_len.into_inner(), &self.data).serialize(serializer)
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for ExtAddr {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::{Error, Visitor};
+
+        struct ExtAddrVisitor;
+
+        impl<'de> Visitor<'de> for ExtAddrVisitor {
+            type Value = ExtAddr;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("an external address")
+            }
+
+            fn visit_str<E: Error>(self, v: &str) -> Result<Self::Value, E> {
+                ExtAddr::from_str(v).map_err(E::custom)
+            }
+        }
+
+        if deserializer.is_human_readable() {
+            deserializer.deserialize_str(ExtAddrVisitor)
+        } else {
+            <(u16, Vec<u8>)>::deserialize(deserializer).and_then(|(data_bit_len, data)| {
+                ExtAddr::new(data_bit_len, data)
+                    .ok_or_else(|| Error::custom("invalid external address data length"))
+            })
+        }
+    }
+}
+
 /// Anycast prefix info.
 ///
 /// ```text
@@ -547,7 +618,8 @@ impl Anycast {
     /// Constructs anycast info from rewrite prefix.
     pub fn from_slice(rewrite_prefix: &CellSlice<'_>) -> Result<Self, Error> {
         let depth = ok!(SplitDepth::from_bit_len(rewrite_prefix.remaining_bits()));
-        let mut data = Vec::with_capacity((depth.into_bit_len() as usize + 7) / 8);
+
+        let mut data = vec![0; (depth.into_bit_len() as usize + 7) / 8];
         ok!(rewrite_prefix.get_raw(0, &mut data, depth.into_bit_len()));
 
         Ok(Self {
@@ -562,54 +634,13 @@ impl Anycast {
     }
 }
 
-const HEX_CHARS_LOWER: &[u8; 16] = b"0123456789abcdef";
-
 impl std::fmt::Display for Anycast {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let depth = std::cmp::min(self.depth.into_bit_len(), 30);
-
-        let mut result = [b'0'; 9]; // 8 bytes for rewrite, 1 byte for
-
-        let rem = depth % 8;
-
-        let byte_len = std::cmp::min(((depth - rem) / 8) as usize, 4);
-        let result_ptr = result.as_mut_ptr();
-        for (i, &byte) in self.rewrite_prefix.iter().take(byte_len).enumerate() {
-            // SAFETY: byte_len is 4 at max
-            unsafe {
-                *result_ptr.add(i * 2) = HEX_CHARS_LOWER[(byte >> 4) as usize];
-                *result_ptr.add(i * 2 + 1) = HEX_CHARS_LOWER[(byte & 0x0f) as usize];
-            }
-        }
-
-        if rem != 0 {
-            let tag_mask: u8 = 1 << (7 - rem);
-            let data_mask = !(tag_mask - 1);
-
-            let mut byte = self
-                .rewrite_prefix
-                .get((depth / 8) as usize)
-                .copied()
-                .unwrap_or_default();
-
-            // xxxxyyyy & data_mask -> xxxxy000 | tag_mask -> xxxx1000
-            byte = (byte & data_mask) | tag_mask;
-
-            result[byte_len * 2] = HEX_CHARS_LOWER[(byte >> 4) as usize];
-            result[byte_len * 2 + 1] = HEX_CHARS_LOWER[(byte & 0x0f) as usize];
-        }
-
-        let data = if depth % 4 == 0 {
-            &result[..(depth / 4) as usize]
-        } else {
-            let underscore = (depth / 4 + 1) as usize;
-            result[underscore] = b'_';
-            &result[..=underscore]
+        let bitstring = Bitstring {
+            bytes: &self.rewrite_prefix,
+            bit_len: self.depth.into_bit_len(),
         };
-
-        // SAFETY: result was constructed from valid ascii `HEX_CHARS_LOWER`
-        let part = unsafe { std::str::from_utf8_unchecked(data) };
-        f.write_str(part)
+        std::fmt::Display::fmt(&bitstring, f)
     }
 }
 
@@ -665,5 +696,31 @@ mod tests {
             let (addr, value) = entry.unwrap();
             println!("{addr}: {value}");
         }
+    }
+
+    #[test]
+    fn anycast_str() {
+        // 0 bit
+        let empty_res = Anycast::from_slice(&Cell::empty_cell().as_slice().unwrap());
+        assert_eq!(empty_res.unwrap_err(), Error::IntOverflow);
+
+        // 1 bit
+        let mut prefix = CellBuilder::new();
+        prefix.store_bit_one().unwrap();
+        let anycast = Anycast::from_slice(&prefix.as_data_slice()).unwrap();
+        assert_eq!(anycast.to_string(), "c_");
+
+        // 8 bit
+        let mut prefix = CellBuilder::new();
+        prefix.store_u8(0xa5).unwrap();
+        let anycast = Anycast::from_slice(&prefix.as_data_slice()).unwrap();
+        assert_eq!(anycast.to_string(), "a5");
+
+        // 30 bit
+        let mut prefix = CellBuilder::new();
+        prefix.store_uint(0xb00b1e5, 28).unwrap();
+        prefix.store_zeros(2).unwrap();
+        let anycast = Anycast::from_slice(&prefix.as_data_slice()).unwrap();
+        assert_eq!(anycast.to_string(), "b00b1e52_");
     }
 }
