@@ -16,42 +16,61 @@ mod params;
 mod tests;
 
 /// Blockchain config.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BlockchainConfig {
     /// Configuration contract address.
     pub address: HashBytes,
     /// Configuration parameters.
-    #[cfg_attr(feature = "serde", serde(with = "serde_params_dict"))]
-    pub params: Dict<u32, Cell>,
-}
-
-impl Store for BlockchainConfig {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
-        let params_root = match self.params.root() {
-            Some(root) => root.clone(),
-            None => return Err(Error::InvalidData),
-        };
-        ok!(builder.store_u256(&self.address));
-        builder.store_reference(params_root)
-    }
-}
-
-impl<'a> Load<'a> for BlockchainConfig {
-    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        Ok(Self {
-            address: ok!(slice.load_u256()),
-            params: Dict::from(Some(ok!(slice.load_reference_cloned()))),
-        })
-    }
+    pub params: BlockchainConfigParams,
 }
 
 impl BlockchainConfig {
+    /// Creates a new blockchain config with only the address set.
+    pub fn new_empty(address: HashBytes) -> Self {
+        let mut params = BlockchainConfigParams(Dict::new());
+        params
+            .set_raw(ConfigParam0::ID, CellBuilder::build_from(address).unwrap())
+            .unwrap();
+
+        Self { address, params }
+    }
+}
+
+impl std::ops::Deref for BlockchainConfig {
+    type Target = BlockchainConfigParams;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.params
+    }
+}
+
+impl std::ops::DerefMut for BlockchainConfig {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.params
+    }
+}
+
+/// A non-empty dictionary with blockchain config params.
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[repr(transparent)]
+pub struct BlockchainConfigParams(Dict<u32, Cell>);
+
+impl BlockchainConfigParams {
     /// Returns the elector account address (in masterchain).
     ///
     /// Uses [`ConfigParam1`].
     pub fn get_elector_address(&self) -> Result<HashBytes, Error> {
         ok!(self.get::<ConfigParam1>()).ok_or(Error::CellUnderflow)
+    }
+
+    /// Updates the elector account address (in masterchain).
+    ///
+    /// Uses [`ConfigParam1`].
+    pub fn set_elector_address(&mut self, address: &HashBytes) -> Result<bool, Error> {
+        self.set_raw(ConfigParam1::ID, ok!(CellBuilder::build_from(address)))
     }
 
     /// Returns the minter account address (in masterchain).
@@ -64,6 +83,13 @@ impl BlockchainConfig {
         }
     }
 
+    /// Updates the minter account address (in masterchain).
+    ///
+    /// Uses [`ConfigParam2`].
+    pub fn set_minter_address(&mut self, address: &HashBytes) -> Result<bool, Error> {
+        self.set_raw(ConfigParam2::ID, ok!(CellBuilder::build_from(address)))
+    }
+
     /// Returns the fee collector account address (in masterchain).
     ///
     /// Uses [`ConfigParam3`] with a fallback to [`ConfigParam1`] (elector).
@@ -74,11 +100,25 @@ impl BlockchainConfig {
         }
     }
 
+    /// Updates the fee collector address (in masterchain).
+    ///
+    /// Uses [`ConfigParam3`].
+    pub fn set_fee_collector_address(&mut self, address: &HashBytes) -> Result<bool, Error> {
+        self.set_raw(ConfigParam3::ID, ok!(CellBuilder::build_from(address)))
+    }
+
     /// Returns the lowest supported block version and required capabilities.
     ///
     /// Uses [`ConfigParam8`].
     pub fn get_global_version(&self) -> Result<GlobalVersion, Error> {
         ok!(self.get::<ConfigParam8>()).ok_or(Error::CellUnderflow)
+    }
+
+    /// Updates the global version.
+    ///
+    /// Uses [`ConfigParam8`].
+    pub fn set_global_version(&mut self, version: &GlobalVersion) -> Result<bool, Error> {
+        self.set_raw(ConfigParam8::ID, ok!(CellBuilder::build_from(version)))
     }
 
     /// Returns a list of params that must be present in config.
@@ -88,6 +128,20 @@ impl BlockchainConfig {
         ok!(self.get::<ConfigParam9>()).ok_or(Error::CellUnderflow)
     }
 
+    /// Updates a list of params that must be present in config.
+    ///
+    /// Uses [`ConfigParam9`].
+    pub fn set_mandatory_params(&mut self, params: &[u32]) -> Result<bool, Error> {
+        let mut dict = Dict::new();
+        for id in params {
+            ok!(dict.set(*id, ()));
+        }
+        self.set_raw(
+            ConfigParam9::ID,
+            ok!(CellBuilder::build_from(NonEmptyDict(dict))),
+        )
+    }
+
     /// Returns a list of params that have a different set of update requirements.
     ///
     /// Uses [`ConfigParam10`].
@@ -95,11 +149,35 @@ impl BlockchainConfig {
         ok!(self.get::<ConfigParam10>()).ok_or(Error::CellUnderflow)
     }
 
+    /// Updates a list of params that have a different set of update requirements.
+    ///
+    /// Uses [`ConfigParam10`].
+    pub fn set_critical_params(&mut self, params: &[u32]) -> Result<bool, Error> {
+        let mut dict = Dict::new();
+        for id in params {
+            ok!(dict.set(*id, ()));
+        }
+        self.set_raw(
+            ConfigParam10::ID,
+            ok!(CellBuilder::build_from(NonEmptyDict(dict))),
+        )
+    }
+
     /// Returns a dictionary with workchain descriptions.
     ///
     /// Uses [`ConfigParam12`].
     pub fn get_workchains(&self) -> Result<Dict<i32, WorkchainDescription>, Error> {
         ok!(self.get::<ConfigParam12>()).ok_or(Error::CellUnderflow)
+    }
+
+    /// Updates a list of workchain descriptions.
+    ///
+    /// Uses [`ConfigParam12`].
+    pub fn set_workchains(
+        &mut self,
+        workchains: &Dict<i32, WorkchainDescription>,
+    ) -> Result<bool, Error> {
+        self.set_raw(ConfigParam12::ID, ok!(CellBuilder::build_from(workchains)))
     }
 
     /// Returns a block creation reward for the specified workchain in tokens.
@@ -121,11 +199,28 @@ impl BlockchainConfig {
         ok!(self.get::<ConfigParam14>()).ok_or(Error::CellUnderflow)
     }
 
+    /// Updates a block creation rewards in tokens.
+    ///
+    /// Uses [`ConfigParam14`].
+    pub fn set_block_creation_rewards(
+        &mut self,
+        rewards: &BlockCreationRewards,
+    ) -> Result<bool, Error> {
+        self.set_raw(ConfigParam14::ID, ok!(CellBuilder::build_from(rewards)))
+    }
+
     /// Returns election timings.
     ///
     /// Uses [`ConfigParam15`].
     pub fn get_election_timings(&self) -> Result<ElectionTimings, Error> {
         ok!(self.get::<ConfigParam15>()).ok_or(Error::CellUnderflow)
+    }
+
+    /// Updates election timings.
+    ///
+    /// Uses [`ConfigParam15`].
+    pub fn set_election_timings(&mut self, timings: &ElectionTimings) -> Result<bool, Error> {
+        self.set_raw(ConfigParam15::ID, ok!(CellBuilder::build_from(timings)))
     }
 
     /// Returns possible validator count.
@@ -135,6 +230,16 @@ impl BlockchainConfig {
         ok!(self.get::<ConfigParam16>()).ok_or(Error::CellUnderflow)
     }
 
+    /// Updates possible validator count.
+    ///
+    /// Uses [`ConfigParam16`].
+    pub fn set_validator_count_params(
+        &mut self,
+        params: &ValidatorCountParams,
+    ) -> Result<bool, Error> {
+        self.set_raw(ConfigParam16::ID, ok!(CellBuilder::build_from(params)))
+    }
+
     /// Returns validator stake range and factor.
     ///
     /// Uses [`ConfigParam17`].
@@ -142,11 +247,28 @@ impl BlockchainConfig {
         ok!(self.get::<ConfigParam17>()).ok_or(Error::CellUnderflow)
     }
 
+    /// Updates validator stake range and factor.
+    ///
+    /// Uses [`ConfigParam17`].
+    pub fn set_validator_stake_params(
+        &mut self,
+        params: &ValidatorStakeParams,
+    ) -> Result<bool, Error> {
+        self.set_raw(ConfigParam17::ID, ok!(CellBuilder::build_from(params)))
+    }
+
     /// Returns a list with a history of all storage prices.
     ///
     /// Uses [`ConfigParam18`].
     pub fn get_storage_prices(&self) -> Result<Dict<u32, StoragePrices>, Error> {
         ok!(self.get::<ConfigParam18>()).ok_or(Error::CellUnderflow)
+    }
+
+    /// Updates a list with a history of all storage prices.
+    ///
+    /// Uses [`ConfigParam18`].
+    pub fn set_storage_prices(&mut self, prices: &Dict<u32, StoragePrices>) -> Result<bool, Error> {
+        self.set_raw(ConfigParam18::ID, ok!(CellBuilder::build_from(prices)))
     }
 
     /// Returns gas limits and prices.
@@ -161,6 +283,22 @@ impl BlockchainConfig {
         .ok_or(Error::CellUnderflow)
     }
 
+    /// Updates gas limits and prices.
+    ///
+    /// Uses [`ConfigParam20`] (for masterchain) or [`ConfigParam21`] (for other workchains).
+    pub fn set_gas_prices(
+        &mut self,
+        masterchain: bool,
+        prices: &GasLimitsPrices,
+    ) -> Result<bool, Error> {
+        let id = if masterchain {
+            ConfigParam20::ID
+        } else {
+            ConfigParam21::ID
+        };
+        self.set_raw(id, ok!(CellBuilder::build_from(prices)))
+    }
+
     /// Returns block limits.
     ///
     /// Uses [`ConfigParam22`] (for masterchain) or [`ConfigParam23`] (for other workchains).
@@ -171,6 +309,22 @@ impl BlockchainConfig {
             self.get::<ConfigParam23>()
         })
         .ok_or(Error::CellUnderflow)
+    }
+
+    /// Updates block limits.
+    ///
+    /// Uses [`ConfigParam22`] (for masterchain) or [`ConfigParam23`] (for other workchains).
+    pub fn set_block_limits(
+        &mut self,
+        masterchain: bool,
+        limits: &BlockLimits,
+    ) -> Result<bool, Error> {
+        let id = if masterchain {
+            ConfigParam22::ID
+        } else {
+            ConfigParam23::ID
+        };
+        self.set_raw(id, ok!(CellBuilder::build_from(limits)))
     }
 
     /// Returns message forwarding prices.
@@ -185,11 +339,34 @@ impl BlockchainConfig {
         .ok_or(Error::CellUnderflow)
     }
 
+    /// Updates message forwarding prices.
+    ///
+    /// Uses [`ConfigParam24`] (for masterchain) or [`ConfigParam25`] (for other workchains).
+    pub fn set_msg_forward_prices(
+        &mut self,
+        masterchain: bool,
+        prices: &MsgForwardPrices,
+    ) -> Result<bool, Error> {
+        let id = if masterchain {
+            ConfigParam24::ID
+        } else {
+            ConfigParam25::ID
+        };
+        self.set_raw(id, ok!(CellBuilder::build_from(prices)))
+    }
+
     /// Returns a catchain config.
     ///
     /// Uses [`ConfigParam28`].
     pub fn get_catchain_config(&self) -> Result<CatchainConfig, Error> {
         ok!(self.get::<ConfigParam28>()).ok_or(Error::CellUnderflow)
+    }
+
+    /// Updates a catchain config.
+    ///
+    /// Uses [`ConfigParam28`].
+    pub fn set_catchain_config(&mut self, config: &CatchainConfig) -> Result<bool, Error> {
+        self.set_raw(ConfigParam28::ID, ok!(CellBuilder::build_from(config)))
     }
 
     /// Returns a consensus config.
@@ -199,11 +376,29 @@ impl BlockchainConfig {
         ok!(self.get::<ConfigParam29>()).ok_or(Error::CellUnderflow)
     }
 
+    /// Updates a consensus config.
+    ///
+    /// Uses [`ConfigParam29`].
+    pub fn set_consensus_config(&mut self, config: &ConsensusConfig) -> Result<bool, Error> {
+        self.set_raw(ConfigParam29::ID, ok!(CellBuilder::build_from(config)))
+    }
+
     /// Returns a list of fundamental account addresses (in masterchain).
     ///
     /// Uses [`ConfigParam31`].
     pub fn get_fundamental_addresses(&self) -> Result<Dict<HashBytes, ()>, Error> {
         ok!(self.get::<ConfigParam31>()).ok_or(Error::CellUnderflow)
+    }
+
+    /// Updates a list of fundamental account addresses (in masterchain).
+    ///
+    /// Uses [`ConfigParam31`].
+    pub fn set_fundamental_addresses(&mut self, addresses: &[HashBytes]) -> Result<bool, Error> {
+        let mut dict = Dict::<HashBytes, ()>::new();
+        for address in addresses {
+            ok!(dict.set(*address, ()));
+        }
+        self.set_raw(ConfigParam31::ID, ok!(CellBuilder::build_from(dict)))
     }
 
     /// Returns `true` if the config contains info about the previous validator set.
@@ -232,12 +427,12 @@ impl BlockchainConfig {
 
     /// Returns `true` if the config contains a param for the specified id.
     pub fn contains<'a, T: KnownConfigParam<'a>>(&'a self) -> Result<bool, Error> {
-        self.params.contains_key(T::ID)
+        self.0.contains_key(T::ID)
     }
 
     /// Returns `true` if the config contains a param for the specified id.
     pub fn contains_raw(&self, id: u32) -> Result<bool, Error> {
-        self.params.contains_key(id)
+        self.0.contains_key(id)
     }
 
     /// Tries to get a parameter from the blockchain config.
@@ -251,15 +446,55 @@ impl BlockchainConfig {
         }
     }
 
+    /// Tries to update a parameter in the blockchain config.
+    pub fn set<'a, T: KnownConfigParam<'a>>(&'a mut self, value: &T::Value) -> Result<bool, Error> {
+        let value = ok!(CellBuilder::build_from(T::Wrapper::wrap_inner(value)));
+        self.set_raw(T::ID, value)
+    }
+
     /// Tries to get a raw parameter from the blockchain config.
     pub fn get_raw(&self, id: u32) -> Result<Option<CellSlice<'_>>, Error> {
-        match ok!(self.params.get_raw(id)) {
+        match ok!(self.0.get_raw(id)) {
             Some(slice) => match slice.get_reference_as_slice(0) {
                 Ok(slice) => Ok(Some(slice)),
                 Err(e) => Err(e),
             },
             None => Ok(None),
         }
+    }
+
+    /// Tries to set a parameter in the blockchain config.
+    ///
+    /// NOTE: Use with caution, as it doesn't check the value structure.
+    pub fn set_raw(&mut self, id: u32, value: Cell) -> Result<bool, Error> {
+        self.0.set(id, value)
+    }
+
+    /// Removes a parameter from the blockchain config.
+    ///
+    /// NOTE: Removing a zero parameter successfully does nothing
+    /// and returns `None` as it is required and externaly managed.
+    pub fn remove(&mut self, id: u32) -> Result<Option<Cell>, Error> {
+        if id == 0 {
+            return Ok(None);
+        }
+        self.0.remove(id)
+    }
+}
+
+impl Store for BlockchainConfigParams {
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+        match self.0.root() {
+            Some(root) => builder.store_reference(root.clone()),
+            None => Err(Error::InvalidData),
+        }
+    }
+}
+
+impl<'a> Load<'a> for BlockchainConfigParams {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
+        let root = ok!(slice.load_reference_cloned());
+        Ok(Self(Dict::from(Some(root))))
     }
 }
 
@@ -272,13 +507,16 @@ pub trait KnownConfigParam<'a> {
     type Value;
 
     /// Value wrapper.
-    type Wrapper: ConfigParamWrapper<Self::Value> + Load<'a>;
+    type Wrapper: ConfigParamWrapper<Self::Value> + Store + Load<'a>;
 }
 
 /// Trait to customize config param representation.
 pub trait ConfigParamWrapper<T> {
     /// Converts this wrapper into an underlying type.
     fn into_inner(self) -> T;
+
+    /// Converts an inner type into a wrapper.
+    fn wrap_inner(inner: &T) -> &Self;
 }
 
 /// Identity wrapper for [`ConfigParamWrapper`].
@@ -289,6 +527,12 @@ impl<T> ConfigParamWrapper<T> for ParamIdentity<T> {
     #[inline]
     fn into_inner(self) -> T {
         self.0
+    }
+
+    #[inline]
+    fn wrap_inner(inner: &T) -> &Self {
+        // SAFETY: `ParamIdentity` is a transparent wrapper.
+        unsafe { &*(inner as *const T).cast() }
     }
 }
 
@@ -334,6 +578,12 @@ pub struct NonEmptyDict<T>(T);
 impl<T> ConfigParamWrapper<T> for NonEmptyDict<T> {
     fn into_inner(self) -> T {
         self.0
+    }
+
+    #[inline]
+    fn wrap_inner(inner: &T) -> &Self {
+        // SAFETY: `NonEmptyDict` is a transparent wrapper.
+        unsafe { &*(inner as *const T).cast() }
     }
 }
 
@@ -431,15 +681,14 @@ macro_rules! define_config_params {
         })*
 
         #[cfg(feature = "serde")]
-        mod serde_params_dict {
-            use super::*;
-
-            pub fn serialize<S>(dict: &Dict<u32, Cell>, serializer: S) -> Result<S::Ok, S::Error>
+        impl serde::Serialize for BlockchainConfigParams {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
             where
                 S: serde::Serializer,
             {
                 use serde::ser::{Error, SerializeMap};
 
+                let dict = &self.0;
                 if !serializer.is_human_readable() {
                     return crate::boc::BocRepr::serialize(dict, serializer);
                 }
@@ -470,8 +719,11 @@ macro_rules! define_config_params {
 
                 map.end()
             }
+        }
 
-            pub fn deserialize<'de, D>(deserializer: D) -> Result<Dict<u32, Cell>, D::Error>
+        #[cfg(feature = "serde")]
+        impl<'de> serde::Deserialize<'de> for BlockchainConfigParams {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
             where
                 D: serde::Deserializer<'de>,
             {
@@ -483,7 +735,7 @@ macro_rules! define_config_params {
                 struct MapVisitor;
 
                 impl<'de> Visitor<'de> for MapVisitor {
-                    type Value = Dict<u32, Cell>;
+                    type Value = BlockchainConfigParams;
 
                     fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
                         f.write_str("a config params map")
@@ -511,7 +763,7 @@ macro_rules! define_config_params {
                             ok!(dict.set(key, value).map_err(Error::custom));
                         }
 
-                        Ok(dict)
+                        Ok(BlockchainConfigParams(dict))
                     }
                 }
 
