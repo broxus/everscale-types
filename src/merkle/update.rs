@@ -9,6 +9,7 @@ use crate::error::Error;
 ///
 /// NOTE: Serialized into `MerkleUpdate` cell.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MerkleUpdate {
     /// Representation hash of the original cell.
     pub old_hash: HashBytes,
@@ -19,8 +20,10 @@ pub struct MerkleUpdate {
     /// Representation depth of the updated cell.
     pub new_depth: u16,
     /// Partially pruned tree with unchanged cells of the origin cell.
+    #[cfg_attr(feature = "serde", serde(with = "crate::boc::Boc"))]
     pub old: Cell,
     /// Partially pruned tree with all cells that are not in the original cell.
+    #[cfg_attr(feature = "serde", serde(with = "crate::boc::Boc"))]
     pub new: Cell,
 }
 

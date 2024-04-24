@@ -9,6 +9,7 @@ use crate::error::Error;
 ///
 /// NOTE: Serialized into `MerkleProof` cell.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct MerkleProofRef<'a> {
     /// Representation hash of the original cell.
     pub hash: HashBytes,
@@ -66,12 +67,14 @@ impl<'a> Load<'a> for MerkleProofRef<'a> {
 ///
 /// NOTE: Serialized into `MerkleProof` cell.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MerkleProof {
     /// Representation hash of the original cell.
     pub hash: HashBytes,
     /// Representation depth of the origin cell.
     pub depth: u16,
     /// Partially pruned tree with the contents of the original cell.
+    #[cfg_attr(feature = "serde", serde(with = "crate::boc::Boc"))]
     pub cell: Cell,
 }
 

@@ -55,6 +55,77 @@ pub struct BaseMessage<I, B> {
     pub layout: Option<MessageLayout>,
 }
 
+#[cfg(feature = "serde")]
+impl<I, B> serde::Serialize for BaseMessage<I, B>
+where
+    I: ExactSize + Store + serde::Serialize,
+    B: ExactSize + StoreBody,
+{
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::{Error, SerializeStruct};
+
+        struct BodySerializer<'a, B: StoreBody>(&'a B);
+
+        impl<B: StoreBody> serde::Serialize for BodySerializer<'_, B> {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                let mut builder = CellBuilder::new();
+                ok!(self
+                    .0
+                    .store_body(false, &mut builder, &mut Cell::empty_context())
+                    .map_err(Error::custom));
+                let cell = ok!(builder.build().map_err(Error::custom));
+                crate::boc::Boc::serialize(&cell, serializer)
+            }
+        }
+
+        if serializer.is_human_readable() {
+            let mut ser = ok!(serializer.serialize_struct("Message", 4));
+            ok!(ser.serialize_field("info", &self.info));
+            ok!(ser.serialize_field("init", &self.init));
+            ok!(ser.serialize_field("body", &BodySerializer(&self.body)));
+            ok!(ser.serialize_field("layout", &self.layout));
+            ser.end()
+        } else {
+            crate::boc::BocRepr::serialize(self, serializer)
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de, I> serde::Deserialize<'de> for BaseMessage<I, CellSliceParts>
+where
+    for<'a> I: ExactSize + Load<'a> + serde::Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        struct Message<I> {
+            info: I,
+            #[serde(default)]
+            init: Option<StateInit>,
+            #[serde(with = "crate::boc::Boc", default)]
+            body: Cell,
+            #[serde(default)]
+            layout: Option<MessageLayout>,
+        }
+
+        if deserializer.is_human_readable() {
+            let msg = Message::deserialize(deserializer)?;
+            let body_range = CellSliceRange::full(msg.body.as_ref());
+            Ok(Self {
+                info: msg.info,
+                init: msg.init,
+                body: (msg.body, body_range),
+                layout: msg.layout,
+            })
+        } else {
+            crate::boc::BocRepr::deserialize(deserializer)
+        }
+    }
+}
+
 impl<I: ExactSize, B: ExactSize> BaseMessage<I, B> {
     /// Computes the most optimal layout of the message parts.
     pub fn compute_layout(info: &I, init: Option<&StateInit>, body: &B) -> MessageLayout {
@@ -275,6 +346,7 @@ impl<'a, T: Load<'a>> Load<'a> for SliceOrCell<T> {
 
 /// Message payload layout.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MessageLayout {
     /// Whether to store state init in a child cell.
     pub init_to_cell: bool,
@@ -424,6 +496,9 @@ impl DetailedMessageLayout {
 }
 
 /// Unfinalized message info.
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "ty"))]
 pub enum RelaxedMsgInfo {
     /// Internal message info,
     Int(RelaxedIntMsgInfo),
@@ -502,6 +577,8 @@ impl<'a> Load<'a> for RelaxedMsgInfo {
 
 /// Message info.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "ty"))]
 pub enum MsgInfo {
     /// Internal message info,
     Int(IntMsgInfo),
@@ -590,6 +667,7 @@ impl<'a> Load<'a> for MsgInfo {
 
 /// Internal message info.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct IntMsgInfo {
     /// Whether IHR is disabled for the message.
     pub ihr_disabled: bool,
@@ -684,6 +762,7 @@ impl<'a> Load<'a> for IntMsgInfo {
 
 /// Unfinished internal message info.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RelaxedIntMsgInfo {
     /// Whether IHR is disabled for the message.
     pub ihr_disabled: bool,
@@ -778,8 +857,13 @@ impl<'a> Load<'a> for RelaxedIntMsgInfo {
 
 /// External incoming message info.
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ExtInMsgInfo {
     /// Optional external source address.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub src: Option<ExtAddr>,
     /// Internal destination address.
     pub dst: IntAddr,
@@ -828,10 +912,15 @@ impl<'a> Load<'a> for ExtInMsgInfo {
 
 /// External outgoing message info.
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ExtOutMsgInfo {
     /// Internal source address.
     pub src: IntAddr,
     /// Optional external address.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub dst: Option<ExtAddr>,
     /// Logical time when the message was created.
     pub created_lt: u64,
@@ -875,10 +964,15 @@ impl<'a> Load<'a> for ExtOutMsgInfo {
 
 /// Unfinalized external outgoing message info.
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RelaxedExtOutMsgInfo {
     /// Optional internal source address.
     pub src: Option<IntAddr>,
     /// Optional external address.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub dst: Option<ExtAddr>,
     /// Logical time when the message was created.
     pub created_lt: u64,

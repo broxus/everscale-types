@@ -198,7 +198,7 @@ fn simple_config() {
     assert_eq!(
         consensus_config,
         ConsensusConfig {
-            new_catchain_ids: false,
+            new_catchain_ids: true,
             round_candidates: NonZeroU32::new(3).unwrap(),
             next_candidate_delay_ms: 2000,
             consensus_timeout_ms: 16000,
@@ -315,4 +315,24 @@ fn test_config_param_7() {
         "{}",
         Boc::encode_base64(CellBuilder::build_from(config).unwrap())
     );
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn serde() {
+    fn check_config(data: &[u8]) {
+        let data = Boc::decode(data).unwrap();
+
+        let original = data.parse::<BlockchainConfig>().unwrap();
+        let json = serde_json::to_string_pretty(&original).unwrap();
+
+        let parsed: BlockchainConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, original);
+    }
+
+    // Some old config from the network beginning
+    check_config(include_bytes!("old_config.boc"));
+
+    // Current config
+    check_config(include_bytes!("new_config.boc"));
 }

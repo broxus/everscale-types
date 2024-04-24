@@ -6,6 +6,7 @@ use crate::num::{Tokens, VarUint248};
 
 /// Amounts collection.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CurrencyCollection {
     /// Amount in native currency.
     pub tokens: Tokens,
@@ -69,6 +70,7 @@ impl ExactSize for CurrencyCollection {
 
 /// Dictionary with amounts for multiple currencies.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(transparent)]
 pub struct ExtraCurrencyCollection(Dict<u32, VarUint248>);
 

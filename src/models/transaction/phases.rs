@@ -9,6 +9,7 @@ use crate::models::currency::CurrencyCollection;
 ///
 /// At this phase account pays for storing its state.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StoragePhase {
     /// Amount of tokens collected for storing this contract for some time.
     pub storage_fees_collected: Tokens,
@@ -23,6 +24,7 @@ pub struct StoragePhase {
 ///
 /// At this phase message balance is added to the account balance.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CreditPhase {
     /// Amount of tokens paid for the debt.
     pub due_fees_collected: Option<Tokens>,
@@ -35,6 +37,8 @@ pub struct CreditPhase {
 ///
 /// At this phase the VM is executed to produce a list of actions.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "ty"))]
 pub enum ComputePhase {
     /// Compute phase was skipped.
     Skipped(SkippedComputePhase),
@@ -110,6 +114,7 @@ impl<'a> Load<'a> for ComputePhase {
 
 /// Executed compute phase info.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ExecutedComputePhase {
     /// Whether the execution was successful.
     pub success: bool,
@@ -141,6 +146,7 @@ pub struct ExecutedComputePhase {
 
 /// Skipped compute phase info.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SkippedComputePhase {
     /// The reason this step was skipped.
     pub reason: ComputePhaseSkipReason,
@@ -197,6 +203,7 @@ impl<'a> Load<'a> for ComputePhaseSkipReason {
 /// At this phase the list of actions from the compute phase
 /// is converted into updates and outgoing messages.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ActionPhase {
     /// Whether the execution was successful.
     pub success: bool,
@@ -287,6 +294,8 @@ impl<'a> Load<'a> for ActionPhase {
 ///
 /// At this stage some funds are returned back to the sender.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "ty"))]
 pub enum BouncePhase {
     /// Default phase state.
     ///
@@ -338,6 +347,7 @@ impl<'a> Load<'a> for BouncePhase {
 
 /// Skipped bounce phase info.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct NoFundsBouncePhase {
     /// The total number of unique cells (bits / refs) of the bounced message.
     pub msg_size: StorageUsedShort,
@@ -347,6 +357,7 @@ pub struct NoFundsBouncePhase {
 
 /// Executed bounce phase info.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ExecutedBouncePhase {
     /// The total number of unique cells (bits / refs) of the bounced message.
     pub msg_size: StorageUsedShort,

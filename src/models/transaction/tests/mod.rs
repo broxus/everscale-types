@@ -4,6 +4,17 @@ use crate::prelude::{Boc, Cell, CellBuilder};
 fn check_tx(boc: &[u8]) -> Cell {
     let boc = Boc::decode(boc).unwrap();
     let tx = boc.parse::<Transaction>().unwrap();
+
+    #[cfg(feature = "serde")]
+    {
+        let json = serde_json::to_string_pretty(&tx).unwrap();
+        println!("{json}");
+
+        let parsed = serde_json::from_str::<Transaction>(&json).unwrap();
+        let parsed_boc = CellBuilder::build_from(&parsed).unwrap();
+        assert_eq!(boc.repr_hash(), parsed_boc.repr_hash());
+    }
+
     println!("tx: {tx:#?}");
 
     let in_msg = tx.load_in_msg().unwrap();

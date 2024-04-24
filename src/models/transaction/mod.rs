@@ -19,6 +19,7 @@ mod tests;
 
 /// Blockchain transaction.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Transaction {
     /// Account on which this transaction was produced.
     pub account: HashBytes,
@@ -37,8 +38,10 @@ pub struct Transaction {
     /// Account status after this transaction.
     pub end_status: AccountStatus,
     /// Optional incoming message.
+    #[cfg_attr(feature = "serde", serde(with = "serde_in_msg"))]
     pub in_msg: Option<Cell>,
     /// Outgoing messages.
+    #[cfg_attr(feature = "serde", serde(with = "serde_out_msgs"))]
     pub out_msgs: Dict<Uint15, Cell>,
     /// Total transaction fees (including extra fwd fees).
     pub total_fees: CurrencyCollection,
@@ -75,6 +78,99 @@ impl Transaction {
     pub fn iter_out_msgs(&'_ self) -> TxOutMsgIter<'_> {
         TxOutMsgIter {
             inner: self.out_msgs.raw_values(),
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+mod serde_in_msg {
+    use super::*;
+
+    pub fn serialize<S>(in_msg: &Option<Cell>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        if serializer.is_human_readable() {
+            match in_msg {
+                Some(in_msg) => {
+                    let message = ok!(in_msg.parse::<Message>().map_err(serde::ser::Error::custom));
+                    serializer.serialize_some(&message)
+                }
+                None => serializer.serialize_none(),
+            }
+        } else {
+            crate::boc::OptionBoc::serialize(in_msg, serializer)
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Cell>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{Deserialize, Error};
+
+        if deserializer.is_human_readable() {
+            match ok!(Option::<crate::models::OwnedMessage>::deserialize(
+                deserializer
+            )) {
+                Some(message) => CellBuilder::build_from(&message)
+                    .map_err(Error::custom)
+                    .map(Some),
+                None => Ok(None),
+            }
+        } else {
+            crate::boc::OptionBoc::deserialize(deserializer)
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+mod serde_out_msgs {
+    use super::*;
+
+    pub fn serialize<S>(out_msgs: &Dict<Uint15, Cell>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::{Error, SerializeMap};
+
+        if serializer.is_human_readable() {
+            let mut map = ok!(serializer.serialize_map(None));
+            for entry in out_msgs.iter() {
+                match entry {
+                    Ok((key, value)) => {
+                        let message = ok!(value.parse::<Message>().map_err(Error::custom));
+                        ok!(map.serialize_entry(&key, &message));
+                    }
+                    Err(e) => return Err(Error::custom(e)),
+                }
+            }
+            map.end()
+        } else {
+            crate::boc::BocRepr::serialize(out_msgs, serializer)
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Dict<Uint15, Cell>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{Deserialize, Error};
+
+        if deserializer.is_human_readable() {
+            let messages = ok!(
+                ahash::HashMap::<Uint15, crate::models::OwnedMessage>::deserialize(deserializer)
+            );
+
+            let cx = &mut Cell::empty_context();
+            let mut dict = Dict::new();
+            for (key, value) in &messages {
+                let cell = ok!(CellBuilder::build_from(value).map_err(Error::custom));
+                ok!(dict.set_ext(*key, cell, cx).map_err(Error::custom));
+            }
+            Ok(dict)
+        } else {
+            crate::boc::BocRepr::deserialize(deserializer)
         }
     }
 }
@@ -179,6 +275,8 @@ impl<'a> Load<'a> for Transaction {
 
 /// Detailed transaction info.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "ty"))]
 pub enum TxInfo {
     /// Ordinary transaction info.
     Ordinary(OrdinaryTxInfo),
@@ -226,6 +324,7 @@ impl<'a> Load<'a> for TxInfo {
 
 /// Ordinary transaction info.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OrdinaryTxInfo {
     /// Whether the credit phase was executed first
     /// (usually set when incoming message has `bounce: false`).
@@ -301,6 +400,7 @@ impl<'a> Load<'a> for OrdinaryTxInfo {
 
 /// Tick-tock transaction info.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TickTockTxInfo {
     /// Tick-tock transaction execution edge.
     pub kind: TickTock,
@@ -395,6 +495,7 @@ impl<'a> Load<'a> for TickTock {
 
 /// Account state hash update.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[tlb(tag = "#72")]
 pub struct HashUpdate {
     /// Old account state hash.

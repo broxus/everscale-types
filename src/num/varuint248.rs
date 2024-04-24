@@ -1,4 +1,5 @@
 use std::mem::MaybeUninit;
+use std::str::FromStr;
 
 use crate::cell::{CellBuilder, CellContext, CellSlice, CellSliceSize, ExactSize, Load, Store};
 use crate::error::Error;
@@ -62,6 +63,11 @@ impl VarUint248 {
         }
     }
 
+    /// Converts a string slice in a given base to an integer.
+    pub fn from_str_radix(src: &str, radix: u32) -> Result<Self, std::num::ParseIntError> {
+        from_str_radix(src, radix, None)
+    }
+
     /// Returns `true` if an underlying primitive integer is zero.
     #[inline]
     pub const fn is_zero(&self) -> bool {
@@ -123,6 +129,26 @@ impl VarUint248 {
         }
     }
 
+    /// Checked integer multiplication. Computes `self * rhs`,
+    /// returning `None` if overflow occurred.
+    pub fn checked_mul(&self, rhs: &Self) -> Option<Self> {
+        let mut res = umulddi3(self.low(), rhs.low());
+
+        let (hi_lo, overflow_hi_lo) = self.high().overflowing_mul(*rhs.low());
+        let (lo_hi, overflow_lo_hi) = self.low().overflowing_mul(*rhs.high());
+        let (hi, overflow_hi) = hi_lo.overflowing_add(lo_hi);
+        let (high, overflow_high) = res.high().overflowing_add(hi);
+        *res.high_mut() = high;
+
+        let overflow_hi_hi = (*self.high() != 0) & (*rhs.high() != 0);
+
+        if overflow_hi_lo || overflow_lo_hi || overflow_hi || overflow_high || overflow_hi_hi {
+            None
+        } else {
+            Some(res)
+        }
+    }
+
     /// The lower part of the integer.
     pub const fn low(&self) -> &u128 {
         &self.0[0]
@@ -157,6 +183,19 @@ impl VarUint248 {
         lo as _
     }
 }
+
+macro_rules! impl_from {
+    ($($ty:ty),*$(,)?) => {
+        $(impl From<$ty> for VarUint248 {
+            #[inline]
+            fn from(value: $ty) -> Self {
+                Self::new(value as _)
+            }
+        })*
+    };
+}
+
+impl_from! { u8, u16, u32, u64, u128, usize }
 
 impl ExactSize for VarUint248 {
     #[inline]
@@ -229,6 +268,63 @@ impl<'a> Load<'a> for VarUint248 {
         match super::load_u128(slice, bytes) {
             Ok(lo) => Ok(Self::from_words(hi, lo)),
             Err(e) => Err(e),
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for VarUint248 {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        if serializer.is_human_readable() {
+            serializer.collect_str(self)
+        } else {
+            self.0.serialize(serializer)
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for VarUint248 {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{Error, Unexpected, Visitor};
+
+        struct VarUint248Visitor;
+
+        impl<'de> Visitor<'de> for VarUint248Visitor {
+            type Value = VarUint248;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a formatted 248-bit integer")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                from_str_radix(v, 10, None).map_err(Error::custom)
+            }
+
+            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                let Ok(string) = std::str::from_utf8(v) else {
+                    return Err(Error::invalid_value(Unexpected::Bytes(v), &self));
+                };
+                self.visit_str(string)
+            }
+        }
+
+        if deserializer.is_human_readable() {
+            deserializer.deserialize_str(VarUint248Visitor)
+        } else {
+            <_>::deserialize(deserializer).map(Self)
         }
     }
 }
@@ -489,27 +585,6 @@ impl std::ops::MulAssign<&Self> for VarUint248 {
     fn mul_assign(&mut self, rhs: &Self) {
         // See https://github.com/nlordell/ethnum-rs/blob/main/src/intrinsics/native/mul.rs
 
-        #[inline]
-        pub fn umulddi3(a: &u128, b: &u128) -> VarUint248 {
-            const BITS_IN_DWORD_2: u32 = 64;
-            const LOWER_MASK: u128 = u128::MAX >> BITS_IN_DWORD_2;
-
-            let mut low = (a & LOWER_MASK) * (b & LOWER_MASK);
-            let mut t = low >> BITS_IN_DWORD_2;
-            low &= LOWER_MASK;
-            t += (a >> BITS_IN_DWORD_2) * (b & LOWER_MASK);
-            low += (t & LOWER_MASK) << BITS_IN_DWORD_2;
-            let mut high = t >> BITS_IN_DWORD_2;
-            t = low >> BITS_IN_DWORD_2;
-            low &= LOWER_MASK;
-            t += (b >> BITS_IN_DWORD_2) * (a & LOWER_MASK);
-            low += (t & LOWER_MASK) << BITS_IN_DWORD_2;
-            high += t >> BITS_IN_DWORD_2;
-            high += (a >> BITS_IN_DWORD_2) * (b >> BITS_IN_DWORD_2);
-
-            VarUint248::from_words(high, low)
-        }
-
         let mut r = umulddi3(self.low(), rhs.low());
         let a_hi_mul_b_lo = self.high().wrapping_mul(*rhs.low());
         let a_lo_mul_b_hi = self.low().wrapping_mul(*rhs.high());
@@ -629,6 +704,27 @@ impl std::ops::RemAssign<&Self> for VarUint248 {
         let r = unsafe { &mut *(self as *mut Self).cast() };
         udivmod(&mut res, &a, b, Some(r));
     }
+}
+
+#[inline]
+pub fn umulddi3(a: &u128, b: &u128) -> VarUint248 {
+    const BITS_IN_DWORD_2: u32 = 64;
+    const LOWER_MASK: u128 = u128::MAX >> BITS_IN_DWORD_2;
+
+    let mut low = (a & LOWER_MASK) * (b & LOWER_MASK);
+    let mut t = low >> BITS_IN_DWORD_2;
+    low &= LOWER_MASK;
+    t += (a >> BITS_IN_DWORD_2) * (b & LOWER_MASK);
+    low += (t & LOWER_MASK) << BITS_IN_DWORD_2;
+    let mut high = t >> BITS_IN_DWORD_2;
+    t = low >> BITS_IN_DWORD_2;
+    low &= LOWER_MASK;
+    t += (b >> BITS_IN_DWORD_2) * (a & LOWER_MASK);
+    low += (t & LOWER_MASK) << BITS_IN_DWORD_2;
+    high += t >> BITS_IN_DWORD_2;
+    high += (a >> BITS_IN_DWORD_2) * (b >> BITS_IN_DWORD_2);
+
+    VarUint248::from_words(high, low)
 }
 
 fn udivmod(
@@ -1034,6 +1130,91 @@ fn fmt_var_uint248(mut n: VarUint248, f: &mut std::fmt::Formatter) -> std::fmt::
     f.pad_integral(true, "", buf_slice)
 }
 
+impl FromStr for VarUint248 {
+    type Err = std::num::ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        from_str_radix(s, 10, None)
+    }
+}
+
+fn from_str_radix(
+    src: &str,
+    radix: u32,
+    prefix: Option<&str>,
+) -> Result<VarUint248, std::num::ParseIntError> {
+    use std::num::IntErrorKind::*;
+
+    // See https://github.com/nlordell/ethnum-rs/blob/main/src/parse.rs
+
+    const fn pie(kind: std::num::IntErrorKind) -> std::num::ParseIntError {
+        unsafe { std::mem::transmute(kind) }
+    }
+
+    assert!(
+        (2..=36).contains(&radix),
+        "from_str_radix_int: must lie in the range `[2, 36]` - found {radix}",
+    );
+
+    if src.is_empty() {
+        return Err(pie(Empty));
+    }
+
+    // all valid digits are ascii, so we will just iterate over the utf8 bytes
+    // and cast them to chars. .to_digit() will safely return None for anything
+    // other than a valid ascii digit for the given radix, including the first-byte
+    // of multi-byte sequences
+    let src = src.as_bytes();
+
+    let prefixed_digits = match src[0] {
+        b'+' | b'-' if src[1..].is_empty() => {
+            return Err(pie(InvalidDigit));
+        }
+        b'+' => &src[1..],
+        _ => src,
+    };
+
+    let digits = match prefix {
+        Some(prefix) => prefixed_digits
+            .strip_prefix(prefix.as_bytes())
+            .ok_or(pie(InvalidDigit))?,
+        None => prefixed_digits,
+    };
+    if digits.is_empty() {
+        return Err(pie(InvalidDigit));
+    }
+
+    let mut result = VarUint248::ZERO;
+
+    if radix <= 16 && digits.len() <= 64 {
+        for &c in digits {
+            result *= radix as u128;
+            let Some(x) = (c as char).to_digit(radix) else {
+                return Err(pie(InvalidDigit));
+            };
+            result += x as u128;
+        }
+    } else {
+        for &c in digits {
+            match result.checked_mul(&VarUint248::from(radix)) {
+                Some(mul) => result = mul,
+                None => return Err(pie(PosOverflow)),
+            }
+
+            let Some(x) = (c as char).to_digit(radix) else {
+                return Err(pie(InvalidDigit));
+            };
+
+            match result.checked_add(&VarUint248::from(x)) {
+                Some(add) => result = add,
+                None => return Err(pie(PosOverflow)),
+            }
+        }
+    }
+
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1090,13 +1271,32 @@ mod tests {
 
     #[test]
     fn mul() {
-        assert_eq!(VarUint248::new(6) * VarUint248::new(7), VarUint248::new(42));
-        assert_eq!(VarUint248::MAX * 1, VarUint248::MAX);
-        assert_eq!(VarUint248::MAX * 0, VarUint248::ZERO);
+        assert_eq!(VarUint248::new(6) * 7, VarUint248::new(42));
+        assert_eq!(
+            VarUint248::new(6).checked_mul(&VarUint248::new(7)),
+            Some(VarUint248::new(42))
+        );
+
+        assert_eq!(
+            VarUint248::MAX.checked_mul(&VarUint248::ONE),
+            Some(VarUint248::MAX)
+        );
+        assert_eq!(
+            VarUint248::MAX.checked_mul(&VarUint248::ZERO),
+            Some(VarUint248::ZERO)
+        );
+
         assert_eq!(
             VarUint248::new(u128::MAX) * u128::MAX,
             VarUint248::from_words(!0 << 1, 1),
         );
+        assert_eq!(
+            VarUint248::new(u128::MAX).checked_mul(&VarUint248::new(u128::MAX)),
+            Some(VarUint248::from_words(!0 << 1, 1))
+        );
+
+        assert_eq!(VarUint248::MAX.checked_mul(&VarUint248::new(257)), None);
+        assert_eq!(VarUint248::MAX.checked_mul(&VarUint248::MAX), None);
     }
 
     #[test]
