@@ -38,7 +38,7 @@ impl AddSub for CurrencyCollection {
         }
         for other_value in other.other.as_dict().iter() {
             let (hash, other_value) = other_value?;
-            if let Some(self_value) = self.other.0.get(&hash)? {
+            if let Some(self_value) = self.other.0.get(hash)? {
                 if self_value >= other_value {
                     let (_, self_lo) = self_value.into_words();
                     let (_, other_lo) = other_value.into_words();
@@ -47,13 +47,13 @@ impl AddSub for CurrencyCollection {
                         Some(new_value) => new_value,
                     };
                     let new_value = VarUint248::new(new_value);
-                    self.other.0.set(&hash, new_value)?;
+                    self.other.0.set(hash, new_value)?;
                 } else {
                     return Ok(false);
                 }
             }
         }
-        return Ok(true);
+        Ok(true)
     }
     fn add(&mut self, other: &Self) -> Result<bool, Error> {
         let option = self.tokens.checked_add(other.tokens);
@@ -63,7 +63,7 @@ impl AddSub for CurrencyCollection {
         }
         for other_value in other.other.as_dict().iter() {
             let (hash, other_value) = other_value?;
-            if let Some(self_value) = self.other.0.get(&hash)? {
+            if let Some(self_value) = self.other.0.get(hash)? {
                 let (_, self_lo) = self_value.into_words();
                 let (_, other_lo) = other_value.into_words();
                 let new_value = match self_lo.checked_add(other_lo) {
@@ -71,10 +71,10 @@ impl AddSub for CurrencyCollection {
                     Some(new_value) => new_value,
                 };
                 let new_value = VarUint248::new(new_value);
-                self.other.0.set(&hash, new_value)?;
+                self.other.0.set(hash, new_value)?;
             }
         }
-        return Ok(true);
+        Ok(true)
     }
 }
 

@@ -5,8 +5,11 @@ use crate::num::Uint15;
 
 use crate::models::config::{BlockchainConfig, ValidatorDescription};
 use crate::models::currency::CurrencyCollection;
+#[cfg(feature = "tycho")]
 use crate::models::in_message::ImportFees;
+#[cfg(feature = "tycho")]
 use crate::models::in_message::InMsg;
+#[cfg(feature = "tycho")]
 use crate::models::out_message::OutMsg;
 use crate::models::transaction::{HashUpdate, Transaction};
 use crate::models::Lazy;
@@ -81,7 +84,9 @@ impl BlockExtraBuilder<BlockExtra> {
     }
 }
 
+#[cfg(feature = "tycho")]
 pub(super) type InMsgDescr = AugDict<HashBytes, ImportFees, InMsg>;
+#[cfg(feature = "tycho")]
 pub(super) type OutMsgDescr = AugDict<HashBytes, CurrencyCollection, OutMsg>;
 
 /// Block content.

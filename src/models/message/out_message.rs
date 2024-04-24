@@ -199,7 +199,7 @@ impl OutMsg {
             OutMsg::External(_) => None,
             OutMsg::Immediate(ref x) => Some(*x.out_message_cell().repr_hash()),
             OutMsg::New(ref x) => Some(*x.out_message_cell().repr_hash()),
-            OutMsg::DequeueShort(ref x) => Some(x.msg_env_hash.clone()),
+            OutMsg::DequeueShort(ref x) => Some(x.msg_env_hash),
             OutMsg::DequeueImmediate(ref x) => Some(*x.out_message_cell().repr_hash()),
         }
     }
@@ -244,13 +244,9 @@ impl OutMsg {
     /// Exported value
     pub fn exported_value(&self) -> Result<CurrencyCollection, Error> {
         let mut exported = CurrencyCollection::default();
-        match self {
-            OutMsg::New(ref x) => {
-                let env = x.load_envelope_message()?;
-                exported.tokens += env.fwd_fee_remaining;
-            }
-            // for other types - no value exported
-            _ => (),
+        if let OutMsg::New(ref x) = self {
+            let env = x.load_envelope_message()?;
+            exported.tokens += env.fwd_fee_remaining;
         }
         Ok(exported)
     }
