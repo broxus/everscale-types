@@ -2,7 +2,7 @@ use std::num::NonZeroU32;
 
 use super::*;
 use crate::boc::BocRepr;
-use crate::models::ShardStateUnsplit;
+use crate::models::{ShardIdent, ShardStateUnsplit};
 use crate::prelude::Boc;
 
 #[test]
@@ -304,20 +304,6 @@ fn prod_config() {
 }
 
 #[test]
-fn test_config_param_7() {
-    let master_state =
-        BocRepr::decode::<ShardStateUnsplit, _>(&include_bytes!("test_state_2_master.boc"))
-            .unwrap();
-
-    let custom = master_state.load_custom().unwrap().unwrap();
-    let config = custom.config.get_raw(7).unwrap().unwrap();
-    println!(
-        "{}",
-        Boc::encode_base64(CellBuilder::build_from(config).unwrap())
-    );
-}
-
-#[test]
 fn create_config() {
     let mut config = BlockchainConfig::new_empty(HashBytes([0x55; 32]));
 
@@ -340,6 +326,92 @@ fn create_config() {
         config.get::<ConfigParam0>().unwrap(),
         Some(HashBytes([0x55; 32]))
     );
+}
+
+#[test]
+fn validator_subset() {
+    let master_state =
+        BocRepr::decode::<ShardStateUnsplit, _>(&include_bytes!("test_state_2_master.boc"))
+            .unwrap();
+
+    let mc_state_extra = master_state.load_custom().unwrap().unwrap();
+
+    let new_session_seqno = mc_state_extra.validator_info.catchain_seqno;
+    let cc_config = mc_state_extra.config.get_catchain_config().unwrap();
+    let validator_set = mc_state_extra.config.get_current_validator_set().unwrap();
+
+    let subset = validator_set
+        .compute_subset(ShardIdent::new_full(0), &cc_config, new_session_seqno)
+        .unwrap();
+
+    let expected_list = vec![
+        ValidatorDescription {
+            public_key: "b3fe2cf2e598d9322cd61f7ae442c9318b8bcb6381d8f02f3af82743ce525e8c"
+                .parse()
+                .unwrap(),
+            weight: 1,
+            adnl_addr: None,
+            mc_seqno_since: 0,
+            prev_total_weight: 0,
+        },
+        ValidatorDescription {
+            public_key: "56d25914d4c907af41044c079b37cbdd4e41d1cf9d01d56c57797dac60778e70"
+                .parse()
+                .unwrap(),
+            weight: 1,
+            adnl_addr: None,
+            mc_seqno_since: 0,
+            prev_total_weight: 0,
+        },
+        ValidatorDescription {
+            public_key: "f62d4118e05d5fb57b37c17a4fc641a865c4133437cbfa35812cc5d1e6db85f1"
+                .parse()
+                .unwrap(),
+            weight: 1,
+            adnl_addr: None,
+            mc_seqno_since: 0,
+            prev_total_weight: 0,
+        },
+        ValidatorDescription {
+            public_key: "2bb9f8277868dfb00800ead2fbed23921a33c2696717f6e41c43a78d14984374"
+                .parse()
+                .unwrap(),
+            weight: 1,
+            adnl_addr: None,
+            mc_seqno_since: 0,
+            prev_total_weight: 0,
+        },
+        ValidatorDescription {
+            public_key: "45e7cc7a12af73baf6fd71041ce9ca09757a6dd7f7720eb683dde520dc19e90b"
+                .parse()
+                .unwrap(),
+            weight: 1,
+            adnl_addr: None,
+            mc_seqno_since: 0,
+            prev_total_weight: 0,
+        },
+        ValidatorDescription {
+            public_key: "4a766a1664c2ea41cfb6451c0bff37e23592344ffb36d939e12c556008f15106"
+                .parse()
+                .unwrap(),
+            weight: 1,
+            adnl_addr: None,
+            mc_seqno_since: 0,
+            prev_total_weight: 0,
+        },
+        ValidatorDescription {
+            public_key: "660c4725fd034e49b21f7a3980681da5cba999f24e7f9c7bd48ab8ca1e6c6477"
+                .parse()
+                .unwrap(),
+            weight: 1,
+            adnl_addr: None,
+            mc_seqno_since: 0,
+            prev_total_weight: 0,
+        },
+    ];
+    let expected_hash_short = 2248643272;
+
+    assert_eq!(subset, (expected_list, expected_hash_short));
 }
 
 #[cfg(feature = "serde")]

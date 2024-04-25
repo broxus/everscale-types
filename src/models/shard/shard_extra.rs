@@ -18,7 +18,7 @@ pub struct McStateExtra {
     /// Brief validator info.
     pub validator_info: ValidatorInfo,
     /// A dictionary with previous masterchain blocks.
-    pub prev_blocks: OldMcBlocksInfo,
+    pub prev_blocks: AugDict<u32, KeyMaxLt, KeyBlockRef>,
     /// Whether this state was produced after the key block.
     pub after_key_block: bool,
     /// Optional reference to the latest known key block.
@@ -95,7 +95,7 @@ impl<'a> Load<'a> for McStateExtra {
             shards,
             config,
             validator_info: ok!(ValidatorInfo::load_from(child_slice)),
-            prev_blocks: ok!(OldMcBlocksInfo::load_from(child_slice)),
+            prev_blocks: ok!(AugDict::load_from(child_slice)),
             after_key_block: ok!(child_slice.load_bit()),
             last_key_block: ok!(Option::<BlockRef>::load_from(child_slice)),
             block_create_stats: if flags & 0b01 != 0 {
@@ -137,10 +137,6 @@ pub struct ValidatorBaseInfo {
     pub catchain_seqno: u32,
 }
 
-/// A dictionary with old masterchain blocks by seqno.
-#[derive(Debug, Clone, Store, Load)]
-pub struct OldMcBlocksInfo(AugDict<u32, KeyMaxLt, KeyBlockRef>);
-
 /// Entry value for the [`OldMcBlocksInfo`] dictionary.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
 pub struct KeyBlockRef {
@@ -151,7 +147,7 @@ pub struct KeyBlockRef {
 }
 
 /// Value augmentation for the [`OldMcBlocksInfo`] dictionary.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Store, Load)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Store, Load)]
 pub struct KeyMaxLt {
     /// Has key block in a subtree.
     pub has_key_block: bool,

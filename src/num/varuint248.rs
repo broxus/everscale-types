@@ -77,7 +77,7 @@ impl VarUint248 {
     /// Returns `true` if an underlying primitive integer fits into the repr.
     #[inline]
     pub const fn is_valid(&self) -> bool {
-        self.into_words().0 <= (u128::MAX >> 8)
+        *self.high() <= (u128::MAX >> 8)
     }
 
     /// Returns number of data bits that this struct occupies.
@@ -108,7 +108,7 @@ impl VarUint248 {
         let (hi, carry_c) = self.high().overflowing_add(carry_lo as _);
         let (hi, carry_hi) = hi.overflowing_add(*rhs.high());
 
-        if carry_c || carry_hi {
+        if carry_c || carry_hi || !self.is_valid() {
             None
         } else {
             Some(Self::from_words(hi, lo))
@@ -122,7 +122,7 @@ impl VarUint248 {
         let (hi, carry_c) = self.high().overflowing_sub(carry_lo as _);
         let (hi, carry_hi) = hi.overflowing_sub(*rhs.high());
 
-        if carry_c || carry_hi {
+        if carry_c || carry_hi || !self.is_valid() {
             None
         } else {
             Some(Self::from_words(hi, lo))
@@ -142,7 +142,13 @@ impl VarUint248 {
 
         let overflow_hi_hi = (*self.high() != 0) & (*rhs.high() != 0);
 
-        if overflow_hi_lo || overflow_lo_hi || overflow_hi || overflow_high || overflow_hi_hi {
+        if overflow_hi_lo
+            || overflow_lo_hi
+            || overflow_hi
+            || overflow_high
+            || overflow_hi_hi
+            || !self.is_valid()
+        {
             None
         } else {
             Some(res)
@@ -1218,6 +1224,19 @@ fn from_str_radix(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn valid_range_is_correct() {
+        assert!(VarUint248::ZERO.is_valid());
+        assert!(VarUint248::ONE.is_valid());
+        assert!(VarUint248::new(123123).is_valid());
+        assert!(VarUint248::new(u128::MAX).is_valid());
+        // ...
+        assert!(VarUint248::from_words(u128::MAX >> 8, u128::MAX).is_valid());
+
+        assert!(!VarUint248::from_words(u128::MAX >> 7, u128::MAX).is_valid());
+        assert!(!VarUint248::from_words(u128::MAX, u128::MAX).is_valid());
+    }
 
     #[test]
     fn store_into_cell() {

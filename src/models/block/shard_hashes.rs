@@ -8,7 +8,7 @@ use crate::util::*;
 
 /// A tree of the most recent descriptions for all currently existing shards
 /// for all workchains except the masterchain.
-#[derive(Debug, Clone, Eq, PartialEq, Store, Load, Default)]
+#[derive(Debug, Default, Clone, Eq, PartialEq, Store, Load)]
 pub struct ShardHashes(Dict<i32, Cell>);
 
 impl ShardHashes {

@@ -8,7 +8,7 @@ use crate::models::currency::CurrencyCollection;
 use crate::models::ShardAccount;
 
 /// A dictionary of account states.
-#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[derive(Debug, Default, Clone, Eq, PartialEq, Store, Load)]
 pub struct ShardAccounts(AugDict<HashBytes, DepthBalanceInfo, ShardAccount>);
 
 impl ShardAccounts {
@@ -76,7 +76,7 @@ impl ShardAccounts {
 }
 
 /// Intermediate balance info.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct DepthBalanceInfo {
     /// Depth for which the balance was calculated.
     pub split_depth: u8,
