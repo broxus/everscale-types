@@ -2,6 +2,7 @@
 
 use crate::cell::*;
 use crate::dict::{AugDictSkipValue, Dict};
+use crate::error::Error;
 use crate::num::{Tokens, VarUint248};
 
 /// Amounts collection.
@@ -41,6 +42,19 @@ impl CurrencyCollection {
     /// Returns the number of data bits that this struct occupies.
     pub const fn bit_len(&self) -> u16 {
         self.tokens.unwrap_bit_len() + 1
+    }
+
+    /// Checked currency collection addition.
+    /// Computes `self + rhs` for each currency, returning `Err`
+    /// if overflow occurred or dictionaries had invalid structure.
+    pub fn checked_add(&self, other: &Self) -> Result<Self, Error> {
+        Ok(Self {
+            tokens: match self.tokens.checked_add(other.tokens) {
+                Some(value) => value,
+                None => return Err(Error::IntOverflow),
+            },
+            other: self.other.checked_add(&other.other)?,
+        })
     }
 }
 
@@ -105,6 +119,23 @@ impl ExtraCurrencyCollection {
     /// Returns a mutable reference to the underlying dictionary.
     pub fn as_dict_mut(&mut self) -> &mut Dict<u32, VarUint248> {
         &mut self.0
+    }
+
+    /// Checked extra currency collection addition.
+    /// Computes `self + rhs` for each currency, returning `Err`
+    /// if overflow occurred or dictionaries had invalid structure.
+    pub fn checked_add(&self, other: &Self) -> Result<Self, Error> {
+        let mut result = self.clone();
+        for entry in other.0.iter() {
+            let (currency_id, other) = ok!(entry);
+
+            let existing = ok!(result.as_dict().get(currency_id)).unwrap_or_default();
+            match existing.checked_add(&other) {
+                Some(value) => ok!(result.0.set(currency_id, &value)),
+                None => return Err(Error::IntOverflow),
+            };
+        }
+        Ok(result)
     }
 }
 

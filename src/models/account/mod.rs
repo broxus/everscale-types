@@ -279,6 +279,13 @@ impl<'a> Load<'a> for OptionalAccount {
     }
 }
 
+impl From<Account> for OptionalAccount {
+    #[inline]
+    fn from(value: Account) -> Self {
+        Self(Some(value))
+    }
+}
+
 /// Existing account data.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
