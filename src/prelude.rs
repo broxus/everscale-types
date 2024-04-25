@@ -8,4 +8,7 @@ pub use crate::cell::{
     CellSliceRange, CellSliceSize, CellType, DynCell, EquivalentRepr, ExactSize, HashBytes, Load,
     Store, UsageTree, UsageTreeMode,
 };
-pub use crate::dict::{Dict, RawDict};
+pub use crate::dict::{AugDict, Dict, RawDict};
+
+#[cfg(feature = "serde")]
+pub use crate::boc::OptionBoc;

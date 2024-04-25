@@ -13,6 +13,15 @@ fn check_block(boc: &[u8], expected_shards: Option<Vec<ShardIdent>>) -> Cell {
     println!("block: {block:#?}");
 
     let info = block.load_info().unwrap();
+
+    #[cfg(feature = "serde")]
+    {
+        let json = serde_json::to_string_pretty(&info).unwrap();
+        let parsed: BlockInfo = serde_json::from_str(&json).unwrap();
+        let parsed_boc = CellBuilder::build_from(&parsed).unwrap();
+        assert_eq!(block.info.cell.repr_hash(), parsed_boc.repr_hash());
+    }
+
     println!("info: {info:#?}");
     let prev_ref = info.load_prev_ref().unwrap();
     println!("prev_ref: {prev_ref:#?}");

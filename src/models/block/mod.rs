@@ -253,6 +253,7 @@ impl BlockInfoBuilder<PrevBlockRef> {
 
 /// Block info.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BlockInfo {
     /// Block model version.
     pub version: u32,
@@ -303,6 +304,7 @@ pub struct BlockInfo {
     /// Reference to the masterchain block which was used during the creation of this block.
     pub master_ref: Option<Lazy<BlockRef>>,
     /// Reference to the previous block (or blocks).
+    #[cfg_attr(feature = "serde", serde(with = "serde_prev_block_ref"))]
     pub prev_ref: Cell,
     /// Optional reference to the previous vertical block.
     pub prev_vert_ref: Option<Lazy<BlockRef>>,
@@ -335,14 +337,7 @@ impl BlockInfo {
 
     /// Tries to load a reference to the previous block (or blocks).
     pub fn load_prev_ref(&self) -> Result<PrevBlockRef, Error> {
-        let mut s = ok!(self.prev_ref.as_ref().as_slice());
-        Ok(if unlikely(self.after_merge) {
-            let left = ok!(BlockRef::load_from(&mut ok!(s.load_reference_as_slice())));
-            let right = ok!(BlockRef::load_from(&mut ok!(s.load_reference_as_slice())));
-            PrevBlockRef::AfterMerge { left, right }
-        } else {
-            PrevBlockRef::Single(ok!(BlockRef::load_from(&mut s)))
-        })
+        PrevBlockRef::load_from_cell(&self.prev_ref, self.after_merge)
     }
 }
 
@@ -483,8 +478,45 @@ impl<'a> Load<'a> for BlockInfo {
     }
 }
 
+#[cfg(feature = "serde")]
+mod serde_prev_block_ref {
+    use super::*;
+
+    pub fn serialize<S: serde::Serializer>(value: &Cell, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::{Error, Serialize};
+
+        if serializer.is_human_readable() {
+            let prev_block_ref = ok!(PrevBlockRef::load_from_cell(
+                value,
+                value.reference_count() > 0
+            )
+            .map_err(Error::custom));
+            prev_block_ref.serialize(serializer)
+        } else {
+            crate::boc::Boc::serialize(value, serializer)
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Cell, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{Deserialize, Error};
+
+        if deserializer.is_human_readable() {
+            PrevBlockRef::deserialize(deserializer).and_then(|prev_block_ref| {
+                CellBuilder::build_from(prev_block_ref).map_err(Error::custom)
+            })
+        } else {
+            crate::boc::Boc::deserialize(deserializer)
+        }
+    }
+}
+
 /// Reference to the previous block.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "type", content = "id"))]
 pub enum PrevBlockRef {
     /// Reference to the parent block (simple case).
     Single(BlockRef),
@@ -505,8 +537,34 @@ pub enum PrevBlockRef {
     },
 }
 
+impl PrevBlockRef {
+    fn load_from_cell(value: &Cell, after_merge: bool) -> Result<Self, Error> {
+        let mut s = ok!(value.as_slice());
+        Ok(if unlikely(after_merge) {
+            let left = ok!(BlockRef::load_from(&mut ok!(s.load_reference_as_slice())));
+            let right = ok!(BlockRef::load_from(&mut ok!(s.load_reference_as_slice())));
+            PrevBlockRef::AfterMerge { left, right }
+        } else {
+            PrevBlockRef::Single(ok!(BlockRef::load_from(&mut s)))
+        })
+    }
+}
+
+impl Store for PrevBlockRef {
+    fn store_into(&self, builder: &mut CellBuilder, cx: &mut dyn CellContext) -> Result<(), Error> {
+        match self {
+            PrevBlockRef::Single(block_ref) => block_ref.store_into(builder, cx),
+            PrevBlockRef::AfterMerge { left, right } => {
+                ok!(builder.store_reference(ok!(CellBuilder::build_from_ext(left, cx))));
+                builder.store_reference(ok!(CellBuilder::build_from_ext(right, cx)))
+            }
+        }
+    }
+}
+
 /// Reference to the external block.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BlockRef {
     /// The end of the logical time of the referenced block.
     pub end_lt: u64,
@@ -532,6 +590,7 @@ impl BlockRef {
 
 /// Tokens flow info.
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ValueFlow {
     /// Total amount transferred from the previous block.
     pub from_prev_block: CurrencyCollection,

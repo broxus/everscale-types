@@ -82,6 +82,16 @@ impl SetMode {
     }
 }
 
+/// A type for a comparator function for [`AugDict`].
+///
+/// ## Args
+/// - `left` - a left branch data.
+/// - `right` - a right branch data.
+/// - `builder` - a builder to write the result.
+/// - `context` - a cell context.
+pub type AugDictFn =
+    fn(&mut CellSlice, &mut CellSlice, &mut CellBuilder, &mut dyn CellContext) -> Result<(), Error>;
+
 /// Removes the value associated with key in dictionary.
 /// Returns a tuple with a new dictionary cell and an optional removed value.
 pub fn dict_remove_owned(
@@ -99,15 +109,79 @@ pub fn dict_remove_owned(
         return Ok(None);
     };
 
+    let Some((mut stack, removed, prev_key_bit_len)) =
+        ok!(dict_find_value_to_remove(root, key, context))
+    else {
+        return Ok(None);
+    };
+
+    // Rebuild the leaf node
+    let value = if let Some(last) = stack.pop() {
+        let (leaf, value) = ok!(last.rebuild_as_removed(key, prev_key_bit_len, context));
+        *dict = Some(ok!(rebuild_dict_from_stack(stack, leaf, context)));
+        value
+    } else {
+        let value = root.clone();
+        *dict = None;
+        value
+    };
+
+    Ok(Some((value, removed)))
+}
+
+/// Removes the value associated with key in aug dictionary.
+/// Returns a tuple with a new dictionary cell and an optional removed value.
+pub fn aug_dict_remove_owned(
+    dict: &mut Option<Cell>,
+    key: &mut CellSlice,
+    key_bit_len: u16,
+    allow_subtree: bool,
+    comparator: AugDictFn,
+    context: &mut dyn CellContext,
+) -> Result<Option<CellSliceParts>, Error> {
+    if !allow_subtree && key.remaining_bits() != key_bit_len {
+        return Err(Error::CellUnderflow);
+    }
+
+    let Some(root) = &dict else {
+        return Ok(None);
+    };
+
+    let Some((mut stack, removed, prev_key_bit_len)) =
+        ok!(dict_find_value_to_remove(root, key, context))
+    else {
+        return Ok(None);
+    };
+
+    // Rebuild the leaf node
+    let value = if let Some(last) = stack.pop() {
+        let (leaf, value) = ok!(last.rebuild_as_removed(key, prev_key_bit_len, context));
+        *dict = Some(ok!(rebuild_aug_dict_from_stack(
+            stack, leaf, comparator, context,
+        )));
+        value
+    } else {
+        let value = root.clone();
+        *dict = None;
+        value
+    };
+
+    Ok(Some((value, removed)))
+}
+
+fn dict_find_value_to_remove<'a>(
+    root: &'a Cell,
+    key: &mut CellSlice,
+    context: &mut dyn CellContext,
+) -> Result<Option<(Vec<Segment<'a>>, CellSliceRange, u16)>, Error> {
     // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok
     let mut data = ok!(context.load_dyn_cell(root.as_ref(), LoadMode::Full));
 
     let mut stack = Vec::<Segment>::new();
 
-    // Find the node with value
     let mut prev_key_bit_len = key.remaining_bits();
     let removed = loop {
-        let mut remaining_data = ok!(data.as_slice());
+        let mut remaining_data: CellSlice<'_> = ok!(data.as_slice());
 
         // Read the next part of the key from the current data
         let prefix = &mut ok!(read_label(&mut remaining_data, key.remaining_bits()));
@@ -119,7 +193,7 @@ pub fn dict_remove_owned(
             std::cmp::Ordering::Equal => break remaining_data.range(),
             // LCP is less than prefix, an edge to slice was found
             std::cmp::Ordering::Less if lcp.remaining_bits() < prefix.remaining_bits() => {
-                return Ok(None)
+                return Ok(None);
             }
             // The key contains the entire prefix, but there are still some bits left
             std::cmp::Ordering::Less => {
@@ -142,7 +216,11 @@ pub fn dict_remove_owned(
                 };
 
                 // Push an intermediate edge to the stack
-                stack.push(Segment { data, next_branch });
+                stack.push(Segment {
+                    data,
+                    next_branch,
+                    key_bit_len: prev_key_bit_len,
+                });
                 data = child;
             }
             std::cmp::Ordering::Greater => {
@@ -152,63 +230,11 @@ pub fn dict_remove_owned(
         }
     };
 
-    // Rebuild the leaf node
-    let (leaf, removed) = if let Some(last) = stack.pop() {
-        let index = last.next_branch as u8;
-
-        // Load value branch
-        let Some(value) = last.data.reference_cloned(index) else {
-            return Err(Error::CellUnderflow);
-        };
-        // NOTE: do not use gas here as it was accounted while loading `child` in previous block.
-        // TODO: change mode to `LoadMode::Noop` if copy-on-write for libraries is not ok.
-        let value = ok!(context.load_cell(value, LoadMode::Resolve));
-
-        // Load parent label
-        let pfx = {
-            // SAFETY: `last.data` was already checked for pruned branch access.
-            let mut parent = unsafe { last.data.as_slice_unchecked() };
-            ok!(read_label(&mut parent, prev_key_bit_len))
-        };
-
-        // Load the opposite branch
-        let mut opposite = match last.data.reference(1 - index) {
-            // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok.
-            Some(cell) => ok!(context
-                .load_dyn_cell(cell, LoadMode::Full)
-                .and_then(CellSlice::new)),
-            None => return Err(Error::CellUnderflow),
-        };
-        let rem = ok!(read_label(&mut opposite, key.remaining_bits()));
-
-        // Build an edge cell
-        let mut builder = CellBuilder::new();
-        ok!(write_label_parts(
-            &pfx,
-            index == 0,
-            &rem,
-            prev_key_bit_len,
-            &mut builder
-        ));
-        ok!(builder.store_slice(opposite));
-        let leaf = ok!(builder.build_ext(context));
-
-        // Return the new cell and the removed one
-        (leaf, (value, removed))
-    } else {
-        let value = root.clone();
-        *dict = None;
-        return Ok(Some((value, removed)));
-    };
-
-    *dict = Some(ok!(rebuild_dict_from_stack(stack, leaf, context)));
-    Ok(Some(removed))
+    Ok(Some((stack, removed, prev_key_bit_len)))
 }
 
 /// Inserts the value associated with key in dictionary
 /// in accordance with the logic of the specified [`SetMode`].
-///
-/// Returns a tuple with a new dict root, and changed flag.
 pub fn dict_insert(
     dict: &mut Option<Cell>,
     key: &mut CellSlice,
@@ -276,6 +302,7 @@ pub fn dict_insert(
                 }
 
                 // Remove the LCP from the key
+                let key_bit_len = key.remaining_bits();
                 key.try_advance(lcp.remaining_bits(), 0);
 
                 // Load the next branch
@@ -291,7 +318,11 @@ pub fn dict_insert(
                 };
 
                 // Push an intermediate edge to the stack
-                stack.push(Segment { data, next_branch });
+                stack.push(Segment {
+                    data,
+                    next_branch,
+                    key_bit_len,
+                });
                 data = child;
             }
             std::cmp::Ordering::Greater => {
@@ -302,6 +333,128 @@ pub fn dict_insert(
     };
 
     *dict = Some(ok!(rebuild_dict_from_stack(stack, leaf, context)));
+    Ok(true)
+}
+
+/// Inserts the value associated with key in aug dictionary
+/// in accordance with the logic of the specified [`SetMode`] and comparator for extra
+#[allow(clippy::too_many_arguments)]
+pub fn aug_dict_insert(
+    dict: &mut Option<Cell>,
+    key: &mut CellSlice,
+    key_bit_len: u16,
+    extra: &dyn Store,
+    value: &dyn Store,
+    mode: SetMode,
+    comparator: AugDictFn,
+    context: &mut dyn CellContext,
+) -> Result<bool, Error> {
+    if key.remaining_bits() != key_bit_len {
+        return Err(Error::CellUnderflow);
+    }
+
+    let mut data = match dict.as_ref() {
+        // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok.
+        Some(data) => {
+            ok!(context.load_dyn_cell(data.as_ref(), LoadMode::Full))
+        }
+        None if mode.can_add() => {
+            let cell = ok!(make_leaf_with_extra(
+                key,
+                key_bit_len,
+                extra,
+                value,
+                context
+            ));
+            *dict = Some(cell);
+            return Ok(true);
+        }
+        None => return Ok(false),
+    };
+
+    let mut stack = Vec::<Segment>::new();
+
+    let leaf = loop {
+        let mut remaining_data = ok!(data.as_slice());
+        // Read the next part of the key from the current data
+        let prefix = &mut ok!(read_label(&mut remaining_data, key.remaining_bits()));
+        // Match the prefix with the key
+        let lcp = key.longest_common_data_prefix(prefix);
+        match lcp.remaining_bits().cmp(&key.remaining_bits()) {
+            // If all bits match, an existing value was found
+            std::cmp::Ordering::Equal => {
+                // Check if we can replace the value
+                if !mode.can_replace() {
+                    // TODO: what is the desired behavior for root as a library?
+                    return Ok(false);
+                }
+                // Replace the existing value
+                break ok!(make_leaf_with_extra(
+                    prefix,
+                    key.remaining_bits(),
+                    extra,
+                    value,
+                    context
+                ));
+            }
+            // LCP is less than prefix, an edge to slice was found
+            std::cmp::Ordering::Less if lcp.remaining_bits() < prefix.remaining_bits() => {
+                // Check if we can add a new value
+                if !mode.can_add() {
+                    // TODO: what is the desired behavior for root as a library?
+                    return Ok(false);
+                }
+                break ok!(split_aug_edge(
+                    &mut remaining_data,
+                    prefix,
+                    &lcp,
+                    key,
+                    extra,
+                    value,
+                    comparator,
+                    context,
+                ));
+            }
+            // The key contains the entire prefix, but there are still some bits left
+            std::cmp::Ordering::Less => {
+                // Fail fast if there are not enough references in the fork
+                if data.reference_count() != 2 {
+                    return Err(Error::CellUnderflow);
+                }
+
+                // Remove the LCP from the key
+                let key_bit_len = key.remaining_bits();
+                key.try_advance(lcp.remaining_bits(), 0);
+                // Load the next branch
+                let next_branch = match key.load_bit() {
+                    Ok(bit) => Branch::from(bit),
+                    Err(e) => return Err(e),
+                };
+                let child = match data.reference(next_branch as u8) {
+                    // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok
+                    Some(cell) => ok!(context.load_dyn_cell(cell, LoadMode::Full)),
+                    None => return Err(Error::CellUnderflow),
+                };
+
+                // Push an intermediate edge to the stack
+                stack.push(Segment {
+                    data,
+                    next_branch,
+                    key_bit_len,
+                });
+                data = child;
+            }
+            std::cmp::Ordering::Greater => {
+                debug_assert!(false, "LCP of prefix and key can't be greater than key");
+                unsafe { std::hint::unreachable_unchecked() };
+            }
+        }
+    };
+
+    *dict = Some(ok!(rebuild_aug_dict_from_stack(
+        stack, leaf, comparator, context,
+    )));
+
     Ok(true)
 }
 
@@ -323,12 +476,12 @@ pub fn dict_insert_owned(
         mode: LoadMode,
     ) -> Result<Option<Cell>, Error> {
         match stack.last() {
-            Some(Segment { data, next_branch }) => {
-                match data.reference_cloned(*next_branch as u8) {
-                    Some(cell) => context.load_cell(cell, mode).map(Some),
-                    None => Err(Error::CellUnderflow),
-                }
-            }
+            Some(Segment {
+                data, next_branch, ..
+            }) => match data.reference_cloned(*next_branch as u8) {
+                Some(cell) => context.load_cell(cell, mode).map(Some),
+                None => Err(Error::CellUnderflow),
+            },
             None => Ok(None),
         }
     }
@@ -404,6 +557,7 @@ pub fn dict_insert_owned(
                 }
 
                 // Remove the LCP from the key
+                let key_bit_len = key.remaining_bits();
                 key.try_advance(lcp.remaining_bits(), 0);
 
                 // Load the next branch
@@ -419,7 +573,11 @@ pub fn dict_insert_owned(
                 };
 
                 // Push an intermediate edge to the stack
-                stack.push(Segment { data, next_branch });
+                stack.push(Segment {
+                    data,
+                    next_branch,
+                    key_bit_len,
+                });
                 data = child;
             }
             std::cmp::Ordering::Greater => {
@@ -569,6 +727,85 @@ pub fn dict_get_owned(
     })
 }
 
+/// Gets subdictionary by specified prefiex
+/// Returns optional dictionary as Cell representation if specified prefix is present in dictionary
+pub fn dict_get_subdict<'a: 'b, 'b>(
+    dict: Option<&'a Cell>,
+    key_bit_len: u16,
+    prefix: &mut CellSlice<'b>,
+    context: &mut dyn CellContext,
+) -> Result<Option<Cell>, Error> {
+    match dict {
+        None => Ok(None),
+        Some(cell) => {
+            let prefix_len = prefix.remaining_bits();
+            if prefix_len == 0 || key_bit_len < prefix_len {
+                return Ok(Some(cell.clone()));
+            }
+
+            let mut data = match dict {
+                Some(data) => ok!(context
+                    .load_dyn_cell(data.as_ref(), LoadMode::Full)
+                    .and_then(CellSlice::new)),
+                None => return Ok(None),
+            };
+            let mut i = 0;
+
+            // Try to find the required root
+            let subtree = loop {
+                // Read the key part written in the current edge
+                let label = &mut ok!(read_label(&mut data, prefix.remaining_bits()));
+                let lcp = prefix.longest_common_data_prefix(label);
+                match lcp.remaining_bits().cmp(&prefix.remaining_bits()) {
+                    std::cmp::Ordering::Equal => {
+                        //found exact key
+                        let new_leaf = ok!(make_leaf(label, lcp.remaining_bits(), &data, context));
+                        println!(
+                            "ITERATION {} cmp equal new_leaf: {}",
+                            i,
+                            new_leaf.display_data()
+                        );
+                        break new_leaf;
+                    }
+                    std::cmp::Ordering::Less if lcp.remaining_bits() < label.remaining_bits() => {
+                        //have to split edge
+                        let value = ok!(CellBuilder::new().build_ext(context));
+                        let split_edge =
+                            ok!(split_edge(&data, label, &lcp, prefix, &value, context));
+                        break split_edge;
+                    }
+                    std::cmp::Ordering::Less => {
+                        if data.cell().reference_count() != 2 {
+                            return Err(Error::CellUnderflow);
+                        }
+                        prefix.try_advance(lcp.remaining_bits(), 0);
+                        let next_branch = match prefix.load_bit() {
+                            Ok(bit) => Branch::from(bit),
+                            Err(e) => return Err(e),
+                        };
+
+                        let child = match data.cell().reference(next_branch as u8) {
+                            // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok
+                            Some(cell) => ok!(context
+                                .load_dyn_cell(cell, LoadMode::Full)
+                                .and_then(CellSlice::new)),
+                            None => return Err(Error::CellUnderflow),
+                        };
+                        data = child;
+                    }
+                    std::cmp::Ordering::Greater => {
+                        debug_assert!(false, "LCP of prefix and key can't be greater than key");
+                        unsafe { std::hint::unreachable_unchecked() };
+                    }
+                }
+                i += 1;
+            };
+
+            Ok(Some(subtree))
+        }
+    }
+}
+
 /// Returns cell slice parts of the value corresponding to the key.
 pub fn dict_find_owned(
     dict: Option<&Cell>,
@@ -597,7 +834,7 @@ pub fn dict_find_owned(
     let mut result_key = CellBuilder::new();
 
     let mut data = root.as_ref();
-    let mut stack = Vec::<(Segment, u16)>::new();
+    let mut stack = Vec::<Segment>::new();
     let mut prev = None;
 
     // Try to find the required leaf
@@ -639,7 +876,11 @@ pub fn dict_find_owned(
                 };
 
                 // Push an intermediate edge to the stack
-                stack.push((Segment { data, next_branch }, key.remaining_bits()));
+                stack.push(Segment {
+                    data,
+                    next_branch,
+                    key_bit_len: key.remaining_bits(),
+                });
                 prev = Some((data, next_branch));
                 data = child;
             }
@@ -654,12 +895,12 @@ pub fn dict_find_owned(
     if inclusive {
         if let Leaf::Value(value_range) = value_range {
             let cell = match stack.last() {
-                Some((Segment { data, next_branch }, _)) => {
-                    match data.reference_cloned(*next_branch as u8) {
-                        Some(cell) => ok!(context.load_cell(cell, LoadMode::Resolve)),
-                        None => return Err(Error::CellUnderflow),
-                    }
-                }
+                Some(Segment {
+                    data, next_branch, ..
+                }) => match data.reference_cloned(*next_branch as u8) {
+                    Some(cell) => ok!(context.load_cell(cell, LoadMode::Resolve)),
+                    None => return Err(Error::CellUnderflow),
+                },
                 None => root,
             };
 
@@ -684,7 +925,12 @@ pub fn dict_find_owned(
             }
         }
 
-        while let Some((Segment { data, next_branch }, remaining_bits)) = stack.pop() {
+        while let Some(Segment {
+            data,
+            next_branch,
+            key_bit_len: remaining_bits,
+        }) = stack.pop()
+        {
             let prefix_len = key_bit_len - remaining_bits;
             let signed_root = signed && prefix_len == 1;
 
@@ -939,7 +1185,11 @@ pub fn dict_remove_bound_owned(
         };
 
         // Push an intermediate edge to the stack
-        stack.push(Segment { data, next_branch });
+        stack.push(Segment {
+            data,
+            next_branch,
+            key_bit_len: 0,
+        });
         data = child;
     };
 
@@ -994,7 +1244,85 @@ pub fn dict_remove_bound_owned(
     Ok(Some((key, removed)))
 }
 
-// Creates a leaf node
+/// Splits one dectionary into two
+/// Returns two optional dictionaries as CellSlice representation
+pub fn dict_split(
+    dict: Option<&'_ Cell>,
+    key_bit_len: u16,
+    context: &mut dyn CellContext,
+) -> Result<(Option<Cell>, Option<Cell>), Error> {
+    let mut remaining_data = match dict {
+        Some(data) => ok!(context
+            .load_dyn_cell(data.as_ref(), LoadMode::Full)
+            .and_then(CellSlice::new)),
+        None => return Ok((None, None)),
+    };
+
+    let parent_label = ok!(read_label(&mut remaining_data, key_bit_len));
+
+    let left_child = match remaining_data.get_reference_cloned(0u8) {
+        Ok(left_child) => {
+            let mut new_left = CellBuilder::new();
+            ok!(new_left.store_slice(parent_label));
+            ok!(new_left.store_bit(false));
+            ok!(new_left.store_slice(ok!(left_child.as_slice())));
+            Some(ok!(new_left.build()))
+        }
+        Err(_) => None,
+    };
+
+    let right_child = match remaining_data.get_reference_cloned(0u8) {
+        Ok(right_child) => {
+            let mut new_right = CellBuilder::new();
+            ok!(new_right.store_slice(parent_label));
+            ok!(new_right.store_bit(false));
+            ok!(new_right.store_slice(ok!(right_child.as_slice())));
+            Some(ok!(new_right.build()))
+        }
+        Err(_) => None,
+    };
+
+    Ok((left_child, right_child))
+}
+
+///Merges two dictionaries into one (left)
+pub fn dict_merge(
+    left: &mut Option<Cell>,
+    right: &Option<Cell>,
+    key_bit_length: u16,
+    context: &mut dyn CellContext,
+) -> Result<(), Error> {
+    match (&left, right) {
+        (None, None) | (Some(_), None) => return Ok(()),
+        (None, Some(right)) => {
+            *left = Some(right.clone());
+            return Ok(());
+        }
+        (Some(left_cell), Some(right_cell)) => {
+            let bit_len = left_cell.bit_len();
+            if bit_len != right_cell.bit_len() && bit_len != key_bit_length {
+                return Err(Error::InvalidCell); //KEY LENGTH ERROR?
+            }
+
+            let mut right_dict_iter = RawIter::new(right, key_bit_length);
+            while let Some(Ok((key, value))) = right_dict_iter.next() {
+                let current_bit_len = key.bit_len();
+
+                dict_insert(
+                    left,
+                    &mut key.as_data_slice(),
+                    current_bit_len,
+                    &value,
+                    SetMode::Set,
+                    context,
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Creates a leaf node
 fn make_leaf(
     key: &CellSlice,
     key_bit_len: u16,
@@ -1007,7 +1335,22 @@ fn make_leaf(
     builder.build_ext(context)
 }
 
-// Splits an edge or leaf
+/// Creates a leaf node with extra value
+fn make_leaf_with_extra(
+    key: &CellSlice,
+    key_bit_len: u16,
+    extra: &dyn Store,
+    value: &dyn Store,
+    context: &mut dyn CellContext,
+) -> Result<Cell, Error> {
+    let mut builder = CellBuilder::new();
+    ok!(write_label(key, key_bit_len, &mut builder));
+    ok!(extra.store_into(&mut builder, context));
+    ok!(value.store_into(&mut builder, context));
+    builder.build_ext(context)
+}
+
+/// Splits an edge or leaf
 fn split_edge(
     data: &CellSlice,
     prefix: &mut CellSlice,
@@ -1041,6 +1384,56 @@ fn split_edge(
     ok!(write_label(lcp, prev_key_bit_len, &mut builder));
     ok!(builder.store_reference(left));
     ok!(builder.store_reference(right));
+    builder.build_ext(context)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn split_aug_edge(
+    data: &mut CellSlice,
+    prefix: &mut CellSlice,
+    lcp: &CellSlice,
+    key: &mut CellSlice,
+    extra: &dyn Store,
+    value: &dyn Store,
+    comparator: AugDictFn,
+    context: &mut dyn CellContext,
+) -> Result<Cell, Error> {
+    // Advance the key
+    let prev_key_bit_len = key.remaining_bits();
+    if !key.try_advance(lcp.remaining_bits() + 1, 0) {
+        return Err(Error::CellUnderflow);
+    }
+
+    // Read the next bit from the data
+    prefix.try_advance(lcp.remaining_bits(), 0);
+    let old_to_right = ok!(prefix.load_bit());
+
+    // Create a leaf for the old value
+    let mut left = ok!(make_leaf(prefix, key.remaining_bits(), data, context));
+    // Create a leaf for the new value
+    let mut right = ok!(make_leaf_with_extra(
+        key,
+        key.remaining_bits(),
+        extra,
+        value,
+        context
+    ));
+    // The part that starts with 1 goes to the right cell
+    if old_to_right {
+        std::mem::swap(&mut left, &mut right);
+    }
+
+    let left_slice = &mut ok!(left.as_slice());
+    let right_slice = &mut ok!(right.as_slice());
+    ok!(read_label(left_slice, key.remaining_bits()));
+    ok!(read_label(right_slice, key.remaining_bits()));
+
+    // Create fork edge
+    let mut builder = CellBuilder::new();
+    ok!(write_label(lcp, prev_key_bit_len, &mut builder));
+    ok!(builder.store_reference(left.clone()));
+    ok!(builder.store_reference(right.clone()));
+    ok!(comparator(left_slice, right_slice, &mut builder, context));
     builder.build_ext(context)
 }
 
@@ -1140,10 +1533,103 @@ fn rebuild_dict_from_stack(
     Ok(leaf)
 }
 
+fn rebuild_aug_dict_from_stack(
+    mut segments: Vec<Segment<'_>>,
+    mut leaf: Cell,
+    comparator: AugDictFn,
+    context: &mut dyn CellContext,
+) -> Result<Cell, Error> {
+    // Rebuild the tree starting from leaves
+    while let Some(last) = segments.pop() {
+        // Load the opposite branch
+        let (left, right) = match last.next_branch {
+            Branch::Left => match last.data.reference_cloned(1) {
+                Some(cell) => (leaf, cell),
+                None => return Err(Error::CellUnderflow),
+            },
+            Branch::Right => match last.data.reference_cloned(0) {
+                Some(cell) => (cell, leaf),
+                None => return Err(Error::CellUnderflow),
+            },
+        };
+
+        let last_data_slice = ok!(last.data.as_slice());
+        let last_label = ok!(read_label(&mut last_data_slice.clone(), last.key_bit_len));
+
+        let child_key_bit_len = last.key_bit_len - last_label.remaining_bits() - 1;
+
+        let left_slice = &mut left.as_slice()?;
+        let right_slice = &mut right.as_slice()?;
+        ok!(read_label(left_slice, child_key_bit_len));
+        ok!(read_label(right_slice, child_key_bit_len));
+
+        let mut builder = CellBuilder::new();
+        ok!(write_label(&last_label, last.key_bit_len, &mut builder));
+        ok!(builder.store_reference(left.clone()));
+        ok!(builder.store_reference(right.clone()));
+        ok!(comparator(left_slice, right_slice, &mut builder, context));
+        leaf = ok!(builder.build_ext(context));
+    }
+
+    Ok(leaf)
+}
+
 #[derive(Clone, Copy)]
 struct Segment<'a> {
     data: &'a DynCell,
     next_branch: Branch,
+    key_bit_len: u16,
+}
+
+impl Segment<'_> {
+    // Returns the new leaf and the removed leaf
+    fn rebuild_as_removed(
+        self,
+        key: &CellSlice<'_>,
+        prev_key_bit_len: u16,
+        context: &mut dyn CellContext,
+    ) -> Result<(Cell, Cell), Error> {
+        let index = self.next_branch as u8;
+
+        // Load value branch
+        let Some(value) = self.data.reference_cloned(index) else {
+            return Err(Error::CellUnderflow);
+        };
+        // NOTE: do not use gas here as it was accounted while loading `child` in previous block.
+        // TODO: change mode to `LoadMode::Noop` if copy-on-write for libraries is not ok.
+        let value = ok!(context.load_cell(value, LoadMode::Resolve));
+
+        // Load parent label
+        let pfx = {
+            // SAFETY: `self.data` was already checked for pruned branch access.
+            let mut parent = unsafe { self.data.as_slice_unchecked() };
+            ok!(read_label(&mut parent, prev_key_bit_len))
+        };
+
+        // Load the opposite branch
+        let mut opposite = match self.data.reference(1 - index) {
+            // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok.
+            Some(cell) => ok!(context
+                .load_dyn_cell(cell, LoadMode::Full)
+                .and_then(CellSlice::new)),
+            None => return Err(Error::CellUnderflow),
+        };
+        let rem = ok!(read_label(&mut opposite, key.remaining_bits()));
+
+        // Build an edge cell
+        let mut builder = CellBuilder::new();
+        ok!(write_label_parts(
+            &pfx,
+            index == 0,
+            &rem,
+            prev_key_bit_len,
+            &mut builder
+        ));
+        ok!(builder.store_slice(opposite));
+        let leaf = ok!(builder.build_ext(context));
+
+        Ok((leaf, value))
+    }
 }
 
 fn write_label(key: &CellSlice, key_bit_len: u16, label: &mut CellBuilder) -> Result<(), Error> {
@@ -1161,7 +1647,8 @@ fn write_label(key: &CellSlice, key_bit_len: u16, label: &mut CellBuilder) -> Re
 
     if hml_same_len < hml_long_len && hml_same_len < hml_short_len {
         if let Some(bit) = key.test_uniform() {
-            return write_hml_same(bit, remaining_bits, bits_for_len, label);
+            ok!(write_hml_same(bit, remaining_bits, bits_for_len, label));
+            return Ok(());
         }
     }
 
@@ -1172,7 +1659,9 @@ fn write_label(key: &CellSlice, key_bit_len: u16, label: &mut CellBuilder) -> Re
     } else {
         return Err(Error::InvalidData);
     }
-    label.store_slice_data(key)
+
+    ok!(label.store_slice_data(key));
+    Ok(())
 }
 
 fn write_label_parts(

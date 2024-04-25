@@ -156,3 +156,39 @@ impl<'a, T> Load<'a> for Lazy<T> {
         }
     }
 }
+
+#[cfg(feature = "serde")]
+impl<T> serde::Serialize for Lazy<T>
+where
+    for<'a> T: serde::Serialize + Load<'a>,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        if serializer.is_human_readable() {
+            let value = ok!(self.load().map_err(serde::ser::Error::custom));
+            value.serialize(serializer)
+        } else {
+            crate::boc::Boc::serialize(&self.cell, serializer)
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de, T> serde::Deserialize<'de> for Lazy<T>
+where
+    T: serde::Deserialize<'de> + Store,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Lazy<T>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        if deserializer.is_human_readable() {
+            let value = T::deserialize(deserializer)?;
+            Lazy::new(&value).map_err(serde::de::Error::custom)
+        } else {
+            crate::boc::Boc::deserialize(deserializer).map(Lazy::from_raw)
+        }
+    }
+}

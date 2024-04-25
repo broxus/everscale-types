@@ -624,7 +624,7 @@ where
     where
         Q: Borrow<K>,
     {
-        pub fn remove_raw_ext_impl<K>(
+        fn remove_raw_ext_impl<K>(
             root: &mut Option<Cell>,
             key: &K,
             context: &mut dyn CellContext,
@@ -773,6 +773,62 @@ where
             mode,
             context,
         )
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<K, V> serde::Serialize for Dict<K, V>
+where
+    K: serde::Serialize + Store + DictKey,
+    for<'a> V: serde::Serialize + Load<'a>,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::{Error, SerializeMap};
+
+        if serializer.is_human_readable() {
+            let mut ser = serializer.serialize_map(None)?;
+            for ref entry in self.iter() {
+                let (key, value) = match entry {
+                    Ok(entry) => entry,
+                    Err(e) => return Err(Error::custom(e)),
+                };
+                ok!(ser.serialize_entry(key, value));
+            }
+            ser.end()
+        } else {
+            crate::boc::BocRepr::serialize(self, serializer)
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de, K, V> serde::Deserialize<'de> for Dict<K, V>
+where
+    K: serde::Deserialize<'de> + std::hash::Hash + Eq + Store + DictKey,
+    V: serde::Deserialize<'de> + Store,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        if deserializer.is_human_readable() {
+            let map = ok!(ahash::HashMap::<K, V>::deserialize(deserializer));
+
+            // TODO: Build from sorted collection
+            let cx = &mut Cell::empty_context();
+            let mut dict = Dict::new();
+            for (key, value) in map {
+                if let Err(e) = dict.set_ext(key, value, cx) {
+                    return Err(serde::de::Error::custom(e));
+                }
+            }
+            Ok(dict)
+        } else {
+            crate::boc::BocRepr::deserialize(deserializer)
+        }
     }
 }
 

@@ -11,6 +11,7 @@ use crate::models::Lazy;
 
 /// Amount of unique cells and bits for shard states.
 #[derive(Debug, Default, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StorageUsed {
     /// Amount of unique cells.
     pub cells: VarUint56,
@@ -65,6 +66,7 @@ impl StorageUsed {
 
 /// Amount of unique cells and bits.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StorageUsedShort {
     /// Amount of unique cells.
     pub cells: VarUint56,
@@ -82,6 +84,7 @@ impl StorageUsedShort {
 
 /// Storage profile of an account.
 #[derive(Debug, Default, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StorageInfo {
     /// Amount of unique cells and bits which account state occupies.
     pub used: StorageUsed,
@@ -139,6 +142,7 @@ impl<'a> Load<'a> for AccountStatus {
 
 /// Shard accounts entry.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ShardAccount {
     /// Optional reference to account state.
     pub account: Lazy<OptionalAccount>,
@@ -158,6 +162,7 @@ impl ShardAccount {
 
 /// A wrapper for `Option<Account>` with customized representation.
 #[derive(Default, Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OptionalAccount(pub Option<Account>);
 
 impl OptionalAccount {
@@ -276,6 +281,7 @@ impl<'a> Load<'a> for OptionalAccount {
 
 /// Existing account data.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Account {
     /// Account address.
     pub address: IntAddr,
@@ -293,6 +299,7 @@ pub struct Account {
 
 /// State of an existing account.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AccountState {
     /// Account exists but has not yet been deployed.
     Uninit,
@@ -353,14 +360,17 @@ impl<'a> Load<'a> for AccountState {
 
 /// Deployed account state.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StateInit {
     /// Optional split depth for large smart contracts.
     pub split_depth: Option<SplitDepth>,
     /// Optional special contract flags.
     pub special: Option<SpecialFlags>,
     /// Optional contract code.
+    #[cfg_attr(feature = "serde", serde(with = "crate::boc::OptionBoc"))]
     pub code: Option<Cell>,
     /// Optional contract data.
+    #[cfg_attr(feature = "serde", serde(with = "crate::boc::OptionBoc"))]
     pub data: Option<Cell>,
     /// Libraries used in smart-contract.
     pub libraries: Dict<HashBytes, SimpleLib>,
@@ -409,6 +419,7 @@ impl ExactSize for StateInit {
 
 /// Special transactions execution flags.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SpecialFlags {
     /// Account will be called at the beginning of each block.
     pub tick: bool,
@@ -441,9 +452,11 @@ impl<'a> Load<'a> for SpecialFlags {
 
 /// Simple TVM library.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SimpleLib {
     /// Whether this library is accessible from other accounts.
     pub public: bool,
     /// Library code.
+    #[cfg_attr(feature = "serde", serde(with = "crate::boc::Boc"))]
     pub root: Cell,
 }

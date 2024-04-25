@@ -198,7 +198,7 @@ fn simple_config() {
     assert_eq!(
         consensus_config,
         ConsensusConfig {
-            new_catchain_ids: false,
+            new_catchain_ids: true,
             round_candidates: NonZeroU32::new(3).unwrap(),
             next_candidate_delay_ms: 2000,
             consensus_timeout_ms: 16000,
@@ -315,4 +315,49 @@ fn test_config_param_7() {
         "{}",
         Boc::encode_base64(CellBuilder::build_from(config).unwrap())
     );
+}
+
+#[test]
+fn create_config() {
+    let mut config = BlockchainConfig::new_empty(HashBytes([0x55; 32]));
+
+    let prices = GasLimitsPrices {
+        gas_price: 123,
+        gas_limit: 321,
+        special_gas_limit: 234,
+        gas_credit: 432,
+        block_gas_limit: 345,
+        freeze_due_limit: 543,
+        delete_due_limit: 456,
+        flat_gas_limit: 654,
+        flat_gas_price: 567,
+    };
+    config.set_gas_prices(false, &prices).unwrap();
+    assert_eq!(config.get_gas_prices(false).unwrap(), prices);
+
+    config.set::<ConfigParam0>(&HashBytes([0x55; 32])).unwrap();
+    assert_eq!(
+        config.get::<ConfigParam0>().unwrap(),
+        Some(HashBytes([0x55; 32]))
+    );
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn serde() {
+    fn check_config(data: &[u8]) {
+        let data = Boc::decode(data).unwrap();
+
+        let original = data.parse::<BlockchainConfig>().unwrap();
+        let json = serde_json::to_string_pretty(&original).unwrap();
+
+        let parsed: BlockchainConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, original);
+    }
+
+    // Some old config from the network beginning
+    check_config(include_bytes!("old_config.boc"));
+
+    // Current config
+    check_config(include_bytes!("new_config.boc"));
 }

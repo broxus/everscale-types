@@ -1,14 +1,16 @@
 use std::borrow::Borrow;
 use std::marker::PhantomData;
 
+use super::{aug_dict_insert, aug_dict_remove_owned, SetMode};
 use crate::cell::*;
 use crate::error::*;
 use crate::util::*;
 
 use super::raw::*;
 use super::typed::*;
-use super::{read_label, DictKey};
+use super::{read_label, AugDictFn, DictKey};
 
+// TODO: Just use load instead?
 pub(crate) trait AugDictSkipValue<'a> {
     fn skip_value(slice: &mut CellSlice<'a>) -> bool;
 }
@@ -143,6 +145,27 @@ impl<K: DictKey, A, V> AugDict<K, A, V> {
     }
 }
 
+impl<K, A, V> AugDict<K, A, V>
+where
+    K: DictKey,
+    for<'a> A: Default + Load<'a>,
+{
+    fn update_root_extra(&mut self) -> Result<(), Error> {
+        self.extra = match &self.dict.root {
+            Some(root) => {
+                let slice = &mut ok!(root.as_slice());
+                let prefix = ok!(read_label(slice, K::BITS));
+                if prefix.remaining_bits() != K::BITS {
+                    ok!(slice.advance(0, 2));
+                }
+                ok!(A::load_from(slice))
+            }
+            None => A::default(),
+        };
+        Ok(())
+    }
+}
+
 fn load_from_root<'a, A, V>(
     slice: &mut CellSlice<'a>,
     key_bit_len: u16,
@@ -225,58 +248,234 @@ where
     }
 }
 
-// TODO: add support for `extra` in edges
+impl<K, A, V> AugDict<K, A, V>
+where
+    K: Store + DictKey,
+    for<'a> A: Default + Store + Load<'a>,
+    V: Store,
+{
+    /// Sets the augmented value associated with the key in the aug dictionary.
+    ///
+    /// Use [`set_ext`] if you need to use a custom cell context.
+    ///
+    /// [`set_ext`]: AugDict::set_ext
+    pub fn set<Q, E, T>(
+        &mut self,
+        key: Q,
+        aug: E,
+        value: T,
+        comparator: AugDictFn,
+    ) -> Result<bool, Error>
+    where
+        Q: Borrow<K>,
+        E: Borrow<A>,
+        T: Borrow<V>,
+    {
+        self.set_ext(key, aug, value, comparator, &mut Cell::empty_context())
+    }
 
-// impl<K, A, V> AugDict<K, A, V>
-// where
-//     K: Store + DictKey,
-//     A: Store,
-//     V: Store,
-// {
-//     /// Sets the augmented value associated with the key in the dictionary.
-//     ///
-//     /// Use [`set_ext`] if you need to use a custom cell context.
-//     ///
-//     /// [`set_ext`]: AugDict::set_ext
-//     pub fn set<Q, E, T>(&mut self, key: Q, aug: E, value: T) -> Result<(), Error>
-//     where
-//         Q: Borrow<K>,
-//         E: Borrow<A>,
-//         T: Borrow<V>,
-//     {
-//         self.set_ext(key, aug, value, &mut Cell::empty_context())
-//     }
+    /// Sets the value associated with the key in the dictionary.
+    pub fn set_ext<Q, E, T>(
+        &mut self,
+        key: Q,
+        aug: E,
+        value: T,
+        comparator: AugDictFn,
+        context: &mut dyn CellContext,
+    ) -> Result<bool, Error>
+    where
+        Q: Borrow<K>,
+        E: Borrow<A>,
+        T: Borrow<V>,
+    {
+        self.insert_impl(
+            key.borrow(),
+            aug.borrow(),
+            value.borrow(),
+            SetMode::Set,
+            comparator,
+            context,
+        )
+    }
 
-//     /// Sets the augmented value associated with the key in the dictionary
-//     /// only if the key was already present in it.
-//     ///
-//     /// Use [`replace_ext`] if you need to use a custom cell context.
-//     ///
-//     /// [`replace_ext`]: AugDict::replace_ext
-//     pub fn replace<Q, E, T>(&mut self, key: Q, aug: E, value: T) -> Result<(), Error>
-//     where
-//         Q: Borrow<K>,
-//         E: Borrow<A>,
-//         T: Borrow<V>,
-//     {
-//         self.replace_ext(key, aug, value, &mut Cell::empty_context())
-//     }
+    /// Sets the augmented value associated with the key in the aug dictionary
+    /// only if the key was already present in it.
+    ///
+    /// Use [`replace_ext`] if you need to use a custom cell context.
+    ///
+    /// [`replace_ext`]: AugDict::replace_ext
+    pub fn replace<Q, E, T>(
+        &mut self,
+        key: Q,
+        aug: E,
+        value: T,
+        comparator: AugDictFn,
+    ) -> Result<bool, Error>
+    where
+        Q: Borrow<K>,
+        E: Borrow<A>,
+        T: Borrow<V>,
+    {
+        self.replace_ext(key, aug, value, comparator, &mut Cell::empty_context())
+    }
 
-//     /// Sets the value associated with key in dictionary,
-//     /// but only if it is not already present.
-//     ///
-//     /// Use [`add_ext`] if you need to use a custom cell context.
-//     ///
-//     /// [`add_ext`]: AugDict::add_ext
-//     pub fn add<Q, E, T>(&mut self, key: Q, aug: E, value: T) -> Result<(), Error>
-//     where
-//         Q: Borrow<K>,
-//         E: Borrow<A>,
-//         T: Borrow<V>,
-//     {
-//         self.add_ext(key, aug, value, &mut Cell::empty_context())
-//     }
-// }
+    /// Sets the value associated with the key in the dictionary
+    /// only if the key was already present in it.
+    pub fn replace_ext<Q, E, T>(
+        &mut self,
+        key: Q,
+        aug: E,
+        value: T,
+        comparator: AugDictFn,
+        context: &mut dyn CellContext,
+    ) -> Result<bool, Error>
+    where
+        Q: Borrow<K>,
+        E: Borrow<A>,
+        T: Borrow<V>,
+    {
+        self.insert_impl(
+            key.borrow(),
+            aug.borrow(),
+            value.borrow(),
+            SetMode::Replace,
+            comparator,
+            context,
+        )
+    }
+
+    /// Sets the value associated with key in aug dictionary,
+    /// but only if it is not already present.
+    ///
+    /// Use [`add_ext`] if you need to use a custom cell context.
+    ///
+    /// [`add_ext`]: AugDict::add_ext
+    pub fn add<Q, E, T>(
+        &mut self,
+        key: Q,
+        aug: E,
+        value: T,
+        comparator: AugDictFn,
+    ) -> Result<bool, Error>
+    where
+        Q: Borrow<K>,
+        E: Borrow<A>,
+        T: Borrow<V>,
+    {
+        self.add_ext(key, aug, value, comparator, &mut Cell::empty_context())
+    }
+
+    /// Sets the value associated with key in dictionary,
+    /// but only if it is not already present.
+    pub fn add_ext<Q, E, T>(
+        &mut self,
+        key: Q,
+        aug: E,
+        value: T,
+        comparator: AugDictFn,
+        context: &mut dyn CellContext,
+    ) -> Result<bool, Error>
+    where
+        Q: Borrow<K>,
+        E: Borrow<A>,
+        T: Borrow<V>,
+    {
+        self.insert_impl(
+            key.borrow(),
+            aug.borrow(),
+            value.borrow(),
+            SetMode::Add,
+            comparator,
+            context,
+        )
+    }
+
+    /// Removes the value associated with key in aug dictionary.
+    /// Returns an optional removed value as cell slice parts.
+    pub fn remove<Q>(&mut self, key: Q, comparator: AugDictFn) -> Result<Option<(A, V)>, Error>
+    where
+        Q: Borrow<K>,
+        for<'a> A: Load<'a> + 'static,
+        for<'a> V: Load<'a> + 'static,
+    {
+        match ok!(self.remove_raw_ext(key, comparator, &mut Cell::empty_context())) {
+            Some((cell, range)) => {
+                let mut slice = ok!(range.apply(&cell));
+                let extra = ok!(A::load_from(&mut slice));
+                let value = ok!(V::load_from(&mut slice));
+                Ok(Some((extra, value)))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Removes the value associated with key in dictionary.
+    /// Returns an optional removed value as cell slice parts.
+    pub fn remove_raw_ext<Q>(
+        &mut self,
+        key: Q,
+        comparator: AugDictFn,
+        context: &mut dyn CellContext,
+    ) -> Result<Option<CellSliceParts>, Error>
+    where
+        Q: Borrow<K>,
+    {
+        self.remove_impl(key.borrow(), comparator, context)
+    }
+
+    fn insert_impl(
+        &mut self,
+        key: &K,
+        extra: &A,
+        value: &V,
+        mode: SetMode,
+        comparator: AugDictFn,
+        context: &mut dyn CellContext,
+    ) -> Result<bool, Error> {
+        let mut key_builder = CellBuilder::new();
+        ok!(key.store_into(&mut key_builder, &mut Cell::empty_context()));
+        let inserted = ok!(aug_dict_insert(
+            &mut self.dict.root,
+            &mut key_builder.as_data_slice(),
+            K::BITS,
+            extra,
+            value,
+            mode,
+            comparator,
+            context,
+        ));
+
+        if inserted {
+            ok!(self.update_root_extra());
+        }
+
+        Ok(inserted)
+    }
+
+    fn remove_impl(
+        &mut self,
+        key: &K,
+        comparator: AugDictFn,
+        context: &mut dyn CellContext,
+    ) -> Result<Option<(Cell, CellSliceRange)>, Error> {
+        let mut key_builder = CellBuilder::new();
+        ok!(key.store_into(&mut key_builder, &mut Cell::empty_context()));
+        let res = ok!(aug_dict_remove_owned(
+            &mut self.dict.root,
+            &mut key_builder.as_data_slice(),
+            K::BITS,
+            false,
+            comparator,
+            context,
+        ));
+
+        if res.is_some() {
+            ok!(self.update_root_extra());
+        }
+
+        Ok(res)
+    }
+}
 
 impl<K, A, V> AugDict<K, A, V>
 where
@@ -389,106 +588,63 @@ where
     }
 }
 
-// impl<K, A, V> AugDict<K, A, V>
-// where
-//     K: Store + DictKey,
-//     A: Store,
-//     V: Store,
-// {
-//     /// Sets the value associated with the key in the dictionary.
-//     pub fn set_ext<Q, E, T>(
-//         &mut self,
-//         key: Q,
-//         aug: E,
-//         value: T,
-//         context: &mut dyn CellContext,
-//     ) -> Result<(), Error>
-//     where
-//         Q: Borrow<K>,
-//         E: Borrow<A>,
-//         T: Borrow<V>,
-//     {
-//         self.insert_impl(
-//             key.borrow(),
-//             aug.borrow(),
-//             value.borrow(),
-//             SetMode::Set,
-//             context,
-//         )
-//     }
+#[cfg(feature = "serde")]
+impl<K, A, V> serde::Serialize for AugDict<K, A, V>
+where
+    K: serde::Serialize + Store + DictKey,
+    for<'a> A: serde::Serialize + Store + Load<'a>,
+    for<'a> V: serde::Serialize + Load<'a>,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::{Error, SerializeMap};
 
-//     /// Sets the value associated with the key in the dictionary
-//     /// only if the key was already present in it.
-//     pub fn replace_ext<Q, E, T>(
-//         &mut self,
-//         key: Q,
-//         aug: E,
-//         value: T,
-//         context: &mut dyn CellContext,
-//     ) -> Result<(), Error>
-//     where
-//         Q: Borrow<K>,
-//         E: Borrow<A>,
-//         T: Borrow<V>,
-//     {
-//         self.insert_impl(
-//             key.borrow(),
-//             aug.borrow(),
-//             value.borrow(),
-//             SetMode::Replace,
-//             context,
-//         )
-//     }
+        #[derive(serde::Serialize)]
+        struct AugDictHelper<'a, K, A, V>
+        where
+            K: serde::Serialize + Store + DictKey,
+            A: serde::Serialize + Store + Load<'a>,
+            V: serde::Serialize + Load<'a>,
+        {
+            #[serde(serialize_with = "serialize_dict_entries")]
+            entires: &'a AugDict<K, A, V>,
+            extra: &'a A,
+        }
 
-//     /// Sets the value associated with key in dictionary,
-//     /// but only if it is not already present.
-//     pub fn add_ext<Q, E, T>(
-//         &mut self,
-//         key: Q,
-//         aug: E,
-//         value: T,
-//         context: &mut dyn CellContext,
-//     ) -> Result<(), Error>
-//     where
-//         Q: Borrow<K>,
-//         E: Borrow<A>,
-//         T: Borrow<V>,
-//     {
-//         self.insert_impl(
-//             key.borrow(),
-//             aug.borrow(),
-//             value.borrow(),
-//             SetMode::Add,
-//             context,
-//         )
-//     }
+        fn serialize_dict_entries<'a, K, A, V, S>(
+            dict: &'a AugDict<K, A, V>,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+            K: serde::Serialize + Store + DictKey,
+            A: serde::Serialize + Store + Load<'a>,
+            V: serde::Serialize + Load<'a>,
+        {
+            let mut ser = serializer.serialize_map(None)?;
+            for ref entry in dict.iter() {
+                let (key, extra, value) = match entry {
+                    Ok(entry) => entry,
+                    Err(e) => return Err(Error::custom(e)),
+                };
+                ok!(ser.serialize_entry(key, &(extra, value)));
+            }
+            ser.end()
+        }
 
-//     fn insert_impl(
-//         &mut self,
-//         key: &K,
-//         aug: &A,
-//         value: &V,
-//         mode: SetMode,
-//         context: &mut dyn CellContext,
-//     ) -> Result<(), Error>
-//     where
-//         K: Store + DictKey,
-//         A: Store,
-//         V: Store,
-//     {
-//         let key = ok!(serialize_entry(key, context));
-//         let value = ok!(serialize_aug_entry(aug, value, context));
-//         self.dict.root = ok!(dict_insert(
-//             &self.dict.root,
-//             &mut key.as_ref().as_slice(),
-//             K::BITS,
-//             &value.as_ref().as_slice(),
-//             mode,
-//             context,
-//         ));
-//         Ok(())
-//     }
-// }
+        if serializer.is_human_readable() {
+            AugDictHelper {
+                entires: self,
+                extra: &self.extra,
+            }
+            .serialize(serializer)
+        } else {
+            crate::boc::BocRepr::serialize(self, serializer)
+        }
+    }
+}
 
 /// An iterator over the entries of an [`AugDict`].
 ///
@@ -548,72 +704,119 @@ where
     }
 }
 
-// fn serialize_aug_entry<A: Store, V: Store>(
-//     aug: &A,
-//     entry: &V,
-//     context: &mut dyn CellContext,
-// ) -> Result<CellContainer, Error> {
-//     let mut builder = CellBuilder::new();
-//     if aug.store_into(&mut builder, context) && entry.store_into(&mut builder, context) {
-//         if let Some(key) = builder.build_ext(context) {
-//             return Ok(key);
-//         }
-//     }
-//     Err(Error::CellOverflow)
-// }
-
 #[cfg(test)]
 mod tests {
+    use anyhow::Context;
+
     use super::*;
+    use crate::models::{AccountBlock, CurrencyCollection};
     use crate::prelude::Boc;
 
-    // #[test]
-    // fn dict_set() {
-    //     let mut dict = AugDict::<RcCellFamily, u32, bool, u16>::new();
-    //     dict.set(123, false, 0xffff).unwrap();
-    //     assert_eq!(dict.get(123).unwrap(), Some((false, 0xffff)));
+    #[test]
+    fn dict_set() {
+        let mut dict = AugDict::<u32, bool, u16>::new();
+        assert_eq!(*dict.root_extra(), false);
 
-    //     dict.set(123, true, 0xcafe).unwrap();
-    //     assert_eq!(dict.get(123).unwrap(), Some((true, 0xcafe)));
-    // }
+        dict.set(123, false, 0xffff, bool_or_comp).unwrap();
+        assert_eq!(dict.get(123).unwrap(), Some((false, 0xffff)));
+        assert_eq!(*dict.root_extra(), false);
 
-    // #[test]
-    // fn dict_set_complex() {
-    //     let mut dict = AugDict::<RcCellFamily, u32, bool, u32>::new();
-    //     for i in 0..520 {
-    //         dict.set(i, true, 123).unwrap();
-    //     }
-    // }
+        dict.set(123, true, 0xcafe, bool_or_comp).unwrap();
+        assert_eq!(dict.get(123).unwrap(), Some((true, 0xcafe)));
+        assert_eq!(*dict.root_extra(), true);
+    }
 
-    // #[test]
-    // fn dict_replace() {
-    //     let mut dict = AugDict::<RcCellFamily, u32, bool, u16>::new();
-    //     dict.replace(123, false, 0xff).unwrap();
-    //     assert!(!dict.contains_key(123).unwrap());
+    #[test]
+    fn dict_set_complex() {
+        let mut dict = AugDict::<u32, bool, u32>::new();
+        assert_eq!(*dict.root_extra(), false);
 
-    //     dict.set(123, false, 0xff).unwrap();
-    //     assert_eq!(dict.get(123).unwrap(), Some((false, 0xff)));
-    //     dict.replace(123, true, 0xaa).unwrap();
-    //     assert_eq!(dict.get(123).unwrap(), Some((true, 0xaa)));
-    // }
+        for i in 0..520 {
+            dict.set(i, true, 123, bool_or_comp).unwrap();
+        }
+        assert_eq!(*dict.root_extra(), true);
+    }
 
-    // #[test]
-    // fn dict_add() {
-    //     let mut dict = AugDict::<RcCellFamily, u32, bool, u16>::new();
+    #[test]
+    fn dict_replace() {
+        let mut dict = AugDict::<u32, bool, u16>::new();
+        assert_eq!(*dict.root_extra(), false);
+        dict.replace(123, false, 0xff, bool_or_comp).unwrap();
+        assert!(!dict.contains_key(123).unwrap());
+        assert_eq!(*dict.root_extra(), false);
 
-    //     dict.add(123, false, 0x12).unwrap();
-    //     assert_eq!(dict.get(123).unwrap(), Some((false, 0x12)));
+        dict.set(123, false, 0xff, bool_or_comp).unwrap();
+        assert_eq!(dict.get(123).unwrap(), Some((false, 0xff)));
+        assert_eq!(*dict.root_extra(), false);
 
-    //     dict.add(123, true, 0x11).unwrap();
-    //     assert_eq!(dict.get(123).unwrap(), Some((false, 0x12)));
-    // }
+        dict.replace(123, true, 0xaa, bool_or_comp).unwrap();
+        assert_eq!(dict.get(123).unwrap(), Some((true, 0xaa)));
+        assert_eq!(*dict.root_extra(), true);
+    }
+
+    #[test]
+    fn dict_add() {
+        let mut dict = AugDict::<u32, bool, u16>::new();
+        assert_eq!(*dict.root_extra(), false);
+
+        dict.add(123, false, 0x12, bool_or_comp).unwrap();
+        assert_eq!(dict.get(123).unwrap(), Some((false, 0x12)));
+        assert_eq!(*dict.root_extra(), false);
+
+        dict.add(123, true, 0x11, bool_or_comp).unwrap();
+        assert_eq!(dict.get(123).unwrap(), Some((false, 0x12)));
+        assert_eq!(*dict.root_extra(), false);
+    }
+
+    #[test]
+    fn dict_remove() {
+        let mut dict = AugDict::<u32, bool, u32>::new();
+        assert_eq!(*dict.root_extra(), false);
+
+        for i in 0..10 {
+            assert!(dict.set(i, i % 2 == 0, i, bool_or_comp).unwrap());
+        }
+        assert_eq!(*dict.root_extra(), true);
+
+        let mut check_remove = |n: u32, expected: Option<(bool, u32)>| -> anyhow::Result<()> {
+            let removed = dict.remove(n, bool_or_comp).context("Failed to remove")?;
+            anyhow::ensure!(removed == expected);
+            Ok(())
+        };
+
+        check_remove(0, Some((true, 0))).unwrap();
+
+        check_remove(4, Some((true, 4))).unwrap();
+
+        check_remove(9, Some((false, 9))).unwrap();
+        check_remove(9, None).unwrap();
+
+        check_remove(5, Some((false, 5))).unwrap();
+        check_remove(5, None).unwrap();
+
+        check_remove(100, None).unwrap();
+
+        check_remove(1, Some((false, 1))).unwrap();
+        check_remove(2, Some((true, 2))).unwrap();
+        check_remove(3, Some((false, 3))).unwrap();
+        check_remove(6, Some((true, 6))).unwrap();
+        check_remove(7, Some((false, 7))).unwrap();
+        check_remove(8, Some((true, 8))).unwrap();
+
+        assert!(dict.is_empty());
+    }
 
     #[test]
     fn dict_iter() {
-        let boc = Boc::decode_base64("te6ccgEBFAEApAABCYAAAABAAQIDzkAFAgIB1AQDABEAAAACQAAAACAAEQAAAAIAAAAAYAIBIA0GAgEgCgcCASAJCAARAAAAAcAAAACgABEAAAABgAAAAOACASAMCwARAAAAAUAAAAEgABEAAAABAAAAAWACASARDgIBIBAPABEAAAAAwAAAAaAAEQAAAACAAAAB4AIBIBMSABEAAAAAQAAAAiAAEQAAAAAAAAACYA==").unwrap();
-        let dict = boc.parse::<AugDict<u32, u32, u32>>().unwrap();
-
+        let mut dict = AugDict::<u32, u32, u32>::new();
         assert_eq!(*dict.root_extra(), 0);
+
+        let mut expected_extra = 0;
+        for i in 0..10 {
+            expected_extra += i;
+            dict.set(i, i, 9 - i, u32_add_comp).unwrap();
+        }
+        assert_eq!(*dict.root_extra(), expected_extra);
 
         let size = dict.values().count();
         assert_eq!(size, 10);
@@ -624,5 +827,74 @@ mod tests {
             assert_eq!(key, i as u32);
             assert_eq!(value, 9 - i as u32);
         }
+    }
+
+    #[test]
+    fn aug_test() {
+        fn cc_add_comp(
+            left: &mut CellSlice<'_>,
+            right: &mut CellSlice<'_>,
+            b: &mut CellBuilder,
+            cx: &mut dyn CellContext,
+        ) -> Result<(), Error> {
+            let mut left = CurrencyCollection::load_from(left)?;
+            let right = CurrencyCollection::load_from(right)?;
+            left.tokens = left
+                .tokens
+                .checked_add(right.tokens)
+                .ok_or(Error::IntOverflow)?;
+            left.store_into(b, cx)
+        }
+
+        let boc = Boc::decode(include_bytes!("./tests/account_blocks_aug_dict.boc")).unwrap();
+
+        let original_dict = boc
+            .parse::<AugDict<HashBytes, CurrencyCollection, AccountBlock>>()
+            .unwrap();
+
+        let mut data = Vec::new();
+        for i in original_dict.iter() {
+            if let Ok(entry) = i {
+                data.push(entry);
+            }
+        }
+        data.reverse();
+
+        let mut new_dict: AugDict<HashBytes, CurrencyCollection, AccountBlock> = AugDict::new();
+        for (key, aug, value) in data.iter() {
+            new_dict.add(key, aug, value, cc_add_comp).unwrap();
+        }
+        assert_eq!(new_dict.root_extra(), original_dict.root_extra());
+
+        let serialized = CellBuilder::build_from(&new_dict).unwrap();
+        assert_eq!(serialized.repr_hash(), boc.repr_hash());
+
+        for (key, _, _) in data.iter() {
+            new_dict.remove(key, cc_add_comp).unwrap();
+        }
+        assert!(new_dict.is_empty());
+        assert_eq!(new_dict.root_extra(), &CurrencyCollection::ZERO);
+    }
+
+    fn bool_or_comp(
+        left: &mut CellSlice<'_>,
+        right: &mut CellSlice<'_>,
+        b: &mut CellBuilder,
+        _: &mut dyn CellContext,
+    ) -> Result<(), Error> {
+        let left = left.load_bit()?;
+        let right = right.load_bit()?;
+        b.store_bit(left | right)
+    }
+
+    fn u32_add_comp(
+        left: &mut CellSlice<'_>,
+        right: &mut CellSlice<'_>,
+        b: &mut CellBuilder,
+        _: &mut dyn CellContext,
+    ) -> Result<(), Error> {
+        let left = left.load_u32()?;
+        let right = right.load_u32()?;
+        b.store_u32(left.saturating_add(right))
     }
 }

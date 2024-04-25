@@ -284,6 +284,7 @@ impl std::ops::BitOrAssign<GlobalCapability> for GlobalCapabilities {
 
 /// Software info.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[tlb(tag = "#c4")]
 pub struct GlobalVersion {
     /// Software version.
@@ -364,6 +365,83 @@ impl IntoIterator for GlobalCapabilities {
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
         GlobalCapabilitiesIter(self.0)
+    }
+}
+
+impl FromIterator<GlobalCapability> for GlobalCapabilities {
+    fn from_iter<T: IntoIterator<Item = GlobalCapability>>(iter: T) -> Self {
+        let mut res = GlobalCapabilities::default();
+        for item in iter {
+            res |= item;
+        }
+        res
+    }
+}
+
+impl<const N: usize> From<[GlobalCapability; N]> for GlobalCapabilities {
+    fn from(value: [GlobalCapability; N]) -> Self {
+        let mut res = GlobalCapabilities::default();
+        for item in value.iter() {
+            res |= *item;
+        }
+        res
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for GlobalCapabilities {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeSeq;
+
+        if serializer.is_human_readable() {
+            let mut seq = serializer.serialize_seq(Some(self.len()))?;
+            for capability in self.iter() {
+                seq.serialize_element(&capability)?;
+            }
+            seq.end()
+        } else {
+            serializer.serialize_u64(self.0)
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for GlobalCapabilities {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Visitor;
+
+        struct GlobalCapabilitiesVisitor;
+
+        impl<'de> Visitor<'de> for GlobalCapabilitiesVisitor {
+            type Value = GlobalCapabilities;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a list of global capabilities")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let mut res = GlobalCapabilities::default();
+                while let Some(capacility) = ok!(seq.next_element::<GlobalCapability>()) {
+                    res |= capacility;
+                }
+                Ok(res)
+            }
+        }
+
+        if deserializer.is_human_readable() {
+            deserializer.deserialize_seq(GlobalCapabilitiesVisitor)
+        } else {
+            u64::deserialize(deserializer).map(Self)
+        }
     }
 }
 
