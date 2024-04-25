@@ -487,6 +487,11 @@ impl BlockchainConfigParams {
         }
         self.0.remove(id)
     }
+
+    /// Returns a reference to the underlying dictionary.
+    pub fn as_dict(&self) -> &Dict<u32, Cell> {
+        &self.0
+    }
 }
 
 impl Store for BlockchainConfigParams {
