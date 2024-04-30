@@ -22,63 +22,6 @@ impl Default for CurrencyCollection {
     }
 }
 
-/// AddSub trait
-pub trait AddSub {
-    /// sub
-    fn sub(&mut self, other: &Self) -> Result<bool, Error>;
-    /// add
-    fn add(&mut self, other: &Self) -> Result<bool, Error>;
-}
-
-impl AddSub for CurrencyCollection {
-    fn sub(&mut self, other: &Self) -> Result<bool, Error> {
-        let option = self.tokens.checked_sub(other.tokens);
-        match option {
-            Some(t) => self.tokens = t,
-            None => return Ok(false),
-        }
-        for other_value in other.other.as_dict().iter() {
-            let (hash, other_value) = other_value?;
-            if let Some(self_value) = self.other.0.get(hash)? {
-                if self_value >= other_value {
-                    let (_, self_lo) = self_value.into_words();
-                    let (_, other_lo) = other_value.into_words();
-                    let new_value = match self_lo.checked_sub(other_lo) {
-                        None => return Ok(false),
-                        Some(new_value) => new_value,
-                    };
-                    let new_value = VarUint248::new(new_value);
-                    self.other.0.set(hash, new_value)?;
-                } else {
-                    return Ok(false);
-                }
-            }
-        }
-        Ok(true)
-    }
-    fn add(&mut self, other: &Self) -> Result<bool, Error> {
-        let option = self.tokens.checked_add(other.tokens);
-        match option {
-            Some(t) => self.tokens = t,
-            None => return Ok(false),
-        }
-        for other_value in other.other.as_dict().iter() {
-            let (hash, other_value) = other_value?;
-            if let Some(self_value) = self.other.0.get(hash)? {
-                let (_, self_lo) = self_value.into_words();
-                let (_, other_lo) = other_value.into_words();
-                let new_value = match self_lo.checked_add(other_lo) {
-                    None => return Ok(false),
-                    Some(new_value) => new_value,
-                };
-                let new_value = VarUint248::new(new_value);
-                self.other.0.set(hash, new_value)?;
-            }
-        }
-        Ok(true)
-    }
-}
-
 impl CurrencyCollection {
     /// The additive identity for the currency collection
     /// (with empty extra currencies).
@@ -110,8 +53,55 @@ impl CurrencyCollection {
                 Some(value) => value,
                 None => return Err(Error::IntOverflow),
             },
-            other: self.other.checked_add(&other.other)?,
+            other: ok!(self.other.checked_add(&other.other)),
         })
+    }
+
+    /// Checked currency collection subtraction.
+    /// Computes `self - rhs` for each currency, returning `Err`
+    /// if overflow occurred or dictionaries had invalid structure.
+    pub fn checked_sub(&self, other: &Self) -> Result<Self, Error> {
+        Ok(Self {
+            tokens: match self.tokens.checked_sub(other.tokens) {
+                Some(value) => value,
+                None => return Err(Error::IntOverflow),
+            },
+            other: ok!(self.other.checked_sub(&other.other)),
+        })
+    }
+
+    /// Tries to add the specified amount of native tokens to the collection.
+    pub fn try_add_assign_tokens(&mut self, other: Tokens) -> Result<(), Error> {
+        match self.tokens.checked_add(other) {
+            Some(value) => {
+                self.tokens = value;
+                Ok(())
+            }
+            None => Err(Error::IntOverflow),
+        }
+    }
+
+    /// Tries to subtract the specified amount of native tokens from the collection.
+    pub fn try_sub_assign_tokens(&mut self, other: Tokens) -> Result<(), Error> {
+        match self.tokens.checked_sub(other) {
+            Some(value) => {
+                self.tokens = value;
+                Ok(())
+            }
+            None => Err(Error::IntOverflow),
+        }
+    }
+
+    /// Tries to add an other currency collection to the current one.
+    pub fn try_add_assign(&mut self, other: &Self) -> Result<(), Error> {
+        *self = ok!(self.checked_add(other));
+        Ok(())
+    }
+
+    /// Tries to subtract an other currency collection from the current one.
+    pub fn try_sub_assign(&mut self, other: &Self) -> Result<(), Error> {
+        *self = ok!(self.checked_sub(other));
+        Ok(())
     }
 }
 
@@ -188,7 +178,24 @@ impl ExtraCurrencyCollection {
 
             let existing = ok!(result.as_dict().get(currency_id)).unwrap_or_default();
             match existing.checked_add(&other) {
-                Some(value) => ok!(result.0.set(currency_id, &value)),
+                Some(ref value) => ok!(result.0.set(currency_id, value)),
+                None => return Err(Error::IntOverflow),
+            };
+        }
+        Ok(result)
+    }
+
+    /// Checked extra currency subtraction.
+    /// Computes `self - rhs` for each currency, returning `Err`
+    /// if overflow occurred or dictionaries had invalid structure.
+    pub fn checked_sub(&self, other: &Self) -> Result<Self, Error> {
+        let mut result = self.clone();
+        for entry in other.0.iter() {
+            let (currency_id, other) = ok!(entry);
+
+            let existing = ok!(result.as_dict().get(currency_id)).unwrap_or_default();
+            match existing.checked_sub(&other) {
+                Some(ref value) => ok!(result.0.set(currency_id, value)),
                 None => return Err(Error::IntOverflow),
             };
         }

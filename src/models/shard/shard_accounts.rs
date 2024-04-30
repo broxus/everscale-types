@@ -69,7 +69,7 @@ impl ShardAccounts {
         ShardAccountsRawIter::new(self.0.dict().root())
     }
 
-    /// Gets Depth Balance Info
+    /// Returns the root balance info.
     pub fn root_extra(&self) -> &DepthBalanceInfo {
         self.0.root_extra()
     }

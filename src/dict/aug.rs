@@ -715,68 +715,68 @@ mod tests {
     #[test]
     fn dict_set() {
         let mut dict = AugDict::<u32, bool, u16>::new();
-        assert_eq!(*dict.root_extra(), false);
+        assert!(!*dict.root_extra());
 
         dict.set(123, false, 0xffff, bool_or_comp).unwrap();
         assert_eq!(dict.get(123).unwrap(), Some((false, 0xffff)));
-        assert_eq!(*dict.root_extra(), false);
+        assert!(!*dict.root_extra());
 
         dict.set(123, true, 0xcafe, bool_or_comp).unwrap();
         assert_eq!(dict.get(123).unwrap(), Some((true, 0xcafe)));
-        assert_eq!(*dict.root_extra(), true);
+        assert!(*dict.root_extra());
     }
 
     #[test]
     fn dict_set_complex() {
         let mut dict = AugDict::<u32, bool, u32>::new();
-        assert_eq!(*dict.root_extra(), false);
+        assert!(!*dict.root_extra());
 
         for i in 0..520 {
             dict.set(i, true, 123, bool_or_comp).unwrap();
         }
-        assert_eq!(*dict.root_extra(), true);
+        assert!(*dict.root_extra());
     }
 
     #[test]
     fn dict_replace() {
         let mut dict = AugDict::<u32, bool, u16>::new();
-        assert_eq!(*dict.root_extra(), false);
+        assert!(!*dict.root_extra());
         dict.replace(123, false, 0xff, bool_or_comp).unwrap();
         assert!(!dict.contains_key(123).unwrap());
-        assert_eq!(*dict.root_extra(), false);
+        assert!(!*dict.root_extra());
 
         dict.set(123, false, 0xff, bool_or_comp).unwrap();
         assert_eq!(dict.get(123).unwrap(), Some((false, 0xff)));
-        assert_eq!(*dict.root_extra(), false);
+        assert!(!*dict.root_extra());
 
         dict.replace(123, true, 0xaa, bool_or_comp).unwrap();
         assert_eq!(dict.get(123).unwrap(), Some((true, 0xaa)));
-        assert_eq!(*dict.root_extra(), true);
+        assert!(*dict.root_extra());
     }
 
     #[test]
     fn dict_add() {
         let mut dict = AugDict::<u32, bool, u16>::new();
-        assert_eq!(*dict.root_extra(), false);
+        assert!(!*dict.root_extra());
 
         dict.add(123, false, 0x12, bool_or_comp).unwrap();
         assert_eq!(dict.get(123).unwrap(), Some((false, 0x12)));
-        assert_eq!(*dict.root_extra(), false);
+        assert!(!*dict.root_extra());
 
         dict.add(123, true, 0x11, bool_or_comp).unwrap();
         assert_eq!(dict.get(123).unwrap(), Some((false, 0x12)));
-        assert_eq!(*dict.root_extra(), false);
+        assert!(!*dict.root_extra());
     }
 
     #[test]
     fn dict_remove() {
         let mut dict = AugDict::<u32, bool, u32>::new();
-        assert_eq!(*dict.root_extra(), false);
+        assert!(!*dict.root_extra());
 
         for i in 0..10 {
             assert!(dict.set(i, i % 2 == 0, i, bool_or_comp).unwrap());
         }
-        assert_eq!(*dict.root_extra(), true);
+        assert!(*dict.root_extra());
 
         let mut check_remove = |n: u32, expected: Option<(bool, u32)>| -> anyhow::Result<()> {
             let removed = dict.remove(n, bool_or_comp).context("Failed to remove")?;
@@ -853,10 +853,8 @@ mod tests {
             .unwrap();
 
         let mut data = Vec::new();
-        for i in original_dict.iter() {
-            if let Ok(entry) = i {
-                data.push(entry);
-            }
+        for entry in original_dict.iter() {
+            data.push(entry.unwrap());
         }
         data.reverse();
 
