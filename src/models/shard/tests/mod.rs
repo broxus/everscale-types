@@ -14,9 +14,9 @@ fn check_master_state(cell: Cell) {
     );
 
     for entry in shard_accounts.iter() {
-        let (id, shard_state) = entry.unwrap();
+        let (id, depth_balance, shard_state) = entry.unwrap();
         let account = shard_state.load_account().unwrap();
-        println!("{id}: {account:#?}");
+        println!("{id}: {depth_balance:?} {account:#?}");
     }
 
     for (i, entry) in data.libraries.iter().enumerate() {
@@ -29,7 +29,7 @@ fn check_master_state(cell: Cell) {
     }
 
     let _elector = shard_accounts.get([0x33; 32]).unwrap().unwrap();
-    assert!(shard_accounts.contains_account([0x55; 32]).unwrap());
+    assert!(shard_accounts.contains_key([0x55; 32]).unwrap());
 
     let custom = data.load_custom().unwrap().unwrap();
     println!("custom: {custom:#?}");

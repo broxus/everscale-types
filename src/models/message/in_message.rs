@@ -1,4 +1,5 @@
 use crate::cell::*;
+use crate::dict::AugDictExtra;
 use crate::error::Error;
 use crate::models::{
     CurrencyCollection, ExtInMsgInfo, IntMsgInfo, Lazy, Message, MsgEnvelope, MsgInfo,
@@ -13,6 +14,27 @@ pub struct ImportFees {
     pub fees_collected: Tokens,
     /// Value imported from the message.
     pub value_imported: CurrencyCollection,
+}
+
+impl AugDictExtra for ImportFees {
+    fn comp_add(
+        left: &mut CellSlice,
+        right: &mut CellSlice,
+        b: &mut CellBuilder,
+        cx: &mut dyn CellContext,
+    ) -> Result<(), Error> {
+        let left = ok!(Self::load_from(left));
+        let right = ok!(Self::load_from(right));
+
+        Self {
+            fees_collected: ok!(left
+                .fees_collected
+                .checked_add(right.fees_collected)
+                .ok_or(Error::IntOverflow)),
+            value_imported: ok!(left.value_imported.checked_add(&right.value_imported)),
+        }
+        .store_into(b, cx)
+    }
 }
 
 /// Inbound message.

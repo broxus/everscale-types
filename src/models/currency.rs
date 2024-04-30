@@ -1,7 +1,7 @@
 //! Currency collection stuff.
 
 use crate::cell::*;
-use crate::dict::{AugDictSkipValue, Dict};
+use crate::dict::{AugDictExtra, Dict};
 use crate::error::Error;
 use crate::num::{Tokens, VarUint248};
 
@@ -115,17 +115,23 @@ impl From<Tokens> for CurrencyCollection {
     }
 }
 
-impl<'a> AugDictSkipValue<'a> for CurrencyCollection {
-    #[inline]
-    fn skip_value(slice: &mut CellSlice<'a>) -> bool {
-        Tokens::skip_value(slice) && ExtraCurrencyCollection::skip_value(slice)
-    }
-}
-
 impl ExactSize for CurrencyCollection {
     #[inline]
     fn exact_size(&self) -> CellSliceSize {
         self.tokens.exact_size() + self.other.exact_size()
+    }
+}
+
+impl AugDictExtra for CurrencyCollection {
+    fn comp_add(
+        left: &mut CellSlice,
+        right: &mut CellSlice,
+        b: &mut CellBuilder,
+        cx: &mut dyn CellContext,
+    ) -> Result<(), Error> {
+        let left = ok!(Self::load_from(left));
+        let right = ok!(Self::load_from(right));
+        ok!(left.checked_add(&right)).store_into(b, cx)
     }
 }
 
@@ -207,17 +213,6 @@ impl From<Dict<u32, VarUint248>> for ExtraCurrencyCollection {
     #[inline]
     fn from(value: Dict<u32, VarUint248>) -> Self {
         Self(value)
-    }
-}
-
-impl<'a> AugDictSkipValue<'a> for ExtraCurrencyCollection {
-    #[inline]
-    fn skip_value(slice: &mut CellSlice<'a>) -> bool {
-        if let Ok(has_extra) = slice.load_bit() {
-            !has_extra || slice.try_advance(0, 1)
-        } else {
-            false
-        }
     }
 }
 

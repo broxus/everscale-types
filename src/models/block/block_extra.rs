@@ -1,22 +1,16 @@
 use crate::cell::*;
-use crate::dict::{AugDict, AugDictSkipValue, Dict};
+use crate::dict::{AugDict, AugDictExtra, Dict, DictKey};
 use crate::error::Error;
 use crate::num::Uint15;
 
 use crate::models::config::{BlockchainConfig, ValidatorDescription};
 use crate::models::currency::CurrencyCollection;
-#[cfg(feature = "tycho")]
-use crate::models::in_message::ImportFees;
-#[cfg(feature = "tycho")]
-use crate::models::in_message::InMsg;
-#[cfg(feature = "tycho")]
-use crate::models::out_message::OutMsg;
+use crate::models::message::{ImportFees, InMsg, OutMsg};
 use crate::models::transaction::{HashUpdate, Transaction};
-use crate::models::Lazy;
+use crate::models::{Lazy, ShardHashes, ShardIdent};
 
 #[cfg(feature = "venom")]
 use super::ShardBlockRefs;
-use super::ShardHashes;
 
 /// Block info builder.
 #[derive(Debug, Clone)]
@@ -31,8 +25,8 @@ impl BlockExtraBuilder<()> {
     pub fn new(account_blocks: Lazy<AugDict<HashBytes, CurrencyCollection, AccountBlock>>) -> Self {
         Self {
             inner: BlockExtra {
-                in_msg_description: Default::default(),
-                out_msg_description: Default::default(),
+                in_msg_description: Lazy::new(&AugDict::new()).unwrap(),
+                out_msg_description: Lazy::new(&AugDict::new()).unwrap(),
                 account_blocks,
                 rand_seed: HashBytes::ZERO,
                 created_by: HashBytes::ZERO,
@@ -49,8 +43,8 @@ impl BlockExtraBuilder<()> {
     ) -> Self {
         Self {
             inner: BlockExtra {
-                in_msg_description: Default::default(),
-                out_msg_description: Default::default(),
+                in_msg_description: Lazy::new(&AugDict::new()).unwrap(),
+                out_msg_description: Lazy::new(&AugDict::new()).unwrap(),
                 account_blocks,
                 rand_seed: HashBytes::ZERO,
                 created_by: HashBytes::ZERO,
@@ -84,18 +78,13 @@ impl BlockExtraBuilder<BlockExtra> {
     }
 }
 
-#[cfg(feature = "tycho")]
-pub(super) type InMsgDescr = AugDict<HashBytes, ImportFees, InMsg>;
-#[cfg(feature = "tycho")]
-pub(super) type OutMsgDescr = AugDict<HashBytes, CurrencyCollection, OutMsg>;
-
 /// Block content.
 #[derive(Debug, Clone)]
 pub struct BlockExtra {
     /// Incoming message description.
-    pub in_msg_description: Cell,
+    pub in_msg_description: Lazy<InMsgDescr>,
     /// Outgoing message description.
-    pub out_msg_description: Cell,
+    pub out_msg_description: Lazy<OutMsgDescr>,
     /// Block transactions info.
     pub account_blocks: Lazy<AugDict<HashBytes, CurrencyCollection, AccountBlock>>,
     /// Random generator seed.
@@ -126,8 +115,8 @@ impl Store for BlockExtra {
         #[cfg(feature = "venom")]
         ok!(builder.store_u32(Self::TAG_V2));
 
-        ok!(builder.store_reference(self.in_msg_description.clone()));
-        ok!(builder.store_reference(self.out_msg_description.clone()));
+        ok!(builder.store_reference(self.in_msg_description.cell.clone()));
+        ok!(builder.store_reference(self.out_msg_description.cell.clone()));
         ok!(builder.store_reference(self.account_blocks.cell.clone()));
         ok!(builder.store_u256(&self.rand_seed));
         ok!(builder.store_u256(&self.created_by));
@@ -161,8 +150,8 @@ impl<'a> Load<'a> for BlockExtra {
             return Err(Error::InvalidTag);
         }
 
-        let in_msg_description = ok!(slice.load_reference_cloned());
-        let out_msg_description = ok!(slice.load_reference_cloned());
+        let in_msg_description = ok!(Lazy::load_from(slice));
+        let out_msg_description = ok!(Lazy::load_from(slice));
         let account_blocks = ok!(Lazy::load_from(slice));
         let rand_seed = ok!(slice.load_u256());
         let created_by = ok!(slice.load_u256());
@@ -265,11 +254,11 @@ impl<'a> Load<'a> for AccountBlock {
     }
 }
 
-impl<'a> AugDictSkipValue<'a> for Lazy<Transaction> {
-    fn skip_value(slice: &mut CellSlice<'a>) -> bool {
-        slice.try_advance(0, 1)
-    }
-}
+/// A list of inbound messages.
+pub type InMsgDescr = AugDict<HashBytes, ImportFees, InMsg>;
+
+/// A list of outbound messages.
+pub type OutMsgDescr = AugDict<HashBytes, CurrencyCollection, OutMsg>;
 
 /// Additional content for masterchain blocks.
 #[derive(Debug, Clone)]
@@ -281,10 +270,10 @@ pub struct McBlockExtra {
     pub fees: ShardFees,
     /// Signatures for previous blocks (TODO)
     pub prev_block_signatures: Dict<u16, BlockSignature>,
-    /// TODO
-    pub recover_create_msg: Option<Cell>,
-    /// TODO
-    pub mint_msg: Option<Cell>,
+    /// An optional message with funds recover.
+    pub recover_create_msg: Option<Lazy<InMsg>>,
+    /// An optional message with minting.
+    pub mint_msg: Option<Lazy<InMsg>>,
     /// Copyleft messages if present.
     pub copyleft_msgs: Dict<Uint15, Cell>,
     /// Blockchain config (if the block is a key block).
@@ -388,8 +377,8 @@ impl<'a> Load<'a> for McBlockExtra {
             shards,
             fees,
             prev_block_signatures: ok!(Dict::load_from(slice)),
-            recover_create_msg: ok!(Option::<Cell>::load_from(slice)),
-            mint_msg: ok!(Option::<Cell>::load_from(slice)),
+            recover_create_msg: ok!(Option::<Lazy<_>>::load_from(slice)),
+            mint_msg: ok!(Option::<Lazy<_>>::load_from(slice)),
             copyleft_msgs: if with_copyleft {
                 ok!(Dict::load_from(slice))
             } else {
@@ -400,38 +389,71 @@ impl<'a> Load<'a> for McBlockExtra {
     }
 }
 
-/// TEMP shard fees mapping sub.
-#[derive(Debug, Clone, Store, Load, Default)]
-pub struct ShardFees {
-    /// Dictionary root.
-    pub root: Option<Cell>,
-    /// `AugDict` root extra part.
+/// A dictionary with collected/created shard fees.
+pub type ShardFees = AugDict<ShardIdentFull, ShardFeeCreated, ShardFeeCreated>;
+
+/// [`ShardIdent`] that is stored with terminatino bit.
+#[derive(Clone, Debug, Default, Store, Load)]
+pub struct ShardIdentFull {
+    /// Workchain id.
+    pub workchain: i32,
+    /// Shard prefix with terminatino bit.
+    pub prefix: u64,
+}
+
+impl DictKey for ShardIdentFull {
+    const BITS: u16 = 96;
+
+    fn from_raw_data(raw_data: &[u8; 128]) -> Option<Self> {
+        let workchain = i32::from_be_bytes(raw_data[0..4].try_into().unwrap());
+        let prefix = u64::from_be_bytes(raw_data[4..12].try_into().unwrap());
+        Some(Self { workchain, prefix })
+    }
+}
+
+impl TryFrom<ShardIdentFull> for ShardIdent {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(ident: ShardIdentFull) -> Result<Self, Self::Error> {
+        ShardIdent::new(ident.workchain, ident.prefix).ok_or(Error::InvalidData)
+    }
+}
+
+impl From<ShardIdent> for ShardIdentFull {
+    #[inline]
+    fn from(ident: ShardIdent) -> Self {
+        Self {
+            workchain: ident.workchain(),
+            prefix: ident.prefix(),
+        }
+    }
+}
+
+/// Collected fees/created funds.
+#[derive(Debug, Clone, Default, Eq, PartialEq, Store, Load)]
+pub struct ShardFeeCreated {
+    /// Collected fees.
     pub fees: CurrencyCollection,
-    /// `AugDict` root extra part.
+    /// Created funds.
     pub create: CurrencyCollection,
 }
 
-impl ShardFees {
-    #[cfg(feature = "tycho")]
-    /// Tries to load Incoming message description.
-    pub fn load_root(&self) -> Option<Result<ShardIdentifier, Error>> {
-        self.root.as_ref().map(|root| root.parse())
+impl AugDictExtra for ShardFeeCreated {
+    fn comp_add(
+        left: &mut CellSlice,
+        right: &mut CellSlice,
+        b: &mut CellBuilder,
+        cx: &mut dyn CellContext,
+    ) -> Result<(), Error> {
+        let left = ok!(Self::load_from(left));
+        let right = ok!(Self::load_from(right));
+        Self {
+            fees: ok!(left.fees.checked_add(&right.fees)),
+            create: ok!(left.create.checked_add(&right.create)),
+        }
+        .store_into(b, cx)
     }
-    #[cfg(feature = "tycho")]
-    /// Set root description.
-    pub fn set_root(&mut self, root: ShardIdentifier) {
-        self.root = Some(CellBuilder::build_from(root).unwrap());
-    }
-}
-
-#[cfg(feature = "tycho")]
-/// Shard identifier with full prefix.
-#[derive(Clone, Debug, Default, Store, Load)]
-pub struct ShardIdentifier {
-    /// Workchain id.
-    pub workchain: i8,
-    /// Shard prefix.
-    pub prefix: u64,
 }
 
 /// Block signature pair.

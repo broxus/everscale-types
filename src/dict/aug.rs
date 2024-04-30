@@ -8,22 +8,23 @@ use crate::util::*;
 
 use super::raw::*;
 use super::typed::*;
-use super::{read_label, AugDictFn, DictKey};
+use super::{read_label, DictKey};
 
-// TODO: Just use load instead?
-pub(crate) trait AugDictSkipValue<'a> {
-    fn skip_value(slice: &mut CellSlice<'a>) -> bool;
-}
-
-impl<'a> AugDictSkipValue<'a> for crate::num::Tokens {
-    #[inline]
-    fn skip_value(slice: &mut CellSlice<'a>) -> bool {
-        if let Ok(token_bytes) = slice.load_small_uint(4) {
-            slice.try_advance(8 * token_bytes as u16, 0)
-        } else {
-            false
-        }
-    }
+/// A trait for values that can be used as augmented values in an augmented dictionary.
+pub trait AugDictExtra: Default {
+    /// Merges two augmented values.
+    ///
+    /// # Parameters
+    /// - `left` - The left branch (should start with `extra`).
+    /// - `right` - The right branch (should start with `extra`).
+    /// - `b` - The builder to store the result (only `extra`).
+    /// - `cx` - The cell context.
+    fn comp_add(
+        left: &mut CellSlice,
+        right: &mut CellSlice,
+        b: &mut CellBuilder,
+        cx: &mut dyn CellContext,
+    ) -> Result<(), Error>;
 }
 
 /// Typed augmented dictionary with fixed length keys.
@@ -132,7 +133,7 @@ impl<K: DictKey, A, V> AugDict<K, A, V> {
     ) -> Result<Self, Error>
     where
         A: Load<'a>,
-        V: AugDictSkipValue<'a>,
+        V: Load<'a>,
     {
         let (extra, root) = ok!(load_from_root::<A, V>(slice, K::BITS, context));
 
@@ -173,7 +174,7 @@ fn load_from_root<'a, A, V>(
 ) -> Result<(A, Cell), Error>
 where
     A: Load<'a>,
-    V: AugDictSkipValue<'a>,
+    V: Load<'a>,
 {
     let root = *slice;
 
@@ -185,9 +186,7 @@ where
         ok!(A::load_from(slice))
     } else {
         let extra = ok!(A::load_from(slice));
-        if !V::skip_value(slice) {
-            return Err(Error::CellUnderflow);
-        }
+        ok!(V::load_from(slice));
         extra
     };
 
@@ -251,7 +250,7 @@ where
 impl<K, A, V> AugDict<K, A, V>
 where
     K: Store + DictKey,
-    for<'a> A: Default + Store + Load<'a>,
+    for<'a> A: AugDictExtra + Store + Load<'a>,
     V: Store,
 {
     /// Sets the augmented value associated with the key in the aug dictionary.
@@ -259,19 +258,13 @@ where
     /// Use [`set_ext`] if you need to use a custom cell context.
     ///
     /// [`set_ext`]: AugDict::set_ext
-    pub fn set<Q, E, T>(
-        &mut self,
-        key: Q,
-        aug: E,
-        value: T,
-        comparator: AugDictFn,
-    ) -> Result<bool, Error>
+    pub fn set<Q, E, T>(&mut self, key: Q, aug: E, value: T) -> Result<bool, Error>
     where
         Q: Borrow<K>,
         E: Borrow<A>,
         T: Borrow<V>,
     {
-        self.set_ext(key, aug, value, comparator, &mut Cell::empty_context())
+        self.set_ext(key, aug, value, &mut Cell::empty_context())
     }
 
     /// Sets the value associated with the key in the dictionary.
@@ -280,7 +273,6 @@ where
         key: Q,
         aug: E,
         value: T,
-        comparator: AugDictFn,
         context: &mut dyn CellContext,
     ) -> Result<bool, Error>
     where
@@ -293,7 +285,6 @@ where
             aug.borrow(),
             value.borrow(),
             SetMode::Set,
-            comparator,
             context,
         )
     }
@@ -304,19 +295,13 @@ where
     /// Use [`replace_ext`] if you need to use a custom cell context.
     ///
     /// [`replace_ext`]: AugDict::replace_ext
-    pub fn replace<Q, E, T>(
-        &mut self,
-        key: Q,
-        aug: E,
-        value: T,
-        comparator: AugDictFn,
-    ) -> Result<bool, Error>
+    pub fn replace<Q, E, T>(&mut self, key: Q, aug: E, value: T) -> Result<bool, Error>
     where
         Q: Borrow<K>,
         E: Borrow<A>,
         T: Borrow<V>,
     {
-        self.replace_ext(key, aug, value, comparator, &mut Cell::empty_context())
+        self.replace_ext(key, aug, value, &mut Cell::empty_context())
     }
 
     /// Sets the value associated with the key in the dictionary
@@ -326,7 +311,6 @@ where
         key: Q,
         aug: E,
         value: T,
-        comparator: AugDictFn,
         context: &mut dyn CellContext,
     ) -> Result<bool, Error>
     where
@@ -339,7 +323,6 @@ where
             aug.borrow(),
             value.borrow(),
             SetMode::Replace,
-            comparator,
             context,
         )
     }
@@ -350,19 +333,13 @@ where
     /// Use [`add_ext`] if you need to use a custom cell context.
     ///
     /// [`add_ext`]: AugDict::add_ext
-    pub fn add<Q, E, T>(
-        &mut self,
-        key: Q,
-        aug: E,
-        value: T,
-        comparator: AugDictFn,
-    ) -> Result<bool, Error>
+    pub fn add<Q, E, T>(&mut self, key: Q, aug: E, value: T) -> Result<bool, Error>
     where
         Q: Borrow<K>,
         E: Borrow<A>,
         T: Borrow<V>,
     {
-        self.add_ext(key, aug, value, comparator, &mut Cell::empty_context())
+        self.add_ext(key, aug, value, &mut Cell::empty_context())
     }
 
     /// Sets the value associated with key in dictionary,
@@ -372,7 +349,6 @@ where
         key: Q,
         aug: E,
         value: T,
-        comparator: AugDictFn,
         context: &mut dyn CellContext,
     ) -> Result<bool, Error>
     where
@@ -385,20 +361,19 @@ where
             aug.borrow(),
             value.borrow(),
             SetMode::Add,
-            comparator,
             context,
         )
     }
 
     /// Removes the value associated with key in aug dictionary.
     /// Returns an optional removed value as cell slice parts.
-    pub fn remove<Q>(&mut self, key: Q, comparator: AugDictFn) -> Result<Option<(A, V)>, Error>
+    pub fn remove<Q>(&mut self, key: Q) -> Result<Option<(A, V)>, Error>
     where
         Q: Borrow<K>,
         for<'a> A: Load<'a> + 'static,
         for<'a> V: Load<'a> + 'static,
     {
-        match ok!(self.remove_raw_ext(key, comparator, &mut Cell::empty_context())) {
+        match ok!(self.remove_raw_ext(key, &mut Cell::empty_context())) {
             Some((cell, range)) => {
                 let mut slice = ok!(range.apply(&cell));
                 let extra = ok!(A::load_from(&mut slice));
@@ -414,13 +389,12 @@ where
     pub fn remove_raw_ext<Q>(
         &mut self,
         key: Q,
-        comparator: AugDictFn,
         context: &mut dyn CellContext,
     ) -> Result<Option<CellSliceParts>, Error>
     where
         Q: Borrow<K>,
     {
-        self.remove_impl(key.borrow(), comparator, context)
+        self.remove_impl(key.borrow(), context)
     }
 
     fn insert_impl(
@@ -429,7 +403,6 @@ where
         extra: &A,
         value: &V,
         mode: SetMode,
-        comparator: AugDictFn,
         context: &mut dyn CellContext,
     ) -> Result<bool, Error> {
         let mut key_builder = CellBuilder::new();
@@ -441,7 +414,7 @@ where
             extra,
             value,
             mode,
-            comparator,
+            A::comp_add,
             context,
         ));
 
@@ -455,7 +428,6 @@ where
     fn remove_impl(
         &mut self,
         key: &K,
-        comparator: AugDictFn,
         context: &mut dyn CellContext,
     ) -> Result<Option<(Cell, CellSliceRange)>, Error> {
         let mut key_builder = CellBuilder::new();
@@ -465,7 +437,7 @@ where
             &mut key_builder.as_data_slice(),
             K::BITS,
             false,
-            comparator,
+            A::comp_add,
             context,
         ));
 
@@ -712,118 +684,150 @@ mod tests {
     use crate::models::{AccountBlock, CurrencyCollection};
     use crate::prelude::Boc;
 
+    #[derive(Debug, Default, Load, Store, Eq, PartialEq)]
+    struct OrCmp(bool);
+
+    impl AugDictExtra for OrCmp {
+        fn comp_add(
+            left: &mut CellSlice,
+            right: &mut CellSlice,
+            b: &mut CellBuilder,
+            _: &mut dyn CellContext,
+        ) -> Result<(), Error> {
+            let left = left.load_bit()?;
+            let right = right.load_bit()?;
+            b.store_bit(left | right)
+        }
+    }
+
+    #[derive(Debug, Default, Load, Store, Eq, PartialEq)]
+    struct SomeValue(u32);
+
+    impl AugDictExtra for SomeValue {
+        fn comp_add(
+            left: &mut CellSlice,
+            right: &mut CellSlice,
+            b: &mut CellBuilder,
+            _: &mut dyn CellContext,
+        ) -> Result<(), Error> {
+            let left = left.load_u32()?;
+            let right = right.load_u32()?;
+            b.store_u32(left.saturating_add(right))
+        }
+    }
+
     #[test]
     fn dict_set() {
-        let mut dict = AugDict::<u32, bool, u16>::new();
-        assert!(!*dict.root_extra());
+        let mut dict = AugDict::<u32, OrCmp, u16>::new();
+        assert_eq!(*dict.root_extra(), OrCmp(false));
 
-        dict.set(123, false, 0xffff, bool_or_comp).unwrap();
-        assert_eq!(dict.get(123).unwrap(), Some((false, 0xffff)));
-        assert!(!*dict.root_extra());
+        dict.set(123, OrCmp(false), 0xffff).unwrap();
+        assert_eq!(dict.get(123).unwrap(), Some((OrCmp(false), 0xffff)));
+        assert_eq!(*dict.root_extra(), OrCmp(false));
 
-        dict.set(123, true, 0xcafe, bool_or_comp).unwrap();
-        assert_eq!(dict.get(123).unwrap(), Some((true, 0xcafe)));
-        assert!(*dict.root_extra());
+        dict.set(123, OrCmp(true), 0xcafe).unwrap();
+        assert_eq!(dict.get(123).unwrap(), Some((OrCmp(true), 0xcafe)));
+        assert_eq!(*dict.root_extra(), OrCmp(true));
     }
 
     #[test]
     fn dict_set_complex() {
-        let mut dict = AugDict::<u32, bool, u32>::new();
-        assert!(!*dict.root_extra());
+        let mut dict = AugDict::<u32, OrCmp, u32>::new();
+        assert_eq!(*dict.root_extra(), OrCmp(false));
 
         for i in 0..520 {
-            dict.set(i, true, 123, bool_or_comp).unwrap();
+            dict.set(i, OrCmp(true), 123).unwrap();
         }
-        assert!(*dict.root_extra());
+        assert_eq!(*dict.root_extra(), OrCmp(true));
     }
 
     #[test]
     fn dict_replace() {
-        let mut dict = AugDict::<u32, bool, u16>::new();
-        assert!(!*dict.root_extra());
-        dict.replace(123, false, 0xff, bool_or_comp).unwrap();
+        let mut dict = AugDict::<u32, OrCmp, u16>::new();
+        assert_eq!(*dict.root_extra(), OrCmp(false));
+        dict.replace(123, OrCmp(false), 0xff).unwrap();
         assert!(!dict.contains_key(123).unwrap());
-        assert!(!*dict.root_extra());
+        assert_eq!(*dict.root_extra(), OrCmp(false));
 
-        dict.set(123, false, 0xff, bool_or_comp).unwrap();
-        assert_eq!(dict.get(123).unwrap(), Some((false, 0xff)));
-        assert!(!*dict.root_extra());
+        dict.set(123, OrCmp(false), 0xff).unwrap();
+        assert_eq!(dict.get(123).unwrap(), Some((OrCmp(false), 0xff)));
+        assert_eq!(*dict.root_extra(), OrCmp(false));
 
-        dict.replace(123, true, 0xaa, bool_or_comp).unwrap();
-        assert_eq!(dict.get(123).unwrap(), Some((true, 0xaa)));
-        assert!(*dict.root_extra());
+        dict.replace(123, OrCmp(true), 0xaa).unwrap();
+        assert_eq!(dict.get(123).unwrap(), Some((OrCmp(true), 0xaa)));
+        assert_eq!(*dict.root_extra(), OrCmp(true));
     }
 
     #[test]
     fn dict_add() {
-        let mut dict = AugDict::<u32, bool, u16>::new();
-        assert!(!*dict.root_extra());
+        let mut dict = AugDict::<u32, OrCmp, u16>::new();
+        assert_eq!(*dict.root_extra(), OrCmp(false));
 
-        dict.add(123, false, 0x12, bool_or_comp).unwrap();
-        assert_eq!(dict.get(123).unwrap(), Some((false, 0x12)));
-        assert!(!*dict.root_extra());
+        dict.add(123, OrCmp(false), 0x12).unwrap();
+        assert_eq!(dict.get(123).unwrap(), Some((OrCmp(false), 0x12)));
+        assert_eq!(*dict.root_extra(), OrCmp(false));
 
-        dict.add(123, true, 0x11, bool_or_comp).unwrap();
-        assert_eq!(dict.get(123).unwrap(), Some((false, 0x12)));
-        assert!(!*dict.root_extra());
+        dict.add(123, OrCmp(true), 0x11).unwrap();
+        assert_eq!(dict.get(123).unwrap(), Some((OrCmp(false), 0x12)));
+        assert_eq!(*dict.root_extra(), OrCmp(false));
     }
 
     #[test]
     fn dict_remove() {
-        let mut dict = AugDict::<u32, bool, u32>::new();
-        assert!(!*dict.root_extra());
+        let mut dict = AugDict::<u32, OrCmp, u32>::new();
+        assert_eq!(*dict.root_extra(), OrCmp(false));
 
         for i in 0..10 {
-            assert!(dict.set(i, i % 2 == 0, i, bool_or_comp).unwrap());
+            assert!(dict.set(i, OrCmp(i % 2 == 0), i).unwrap());
         }
-        assert!(*dict.root_extra());
+        assert_eq!(*dict.root_extra(), OrCmp(true));
 
-        let mut check_remove = |n: u32, expected: Option<(bool, u32)>| -> anyhow::Result<()> {
-            let removed = dict.remove(n, bool_or_comp).context("Failed to remove")?;
+        let mut check_remove = |n: u32, expected: Option<(OrCmp, u32)>| -> anyhow::Result<()> {
+            let removed = dict.remove(n).context("Failed to remove")?;
             anyhow::ensure!(removed == expected);
             Ok(())
         };
 
-        check_remove(0, Some((true, 0))).unwrap();
+        check_remove(0, Some((OrCmp(true), 0))).unwrap();
 
-        check_remove(4, Some((true, 4))).unwrap();
+        check_remove(4, Some((OrCmp(true), 4))).unwrap();
 
-        check_remove(9, Some((false, 9))).unwrap();
+        check_remove(9, Some((OrCmp(false), 9))).unwrap();
         check_remove(9, None).unwrap();
 
-        check_remove(5, Some((false, 5))).unwrap();
+        check_remove(5, Some((OrCmp(false), 5))).unwrap();
         check_remove(5, None).unwrap();
 
         check_remove(100, None).unwrap();
 
-        check_remove(1, Some((false, 1))).unwrap();
-        check_remove(2, Some((true, 2))).unwrap();
-        check_remove(3, Some((false, 3))).unwrap();
-        check_remove(6, Some((true, 6))).unwrap();
-        check_remove(7, Some((false, 7))).unwrap();
-        check_remove(8, Some((true, 8))).unwrap();
+        check_remove(1, Some((OrCmp(false), 1))).unwrap();
+        check_remove(2, Some((OrCmp(true), 2))).unwrap();
+        check_remove(3, Some((OrCmp(false), 3))).unwrap();
+        check_remove(6, Some((OrCmp(true), 6))).unwrap();
+        check_remove(7, Some((OrCmp(false), 7))).unwrap();
+        check_remove(8, Some((OrCmp(true), 8))).unwrap();
 
         assert!(dict.is_empty());
     }
 
     #[test]
     fn dict_iter() {
-        let mut dict = AugDict::<u32, u32, u32>::new();
-        assert_eq!(*dict.root_extra(), 0);
+        let mut dict = AugDict::<u32, SomeValue, u32>::new();
+        assert_eq!(*dict.root_extra(), SomeValue(0));
 
         let mut expected_extra = 0;
         for i in 0..10 {
             expected_extra += i;
-            dict.set(i, i, 9 - i, u32_add_comp).unwrap();
+            dict.set(i, SomeValue(i), 9 - i).unwrap();
         }
-        assert_eq!(*dict.root_extra(), expected_extra);
+        assert_eq!(*dict.root_extra(), SomeValue(expected_extra));
 
         let size = dict.values().count();
         assert_eq!(size, 10);
 
         for (i, entry) in dict.iter().enumerate() {
             let (key, aug, value) = entry.unwrap();
-            assert_eq!(key, aug);
+            assert_eq!(SomeValue(key), aug);
             assert_eq!(key, i as u32);
             assert_eq!(value, 9 - i as u32);
         }
@@ -831,21 +835,6 @@ mod tests {
 
     #[test]
     fn aug_test() {
-        fn cc_add_comp(
-            left: &mut CellSlice<'_>,
-            right: &mut CellSlice<'_>,
-            b: &mut CellBuilder,
-            cx: &mut dyn CellContext,
-        ) -> Result<(), Error> {
-            let mut left = CurrencyCollection::load_from(left)?;
-            let right = CurrencyCollection::load_from(right)?;
-            left.tokens = left
-                .tokens
-                .checked_add(right.tokens)
-                .ok_or(Error::IntOverflow)?;
-            left.store_into(b, cx)
-        }
-
         let boc = Boc::decode(include_bytes!("./tests/account_blocks_aug_dict.boc")).unwrap();
 
         let original_dict = boc
@@ -860,7 +849,7 @@ mod tests {
 
         let mut new_dict: AugDict<HashBytes, CurrencyCollection, AccountBlock> = AugDict::new();
         for (key, aug, value) in data.iter() {
-            new_dict.add(key, aug, value, cc_add_comp).unwrap();
+            new_dict.add(key, aug, value).unwrap();
         }
         assert_eq!(new_dict.root_extra(), original_dict.root_extra());
 
@@ -868,31 +857,9 @@ mod tests {
         assert_eq!(serialized.repr_hash(), boc.repr_hash());
 
         for (key, _, _) in data.iter() {
-            new_dict.remove(key, cc_add_comp).unwrap();
+            new_dict.remove(key).unwrap();
         }
         assert!(new_dict.is_empty());
         assert_eq!(new_dict.root_extra(), &CurrencyCollection::ZERO);
-    }
-
-    fn bool_or_comp(
-        left: &mut CellSlice<'_>,
-        right: &mut CellSlice<'_>,
-        b: &mut CellBuilder,
-        _: &mut dyn CellContext,
-    ) -> Result<(), Error> {
-        let left = left.load_bit()?;
-        let right = right.load_bit()?;
-        b.store_bit(left | right)
-    }
-
-    fn u32_add_comp(
-        left: &mut CellSlice<'_>,
-        right: &mut CellSlice<'_>,
-        b: &mut CellBuilder,
-        _: &mut dyn CellContext,
-    ) -> Result<(), Error> {
-        let left = left.load_u32()?;
-        let right = right.load_u32()?;
-        b.store_u32(left.saturating_add(right))
     }
 }
