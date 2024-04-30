@@ -1,5 +1,7 @@
 //! Block models.
 
+use std::sync::OnceLock;
+
 use crate::cell::*;
 use crate::dict::Dict;
 use crate::error::Error;
@@ -145,112 +147,6 @@ impl<'a> Load<'a> for Block {
     }
 }
 
-/// Block info builder.
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct BlockInfoBuilder<T> {
-    inner: BlockInfo,
-    phantom_data: std::marker::PhantomData<T>,
-}
-
-impl BlockInfoBuilder<()> {
-    /// Creates a new block info builder.
-    pub fn new() -> Self {
-        Self {
-            inner: BlockInfo {
-                version: 0,
-                after_merge: false,
-                before_split: false,
-                after_split: false,
-                want_split: false,
-                want_merge: false,
-                key_block: false,
-                flags: 0,
-                seqno: 0,
-                vert_seqno: 0,
-                shard: Default::default(),
-                gen_utime: 0,
-                #[cfg(feature = "venom")]
-                gen_utime_ms: 0,
-                start_lt: 0,
-                end_lt: 0,
-                gen_validator_list_hash_short: 0,
-                gen_catchain_seqno: 0,
-                min_ref_mc_seqno: 0,
-                prev_key_block_seqno: 0,
-                gen_software: Default::default(),
-                master_ref: None,
-                prev_ref: Default::default(),
-                prev_vert_ref: None,
-            },
-            phantom_data: std::marker::PhantomData,
-        }
-    }
-
-    /// Set previous block reference.
-    pub fn set_prev_ref(mut self, prev_ref: PrevBlockRef) -> BlockInfoBuilder<PrevBlockRef> {
-        match prev_ref {
-            PrevBlockRef::Single(block) => {
-                self.inner.prev_ref = CellBuilder::build_from(block).unwrap();
-                BlockInfoBuilder {
-                    inner: self.inner,
-                    phantom_data: std::marker::PhantomData,
-                }
-            }
-            PrevBlockRef::AfterMerge { left, right } => {
-                let cell = {
-                    let mut builder = CellBuilder::new();
-                    left.store_into(&mut builder, &mut Cell::empty_context())
-                        .unwrap();
-                    right
-                        .store_into(&mut builder, &mut Cell::empty_context())
-                        .unwrap();
-                    builder.build_ext(&mut Cell::empty_context()).unwrap()
-                };
-
-                self.inner.prev_ref = cell;
-                BlockInfoBuilder {
-                    inner: self.inner,
-                    phantom_data: std::marker::PhantomData,
-                }
-            }
-        }
-    }
-}
-
-impl Default for BlockInfoBuilder<()> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl BlockInfoBuilder<PrevBlockRef> {
-    /// Set the version and capabilities of the software that created this block.
-    pub fn with_gen_software(
-        mut self,
-        gen_software: Option<GlobalVersion>,
-    ) -> BlockInfoBuilder<BlockRef> {
-        match gen_software {
-            Some(gen_software) => {
-                self.inner.gen_software = gen_software;
-                self.inner.flags |= BlockInfo::FLAG_WITH_GEN_SOFTWARE;
-            }
-            None => {
-                self.inner.gen_software = Default::default();
-                self.inner.flags &= !BlockInfo::FLAG_WITH_GEN_SOFTWARE;
-            }
-        }
-        BlockInfoBuilder {
-            inner: self.inner,
-            phantom_data: std::marker::PhantomData,
-        }
-    }
-
-    /// Builds the block info.
-    pub fn build(self) -> BlockInfo {
-        self.inner
-    }
-}
-
 /// Block info.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -310,6 +206,37 @@ pub struct BlockInfo {
     pub prev_vert_ref: Option<Lazy<BlockRef>>,
 }
 
+impl Default for BlockInfo {
+    fn default() -> Self {
+        Self {
+            version: 0,
+            after_merge: false,
+            before_split: false,
+            after_split: false,
+            want_split: false,
+            want_merge: false,
+            key_block: false,
+            flags: 0,
+            seqno: 0,
+            vert_seqno: 0,
+            shard: ShardIdent::MASTERCHAIN,
+            gen_utime: 0,
+            #[cfg(feature = "venom")]
+            gen_utime_ms: 0,
+            start_lt: 0,
+            end_lt: 0,
+            gen_validator_list_hash_short: 0,
+            gen_catchain_seqno: 0,
+            min_ref_mc_seqno: 0,
+            prev_key_block_seqno: 0,
+            gen_software: Default::default(),
+            master_ref: None,
+            prev_ref: PrevBlockRef::empty_single_ref().clone(),
+            prev_vert_ref: None,
+        }
+    }
+}
+
 impl BlockInfo {
     const TAG_V1: u32 = 0x9bc7a987;
     #[cfg(feature = "venom")]
@@ -338,6 +265,26 @@ impl BlockInfo {
     /// Tries to load a reference to the previous block (or blocks).
     pub fn load_prev_ref(&self) -> Result<PrevBlockRef, Error> {
         PrevBlockRef::load_from_cell(&self.prev_ref, self.after_merge)
+    }
+
+    /// Set previous block reference (direct).
+    pub fn set_prev_ref(&mut self, prev_ref: &BlockRef) {
+        // NOTE: Unwrap is ok because we control the input.
+        self.prev_ref = CellBuilder::build_from(prev_ref).unwrap();
+    }
+
+    /// Set previous block reference (split).
+    pub fn set_prev_ref_after_merge(&mut self, left: &BlockRef, right: &BlockRef) {
+        fn store_split_ref(left: &BlockRef, right: &BlockRef) -> Result<Cell, Error> {
+            let cx = &mut Cell::empty_context();
+            let mut builder = CellBuilder::new();
+            ok!(builder.store_reference(ok!(CellBuilder::build_from_ext(left, cx))));
+            ok!(builder.store_reference(ok!(CellBuilder::build_from_ext(right, cx))));
+            builder.build_ext(cx)
+        }
+
+        // NOTE: Unwrap is ok because we control the input.
+        self.prev_ref = store_split_ref(left, right).unwrap();
     }
 }
 
@@ -538,6 +485,20 @@ pub enum PrevBlockRef {
 }
 
 impl PrevBlockRef {
+    /// Returns a static reference to an empty single reference.
+    pub fn empty_single_ref() -> &'static Cell {
+        static CELL: OnceLock<Cell> = OnceLock::new();
+        CELL.get_or_init(|| {
+            CellBuilder::build_from(&BlockRef {
+                end_lt: 0,
+                seqno: 0,
+                root_hash: HashBytes::ZERO,
+                file_hash: HashBytes::ZERO,
+            })
+            .unwrap()
+        })
+    }
+
     fn load_from_cell(value: &Cell, after_merge: bool) -> Result<Self, Error> {
         let mut s = ok!(value.as_slice());
         Ok(if unlikely(after_merge) {

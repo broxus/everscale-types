@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use crate::cell::*;
 use crate::dict::{AugDict, AugDictExtra, Dict, DictKey};
 use crate::error::Error;
@@ -12,81 +14,15 @@ use crate::models::{Lazy, ShardHashes, ShardIdent};
 #[cfg(feature = "venom")]
 use super::ShardBlockRefs;
 
-/// Block info builder.
-#[derive(Debug, Clone)]
-pub struct BlockExtraBuilder<T> {
-    inner: BlockExtra,
-    phantom_data: std::marker::PhantomData<T>,
-}
-
-impl BlockExtraBuilder<()> {
-    #[cfg(not(feature = "venom"))]
-    /// Creates a new block info builder.
-    pub fn new(account_blocks: Lazy<AugDict<HashBytes, CurrencyCollection, AccountBlock>>) -> Self {
-        Self {
-            inner: BlockExtra {
-                in_msg_description: Lazy::new(&AugDict::new()).unwrap(),
-                out_msg_description: Lazy::new(&AugDict::new()).unwrap(),
-                account_blocks,
-                rand_seed: HashBytes::ZERO,
-                created_by: HashBytes::ZERO,
-                custom: None,
-            },
-            phantom_data: std::marker::PhantomData,
-        }
-    }
-    #[cfg(feature = "venom")]
-    /// Creates a new block info builder.
-    pub fn new(
-        account_blocks: Lazy<AugDict<HashBytes, CurrencyCollection, AccountBlock>>,
-        shard_block_refs: ShardBlockRefs,
-    ) -> Self {
-        Self {
-            inner: BlockExtra {
-                in_msg_description: Lazy::new(&AugDict::new()).unwrap(),
-                out_msg_description: Lazy::new(&AugDict::new()).unwrap(),
-                account_blocks,
-                rand_seed: HashBytes::ZERO,
-                created_by: HashBytes::ZERO,
-                custom: None,
-                shard_block_refs,
-            },
-            phantom_data: std::marker::PhantomData,
-        }
-    }
-
-    #[cfg(feature = "tycho")]
-    /// Set incoming and outgoing message description.
-    pub fn set_msg_descriptions(
-        mut self,
-        in_msg_description: InMsgDescr,
-        out_msg_description: OutMsgDescr,
-    ) -> BlockExtraBuilder<BlockExtra> {
-        self.inner.in_msg_description = CellBuilder::build_from(in_msg_description).unwrap();
-        self.inner.out_msg_description = CellBuilder::build_from(out_msg_description).unwrap();
-        BlockExtraBuilder {
-            inner: self.inner,
-            phantom_data: std::marker::PhantomData,
-        }
-    }
-}
-
-impl BlockExtraBuilder<BlockExtra> {
-    /// Builds the block info.
-    pub fn build(self) -> BlockExtra {
-        self.inner
-    }
-}
-
 /// Block content.
 #[derive(Debug, Clone)]
 pub struct BlockExtra {
-    /// Incoming message description.
+    /// Inbound message description.
     pub in_msg_description: Lazy<InMsgDescr>,
-    /// Outgoing message description.
+    /// Outbound message description.
     pub out_msg_description: Lazy<OutMsgDescr>,
     /// Block transactions info.
-    pub account_blocks: Lazy<AugDict<HashBytes, CurrencyCollection, AccountBlock>>,
+    pub account_blocks: Lazy<AccountBlocks>,
     /// Random generator seed.
     pub rand_seed: HashBytes,
     /// Public key of the collator who produced this block.
@@ -102,6 +38,38 @@ impl BlockExtra {
     const TAG_V1: u32 = 0x4a33f6fd;
     #[cfg(feature = "venom")]
     const TAG_V2: u32 = 0x4a33f6fc;
+
+    /// Returns a static reference to an empty inbound message description.
+    pub fn empty_in_msg_descr() -> &'static Lazy<InMsgDescr> {
+        static IN_MSG_DESCR: OnceLock<Lazy<InMsgDescr>> = OnceLock::new();
+        IN_MSG_DESCR.get_or_init(|| Lazy::new(&AugDict::new()).unwrap())
+    }
+
+    /// Returns a static reference to an empty outbound message description.
+    pub fn empty_out_msg_descr() -> &'static Lazy<OutMsgDescr> {
+        static OUT_MSG_DESCR: OnceLock<Lazy<OutMsgDescr>> = OnceLock::new();
+        OUT_MSG_DESCR.get_or_init(|| Lazy::new(&AugDict::new()).unwrap())
+    }
+
+    /// Returns a static reference to an empty account blocks.
+    pub fn empty_account_blocks() -> &'static Lazy<AccountBlocks> {
+        static ACCOUNT_BLOCKS: OnceLock<Lazy<AccountBlocks>> = OnceLock::new();
+        ACCOUNT_BLOCKS.get_or_init(|| Lazy::new(&AugDict::new()).unwrap())
+    }
+
+    /// Creates a new empty instance.
+    pub fn new_empty() -> Self {
+        Self {
+            in_msg_description: Self::empty_in_msg_descr().clone(),
+            out_msg_description: Self::empty_out_msg_descr().clone(),
+            account_blocks: Self::empty_account_blocks().clone(),
+            rand_seed: HashBytes::default(),
+            created_by: HashBytes::default(),
+            custom: None,
+            #[cfg(feature = "venom")]
+            shard_block_refs: ShardBlockRefs::default(),
+        }
+    }
 }
 
 impl Store for BlockExtra {
@@ -192,18 +160,19 @@ impl BlockExtra {
         }
     }
 
-    #[cfg(feature = "tycho")]
-    /// Tries to load Incoming message description.
+    /// Tries to load inbound message description.
     pub fn load_in_msg_description(&self) -> Result<InMsgDescr, Error> {
-        self.in_msg_description.as_ref().parse()
+        self.in_msg_description.load()
     }
 
-    #[cfg(feature = "tycho")]
-    /// Tries to load Outgoing message description.
+    /// Tries to load outbound message description.
     pub fn load_out_msg_description(&self) -> Result<OutMsgDescr, Error> {
-        self.out_msg_description.as_ref().parse()
+        self.out_msg_description.load()
     }
 }
+
+/// Account blocks grouped by account id with a total fees as an extra data.
+pub type AccountBlocks = AugDict<HashBytes, CurrencyCollection, AccountBlock>;
 
 /// A group of account transactions.
 #[derive(Debug, Clone)]
@@ -268,7 +237,7 @@ pub struct McBlockExtra {
     pub shards: ShardHashes,
     /// Collected/created shard fees.
     pub fees: ShardFees,
-    /// Signatures for previous blocks (TODO)
+    /// Signatures for previous blocks.
     pub prev_block_signatures: Dict<u16, BlockSignature>,
     /// An optional message with funds recover.
     pub recover_create_msg: Option<Lazy<InMsg>>,
@@ -280,34 +249,38 @@ pub struct McBlockExtra {
     pub config: Option<BlockchainConfig>,
 }
 
+impl Default for McBlockExtra {
+    fn default() -> Self {
+        Self {
+            shards: ShardHashes::default(),
+            fees: ShardFees::new(),
+            prev_block_signatures: Dict::new(),
+            recover_create_msg: None,
+            mint_msg: None,
+            copyleft_msgs: Dict::new(),
+            config: None,
+        }
+    }
+}
+
 impl McBlockExtra {
     const TAG_V1: u16 = 0xcca5;
     const TAG_V2: u16 = 0xdc75;
 
-    // #[cfg(feature = "tycho")]
-    // /// Tries to load recover create message
-    // pub fn load_recover_create_msg(&self) -> Option<Result<InMsg, Error>> {
-    //     self.recover_create_msg
-    //         .clone()
-    //         .map(|msg| msg.as_ref().parse())
-    // }
-    //
-    // #[cfg(feature = "tycho")]
-    // /// Tries to load mint message
-    // pub fn load_mint_msg(&self) -> Option<Result<InMsg, Error>> {
-    //     self.mint_msg.clone().map(|msg| msg.as_ref().parse())
-    // }
-
-    #[cfg(feature = "tycho")]
-    /// Set recover create message
-    pub fn set_recover_create_msg(mut self, recover_create_msg: InMsg) {
-        self.recover_create_msg = Some(CellBuilder::build_from(recover_create_msg).unwrap());
+    /// Tries to load recover/create message.
+    pub fn load_recover_create_msg(&self) -> Result<Option<InMsg>, Error> {
+        match &self.recover_create_msg {
+            Some(msg) => msg.load().map(Some),
+            None => Ok(None),
+        }
     }
 
-    #[cfg(feature = "tycho")]
-    /// Set mint message
-    pub fn set_mint_msg(mut self, mint_msg: InMsg) {
-        self.mint_msg = Some(CellBuilder::build_from(mint_msg).unwrap());
+    /// Tries to load mint message.
+    pub fn load_mint_msg(&self) -> Result<Option<InMsg>, Error> {
+        match &self.mint_msg {
+            Some(msg) => msg.load().map(Some),
+            None => Ok(None),
+        }
     }
 }
 
