@@ -34,6 +34,21 @@ pub struct BlockExtra {
     pub shard_block_refs: ShardBlockRefs,
 }
 
+impl Default for BlockExtra {
+    fn default() -> Self {
+        Self {
+            in_msg_description: Self::empty_in_msg_descr().clone(),
+            out_msg_description: Self::empty_out_msg_descr().clone(),
+            account_blocks: Self::empty_account_blocks().clone(),
+            rand_seed: HashBytes::default(),
+            created_by: HashBytes::default(),
+            custom: None,
+            #[cfg(feature = "venom")]
+            shard_block_refs: ShardBlockRefs::default(),
+        }
+    }
+}
+
 impl BlockExtra {
     const TAG_V1: u32 = 0x4a33f6fd;
     #[cfg(feature = "venom")]
@@ -55,20 +70,6 @@ impl BlockExtra {
     pub fn empty_account_blocks() -> &'static Lazy<AccountBlocks> {
         static ACCOUNT_BLOCKS: OnceLock<Lazy<AccountBlocks>> = OnceLock::new();
         ACCOUNT_BLOCKS.get_or_init(|| Lazy::new(&AugDict::new()).unwrap())
-    }
-
-    /// Creates a new empty instance.
-    pub fn new_empty() -> Self {
-        Self {
-            in_msg_description: Self::empty_in_msg_descr().clone(),
-            out_msg_description: Self::empty_out_msg_descr().clone(),
-            account_blocks: Self::empty_account_blocks().clone(),
-            rand_seed: HashBytes::default(),
-            created_by: HashBytes::default(),
-            custom: None,
-            #[cfg(feature = "venom")]
-            shard_block_refs: ShardBlockRefs::default(),
-        }
     }
 }
 
