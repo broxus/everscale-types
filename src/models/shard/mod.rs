@@ -1,5 +1,7 @@
 //! Shard state models.
 
+use std::sync::OnceLock;
+
 use crate::cell::*;
 use crate::dict::Dict;
 use crate::error::*;
@@ -59,52 +61,6 @@ impl<'a> Load<'a> for ShardState {
     }
 }
 
-/// State of single shard builder.
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct ShardStateUnsplitBuilder<T> {
-    inner: ShardStateUnsplit,
-    phantom_data: std::marker::PhantomData<T>,
-}
-
-impl ShardStateUnsplitBuilder<()> {
-    /// Creates a new single shard state builder.
-    pub fn new(shard_ident: ShardIdent, accounts: Lazy<ShardAccounts>) -> Self {
-        Self {
-            inner: ShardStateUnsplit {
-                global_id: 0,
-                shard_ident,
-                seqno: 0,
-                vert_seqno: 0,
-                gen_utime: 0,
-                #[cfg(feature = "venom")]
-                gen_utime_ms: 0,
-                gen_lt: 0,
-                min_ref_mc_seqno: 0,
-                out_msg_queue_info: Default::default(),
-                #[cfg(feature = "tycho")]
-                externals_processed_upto: Default::default(),
-                before_split: false,
-                accounts,
-                overload_history: 0,
-                underload_history: 0,
-                total_balance: Default::default(),
-                total_validator_fees: Default::default(),
-                libraries: Default::default(),
-                master_ref: None,
-                custom: None,
-                #[cfg(feature = "venom")]
-                shard_block_refs: None,
-            },
-            phantom_data: std::marker::PhantomData,
-        }
-    }
-
-    /// Builds the single shard state.
-    pub fn build(self) -> ShardStateUnsplit {
-        self.inner
-    }
-}
-
 /// State of the single shard.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ShardStateUnsplit {
@@ -125,11 +81,19 @@ pub struct ShardStateUnsplit {
     pub gen_lt: u64,
     /// Minimal referenced seqno of the masterchain block.
     pub min_ref_mc_seqno: u32,
-    /// Output messages queue info.
+
+    /// Output messages queue info (stub).
+    #[cfg(not(feature = "tycho"))]
     pub out_msg_queue_info: Cell,
+
+    /// Output messages queue info.
     #[cfg(feature = "tycho")]
+    pub out_msg_queue_info: Lazy<OutMsgQueueInfo>,
+
     /// Index of the highest externals processed from the anchors: (anchor, index)
+    #[cfg(feature = "tycho")]
     pub externals_processed_upto: Dict<u32, u64>,
+
     /// Whether this state was produced before the shards split.
     pub before_split: bool,
     /// Reference to the dictionary with shard accounts.
@@ -153,10 +117,61 @@ pub struct ShardStateUnsplit {
     pub shard_block_refs: Option<ShardBlockRefs>,
 }
 
+impl Default for ShardStateUnsplit {
+    fn default() -> Self {
+        Self {
+            global_id: 0,
+            shard_ident: ShardIdent::MASTERCHAIN,
+            seqno: 0,
+            vert_seqno: 0,
+            gen_utime: 0,
+            #[cfg(feature = "venom")]
+            gen_utime_ms: 0,
+            gen_lt: 0,
+            min_ref_mc_seqno: 0,
+            #[cfg(not(feature = "tycho"))]
+            out_msg_queue_info: Cell::default(),
+            #[cfg(feature = "tycho")]
+            out_msg_queue_info: Self::empty_out_msg_queue_info().clone(),
+            #[cfg(feature = "tycho")]
+            externals_processed_upto: Dict::new(),
+            before_split: false,
+            accounts: Self::empty_shard_accounts().clone(),
+            overload_history: 0,
+            underload_history: 0,
+            total_balance: CurrencyCollection::ZERO,
+            total_validator_fees: CurrencyCollection::ZERO,
+            libraries: Dict::new(),
+            master_ref: None,
+            custom: None,
+            #[cfg(feature = "venom")]
+            shard_block_refs: None,
+        }
+    }
+}
+
 impl ShardStateUnsplit {
     const TAG_V1: u32 = 0x9023afe2;
     #[cfg(feature = "venom")]
     const TAG_V2: u32 = 0x9023aeee;
+
+    /// Returns a static reference to the empty out message queue info.
+    #[cfg(feature = "tycho")]
+    pub fn empty_out_msg_queue_info() -> &'static Lazy<OutMsgQueueInfo> {
+        static OUT_MSG_QUEUE_INFO: OnceLock<Lazy<OutMsgQueueInfo>> = OnceLock::new();
+        OUT_MSG_QUEUE_INFO.get_or_init(|| {
+            Lazy::new(&OutMsgQueueInfo {
+                proc_info: Dict::new(),
+            })
+            .unwrap()
+        })
+    }
+
+    /// Returns a static reference to the empty shard accounts.
+    pub fn empty_shard_accounts() -> &'static Lazy<ShardAccounts> {
+        static SHARD_ACCOUNTS: OnceLock<Lazy<ShardAccounts>> = OnceLock::new();
+        SHARD_ACCOUNTS.get_or_init(|| Lazy::new(&ShardAccounts::new()).unwrap())
+    }
 
     /// Tries to load shard accounts dictionary.
     pub fn load_accounts(&self) -> Result<ShardAccounts, Error> {
@@ -174,17 +189,32 @@ impl ShardStateUnsplit {
         }
     }
 
-    #[cfg(feature = "tycho")]
-    /// Tries to load OutMsgQueueInfo data.
-    pub fn load_out_msg_queue_info(&self) -> Result<OutMsgQueueInfo, Error> {
-        self.out_msg_queue_info.as_ref().parse()
+    /// Tries to set additional masterchain data.
+    pub fn set_custom(&mut self, value: Option<&McStateExtra>) -> Result<(), Error> {
+        match (&mut self.custom, value) {
+            (None, None) => Ok(()),
+            (None, Some(value)) => {
+                self.custom = Some(ok!(Lazy::new(value)));
+                Ok(())
+            }
+            (Some(_), None) => {
+                self.custom = None;
+                Ok(())
+            }
+            (Some(custom), Some(value)) => custom.set(value),
+        }
     }
+
+    /// Tries to load OutMsgQueueInfo data.
     #[cfg(feature = "tycho")]
+    pub fn load_out_msg_queue_info(&self) -> Result<OutMsgQueueInfo, Error> {
+        self.out_msg_queue_info.load()
+    }
+
     /// Tries to store OutMsgQueueInfo data to cell.
+    #[cfg(feature = "tycho")]
     pub fn set_out_msg_queue_info(&mut self, value: &OutMsgQueueInfo) -> Result<(), Error> {
-        let cell = ok!(CellBuilder::build_from(value));
-        self.out_msg_queue_info = cell;
-        Ok(())
+        self.out_msg_queue_info.set(value)
     }
 }
 
@@ -221,7 +251,7 @@ impl Store for ShardStateUnsplit {
         ok!(builder.store_u32(self.gen_utime));
         ok!(builder.store_u64(self.gen_lt));
         ok!(builder.store_u32(self.min_ref_mc_seqno));
-        ok!(builder.store_reference(self.out_msg_queue_info.clone()));
+        ok!(self.out_msg_queue_info.store_into(builder, context));
         ok!(builder.store_bit(self.before_split));
         ok!(builder.store_reference(self.accounts.cell.clone()));
         ok!(builder.store_reference(child_cell));
@@ -255,7 +285,8 @@ impl<'a> Load<'a> for ShardStateUnsplit {
         #[cfg(not(feature = "venom"))]
         let _ = fast_finality;
 
-        let out_msg_queue_info = ok!(slice.load_reference_cloned());
+        let out_msg_queue_info = ok!(<_>::load_from(slice));
+
         let accounts = ok!(Lazy::load_from(slice));
 
         let child_slice = &mut ok!(slice.load_reference_as_slice());
@@ -349,14 +380,16 @@ impl<'a> Load<'a> for LibDescr {
 }
 
 /// Out message queue info
-#[derive(Clone, Debug, Eq, PartialEq, Default)]
+#[cfg(feature = "tycho")]
+#[derive(Debug, Default, Clone, Eq, PartialEq, Store, Load)]
 pub struct OutMsgQueueInfo {
-    ///  Dict (shard, seq_no): processed up to info
+    /// Dict (shard, seq_no): processed up to info
     pub proc_info: Dict<(u64, u32), ProcessedUpto>,
 }
 
 /// Processed up to info
-#[derive(Clone, Debug, Eq, PartialEq, Default)]
+#[cfg(feature = "tycho")]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
 pub struct ProcessedUpto {
     ///  Last msg lt
     pub last_msg_lt: u64,
@@ -364,22 +397,4 @@ pub struct ProcessedUpto {
     pub last_msg_hash: HashBytes,
     /// Original shard
     pub original_shard: Option<u64>,
-}
-
-impl<'a> Load<'a> for OutMsgQueueInfo {
-    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        Ok(Self {
-            proc_info: ok!(Dict::load_from_root_ext(slice, &mut Cell::empty_context())),
-        })
-    }
-}
-
-impl Store for OutMsgQueueInfo {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
-    ) -> Result<(), Error> {
-        self.proc_info.store_into(builder, context)
-    }
 }

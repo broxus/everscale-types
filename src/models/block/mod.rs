@@ -267,8 +267,16 @@ impl BlockInfo {
         PrevBlockRef::load_from_cell(&self.prev_ref, self.after_merge)
     }
 
+    /// Set previous block reference.
+    pub fn set_prev_ref(&mut self, prev_ref: &PrevBlockRef) {
+        match prev_ref {
+            PrevBlockRef::Single(prev_ref) => self.set_prev_ref_single(prev_ref),
+            PrevBlockRef::AfterMerge { left, right } => self.set_prev_ref_after_merge(left, right),
+        }
+    }
+
     /// Set previous block reference (direct).
-    pub fn set_prev_ref(&mut self, prev_ref: &BlockRef) {
+    pub fn set_prev_ref_single(&mut self, prev_ref: &BlockRef) {
         // NOTE: Unwrap is ok because we control the input.
         self.prev_ref = CellBuilder::build_from(prev_ref).unwrap();
     }
