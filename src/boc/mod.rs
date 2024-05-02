@@ -1,6 +1,6 @@
 //! BOC (Bag Of Cells) implementation.
 
-use crate::cell::{Cell, CellBuilder, CellContext, CellFamily, DynCell, Load, Store};
+use crate::cell::{Cell, CellBuilder, CellContext, CellFamily, DynCell, HashBytes, Load, Store};
 
 /// BOC decoder implementation.
 pub mod de;
@@ -83,6 +83,14 @@ impl OptionBoc {
 pub struct Boc;
 
 impl Boc {
+    /// Computes a simple SHA256 hash of the data.
+    #[inline]
+    pub fn file_hash(data: impl AsRef<[u8]>) -> HashBytes {
+        use sha2::Digest;
+
+        sha2::Sha256::digest(data).into()
+    }
+
     /// Encodes the specified cell tree as BOC and
     /// returns the `base64` encoded bytes as a string.
     #[cfg(any(feature = "base64", test))]
