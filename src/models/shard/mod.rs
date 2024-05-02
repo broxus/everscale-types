@@ -86,13 +86,9 @@ pub struct ShardStateUnsplit {
     #[cfg(not(feature = "tycho"))]
     pub out_msg_queue_info: Cell,
 
-    /// Output messages queue info.
+    /// Processed up to info for externals and internals.
     #[cfg(feature = "tycho")]
-    pub out_msg_queue_info: Lazy<OutMsgQueueInfo>,
-
-    /// Index of the highest externals processed from the anchors: (anchor, index)
-    #[cfg(feature = "tycho")]
-    pub externals_processed_upto: Dict<u32, u64>,
+    pub processed_upto: Lazy<ProcessedUptoInfo>,
 
     /// Whether this state was produced before the shards split.
     pub before_split: bool,
@@ -132,9 +128,7 @@ impl Default for ShardStateUnsplit {
             #[cfg(not(feature = "tycho"))]
             out_msg_queue_info: Cell::default(),
             #[cfg(feature = "tycho")]
-            out_msg_queue_info: Self::empty_out_msg_queue_info().clone(),
-            #[cfg(feature = "tycho")]
-            externals_processed_upto: Dict::new(),
+            processed_upto: Self::empty_processed_upto_info().clone(),
             before_split: false,
             accounts: Self::empty_shard_accounts().clone(),
             overload_history: 0,
@@ -155,16 +149,11 @@ impl ShardStateUnsplit {
     #[cfg(feature = "venom")]
     const TAG_V2: u32 = 0x9023aeee;
 
-    /// Returns a static reference to the empty out message queue info.
+    /// Returns a static reference to the empty processed up to info.
     #[cfg(feature = "tycho")]
-    pub fn empty_out_msg_queue_info() -> &'static Lazy<OutMsgQueueInfo> {
-        static OUT_MSG_QUEUE_INFO: OnceLock<Lazy<OutMsgQueueInfo>> = OnceLock::new();
-        OUT_MSG_QUEUE_INFO.get_or_init(|| {
-            Lazy::new(&OutMsgQueueInfo {
-                proc_info: Dict::new(),
-            })
-            .unwrap()
-        })
+    pub fn empty_processed_upto_info() -> &'static Lazy<ProcessedUptoInfo> {
+        static PROCESSED_UPTO_INFO: OnceLock<Lazy<ProcessedUptoInfo>> = OnceLock::new();
+        PROCESSED_UPTO_INFO.get_or_init(|| Lazy::new(&ProcessedUptoInfo::default()).unwrap())
     }
 
     /// Returns a static reference to the empty shard accounts.
@@ -204,18 +193,6 @@ impl ShardStateUnsplit {
             (Some(custom), Some(value)) => custom.set(value),
         }
     }
-
-    /// Tries to load OutMsgQueueInfo data.
-    #[cfg(feature = "tycho")]
-    pub fn load_out_msg_queue_info(&self) -> Result<OutMsgQueueInfo, Error> {
-        self.out_msg_queue_info.load()
-    }
-
-    /// Tries to store OutMsgQueueInfo data to cell.
-    #[cfg(feature = "tycho")]
-    pub fn set_out_msg_queue_info(&mut self, value: &OutMsgQueueInfo) -> Result<(), Error> {
-        self.out_msg_queue_info.set(value)
-    }
 }
 
 impl Store for ShardStateUnsplit {
@@ -232,10 +209,6 @@ impl Store for ShardStateUnsplit {
             ok!(self.total_validator_fees.store_into(&mut builder, context));
             ok!(self.libraries.store_into(&mut builder, context));
             ok!(self.master_ref.store_into(&mut builder, context));
-            #[cfg(feature = "tycho")]
-            ok!(self
-                .externals_processed_upto
-                .store_into(&mut builder, context));
             ok!(builder.build_ext(context))
         };
 
@@ -251,7 +224,10 @@ impl Store for ShardStateUnsplit {
         ok!(builder.store_u32(self.gen_utime));
         ok!(builder.store_u64(self.gen_lt));
         ok!(builder.store_u32(self.min_ref_mc_seqno));
+        #[cfg(not(feature = "tycho"))]
         ok!(self.out_msg_queue_info.store_into(builder, context));
+        #[cfg(feature = "tycho")]
+        ok!(self.processed_upto.store_into(builder, context));
         ok!(builder.store_bit(self.before_split));
         ok!(builder.store_reference(self.accounts.cell.clone()));
         ok!(builder.store_reference(child_cell));
@@ -285,7 +261,11 @@ impl<'a> Load<'a> for ShardStateUnsplit {
         #[cfg(not(feature = "venom"))]
         let _ = fast_finality;
 
+        #[cfg(not(feature = "tycho"))]
         let out_msg_queue_info = ok!(<_>::load_from(slice));
+
+        #[cfg(feature = "tycho")]
+        let processed_upto = ok!(Lazy::load_from(slice));
 
         let accounts = ok!(Lazy::load_from(slice));
 
@@ -316,9 +296,10 @@ impl<'a> Load<'a> for ShardStateUnsplit {
             total_validator_fees: ok!(CurrencyCollection::load_from(child_slice)),
             libraries: ok!(Dict::load_from(child_slice)),
             master_ref: ok!(Option::<BlockRef>::load_from(child_slice)),
-            #[cfg(feature = "tycho")]
-            externals_processed_upto: ok!(Dict::load_from(child_slice)),
+            #[cfg(not(feature = "tycho"))]
             out_msg_queue_info,
+            #[cfg(feature = "tycho")]
+            processed_upto,
             #[allow(unused_labels)]
             custom: 'custom: {
                 #[cfg(feature = "venom")]
@@ -379,22 +360,78 @@ impl<'a> Load<'a> for LibDescr {
     }
 }
 
-/// Out message queue info
+/// Processed up to info for externals and internals.
 #[cfg(feature = "tycho")]
-#[derive(Debug, Default, Clone, Eq, PartialEq, Store, Load)]
-pub struct OutMsgQueueInfo {
-    /// Dict (shard, seq_no): processed up to info
-    pub proc_info: Dict<(u64, u32), ProcessedUpto>,
+#[derive(Debug, Default, Clone, Store, Load)]
+pub struct ProcessedUptoInfo {
+    /// Externals processed up to point and range
+    /// to reproduce last messages set
+    /// (if it was not fully processed in prev block collation).
+    pub externals: Option<ExternalsProcessedUpto>,
+    /// Internals processed up to points and ranges by shards
+    /// to reproduce last messages set
+    /// (if it was not fully processed in prev block collation).
+    pub internals: Dict<u64, InternalsProcessedUpto>,
+    /// Offset of processed messages from last set.
+    /// Will be `!=0` if th set was not fully processed in prev block collation.
+    pub processed_offset: u32,
 }
 
-/// Processed up to info
+/// Describes the processed up to point and range of externals
+/// that we should read to reproduce the same messages set
+/// on which the previous block collation stopped:
+/// from message in FROM achor to message in TO anchor.
+///
+/// If last read messages set was fully processed then
+/// will be `processed_to == read_to`.
+/// So we do not need to reproduce the last messages set
+/// and we can continue to read externals from `read_to`.
 #[cfg(feature = "tycho")]
-#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
-pub struct ProcessedUpto {
-    ///  Last msg lt
-    pub last_msg_lt: u64,
-    /// Last msg hash
-    pub last_msg_hash: HashBytes,
-    /// Original shard
-    pub original_shard: Option<u64>,
+#[derive(Debug, Clone, Store, Load)]
+pub struct ExternalsProcessedUpto {
+    /// Externals processed up to (anchor, len).
+    /// Means that all externals upto this point
+    /// already processed during previous blocks collations.
+    ///
+    /// Needs to read externals from this point to reproduce messages set for collation.
+    pub processed_to: (u32, u64),
+    /// Needs to read externals to this point to reproduce messages set for collation.
+    pub read_to: (u32, u64),
+}
+
+/// Describes the processed up to point and range of internals
+/// that we should read from shard to reproduce the same messages set
+/// on which the previous block collation stopped:
+/// from message LT_HASH to message LT_HASH.
+///
+/// If last read messages set was fully processed then
+/// will be
+/// ```
+/// processed_to_msg_lt == read_to_msg_lt
+/// processed_to_msg_hash == read_to_msg_hash
+/// ```
+///
+/// So we do not need to reproduce the last messages set
+/// and we can continue to read internals from
+/// `read_to_msg_lt` and `read_to_msg_hash`.
+#[cfg(feature = "tycho")]
+#[derive(Debug, Clone, Store, Load)]
+pub struct InternalsProcessedUpto {
+    /// Internals processed up to message LT.
+    /// All internals upto this point
+    /// already processed during previous blocks collations.
+    ///
+    /// Needs to read internals from this point to reproduce messages set for collation.
+    pub processed_to_msg_lt: u64,
+    /// Internals processed up to message HASH.
+    /// All internals upto this point
+    /// already processed during previous blocks collations.
+    ///
+    /// Needs to read internals from this point to reproduce messages set for collation.
+    pub processed_to_msg_hash: HashBytes,
+
+    /// Needs to read internals to this point to reproduce messages set for collation.
+    pub read_to_msg_lt: u64,
+    /// Needs to read internals to this point to reproduce messages set for collation.
+    pub read_to_msg_hash: HashBytes,
 }
