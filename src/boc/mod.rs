@@ -501,6 +501,7 @@ mod tests {
     }
 
     #[cfg(feature = "serde")]
+    #[allow(unused)]
     #[derive(::serde::Serialize)]
     struct SerdeWithCellRef<'a> {
         cell: &'a DynCell,
