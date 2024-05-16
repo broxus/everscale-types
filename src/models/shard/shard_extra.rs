@@ -1,5 +1,5 @@
 use crate::cell::*;
-use crate::dict::{AugDict, Dict};
+use crate::dict::{AugDict, AugDictExtra, Dict};
 use crate::error::Error;
 use crate::num::*;
 
@@ -153,6 +153,23 @@ pub struct KeyMaxLt {
     pub has_key_block: bool,
     /// The maximum logical time in a subtree.
     pub max_end_lt: u64,
+}
+
+impl AugDictExtra for KeyMaxLt {
+    fn comp_add(
+        left: &mut CellSlice,
+        right: &mut CellSlice,
+        b: &mut CellBuilder,
+        cx: &mut dyn CellContext,
+    ) -> Result<(), Error> {
+        let left = ok!(Self::load_from(left));
+        let right = ok!(Self::load_from(right));
+        Self {
+            has_key_block: left.has_key_block || right.has_key_block,
+            max_end_lt: std::cmp::max(left.max_end_lt, right.max_end_lt),
+        }
+        .store_into(b, cx)
+    }
 }
 
 /// Block production statistics for the single validator.
