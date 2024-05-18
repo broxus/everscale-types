@@ -8,7 +8,7 @@ use crate::error::*;
 
 use crate::models::block::{BlockRef, ShardIdent};
 use crate::models::currency::CurrencyCollection;
-use crate::models::Lazy;
+use crate::models::{Lazy, ShardIdentFull};
 
 pub use self::shard_accounts::*;
 pub use self::shard_extra::*;
@@ -371,7 +371,7 @@ pub struct ProcessedUptoInfo {
     /// Internals processed up to points and ranges by shards
     /// to reproduce last messages set
     /// (if it was not fully processed in prev block collation).
-    pub internals: Dict<u64, InternalsProcessedUpto>,
+    pub internals: Dict<ShardIdentFull, InternalsProcessedUpto>,
     /// Offset of processed messages from last set.
     /// Will be `!=0` if th set was not fully processed in prev block collation.
     pub processed_offset: u32,
@@ -407,8 +407,7 @@ pub struct ExternalsProcessedUpto {
 /// If last read messages set was fully processed then
 /// will be
 /// ```
-/// processed_to_msg_lt == read_to_msg_lt
-/// processed_to_msg_hash == read_to_msg_hash
+/// processed_to_msg == read_to_msg
 /// ```
 ///
 /// So we do not need to reproduce the last messages set
@@ -417,21 +416,12 @@ pub struct ExternalsProcessedUpto {
 #[cfg(feature = "tycho")]
 #[derive(Debug, Clone, Store, Load)]
 pub struct InternalsProcessedUpto {
-    /// Internals processed up to message LT.
+    /// Internals processed up to message (LT, Hash).
     /// All internals upto this point
     /// already processed during previous blocks collations.
     ///
     /// Needs to read internals from this point to reproduce messages set for collation.
-    pub processed_to_msg_lt: u64,
-    /// Internals processed up to message HASH.
-    /// All internals upto this point
-    /// already processed during previous blocks collations.
-    ///
-    /// Needs to read internals from this point to reproduce messages set for collation.
-    pub processed_to_msg_hash: HashBytes,
-
-    /// Needs to read internals to this point to reproduce messages set for collation.
-    pub read_to_msg_lt: u64,
-    /// Needs to read internals to this point to reproduce messages set for collation.
-    pub read_to_msg_hash: HashBytes,
+    pub processed_to_msg: (u64, HashBytes),
+    /// Needs to read internals to this point to reproduce messages set for collation (LT, Hash).
+    pub read_to_msg: (u64, HashBytes),
 }
