@@ -5,7 +5,7 @@ authors = ["Ivan Kalinin <i.kalinin@dexpa.io>"]
 repository = "https://github.com/broxus/everscale-types"
 version = "0.1.0-rc.6"
 edition = "2021"
-rust-version = "1.65"
+rust-version = "1.77"
 include = ["src/**/*.rs", "benches/**/*.rs", "LICENSE-*", "README.md"]
 license = "MIT OR Apache-2.0"
 

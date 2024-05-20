@@ -447,6 +447,48 @@ where
 
         Ok(res)
     }
+
+    /// Split dictionary into 2 dictionaries by the first key bit.
+    pub fn split(&self) -> Result<(Self, Self), Error> {
+        self.split_by_prefix_ext(&Default::default(), &mut Cell::empty_context())
+    }
+
+    /// Split dictionary into 2 dictionaries by the first key bit.
+    pub fn split_ext(&self, context: &mut dyn CellContext) -> Result<(Self, Self), Error> {
+        self.split_by_prefix_ext(&Default::default(), context)
+    }
+
+    /// Split dictionary into 2 dictionaries at the prefix.
+    pub fn split_by_prefix(&self, key_prefix: &CellSlice<'_>) -> Result<(Self, Self), Error> {
+        self.split_by_prefix_ext(key_prefix, &mut Cell::empty_context())
+    }
+
+    /// Split dictionary into 2 dictionaries at the prefix.
+    pub fn split_by_prefix_ext(
+        &self,
+        key_prefix: &CellSlice<'_>,
+        context: &mut dyn CellContext,
+    ) -> Result<(Self, Self), Error> {
+        let (left, right) = ok!(self.dict.split_by_prefix_ext(key_prefix, context));
+
+        let mut left = Self {
+            dict: left,
+            extra: A::default(),
+            _key: PhantomData,
+            _value: PhantomData,
+        };
+        ok!(left.update_root_extra());
+
+        let mut right = Self {
+            dict: right,
+            extra: A::default(),
+            _key: PhantomData,
+            _value: PhantomData,
+        };
+        ok!(right.update_root_extra());
+
+        Ok((left, right))
+    }
 }
 
 impl<K, A, V> AugDict<K, A, V>

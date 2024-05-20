@@ -1292,7 +1292,7 @@ pub fn dict_split_by_prefix(
 
         let mut builder = CellBuilder::new();
         ok!(write_label(&key, key_bit_len, &mut builder));
-        ok!(builder.store_slice(&branch));
+        ok!(builder.store_slice(branch));
         builder.build()
     };
 
