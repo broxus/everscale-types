@@ -415,8 +415,14 @@ impl<const N: u16> RawDict<N> {
         dict_remove_bound_owned(&mut self.0, N, bound, signed, context)
     }
 
-    ///Split dictionary to 2 dictionaries on a root level
-    pub fn split(
+    /// Split dictionary into 2 dictionaries by the first key bit.
+    pub fn split(&self) -> Result<(Self, Self), Error> {
+        let (left, right) = ok!(dict_split(self.0.as_ref(), N, &mut Cell::empty_context()));
+        Ok((Self(left), Self(right)))
+    }
+
+    /// Split dictionary into 2 dictionaries by the first key bit.
+    pub fn split_ext(
         &self,
         context: &mut dyn CellContext,
     ) -> Result<(Option<Cell>, Option<Cell>), Error> {
@@ -1537,30 +1543,31 @@ mod tests {
 
     #[test]
     fn dict_split() -> anyhow::Result<()> {
-        let mut dict = RawDict::<32>::new();
-
-        for i in 0u32..10 {
-            let key = CellBuilder::build_from(i << 15)?;
+        let mut dict = RawDict::<4>::new();
+        for i in 0..16 {
+            let key = build_cell(|b| b.store_small_uint(i, 4));
             dict.add(key.as_slice()?, i)?;
         }
 
-        let context = &mut SimpleContext::default();
+        let (left, right) = dict.split()?;
+        assert!(!left.is_empty());
+        assert!(!right.is_empty());
+        assert_eq!(left.iter().count(), 8);
+        assert_eq!(right.iter().count(), 8);
 
-        match dict.split(context).unwrap() {
-            (Some(left), Some(right)) => {
-                println!("LEFT: {}", left.display_tree());
-                println!("RIGHT: {}", right.display_tree());
-            }
-            (Some(left), None) => {
-                println!("ONLY LEFT: {}", left.display_tree());
-            }
-            (None, Some(right)) => {
-                println!("ONLY RIGHT: {}", right.display_tree());
-            }
-            (None, None) => {
-                println!("BOTH BRANCHES ARE EMPTY");
-            }
-        }
+        let (ll, lr) = left.split()?;
+        assert!(!ll.is_empty());
+        assert!(lr.is_empty());
+        assert_eq!(ll.iter().count(), 8);
+
+        let (rl, rr) = right.split()?;
+        assert!(rl.is_empty());
+        assert!(!rr.is_empty());
+        assert_eq!(rr.iter().count(), 8);
+
+        let (left, right) = RawDict::<4>::new().split()?;
+        assert!(left.is_empty());
+        assert!(right.is_empty());
 
         Ok(())
     }

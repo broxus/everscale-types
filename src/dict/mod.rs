@@ -1244,13 +1244,16 @@ pub fn dict_remove_bound_owned(
     Ok(Some((key, removed)))
 }
 
-/// Splits one dectionary into two
-/// Returns two optional dictionaries as CellSlice representation
+/// Splits one dectionary by the first key bit
 pub fn dict_split(
     dict: Option<&'_ Cell>,
     key_bit_len: u16,
     context: &mut dyn CellContext,
 ) -> Result<(Option<Cell>, Option<Cell>), Error> {
+    if key_bit_len == 0 {
+        return Ok((None, None));
+    }
+
     let mut remaining_data = match dict {
         Some(data) => ok!(context
             .load_dyn_cell(data.as_ref(), LoadMode::Full)
@@ -1260,32 +1263,39 @@ pub fn dict_split(
 
     let parent_label = ok!(read_label(&mut remaining_data, key_bit_len));
 
-    let left_child = match remaining_data.get_reference_cloned(0u8) {
-        Ok(left_child) => {
-            let mut new_left = CellBuilder::new();
-            ok!(new_left.store_slice(parent_label));
-            ok!(new_left.store_bit(false));
-            ok!(new_left.store_slice(ok!(left_child.as_slice())));
-            Some(ok!(new_left.build()))
+    // Handle the case when all keys are in the same branch
+    if !parent_label.is_data_empty() {
+        let mut left = dict.cloned();
+        let mut right = None;
+        if ok!(parent_label.get_bit(0)) {
+            std::mem::swap(&mut left, &mut right);
         }
-        Err(_) => None,
+        return Ok((left, right));
+    }
+
+    let mut rebuild_branch = |bit: bool| -> Result<Cell, Error> {
+        let mut branch = ok!(context
+            .load_dyn_cell(ok!(remaining_data.load_reference()), LoadMode::Full)
+            .and_then(CellSlice::new));
+        let label = ok!(read_label(&mut branch, key_bit_len - 1));
+
+        let mut key_builder = CellBuilder::new();
+        ok!(key_builder.store_bit(bit));
+        ok!(key_builder.store_slice_data(label));
+        let key = key_builder.as_data_slice();
+
+        let mut builder = CellBuilder::new();
+        ok!(write_label(&key, key_bit_len, &mut builder));
+        ok!(builder.store_slice(&branch));
+        builder.build()
     };
 
-    let right_child = match remaining_data.get_reference_cloned(0u8) {
-        Ok(right_child) => {
-            let mut new_right = CellBuilder::new();
-            ok!(new_right.store_slice(parent_label));
-            ok!(new_right.store_bit(false));
-            ok!(new_right.store_slice(ok!(right_child.as_slice())));
-            Some(ok!(new_right.build()))
-        }
-        Err(_) => None,
-    };
-
-    Ok((left_child, right_child))
+    let left_branch = ok!(rebuild_branch(false));
+    let right_branch = ok!(rebuild_branch(true));
+    Ok((Some(left_branch), Some(right_branch)))
 }
 
-///Merges two dictionaries into one (left)
+/// Merges two dictionaries into one (left)
 pub fn dict_merge(
     left: &mut Option<Cell>,
     right: &Option<Cell>,
