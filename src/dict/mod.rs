@@ -749,7 +749,6 @@ pub fn dict_get_subdict<'a: 'b, 'b>(
                     .and_then(CellSlice::new)),
                 None => return Ok(None),
             };
-            let mut i = 0;
 
             // Try to find the required root
             let subtree = loop {
@@ -758,17 +757,12 @@ pub fn dict_get_subdict<'a: 'b, 'b>(
                 let lcp = prefix.longest_common_data_prefix(label);
                 match lcp.remaining_bits().cmp(&prefix.remaining_bits()) {
                     std::cmp::Ordering::Equal => {
-                        //found exact key
+                        // Found exact key
                         let new_leaf = ok!(make_leaf(label, lcp.remaining_bits(), &data, context));
-                        println!(
-                            "ITERATION {} cmp equal new_leaf: {}",
-                            i,
-                            new_leaf.display_data()
-                        );
                         break new_leaf;
                     }
                     std::cmp::Ordering::Less if lcp.remaining_bits() < label.remaining_bits() => {
-                        //have to split edge
+                        // Have to split edge
                         let value = ok!(CellBuilder::new().build_ext(context));
                         let split_edge =
                             ok!(split_edge(&data, label, &lcp, prefix, &value, context));
@@ -798,7 +792,6 @@ pub fn dict_get_subdict<'a: 'b, 'b>(
                         unsafe { std::hint::unreachable_unchecked() };
                     }
                 }
-                i += 1;
             };
 
             Ok(Some(subtree))
@@ -1244,10 +1237,11 @@ pub fn dict_remove_bound_owned(
     Ok(Some((key, removed)))
 }
 
-/// Splits one dectionary by the first key bit
-pub fn dict_split(
+/// Splits one dictionary by the key prefix
+pub fn dict_split_by_prefix(
     dict: Option<&'_ Cell>,
     key_bit_len: u16,
+    key_prefix: &CellSlice,
     context: &mut dyn CellContext,
 ) -> Result<(Option<Cell>, Option<Cell>), Error> {
     if key_bit_len == 0 {
@@ -1261,25 +1255,37 @@ pub fn dict_split(
         None => return Ok((None, None)),
     };
 
-    let parent_label = ok!(read_label(&mut remaining_data, key_bit_len));
-
-    // Handle the case when all keys are in the same branch
-    if !parent_label.is_data_empty() {
-        let mut left = dict.cloned();
-        let mut right = None;
-        if ok!(parent_label.get_bit(0)) {
-            std::mem::swap(&mut left, &mut right);
+    let root_label = ok!(read_label(&mut remaining_data, key_bit_len));
+    let subdict_bit_len = match root_label.strip_data_prefix(key_prefix) {
+        // Root label == key prefix
+        Some(root_label_rem) if root_label_rem.is_data_empty() => {
+            match key_bit_len.checked_sub(root_label.remaining_bits() + 1) {
+                Some(bit_len) => bit_len,
+                None => return Err(Error::CellUnderflow),
+            }
         }
-        return Ok((left, right));
-    }
+        // Root label > key prefix
+        Some(root_label_rem) => {
+            let mut left = dict.cloned();
+            let mut right = None;
+            if ok!(root_label_rem.get_bit(0)) {
+                std::mem::swap(&mut left, &mut right);
+            }
+            return Ok((left, right));
+        }
+        // Root label < key prefix
+        None => return Err(Error::CellUnderflow),
+    };
 
     let mut rebuild_branch = |bit: bool| -> Result<Cell, Error> {
         let mut branch = ok!(context
             .load_dyn_cell(ok!(remaining_data.load_reference()), LoadMode::Full)
             .and_then(CellSlice::new));
-        let label = ok!(read_label(&mut branch, key_bit_len - 1));
+
+        let label = ok!(read_label(&mut branch, subdict_bit_len));
 
         let mut key_builder = CellBuilder::new();
+        ok!(key_builder.store_slice(key_prefix));
         ok!(key_builder.store_bit(bit));
         ok!(key_builder.store_slice_data(label));
         let key = key_builder.as_data_slice();

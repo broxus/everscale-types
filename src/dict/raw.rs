@@ -5,7 +5,7 @@ use crate::util::{unlikely, IterStatus};
 use super::{
     dict_find_bound, dict_find_bound_owned, dict_find_owned, dict_get, dict_get_owned,
     dict_get_subdict, dict_insert, dict_load_from_root, dict_remove_bound_owned, dict_remove_owned,
-    dict_split, read_label, DictBound, DictOwnedEntry, SetMode,
+    dict_split_by_prefix, read_label, DictBound, DictOwnedEntry, SetMode,
 };
 
 /// Dictionary with fixed length keys (where `N` is a number of bits in each key).
@@ -417,16 +417,32 @@ impl<const N: u16> RawDict<N> {
 
     /// Split dictionary into 2 dictionaries by the first key bit.
     pub fn split(&self) -> Result<(Self, Self), Error> {
-        let (left, right) = ok!(dict_split(self.0.as_ref(), N, &mut Cell::empty_context()));
-        Ok((Self(left), Self(right)))
+        self.split_by_prefix_ext(&Default::default(), &mut Cell::empty_context())
     }
 
     /// Split dictionary into 2 dictionaries by the first key bit.
-    pub fn split_ext(
+    pub fn split_ext(&self, context: &mut dyn CellContext) -> Result<(Self, Self), Error> {
+        self.split_by_prefix_ext(&Default::default(), context)
+    }
+
+    /// Split dictionary into 2 dictionaries at the prefix.
+    pub fn split_by_prefix(&self, key_prefix: &CellSlice<'_>) -> Result<(Self, Self), Error> {
+        self.split_by_prefix_ext(key_prefix, &mut Cell::empty_context())
+    }
+
+    /// Split dictionary into 2 dictionaries at the prefix.
+    pub fn split_by_prefix_ext(
         &self,
+        key_prefix: &CellSlice<'_>,
         context: &mut dyn CellContext,
-    ) -> Result<(Option<Cell>, Option<Cell>), Error> {
-        dict_split(self.0.as_ref(), N, context)
+    ) -> Result<(Self, Self), Error> {
+        let (left, right) = ok!(dict_split_by_prefix(
+            self.0.as_ref(),
+            N,
+            key_prefix,
+            context
+        ));
+        Ok((Self(left), Self(right)))
     }
 
     /// Gets an iterator over the entries of the dictionary, sorted by key.
@@ -1568,6 +1584,53 @@ mod tests {
         let (left, right) = RawDict::<4>::new().split()?;
         assert!(left.is_empty());
         assert!(right.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn dict_split_by_prefix() -> anyhow::Result<()> {
+        fn check_range(dict: &RawDict<4>, mut range: std::ops::Range<u8>) {
+            for key in dict.keys() {
+                let key = key.unwrap();
+                let key = key.as_data_slice().load_small_uint(4).unwrap();
+                assert_eq!(key, range.next().unwrap());
+            }
+            assert_eq!(range.next(), None);
+        }
+
+        let mut dict = RawDict::<4>::new();
+        for i in 0..16 {
+            let key = build_cell(|b| b.store_small_uint(i, 4));
+            dict.add(key.as_slice()?, i)?;
+        }
+
+        let (left, right) = dict.split()?;
+        check_range(&left, 0..8);
+        check_range(&right, 8..16);
+
+        {
+            let mut prefix = CellBuilder::new();
+            prefix.store_bit_one()?;
+            let res = dict.split_by_prefix(&prefix.as_data_slice());
+            assert!(matches!(res, Err(Error::CellUnderflow)));
+        }
+
+        let (ll, lr) = {
+            let mut prefix = CellBuilder::new();
+            prefix.store_bit_zero()?;
+            left.split_by_prefix(&prefix.as_data_slice())?
+        };
+        check_range(&ll, 0..4);
+        check_range(&lr, 4..8);
+
+        let (rl, rr) = {
+            let mut prefix = CellBuilder::new();
+            prefix.store_bit_one()?;
+            right.split_by_prefix(&prefix.as_data_slice())?
+        };
+        check_range(&rl, 8..12);
+        check_range(&rr, 12..16);
 
         Ok(())
     }

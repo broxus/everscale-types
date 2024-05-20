@@ -7,8 +7,8 @@ use crate::error::Error;
 use crate::util::*;
 
 use super::{
-    dict_find_bound, dict_find_owned, dict_get, dict_insert, dict_load_from_root, DictBound,
-    DictKey, SetMode,
+    dict_find_bound, dict_find_owned, dict_get, dict_insert, dict_load_from_root,
+    dict_split_by_prefix, DictBound, DictKey, SetMode,
 };
 use super::{dict_remove_bound_owned, raw::*};
 
@@ -319,6 +319,36 @@ where
         signed: bool,
     ) -> Result<Option<(K, CellSliceParts)>, Error> {
         self.remove_bound_raw_ext(bound, signed, &mut Cell::empty_context())
+    }
+
+    /// Split dictionary into 2 dictionaries by the first key bit.
+    pub fn split(&self) -> Result<(Self, Self), Error> {
+        self.split_by_prefix_ext(&Default::default(), &mut Cell::empty_context())
+    }
+
+    /// Split dictionary into 2 dictionaries by the first key bit.
+    pub fn split_ext(&self, context: &mut dyn CellContext) -> Result<(Self, Self), Error> {
+        self.split_by_prefix_ext(&Default::default(), context)
+    }
+
+    /// Split dictionary into 2 dictionaries at the prefix.
+    pub fn split_by_prefix(&self, key_prefix: &CellSlice<'_>) -> Result<(Self, Self), Error> {
+        self.split_by_prefix_ext(key_prefix, &mut Cell::empty_context())
+    }
+
+    /// Split dictionary into 2 dictionaries at the prefix.
+    pub fn split_by_prefix_ext(
+        &self,
+        key_prefix: &CellSlice<'_>,
+        context: &mut dyn CellContext,
+    ) -> Result<(Self, Self), Error> {
+        let (left, right) = ok!(dict_split_by_prefix(
+            self.root.as_ref(),
+            K::BITS,
+            key_prefix,
+            context
+        ));
+        Ok((Self::from_raw(left), Self::from_raw(right)))
     }
 }
 
