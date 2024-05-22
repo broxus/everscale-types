@@ -1527,6 +1527,16 @@ pub const MAX_BIT_LEN: u16 = 1023;
 /// Maximum number of child cells
 pub const MAX_REF_COUNT: usize = 4;
 
+#[cfg(feature = "arbitrary")]
+impl arbitrary::Arbitrary<'_> for Cell {
+    fn arbitrary(u: &mut arbitrary::Unstructured) -> arbitrary::Result<Self> {
+        let builder = CellBuilder::arbitrary(u)?;
+        builder
+            .build()
+            .map_err(|_| arbitrary::Error::IncorrectFormat)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

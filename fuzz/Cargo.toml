@@ -9,10 +9,12 @@ edition = "2021"
 cargo-fuzz = true
 
 [dependencies]
+arbitrary = { version = "1.0.1", features = ["derive"] }
 libfuzzer-sys = "0.4"
 
 [dependencies.everscale-types]
 path = ".."
+features = ["arbitrary"]
 
 # Prevent this from interfering with workspaces
 [workspace]
@@ -43,7 +45,19 @@ test = false
 doc = false
 
 [[bin]]
+name = "boc_dict_arb"
+path = "fuzz_targets/boc_dict_arb.rs"
+test = false
+doc = false
+
+[[bin]]
 name = "boc_message"
 path = "fuzz_targets/boc_message.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "boc_message_arb"
+path = "fuzz_targets/boc_message_arb.rs"
 test = false
 doc = false
