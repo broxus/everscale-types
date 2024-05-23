@@ -351,6 +351,21 @@ impl ShardIdent {
         }
     }
 
+    /// Returns the opposite shard if appliable.
+    ///
+    /// Returns `None` for the shard with `depth == 0`.
+    pub const fn opposite(&self) -> Option<Self> {
+        if self.is_full() {
+            None
+        } else {
+            let last_bit_mask = self.prefix_tag() << 1;
+            Some(Self {
+                workchain: self.workchain,
+                prefix: self.prefix ^ last_bit_mask,
+            })
+        }
+    }
+
     /// Returns shard prefix len in bits.
     pub const fn prefix_len(&self) -> u16 {
         match self.prefix {
