@@ -51,7 +51,7 @@ impl Default for BlockExtra {
 
 impl BlockExtra {
     const TAG_V1: u32 = 0x4a33f6fd;
-    #[cfg(feature = "venom")]
+    #[cfg(any(feature = "venom", feature = "tycho"))]
     const TAG_V2: u32 = 0x4a33f6fc;
 
     /// Returns a static reference to an empty inbound message description.
@@ -79,9 +79,9 @@ impl Store for BlockExtra {
         builder: &mut CellBuilder,
         context: &mut dyn CellContext,
     ) -> Result<(), Error> {
-        #[cfg(not(feature = "venom"))]
+        #[cfg(not(any(feature = "venom", feature = "tycho")))]
         ok!(builder.store_u32(Self::TAG_V1));
-        #[cfg(feature = "venom")]
+        #[cfg(any(feature = "venom", feature = "tycho"))]
         ok!(builder.store_u32(Self::TAG_V2));
 
         ok!(builder.store_reference(self.in_msg_description.cell.clone()));
@@ -110,11 +110,11 @@ impl Store for BlockExtra {
 impl<'a> Load<'a> for BlockExtra {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let tag = ok!(slice.load_u32());
-        #[cfg(not(feature = "venom"))]
+        #[cfg(not(any(feature = "venom", feature = "tycho")))]
         if tag != Self::TAG_V1 {
             return Err(Error::InvalidTag);
         }
-        #[cfg(feature = "venom")]
+        #[cfg(any(feature = "venom", feature = "tycho"))]
         if tag != Self::TAG_V1 && tag != Self::TAG_V2 {
             return Err(Error::InvalidTag);
         }

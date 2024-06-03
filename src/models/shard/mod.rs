@@ -75,7 +75,7 @@ pub struct ShardStateUnsplit {
     /// Unix timestamp when the block was created.
     pub gen_utime: u32,
     /// Milliseconds part of the timestamp when the block was created.
-    #[cfg(feature = "venom")]
+    #[cfg(any(feature = "venom", feature = "tycho"))]
     pub gen_utime_ms: u16,
     /// Logical time when the state was created.
     pub gen_lt: u64,
@@ -121,7 +121,7 @@ impl Default for ShardStateUnsplit {
             seqno: 0,
             vert_seqno: 0,
             gen_utime: 0,
-            #[cfg(feature = "venom")]
+            #[cfg(any(feature = "venom", feature = "tycho"))]
             gen_utime_ms: 0,
             gen_lt: 0,
             min_ref_mc_seqno: 0,
@@ -146,7 +146,7 @@ impl Default for ShardStateUnsplit {
 
 impl ShardStateUnsplit {
     const TAG_V1: u32 = 0x9023afe2;
-    #[cfg(feature = "venom")]
+    #[cfg(any(feature = "venom", feature = "tycho"))]
     const TAG_V2: u32 = 0x9023aeee;
 
     /// Returns a static reference to the empty processed up to info.
@@ -212,9 +212,9 @@ impl Store for ShardStateUnsplit {
             ok!(builder.build_ext(context))
         };
 
-        #[cfg(not(feature = "venom"))]
+        #[cfg(not(any(feature = "venom", feature = "tycho")))]
         ok!(builder.store_u32(Self::TAG_V1));
-        #[cfg(feature = "venom")]
+        #[cfg(any(feature = "venom", feature = "tycho"))]
         ok!(builder.store_u32(Self::TAG_V2));
 
         ok!(builder.store_u32(self.global_id as u32));
@@ -222,6 +222,10 @@ impl Store for ShardStateUnsplit {
         ok!(builder.store_u32(self.seqno));
         ok!(builder.store_u32(self.vert_seqno));
         ok!(builder.store_u32(self.gen_utime));
+
+        #[cfg(any(feature = "venom", feature = "tycho"))]
+        ok!(builder.store_u16(self.gen_utime_ms));
+
         ok!(builder.store_u64(self.gen_lt));
         ok!(builder.store_u32(self.min_ref_mc_seqno));
         #[cfg(not(feature = "tycho"))]
@@ -252,13 +256,13 @@ impl<'a> Load<'a> for ShardStateUnsplit {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let fast_finality = match slice.load_u32() {
             Ok(Self::TAG_V1) => false,
-            #[cfg(feature = "venom")]
+            #[cfg(any(feature = "venom", feature = "tycho"))]
             Ok(Self::TAG_V2) => true,
             Ok(_) => return Err(Error::InvalidTag),
             Err(e) => return Err(e),
         };
 
-        #[cfg(not(feature = "venom"))]
+        #[cfg(not(any(feature = "venom", feature = "tycho")))]
         let _ = fast_finality;
 
         #[cfg(not(feature = "tycho"))]
@@ -280,7 +284,7 @@ impl<'a> Load<'a> for ShardStateUnsplit {
             seqno: ok!(slice.load_u32()),
             vert_seqno: ok!(slice.load_u32()),
             gen_utime: ok!(slice.load_u32()),
-            #[cfg(feature = "venom")]
+            #[cfg(any(feature = "venom", feature = "tycho"))]
             gen_utime_ms: if fast_finality {
                 ok!(slice.load_u16())
             } else {
