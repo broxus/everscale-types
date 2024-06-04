@@ -8,7 +8,10 @@ use crate::error::*;
 
 use crate::models::block::{BlockRef, ShardIdent};
 use crate::models::currency::CurrencyCollection;
-use crate::models::{Lazy, ShardIdentFull};
+use crate::models::Lazy;
+
+#[cfg(feature = "tycho")]
+use crate::models::ShardIdentFull;
 
 pub use self::shard_accounts::*;
 pub use self::shard_extra::*;
