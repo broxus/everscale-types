@@ -16,6 +16,13 @@ use crate::util::TryAsMut;
 #[repr(transparent)]
 pub struct Cell(Rc<DynCell>);
 
+impl Default for Cell {
+    #[inline]
+    fn default() -> Self {
+        Cell::empty_cell()
+    }
+}
+
 impl std::ops::Deref for Cell {
     type Target = DynCell;
 

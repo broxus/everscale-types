@@ -82,11 +82,6 @@ impl UsageTreeWithSubtrees {
     }
 }
 
-struct VisitedCell {
-    include: bool,
-    _cell: Cell,
-}
-
 #[cfg(not(feature = "sync"))]
 use self::rc::{SharedState, UsageCell, UsageTreeState};
 
@@ -164,12 +159,12 @@ impl CellImpl for UsageCell {
 mod rc {
     use std::rc::Rc;
 
-    use super::{UsageTreeMode, VisitedCell};
+    use super::UsageTreeMode;
     use crate::cell::{Cell, DynCell, HashBytes};
 
     pub type SharedState = Rc<UsageTreeState>;
 
-    type VisitedCells = std::cell::RefCell<ahash::HashMap<HashBytes, VisitedCell>>;
+    type VisitedCells = std::cell::RefCell<ahash::HashSet<HashBytes>>;
 
     pub struct UsageTreeState {
         mode: UsageTreeMode,
@@ -194,31 +189,14 @@ mod rc {
 
         #[inline]
         pub fn insert(&self, cell: &Cell, ctx: UsageTreeMode) {
-            let repr_hash = cell.repr_hash();
-            let include = self.mode == ctx;
-
-            let mut visited = self.visited.borrow_mut();
-
-            if let Some(visited) = visited.get_mut(repr_hash) {
-                visited.include |= include;
-            } else {
-                visited.insert(
-                    *repr_hash,
-                    VisitedCell {
-                        include,
-                        _cell: cell.clone(),
-                    },
-                );
+            if self.mode == ctx {
+                self.visited.borrow_mut().insert(*cell.repr_hash());
             }
         }
 
         #[inline]
         pub fn contains(&self, repr_hash: &HashBytes) -> bool {
-            if let Some(cell) = self.visited.borrow().get(repr_hash) {
-                cell.include
-            } else {
-                false
-            }
+            self.visited.borrow().contains(repr_hash)
         }
     }
 
@@ -256,14 +234,14 @@ mod rc {
 
 #[cfg(feature = "sync")]
 mod sync {
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
-    use super::{UsageTreeMode, VisitedCell};
+    use super::UsageTreeMode;
     use crate::cell::{Cell, DynCell, HashBytes};
 
     pub type SharedState = Arc<UsageTreeState>;
 
-    type VisitedCells = Mutex<ahash::HashMap<HashBytes, VisitedCell>>;
+    type VisitedCells = dashmap::DashSet<HashBytes, ahash::RandomState>;
 
     pub struct UsageTreeState {
         mode: UsageTreeMode,
@@ -288,32 +266,14 @@ mod sync {
 
         #[inline]
         pub fn insert(&self, cell: &Cell, ctx: UsageTreeMode) {
-            let repr_hash = cell.repr_hash();
-            let include = self.mode == ctx;
-
-            let mut visited = self.visited.lock().expect("lock failed");
-
-            if let Some(visited) = visited.get_mut(repr_hash) {
-                visited.include |= include;
-            } else {
-                visited.insert(
-                    *repr_hash,
-                    VisitedCell {
-                        include,
-                        _cell: cell.clone(),
-                    },
-                );
+            if self.mode == ctx {
+                self.visited.insert(*cell.repr_hash());
             }
         }
 
         #[inline]
         pub fn contains(&self, repr_hash: &HashBytes) -> bool {
-            let visited = self.visited.lock().expect("lock failed");
-            if let Some(cell) = visited.get(repr_hash) {
-                cell.include
-            } else {
-                false
-            }
+            self.visited.contains(repr_hash)
         }
     }
 

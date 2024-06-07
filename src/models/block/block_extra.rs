@@ -1,3 +1,4 @@
+#[cfg(feature = "sync")]
 use std::sync::OnceLock;
 
 use crate::cell::*;
@@ -34,6 +35,7 @@ pub struct BlockExtra {
     pub shard_block_refs: ShardBlockRefs,
 }
 
+#[cfg(feature = "sync")]
 impl Default for BlockExtra {
     fn default() -> Self {
         Self {
@@ -55,18 +57,21 @@ impl BlockExtra {
     const TAG_V2: u32 = 0x4a33f6fc;
 
     /// Returns a static reference to an empty inbound message description.
+    #[cfg(feature = "sync")]
     pub fn empty_in_msg_descr() -> &'static Lazy<InMsgDescr> {
         static IN_MSG_DESCR: OnceLock<Lazy<InMsgDescr>> = OnceLock::new();
         IN_MSG_DESCR.get_or_init(|| Lazy::new(&AugDict::new()).unwrap())
     }
 
     /// Returns a static reference to an empty outbound message description.
+    #[cfg(feature = "sync")]
     pub fn empty_out_msg_descr() -> &'static Lazy<OutMsgDescr> {
         static OUT_MSG_DESCR: OnceLock<Lazy<OutMsgDescr>> = OnceLock::new();
         OUT_MSG_DESCR.get_or_init(|| Lazy::new(&AugDict::new()).unwrap())
     }
 
     /// Returns a static reference to an empty account blocks.
+    #[cfg(feature = "sync")]
     pub fn empty_account_blocks() -> &'static Lazy<AccountBlocks> {
         static ACCOUNT_BLOCKS: OnceLock<Lazy<AccountBlocks>> = OnceLock::new();
         ACCOUNT_BLOCKS.get_or_init(|| Lazy::new(&AugDict::new()).unwrap())

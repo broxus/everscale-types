@@ -1,5 +1,6 @@
 //! Block models.
 
+#[cfg(feature = "sync")]
 use std::sync::OnceLock;
 
 use crate::cell::*;
@@ -206,6 +207,7 @@ pub struct BlockInfo {
     pub prev_vert_ref: Option<Lazy<BlockRef>>,
 }
 
+#[cfg(feature = "sync")]
 impl Default for BlockInfo {
     fn default() -> Self {
         Self {
@@ -494,6 +496,7 @@ pub enum PrevBlockRef {
 
 impl PrevBlockRef {
     /// Returns a static reference to an empty single reference.
+    #[cfg(feature = "sync")]
     pub fn empty_single_ref() -> &'static Cell {
         static CELL: OnceLock<Cell> = OnceLock::new();
         CELL.get_or_init(|| {

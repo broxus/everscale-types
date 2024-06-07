@@ -391,7 +391,7 @@ fn validator_subset() {
             prev_total_weight: 0,
         },
         ValidatorDescription {
-            public_key: "4a766a1664c2ea41cfb6451c0bff37e23592344ffb36d939e12c556008f15106"
+            public_key: "dad309ba273ef26449a9824a31136e0cfcb904e0b37f99123b5ad8cc61ff3c82"
                 .parse()
                 .unwrap(),
             weight: 1,
@@ -409,7 +409,7 @@ fn validator_subset() {
             prev_total_weight: 0,
         },
     ];
-    let expected_hash_short = 2248643272;
+    let expected_hash_short = 730838627;
 
     assert_eq!(subset, (expected_list, expected_hash_short));
 }

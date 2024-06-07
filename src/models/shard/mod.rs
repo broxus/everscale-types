@@ -1,5 +1,6 @@
 //! Shard state models.
 
+#[cfg(feature = "sync")]
 use std::sync::OnceLock;
 
 use crate::cell::*;
@@ -116,6 +117,7 @@ pub struct ShardStateUnsplit {
     pub shard_block_refs: Option<ShardBlockRefs>,
 }
 
+#[cfg(feature = "sync")]
 impl Default for ShardStateUnsplit {
     fn default() -> Self {
         Self {
@@ -153,13 +155,14 @@ impl ShardStateUnsplit {
     const TAG_V2: u32 = 0x9023aeee;
 
     /// Returns a static reference to the empty processed up to info.
-    #[cfg(feature = "tycho")]
+    #[cfg(all(feature = "sync", feature = "tycho"))]
     pub fn empty_processed_upto_info() -> &'static Lazy<ProcessedUptoInfo> {
         static PROCESSED_UPTO_INFO: OnceLock<Lazy<ProcessedUptoInfo>> = OnceLock::new();
         PROCESSED_UPTO_INFO.get_or_init(|| Lazy::new(&ProcessedUptoInfo::default()).unwrap())
     }
 
     /// Returns a static reference to the empty shard accounts.
+    #[cfg(feature = "sync")]
     pub fn empty_shard_accounts() -> &'static Lazy<ShardAccounts> {
         static SHARD_ACCOUNTS: OnceLock<Lazy<ShardAccounts>> = OnceLock::new();
         SHARD_ACCOUNTS.get_or_init(|| Lazy::new(&ShardAccounts::new()).unwrap())
