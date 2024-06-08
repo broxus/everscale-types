@@ -847,8 +847,12 @@ pub fn dict_find_owned(
             std::cmp::Ordering::Less => {
                 // LCP is less than prefix, an edge to slice was found
                 if lcp_len < prefix.remaining_bits() {
-                    // Stop searching for the value with the first divergent bit
-                    break Leaf::Divergence(Branch::from(ok!(key.get_bit(lcp_len))));
+                    let mut next_branch = Branch::from(ok!(key.get_bit(lcp_len)));
+                    if signed && stack.is_empty() && lcp_len == 0 {
+                        next_branch = next_branch.reversed();
+                    }
+
+                    break Leaf::Divergence(next_branch);
                 }
 
                 // The key contains the entire prefix, but there are still some bits left.
