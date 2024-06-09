@@ -28,6 +28,19 @@ fn traverse_cell_storage_cell(c: &mut Criterion) {
     });
 }
 
+fn traverse_cell_storage_cell_with_capacity(c: &mut Criterion) {
+    let cell = Boc::decode_base64(BOC).unwrap();
+    let usage_tree = UsageTree::with_mode_and_capacity(UsageTreeMode::OnDataAccess, 100);
+    let cell = usage_tree.track(&cell);
+
+    c.bench_function("traverse cell usage tree with capacity", |b| {
+        b.iter(|| {
+            let mut visitor = Visitor::default();
+            black_box(visitor.add_cell(cell.as_ref()));
+        })
+    });
+}
+
 #[derive(Default)]
 struct Visitor<'a> {
     visited: ahash::HashSet<&'a HashBytes>,
@@ -72,5 +85,10 @@ impl<'a> Visitor<'a> {
     }
 }
 
-criterion_group!(benches, traverse_cell_ordinary, traverse_cell_storage_cell);
+criterion_group!(
+    benches,
+    traverse_cell_ordinary,
+    traverse_cell_storage_cell,
+    traverse_cell_storage_cell_with_capacity
+);
 criterion_main!(benches);

@@ -27,6 +27,14 @@ impl UsageTree {
         }
     }
 
+    /// Creates a usage tree with the specified tracking mode
+    /// and a specified starting capacity.
+    pub fn with_mode_and_capacity(mode: UsageTreeMode, capacity: usize) -> Self {
+        Self {
+            state: UsageTreeState::with_mode_and_capacity(mode, capacity),
+        }
+    }
+
     /// Wraps the specified cell in a usage cell to keep track
     /// of the data or links being accessed.
     pub fn track(&self, cell: &Cell) -> Cell {
@@ -179,6 +187,16 @@ mod rc {
             })
         }
 
+        pub fn with_mode_and_capacity(mode: UsageTreeMode, capacity: usize) -> SharedState {
+            Rc::new(Self {
+                mode,
+                visited: std::cell::RefCell::new(ahash::HashSet::with_capacity_and_hasher(
+                    capacity,
+                    Default::default(),
+                )),
+            })
+        }
+
         pub fn wrap(self: &SharedState, cell: Cell) -> Cell {
             Cell::from(Rc::new(UsageCell {
                 cell,
@@ -254,6 +272,13 @@ mod sync {
             Arc::new(Self {
                 mode,
                 visited: Default::default(),
+            })
+        }
+
+        pub fn with_mode_and_capacity(mode: UsageTreeMode, capacity: usize) -> SharedState {
+            Arc::new(Self {
+                mode,
+                visited: VisitedCells::with_capacity_and_hasher(capacity, Default::default()),
             })
         }
 
