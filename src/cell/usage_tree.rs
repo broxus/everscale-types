@@ -234,7 +234,8 @@ mod rc {
 
 #[cfg(feature = "sync")]
 mod sync {
-    use std::sync::Arc;
+    use std::cell::UnsafeCell;
+    use std::sync::{Arc, Once};
 
     use super::UsageTreeMode;
     use crate::cell::{Cell, DynCell, HashBytes};
@@ -260,7 +261,8 @@ mod sync {
             Cell::from(Arc::new(UsageCell {
                 cell,
                 usage_tree: Arc::downgrade(self),
-                children: [(); 4].map(|_| Default::default()),
+                reference_states: [(); 4].map(|_| Once::new()),
+                reference_data: [(); 4].map(|_| UnsafeCell::new(None)),
             }) as Arc<DynCell>)
         }
 
@@ -280,29 +282,52 @@ mod sync {
     pub struct UsageCell {
         pub cell: Cell,
         pub usage_tree: std::sync::Weak<UsageTreeState>,
-        pub children: [once_cell::sync::OnceCell<Option<Arc<Self>>>; 4],
+        // TODO: Compress into one futex with bitset.
+        pub reference_states: [Once; 4],
+        pub reference_data: [UnsafeCell<Option<Arc<Self>>>; 4],
     }
 
     impl UsageCell {
         pub fn load_reference(&self, index: u8) -> Option<&Arc<Self>> {
             if index < 4 {
-                self.children[index as usize]
-                    .get_or_init(|| {
-                        let child = self.cell.as_ref().reference_cloned(index)?;
-                        if let Some(usage_tree) = self.usage_tree.upgrade() {
-                            usage_tree.insert(&child, UsageTreeMode::OnLoad);
-                        }
+                let mut updated = false;
+                self.reference_states[index as usize].call_once_force(|_| {
+                    let Some(child) = self.cell.as_ref().reference_cloned(index) else {
+                        // NOTE: Don't forget to set `None` here if `MaybeUninit` is used.
+                        return;
+                    };
 
-                        Some(Arc::new(UsageCell {
+                    updated = true;
+
+                    // SAFETY: `UnsafeCell` data is controlled by the `Once` state.
+                    unsafe {
+                        *self.reference_data[index as usize].get() = Some(Arc::new(Self {
                             cell: child,
                             usage_tree: self.usage_tree.clone(),
-                            children: Default::default(),
+                            reference_states: [(); 4].map(|_| Once::new()),
+                            reference_data: [(); 4].map(|_| UnsafeCell::new(None)),
                         }))
-                    })
-                    .as_ref()
+                    };
+                });
+
+                // SAFETY: `UnsafeCell` data is controlled by the `Once` state.
+                let child = unsafe { &*self.reference_data[index as usize].get().cast_const() };
+                if crate::util::unlikely(updated) {
+                    if let Some(child) = child {
+                        if let Some(usage_tree) = self.usage_tree.upgrade() {
+                            usage_tree.insert(&child.cell, UsageTreeMode::OnLoad);
+                        }
+                    }
+                }
+
+                child.as_ref()
             } else {
                 None
             }
         }
     }
+
+    // SAFETY: `UnsafeCell` data is controlled by the `Once` state.
+    unsafe impl Send for UsageCell {}
+    unsafe impl Sync for UsageCell {}
 }

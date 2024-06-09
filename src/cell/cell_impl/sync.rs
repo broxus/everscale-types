@@ -1,7 +1,7 @@
 use std::alloc::Layout;
 use std::borrow::Borrow;
 use std::sync::atomic::AtomicUsize;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use super::{
     EmptyOrdinaryCell, HeaderWithData, LibraryReference, OrdinaryCell, OrdinaryCellHeader,
@@ -78,9 +78,7 @@ impl CellFamily for Cell {
     type EmptyCellContext = EmptyCellContext;
 
     fn empty_cell() -> Cell {
-        use once_cell::sync::OnceCell;
-
-        static EMPTY_CELL: OnceCell<Cell> = OnceCell::new();
+        static EMPTY_CELL: OnceLock<Cell> = OnceLock::new();
         EMPTY_CELL
             .get_or_init(|| Cell(Arc::new(EmptyOrdinaryCell)))
             .clone()
