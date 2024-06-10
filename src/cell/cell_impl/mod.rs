@@ -755,13 +755,10 @@ const unsafe fn virtualize_into_next_wrapper<
     cell: &T,
 ) -> &DynCell {
     const fn gen_vtable_ptr<
-        #[cfg(not(feature = "sync"))] T: CellImpl,
-        #[cfg(feature = "sync")] T: CellImpl + Send + Sync,
+        #[cfg(not(feature = "sync"))] T: CellImpl + 'static,
+        #[cfg(feature = "sync")] T: CellImpl + Send + Sync + 'static,
         const L: u8,
-    >() -> *const ()
-    where
-        T: 'static,
-    {
+    >() -> *const () {
         // SAFETY: "fat" pointer consists of two "slim" pointers
         let [_, vtable] = unsafe {
             std::mem::transmute::<*const dyn CellImpl, [*const (); 2]>(std::ptr::null::<

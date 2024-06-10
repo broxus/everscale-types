@@ -687,7 +687,7 @@ impl ValidatorSet {
                 let i = holes.partition_point(|item| item <= &new_hole);
                 debug_assert!(i == 0 || holes[i - 1] < new_hole);
 
-                holes.insert(i.saturating_sub(1), new_hole);
+                holes.insert(i, new_hole);
             }
 
             nodes

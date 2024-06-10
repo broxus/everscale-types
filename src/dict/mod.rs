@@ -49,6 +49,9 @@ impl_dict_key! {
     [u8; 20] => 160 => |d| d[..20].try_into().unwrap(),
     [u8; 32] => 256 => |d| d[..32].try_into().unwrap(),
     HashBytes => 256 => |d| HashBytes(d[..32].try_into().unwrap()),
+     (u64, u32) => 96 => |d| {
+        (u64::from_be_bytes(d[..8].try_into().unwrap()), u32::from_be_bytes(d[8..12].try_into().unwrap()))
+    },
 }
 
 /// Dictionary insertion mode.
@@ -746,7 +749,6 @@ pub fn dict_get_subdict<'a: 'b, 'b>(
                     .and_then(CellSlice::new)),
                 None => return Ok(None),
             };
-            let mut i = 0;
 
             // Try to find the required root
             let subtree = loop {
@@ -755,17 +757,12 @@ pub fn dict_get_subdict<'a: 'b, 'b>(
                 let lcp = prefix.longest_common_data_prefix(label);
                 match lcp.remaining_bits().cmp(&prefix.remaining_bits()) {
                     std::cmp::Ordering::Equal => {
-                        //found exact key
+                        // Found exact key
                         let new_leaf = ok!(make_leaf(label, lcp.remaining_bits(), &data, context));
-                        println!(
-                            "ITERATION {} cmp equal new_leaf: {}",
-                            i,
-                            new_leaf.display_data()
-                        );
                         break new_leaf;
                     }
                     std::cmp::Ordering::Less if lcp.remaining_bits() < label.remaining_bits() => {
-                        //have to split edge
+                        // Have to split edge
                         let value = ok!(CellBuilder::new().build_ext(context));
                         let split_edge =
                             ok!(split_edge(&data, label, &lcp, prefix, &value, context));
@@ -795,7 +792,6 @@ pub fn dict_get_subdict<'a: 'b, 'b>(
                         unsafe { std::hint::unreachable_unchecked() };
                     }
                 }
-                i += 1;
             };
 
             Ok(Some(subtree))
@@ -851,8 +847,12 @@ pub fn dict_find_owned(
             std::cmp::Ordering::Less => {
                 // LCP is less than prefix, an edge to slice was found
                 if lcp_len < prefix.remaining_bits() {
-                    // Stop searching for the value with the first divergent bit
-                    break Leaf::Divergence(Branch::from(ok!(key.get_bit(lcp_len))));
+                    let mut next_branch = Branch::from(ok!(key.get_bit(lcp_len)));
+                    if signed && stack.is_empty() && lcp_len == 0 {
+                        next_branch = next_branch.reversed();
+                    }
+
+                    break Leaf::Divergence(next_branch);
                 }
 
                 // The key contains the entire prefix, but there are still some bits left.
@@ -1241,13 +1241,17 @@ pub fn dict_remove_bound_owned(
     Ok(Some((key, removed)))
 }
 
-/// Splits one dectionary into two
-/// Returns two optional dictionaries as CellSlice representation
-pub fn dict_split(
+/// Splits one dictionary by the key prefix
+pub fn dict_split_by_prefix(
     dict: Option<&'_ Cell>,
     key_bit_len: u16,
+    key_prefix: &CellSlice,
     context: &mut dyn CellContext,
 ) -> Result<(Option<Cell>, Option<Cell>), Error> {
+    if key_bit_len == 0 {
+        return Ok((None, None));
+    }
+
     let mut remaining_data = match dict {
         Some(data) => ok!(context
             .load_dyn_cell(data.as_ref(), LoadMode::Full)
@@ -1255,34 +1259,53 @@ pub fn dict_split(
         None => return Ok((None, None)),
     };
 
-    let parent_label = ok!(read_label(&mut remaining_data, key_bit_len));
-
-    let left_child = match remaining_data.get_reference_cloned(0u8) {
-        Ok(left_child) => {
-            let mut new_left = CellBuilder::new();
-            ok!(new_left.store_slice(parent_label));
-            ok!(new_left.store_bit(false));
-            ok!(new_left.store_slice(ok!(left_child.as_slice())));
-            Some(ok!(new_left.build()))
+    let root_label = ok!(read_label(&mut remaining_data, key_bit_len));
+    let subdict_bit_len = match root_label.strip_data_prefix(key_prefix) {
+        // Root label == key prefix
+        Some(root_label_rem) if root_label_rem.is_data_empty() => {
+            match key_bit_len.checked_sub(root_label.remaining_bits() + 1) {
+                Some(bit_len) => bit_len,
+                None => return Err(Error::CellUnderflow),
+            }
         }
-        Err(_) => None,
+        // Root label > key prefix
+        Some(root_label_rem) => {
+            let mut left = dict.cloned();
+            let mut right = None;
+            if ok!(root_label_rem.get_bit(0)) {
+                std::mem::swap(&mut left, &mut right);
+            }
+            return Ok((left, right));
+        }
+        // Root label < key prefix
+        None => return Err(Error::CellUnderflow),
     };
 
-    let right_child = match remaining_data.get_reference_cloned(0u8) {
-        Ok(right_child) => {
-            let mut new_right = CellBuilder::new();
-            ok!(new_right.store_slice(parent_label));
-            ok!(new_right.store_bit(false));
-            ok!(new_right.store_slice(ok!(right_child.as_slice())));
-            Some(ok!(new_right.build()))
-        }
-        Err(_) => None,
+    let mut rebuild_branch = |bit: bool| -> Result<Cell, Error> {
+        let mut branch = ok!(context
+            .load_dyn_cell(ok!(remaining_data.load_reference()), LoadMode::Full)
+            .and_then(CellSlice::new));
+
+        let label = ok!(read_label(&mut branch, subdict_bit_len));
+
+        let mut key_builder = CellBuilder::new();
+        ok!(key_builder.store_slice(key_prefix));
+        ok!(key_builder.store_bit(bit));
+        ok!(key_builder.store_slice_data(label));
+        let key = key_builder.as_data_slice();
+
+        let mut builder = CellBuilder::new();
+        ok!(write_label(&key, key_bit_len, &mut builder));
+        ok!(builder.store_slice(branch));
+        builder.build()
     };
 
-    Ok((left_child, right_child))
+    let left_branch = ok!(rebuild_branch(false));
+    let right_branch = ok!(rebuild_branch(true));
+    Ok((Some(left_branch), Some(right_branch)))
 }
 
-///Merges two dictionaries into one (left)
+/// Merges two dictionaries into one (left)
 pub fn dict_merge(
     left: &mut Option<Cell>,
     right: &Option<Cell>,

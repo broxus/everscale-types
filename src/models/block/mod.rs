@@ -1,5 +1,8 @@
 //! Block models.
 
+#[cfg(feature = "sync")]
+use std::sync::OnceLock;
+
 use crate::cell::*;
 use crate::dict::Dict;
 use crate::error::Error;
@@ -178,7 +181,7 @@ pub struct BlockInfo {
     /// Unix timestamp when the block was created.
     pub gen_utime: u32,
     /// Milliseconds part of the timestamp when the block was created.
-    #[cfg(feature = "venom")]
+    #[cfg(any(feature = "venom", feature = "tycho"))]
     pub gen_utime_ms: u16,
     /// Logical time range start.
     pub start_lt: u64,
@@ -204,11 +207,54 @@ pub struct BlockInfo {
     pub prev_vert_ref: Option<Lazy<BlockRef>>,
 }
 
+#[cfg(feature = "sync")]
+impl Default for BlockInfo {
+    fn default() -> Self {
+        Self {
+            version: 0,
+            after_merge: false,
+            before_split: false,
+            after_split: false,
+            want_split: false,
+            want_merge: false,
+            key_block: false,
+            flags: 0,
+            seqno: 0,
+            vert_seqno: 0,
+            shard: ShardIdent::MASTERCHAIN,
+            gen_utime: 0,
+            #[cfg(any(feature = "venom", feature = "tycho"))]
+            gen_utime_ms: 0,
+            start_lt: 0,
+            end_lt: 0,
+            gen_validator_list_hash_short: 0,
+            gen_catchain_seqno: 0,
+            min_ref_mc_seqno: 0,
+            prev_key_block_seqno: 0,
+            gen_software: Default::default(),
+            master_ref: None,
+            prev_ref: PrevBlockRef::empty_single_ref().clone(),
+            prev_vert_ref: None,
+        }
+    }
+}
+
 impl BlockInfo {
     const TAG_V1: u32 = 0x9bc7a987;
-    #[cfg(feature = "venom")]
+    #[cfg(any(feature = "venom", feature = "tycho"))]
     const TAG_V2: u32 = 0x9bc7a988;
     const FLAG_WITH_GEN_SOFTWARE: u8 = 0x1;
+
+    /// Set the version and capabilities of the software that created this block.
+    pub fn set_gen_software(&mut self, gen_software: Option<GlobalVersion>) {
+        if let Some(gen_software) = gen_software {
+            self.gen_software = gen_software;
+            self.flags |= BlockInfo::FLAG_WITH_GEN_SOFTWARE;
+        } else {
+            self.gen_software = Default::default();
+            self.flags &= !BlockInfo::FLAG_WITH_GEN_SOFTWARE;
+        }
+    }
 
     /// Tries to load a reference to the masterchain block.
     pub fn load_master_ref(&self) -> Result<Option<BlockRef>, Error> {
@@ -221,6 +267,34 @@ impl BlockInfo {
     /// Tries to load a reference to the previous block (or blocks).
     pub fn load_prev_ref(&self) -> Result<PrevBlockRef, Error> {
         PrevBlockRef::load_from_cell(&self.prev_ref, self.after_merge)
+    }
+
+    /// Set previous block reference.
+    pub fn set_prev_ref(&mut self, prev_ref: &PrevBlockRef) {
+        match prev_ref {
+            PrevBlockRef::Single(prev_ref) => self.set_prev_ref_single(prev_ref),
+            PrevBlockRef::AfterMerge { left, right } => self.set_prev_ref_after_merge(left, right),
+        }
+    }
+
+    /// Set previous block reference (direct).
+    pub fn set_prev_ref_single(&mut self, prev_ref: &BlockRef) {
+        // NOTE: Unwrap is ok because we control the input.
+        self.prev_ref = CellBuilder::build_from(prev_ref).unwrap();
+    }
+
+    /// Set previous block reference (split).
+    pub fn set_prev_ref_after_merge(&mut self, left: &BlockRef, right: &BlockRef) {
+        fn store_split_ref(left: &BlockRef, right: &BlockRef) -> Result<Cell, Error> {
+            let cx = &mut Cell::empty_context();
+            let mut builder = CellBuilder::new();
+            ok!(builder.store_reference(ok!(CellBuilder::build_from_ext(left, cx))));
+            ok!(builder.store_reference(ok!(CellBuilder::build_from_ext(right, cx))));
+            builder.build_ext(cx)
+        }
+
+        // NOTE: Unwrap is ok because we control the input.
+        self.prev_ref = store_split_ref(left, right).unwrap();
     }
 }
 
@@ -239,9 +313,9 @@ impl Store for BlockInfo {
             | ((self.key_block as u8) << 1)
             | (self.prev_vert_ref.is_some() as u8);
 
-        #[cfg(not(feature = "venom"))]
+        #[cfg(not(any(feature = "venom", feature = "tycho")))]
         ok!(builder.store_u32(Self::TAG_V1));
-        #[cfg(feature = "venom")]
+        #[cfg(any(feature = "venom", feature = "tycho"))]
         ok!(builder.store_u32(Self::TAG_V2));
 
         ok!(builder.store_u32(self.version));
@@ -250,7 +324,7 @@ impl Store for BlockInfo {
         ok!(builder.store_u32(self.vert_seqno));
         ok!(self.shard.store_into(builder, context));
         ok!(builder.store_u32(self.gen_utime));
-        #[cfg(feature = "venom")]
+        #[cfg(any(feature = "venom", feature = "tycho"))]
         ok!(builder.store_u16(self.gen_utime_ms));
         ok!(builder.store_u64(self.start_lt));
         ok!(builder.store_u64(self.end_lt));
@@ -281,13 +355,13 @@ impl<'a> Load<'a> for BlockInfo {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let with_ms = match slice.load_u32() {
             Ok(Self::TAG_V1) => false,
-            #[cfg(feature = "venom")]
+            #[cfg(any(feature = "venom", feature = "tycho"))]
             Ok(Self::TAG_V2) => true,
             Ok(_) => return Err(Error::InvalidTag),
             Err(e) => return Err(e),
         };
 
-        #[cfg(not(feature = "venom"))]
+        #[cfg(not(any(feature = "venom", feature = "tycho")))]
         let _ = with_ms;
 
         let version = ok!(slice.load_u32());
@@ -299,7 +373,7 @@ impl<'a> Load<'a> for BlockInfo {
         let vert_seqno = ok!(slice.load_u32());
         let shard = ok!(ShardIdent::load_from(slice));
         let gen_utime = ok!(slice.load_u32());
-        #[cfg(feature = "venom")]
+        #[cfg(any(feature = "venom", feature = "tycho"))]
         let gen_utime_ms = if with_ms { ok!(slice.load_u16()) } else { 0 };
         let start_lt = ok!(slice.load_u64());
         let end_lt = ok!(slice.load_u64());
@@ -345,7 +419,7 @@ impl<'a> Load<'a> for BlockInfo {
             vert_seqno,
             shard,
             gen_utime,
-            #[cfg(feature = "venom")]
+            #[cfg(any(feature = "venom", feature = "tycho"))]
             gen_utime_ms,
             start_lt,
             end_lt,
@@ -421,6 +495,21 @@ pub enum PrevBlockRef {
 }
 
 impl PrevBlockRef {
+    /// Returns a static reference to an empty single reference.
+    #[cfg(feature = "sync")]
+    pub fn empty_single_ref() -> &'static Cell {
+        static CELL: OnceLock<Cell> = OnceLock::new();
+        CELL.get_or_init(|| {
+            CellBuilder::build_from(&BlockRef {
+                end_lt: 0,
+                seqno: 0,
+                root_hash: HashBytes::ZERO,
+                file_hash: HashBytes::ZERO,
+            })
+            .unwrap()
+        })
+    }
+
     fn load_from_cell(value: &Cell, after_merge: bool) -> Result<Self, Error> {
         let mut s = ok!(value.as_slice());
         Ok(if unlikely(after_merge) {
@@ -472,7 +561,7 @@ impl BlockRef {
 }
 
 /// Tokens flow info.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ValueFlow {
     /// Total amount transferred from the previous block.

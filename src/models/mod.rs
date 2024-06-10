@@ -3,8 +3,7 @@
 use std::marker::PhantomData;
 
 use crate::cell::{
-    Cell, CellBuilder, CellContext, CellFamily, CellSlice, CellSliceSize, EquivalentRepr, Load,
-    Store,
+    Cell, CellBuilder, CellContext, CellSlice, CellSliceSize, EquivalentRepr, Load, Store,
 };
 use crate::error::Error;
 use crate::util::*;
@@ -125,10 +124,13 @@ impl<T> Lazy<T> {
 impl<T: Store> Lazy<T> {
     /// Serializes the provided data and returns the typed wrapper around it.
     pub fn new(data: &T) -> Result<Self, Error> {
-        let mut builder = CellBuilder::new();
-        let context = &mut Cell::empty_context();
-        ok!(data.store_into(&mut builder, context));
-        Ok(Self::from_raw(ok!(builder.build_ext(context))))
+        Ok(Self::from_raw(ok!(CellBuilder::build_from(data))))
+    }
+
+    /// Updates the content with the provided data.
+    pub fn set(&mut self, data: &T) -> Result<(), Error> {
+        self.cell = ok!(CellBuilder::build_from(data));
+        Ok(())
     }
 }
 

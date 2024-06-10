@@ -1,7 +1,7 @@
 //! Currency collection stuff.
 
 use crate::cell::*;
-use crate::dict::{AugDictSkipValue, Dict};
+use crate::dict::{AugDictExtra, Dict};
 use crate::error::Error;
 use crate::num::{Tokens, VarUint248};
 
@@ -53,8 +53,55 @@ impl CurrencyCollection {
                 Some(value) => value,
                 None => return Err(Error::IntOverflow),
             },
-            other: self.other.checked_add(&other.other)?,
+            other: ok!(self.other.checked_add(&other.other)),
         })
+    }
+
+    /// Checked currency collection subtraction.
+    /// Computes `self - rhs` for each currency, returning `Err`
+    /// if overflow occurred or dictionaries had invalid structure.
+    pub fn checked_sub(&self, other: &Self) -> Result<Self, Error> {
+        Ok(Self {
+            tokens: match self.tokens.checked_sub(other.tokens) {
+                Some(value) => value,
+                None => return Err(Error::IntOverflow),
+            },
+            other: ok!(self.other.checked_sub(&other.other)),
+        })
+    }
+
+    /// Tries to add the specified amount of native tokens to the collection.
+    pub fn try_add_assign_tokens(&mut self, other: Tokens) -> Result<(), Error> {
+        match self.tokens.checked_add(other) {
+            Some(value) => {
+                self.tokens = value;
+                Ok(())
+            }
+            None => Err(Error::IntOverflow),
+        }
+    }
+
+    /// Tries to subtract the specified amount of native tokens from the collection.
+    pub fn try_sub_assign_tokens(&mut self, other: Tokens) -> Result<(), Error> {
+        match self.tokens.checked_sub(other) {
+            Some(value) => {
+                self.tokens = value;
+                Ok(())
+            }
+            None => Err(Error::IntOverflow),
+        }
+    }
+
+    /// Tries to add an other currency collection to the current one.
+    pub fn try_add_assign(&mut self, other: &Self) -> Result<(), Error> {
+        *self = ok!(self.checked_add(other));
+        Ok(())
+    }
+
+    /// Tries to subtract an other currency collection from the current one.
+    pub fn try_sub_assign(&mut self, other: &Self) -> Result<(), Error> {
+        *self = ok!(self.checked_sub(other));
+        Ok(())
     }
 }
 
@@ -68,17 +115,23 @@ impl From<Tokens> for CurrencyCollection {
     }
 }
 
-impl<'a> AugDictSkipValue<'a> for CurrencyCollection {
-    #[inline]
-    fn skip_value(slice: &mut CellSlice<'a>) -> bool {
-        Tokens::skip_value(slice) && ExtraCurrencyCollection::skip_value(slice)
-    }
-}
-
 impl ExactSize for CurrencyCollection {
     #[inline]
     fn exact_size(&self) -> CellSliceSize {
         self.tokens.exact_size() + self.other.exact_size()
+    }
+}
+
+impl AugDictExtra for CurrencyCollection {
+    fn comp_add(
+        left: &mut CellSlice,
+        right: &mut CellSlice,
+        b: &mut CellBuilder,
+        cx: &mut dyn CellContext,
+    ) -> Result<(), Error> {
+        let left = ok!(Self::load_from(left));
+        let right = ok!(Self::load_from(right));
+        ok!(left.checked_add(&right)).store_into(b, cx)
     }
 }
 
@@ -131,7 +184,24 @@ impl ExtraCurrencyCollection {
 
             let existing = ok!(result.as_dict().get(currency_id)).unwrap_or_default();
             match existing.checked_add(&other) {
-                Some(value) => ok!(result.0.set(currency_id, &value)),
+                Some(ref value) => ok!(result.0.set(currency_id, value)),
+                None => return Err(Error::IntOverflow),
+            };
+        }
+        Ok(result)
+    }
+
+    /// Checked extra currency subtraction.
+    /// Computes `self - rhs` for each currency, returning `Err`
+    /// if overflow occurred or dictionaries had invalid structure.
+    pub fn checked_sub(&self, other: &Self) -> Result<Self, Error> {
+        let mut result = self.clone();
+        for entry in other.0.iter() {
+            let (currency_id, other) = ok!(entry);
+
+            let existing = ok!(result.as_dict().get(currency_id)).unwrap_or_default();
+            match existing.checked_sub(&other) {
+                Some(ref value) => ok!(result.0.set(currency_id, value)),
                 None => return Err(Error::IntOverflow),
             };
         }
@@ -143,17 +213,6 @@ impl From<Dict<u32, VarUint248>> for ExtraCurrencyCollection {
     #[inline]
     fn from(value: Dict<u32, VarUint248>) -> Self {
         Self(value)
-    }
-}
-
-impl<'a> AugDictSkipValue<'a> for ExtraCurrencyCollection {
-    #[inline]
-    fn skip_value(slice: &mut CellSlice<'a>) -> bool {
-        if let Ok(has_extra) = slice.load_bit() {
-            !has_extra || slice.try_advance(0, 1)
-        } else {
-            false
-        }
     }
 }
 

@@ -175,10 +175,14 @@ fn shard_ident_operations() {
     assert!(shard.is_left_child());
     assert_eq!(shard.prefix_len(), 0);
     assert!(shard.merge().is_none());
+    assert_eq!(shard.opposite(), None);
 
     let (left, right) = shard.split().unwrap();
     assert!(left.is_left_child() && !left.is_right_child());
     assert!(right.is_right_child() && !right.is_left_child());
+
+    assert_eq!(left.opposite(), Some(right));
+    assert_eq!(right.opposite(), Some(left));
 
     assert!(!left.is_child_of(&ShardIdent::MASTERCHAIN));
     assert!(!right.is_child_of(&ShardIdent::MASTERCHAIN));
@@ -209,6 +213,11 @@ fn shard_ident_operations() {
     let children = {
         let (ll, lr) = left.split().unwrap();
         let (rl, rr) = right.split().unwrap();
+
+        assert_eq!(ll.opposite(), Some(lr));
+        assert_eq!(lr.opposite(), Some(ll));
+        assert_eq!(rl.opposite(), Some(rr));
+        assert_eq!(rr.opposite(), Some(rl));
 
         assert!(ll.intersects(&left));
         assert!(left.intersects(&ll));

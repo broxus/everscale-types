@@ -1,26 +1,29 @@
+#[cfg(feature = "sync")]
+use std::sync::OnceLock;
+
 use crate::cell::*;
-use crate::dict::{AugDict, AugDictSkipValue, Dict};
+use crate::dict::{AugDict, AugDictExtra, Dict, DictKey};
 use crate::error::Error;
 use crate::num::Uint15;
 
 use crate::models::config::{BlockchainConfig, ValidatorDescription};
 use crate::models::currency::CurrencyCollection;
+use crate::models::message::{ImportFees, InMsg, OutMsg};
 use crate::models::transaction::{HashUpdate, Transaction};
-use crate::models::Lazy;
+use crate::models::{Lazy, ShardHashes, ShardIdent};
 
 #[cfg(feature = "venom")]
 use super::ShardBlockRefs;
-use super::ShardHashes;
 
 /// Block content.
 #[derive(Debug, Clone)]
 pub struct BlockExtra {
-    /// Incoming message description.
-    pub in_msg_description: Cell,
-    /// Outgoing message description.
-    pub out_msg_description: Cell,
+    /// Inbound message description.
+    pub in_msg_description: Lazy<InMsgDescr>,
+    /// Outbound message description.
+    pub out_msg_description: Lazy<OutMsgDescr>,
     /// Block transactions info.
-    pub account_blocks: Lazy<AugDict<HashBytes, CurrencyCollection, AccountBlock>>,
+    pub account_blocks: Lazy<AccountBlocks>,
     /// Random generator seed.
     pub rand_seed: HashBytes,
     /// Public key of the collator who produced this block.
@@ -32,10 +35,47 @@ pub struct BlockExtra {
     pub shard_block_refs: ShardBlockRefs,
 }
 
+#[cfg(feature = "sync")]
+impl Default for BlockExtra {
+    fn default() -> Self {
+        Self {
+            in_msg_description: Self::empty_in_msg_descr().clone(),
+            out_msg_description: Self::empty_out_msg_descr().clone(),
+            account_blocks: Self::empty_account_blocks().clone(),
+            rand_seed: HashBytes::default(),
+            created_by: HashBytes::default(),
+            custom: None,
+            #[cfg(feature = "venom")]
+            shard_block_refs: ShardBlockRefs::default(),
+        }
+    }
+}
+
 impl BlockExtra {
     const TAG_V1: u32 = 0x4a33f6fd;
-    #[cfg(feature = "venom")]
+    #[cfg(any(feature = "venom", feature = "tycho"))]
     const TAG_V2: u32 = 0x4a33f6fc;
+
+    /// Returns a static reference to an empty inbound message description.
+    #[cfg(feature = "sync")]
+    pub fn empty_in_msg_descr() -> &'static Lazy<InMsgDescr> {
+        static IN_MSG_DESCR: OnceLock<Lazy<InMsgDescr>> = OnceLock::new();
+        IN_MSG_DESCR.get_or_init(|| Lazy::new(&AugDict::new()).unwrap())
+    }
+
+    /// Returns a static reference to an empty outbound message description.
+    #[cfg(feature = "sync")]
+    pub fn empty_out_msg_descr() -> &'static Lazy<OutMsgDescr> {
+        static OUT_MSG_DESCR: OnceLock<Lazy<OutMsgDescr>> = OnceLock::new();
+        OUT_MSG_DESCR.get_or_init(|| Lazy::new(&AugDict::new()).unwrap())
+    }
+
+    /// Returns a static reference to an empty account blocks.
+    #[cfg(feature = "sync")]
+    pub fn empty_account_blocks() -> &'static Lazy<AccountBlocks> {
+        static ACCOUNT_BLOCKS: OnceLock<Lazy<AccountBlocks>> = OnceLock::new();
+        ACCOUNT_BLOCKS.get_or_init(|| Lazy::new(&AugDict::new()).unwrap())
+    }
 }
 
 impl Store for BlockExtra {
@@ -44,13 +84,13 @@ impl Store for BlockExtra {
         builder: &mut CellBuilder,
         context: &mut dyn CellContext,
     ) -> Result<(), Error> {
-        #[cfg(not(feature = "venom"))]
+        #[cfg(not(any(feature = "venom", feature = "tycho")))]
         ok!(builder.store_u32(Self::TAG_V1));
-        #[cfg(feature = "venom")]
+        #[cfg(any(feature = "venom", feature = "tycho"))]
         ok!(builder.store_u32(Self::TAG_V2));
 
-        ok!(builder.store_reference(self.in_msg_description.clone()));
-        ok!(builder.store_reference(self.out_msg_description.clone()));
+        ok!(builder.store_reference(self.in_msg_description.cell.clone()));
+        ok!(builder.store_reference(self.out_msg_description.cell.clone()));
         ok!(builder.store_reference(self.account_blocks.cell.clone()));
         ok!(builder.store_u256(&self.rand_seed));
         ok!(builder.store_u256(&self.created_by));
@@ -75,17 +115,17 @@ impl Store for BlockExtra {
 impl<'a> Load<'a> for BlockExtra {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let tag = ok!(slice.load_u32());
-        #[cfg(not(feature = "venom"))]
+        #[cfg(not(any(feature = "venom", feature = "tycho")))]
         if tag != Self::TAG_V1 {
             return Err(Error::InvalidTag);
         }
-        #[cfg(feature = "venom")]
+        #[cfg(any(feature = "venom", feature = "tycho"))]
         if tag != Self::TAG_V1 && tag != Self::TAG_V2 {
             return Err(Error::InvalidTag);
         }
 
-        let in_msg_description = ok!(slice.load_reference_cloned());
-        let out_msg_description = ok!(slice.load_reference_cloned());
+        let in_msg_description = ok!(Lazy::load_from(slice));
+        let out_msg_description = ok!(Lazy::load_from(slice));
         let account_blocks = ok!(Lazy::load_from(slice));
         let rand_seed = ok!(slice.load_u256());
         let created_by = ok!(slice.load_u256());
@@ -125,7 +165,20 @@ impl BlockExtra {
             None => Ok(None),
         }
     }
+
+    /// Tries to load inbound message description.
+    pub fn load_in_msg_description(&self) -> Result<InMsgDescr, Error> {
+        self.in_msg_description.load()
+    }
+
+    /// Tries to load outbound message description.
+    pub fn load_out_msg_description(&self) -> Result<OutMsgDescr, Error> {
+        self.out_msg_description.load()
+    }
 }
+
+/// Account blocks grouped by account id with a total fees as an extra data.
+pub type AccountBlocks = AugDict<HashBytes, CurrencyCollection, AccountBlock>;
 
 /// A group of account transactions.
 #[derive(Debug, Clone)]
@@ -176,11 +229,11 @@ impl<'a> Load<'a> for AccountBlock {
     }
 }
 
-impl<'a> AugDictSkipValue<'a> for Lazy<Transaction> {
-    fn skip_value(slice: &mut CellSlice<'a>) -> bool {
-        slice.try_advance(0, 1)
-    }
-}
+/// A list of inbound messages.
+pub type InMsgDescr = AugDict<HashBytes, ImportFees, InMsg>;
+
+/// A list of outbound messages.
+pub type OutMsgDescr = AugDict<HashBytes, CurrencyCollection, OutMsg>;
 
 /// Additional content for masterchain blocks.
 #[derive(Debug, Clone)]
@@ -190,21 +243,51 @@ pub struct McBlockExtra {
     pub shards: ShardHashes,
     /// Collected/created shard fees.
     pub fees: ShardFees,
-    /// Signatures for previous blocks (TODO)
+    /// Signatures for previous blocks.
     pub prev_block_signatures: Dict<u16, BlockSignature>,
-    /// TODO
-    pub recover_create_msg: Option<Cell>,
-    /// TODO
-    pub mint_msg: Option<Cell>,
+    /// An optional message with funds recover.
+    pub recover_create_msg: Option<Lazy<InMsg>>,
+    /// An optional message with minting.
+    pub mint_msg: Option<Lazy<InMsg>>,
     /// Copyleft messages if present.
     pub copyleft_msgs: Dict<Uint15, Cell>,
     /// Blockchain config (if the block is a key block).
     pub config: Option<BlockchainConfig>,
 }
 
+impl Default for McBlockExtra {
+    fn default() -> Self {
+        Self {
+            shards: ShardHashes::default(),
+            fees: ShardFees::new(),
+            prev_block_signatures: Dict::new(),
+            recover_create_msg: None,
+            mint_msg: None,
+            copyleft_msgs: Dict::new(),
+            config: None,
+        }
+    }
+}
+
 impl McBlockExtra {
     const TAG_V1: u16 = 0xcca5;
     const TAG_V2: u16 = 0xdc75;
+
+    /// Tries to load recover/create message.
+    pub fn load_recover_create_msg(&self) -> Result<Option<InMsg>, Error> {
+        match &self.recover_create_msg {
+            Some(msg) => msg.load().map(Some),
+            None => Ok(None),
+        }
+    }
+
+    /// Tries to load mint message.
+    pub fn load_mint_msg(&self) -> Result<Option<InMsg>, Error> {
+        match &self.mint_msg {
+            Some(msg) => msg.load().map(Some),
+            None => Ok(None),
+        }
+    }
 }
 
 impl Store for McBlockExtra {
@@ -273,8 +356,8 @@ impl<'a> Load<'a> for McBlockExtra {
             shards,
             fees,
             prev_block_signatures: ok!(Dict::load_from(slice)),
-            recover_create_msg: ok!(Option::<Cell>::load_from(slice)),
-            mint_msg: ok!(Option::<Cell>::load_from(slice)),
+            recover_create_msg: ok!(Option::<Lazy<_>>::load_from(slice)),
+            mint_msg: ok!(Option::<Lazy<_>>::load_from(slice)),
             copyleft_msgs: if with_copyleft {
                 ok!(Dict::load_from(slice))
             } else {
@@ -285,15 +368,71 @@ impl<'a> Load<'a> for McBlockExtra {
     }
 }
 
-/// TEMP shard fees mapping sub.
-#[derive(Debug, Clone, Store, Load)]
-pub struct ShardFees {
-    /// Dictionary root.
-    pub root: Option<Cell>,
-    /// `AugDict` root extra part.
+/// A dictionary with collected/created shard fees.
+pub type ShardFees = AugDict<ShardIdentFull, ShardFeeCreated, ShardFeeCreated>;
+
+/// [`ShardIdent`] that is stored with terminatino bit.
+#[derive(Clone, Debug, Default, Store, Load)]
+pub struct ShardIdentFull {
+    /// Workchain id.
+    pub workchain: i32,
+    /// Shard prefix with terminatino bit.
+    pub prefix: u64,
+}
+
+impl DictKey for ShardIdentFull {
+    const BITS: u16 = 96;
+
+    fn from_raw_data(raw_data: &[u8; 128]) -> Option<Self> {
+        let workchain = i32::from_be_bytes(raw_data[0..4].try_into().unwrap());
+        let prefix = u64::from_be_bytes(raw_data[4..12].try_into().unwrap());
+        Some(Self { workchain, prefix })
+    }
+}
+
+impl TryFrom<ShardIdentFull> for ShardIdent {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(ident: ShardIdentFull) -> Result<Self, Self::Error> {
+        ShardIdent::new(ident.workchain, ident.prefix).ok_or(Error::InvalidData)
+    }
+}
+
+impl From<ShardIdent> for ShardIdentFull {
+    #[inline]
+    fn from(ident: ShardIdent) -> Self {
+        Self {
+            workchain: ident.workchain(),
+            prefix: ident.prefix(),
+        }
+    }
+}
+
+/// Collected fees/created funds.
+#[derive(Debug, Clone, Default, Eq, PartialEq, Store, Load)]
+pub struct ShardFeeCreated {
+    /// Collected fees.
     pub fees: CurrencyCollection,
-    /// `AugDict` root extra part.
+    /// Created funds.
     pub create: CurrencyCollection,
+}
+
+impl AugDictExtra for ShardFeeCreated {
+    fn comp_add(
+        left: &mut CellSlice,
+        right: &mut CellSlice,
+        b: &mut CellBuilder,
+        cx: &mut dyn CellContext,
+    ) -> Result<(), Error> {
+        let left = ok!(Self::load_from(left));
+        let right = ok!(Self::load_from(right));
+        Self {
+            fees: ok!(left.fees.checked_add(&right.fees)),
+            create: ok!(left.create.checked_add(&right.create)),
+        }
+        .store_into(b, cx)
+    }
 }
 
 /// Block signature pair.

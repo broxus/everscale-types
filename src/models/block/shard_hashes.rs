@@ -750,7 +750,7 @@ pub struct ShardBlockRef {
 /// A tree of the most recent shard block references for all currently existing shards
 /// for all workchains except the masterchain.
 #[cfg(feature = "venom")]
-#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[derive(Debug, Default, Clone, Eq, PartialEq, Store, Load)]
 pub struct ShardBlockRefs(Dict<i32, Cell>);
 
 #[cfg(feature = "venom")]
@@ -1197,6 +1197,8 @@ mod test {
             funds_created: Default::default(),
             copyleft_rewards: Default::default(),
             proof_chain: None,
+            #[cfg(feature = "venom")]
+            collators: None,
         };
         // arbitrary order
         let input = HashMap::from([

@@ -7,8 +7,8 @@ use crate::error::Error;
 use crate::util::*;
 
 use super::{
-    dict_find_bound, dict_find_owned, dict_get, dict_insert, dict_load_from_root, DictBound,
-    DictKey, SetMode,
+    dict_find_bound, dict_find_owned, dict_get, dict_insert, dict_load_from_root,
+    dict_split_by_prefix, DictBound, DictKey, SetMode,
 };
 use super::{dict_remove_bound_owned, raw::*};
 
@@ -319,6 +319,36 @@ where
         signed: bool,
     ) -> Result<Option<(K, CellSliceParts)>, Error> {
         self.remove_bound_raw_ext(bound, signed, &mut Cell::empty_context())
+    }
+
+    /// Split dictionary into 2 dictionaries by the first key bit.
+    pub fn split(&self) -> Result<(Self, Self), Error> {
+        self.split_by_prefix_ext(&Default::default(), &mut Cell::empty_context())
+    }
+
+    /// Split dictionary into 2 dictionaries by the first key bit.
+    pub fn split_ext(&self, context: &mut dyn CellContext) -> Result<(Self, Self), Error> {
+        self.split_by_prefix_ext(&Default::default(), context)
+    }
+
+    /// Split dictionary into 2 dictionaries at the prefix.
+    pub fn split_by_prefix(&self, key_prefix: &CellSlice<'_>) -> Result<(Self, Self), Error> {
+        self.split_by_prefix_ext(key_prefix, &mut Cell::empty_context())
+    }
+
+    /// Split dictionary into 2 dictionaries at the prefix.
+    pub fn split_by_prefix_ext(
+        &self,
+        key_prefix: &CellSlice<'_>,
+        context: &mut dyn CellContext,
+    ) -> Result<(Self, Self), Error> {
+        let (left, right) = ok!(dict_split_by_prefix(
+            self.root.as_ref(),
+            K::BITS,
+            key_prefix,
+            context
+        ));
+        Ok((Self::from_raw(left), Self::from_raw(right)))
     }
 }
 
@@ -1409,6 +1439,110 @@ mod tests {
 
         assert_eq!(dict.get_prev(100, true).unwrap(), Some((20, 20)));
         assert_eq!(dict.get_or_prev(100, true).unwrap(), Some((20, 20)));
+
+        // All negative
+        let mut dict = Dict::<i32, i32>::new();
+        for i in -10..=-5 {
+            dict.set(i, i).unwrap();
+        }
+
+        assert_eq!(dict.get_prev(-20, true).unwrap(), None);
+        assert_eq!(dict.get_or_prev(-20, true).unwrap(), None);
+        assert_eq!(dict.get_prev(-10, true).unwrap(), None);
+        assert_eq!(dict.get_or_prev(-10, true).unwrap(), Some((-10, -10)));
+
+        assert_eq!(dict.get_next(-20, true).unwrap(), Some((-10, -10)));
+        assert_eq!(dict.get_or_next(-20, true).unwrap(), Some((-10, -10)));
+        assert_eq!(dict.get_next(-10, true).unwrap(), Some((-9, -9)));
+        assert_eq!(dict.get_or_next(-10, true).unwrap(), Some((-10, -10)));
+
+        assert_eq!(dict.get_prev(-7, true).unwrap(), Some((-8, -8)));
+        assert_eq!(dict.get_or_prev(-7, true).unwrap(), Some((-7, -7)));
+        assert_eq!(dict.get_next(-7, true).unwrap(), Some((-6, -6)));
+        assert_eq!(dict.get_or_next(-7, true).unwrap(), Some((-7, -7)));
+
+        assert_eq!(dict.get_prev(-5, true).unwrap(), Some((-6, -6)));
+        assert_eq!(dict.get_or_prev(-5, true).unwrap(), Some((-5, -5)));
+        assert_eq!(dict.get_prev(-4, true).unwrap(), Some((-5, -5)));
+        assert_eq!(dict.get_or_prev(-4, true).unwrap(), Some((-5, -5)));
+
+        assert_eq!(dict.get_next(-5, true).unwrap(), None);
+        assert_eq!(dict.get_or_next(-5, true).unwrap(), Some((-5, -5)));
+        assert_eq!(dict.get_next(-4, true).unwrap(), None);
+        assert_eq!(dict.get_or_next(-4, true).unwrap(), None);
+
+        assert_eq!(dict.get_next(0, true).unwrap(), None);
+        assert_eq!(dict.get_or_next(0, true).unwrap(), None);
+        assert_eq!(dict.get_next(1, true).unwrap(), None);
+        assert_eq!(dict.get_or_next(1, true).unwrap(), None);
+
+        // All positive
+        let mut dict = Dict::<i32, i32>::new();
+        for i in 5..=10 {
+            dict.set(i, i).unwrap();
+        }
+
+        assert_eq!(dict.get_prev(-1, true).unwrap(), None);
+        assert_eq!(dict.get_or_prev(-1, true).unwrap(), None);
+        assert_eq!(dict.get_prev(0, true).unwrap(), None);
+        assert_eq!(dict.get_or_prev(0, true).unwrap(), None);
+
+        assert_eq!(dict.get_next(4, true).unwrap(), Some((5, 5)));
+        assert_eq!(dict.get_or_next(4, true).unwrap(), Some((5, 5)));
+        assert_eq!(dict.get_next(5, true).unwrap(), Some((6, 6)));
+        assert_eq!(dict.get_or_next(5, true).unwrap(), Some((5, 5)));
+
+        assert_eq!(dict.get_prev(7, true).unwrap(), Some((6, 6)));
+        assert_eq!(dict.get_or_prev(7, true).unwrap(), Some((7, 7)));
+        assert_eq!(dict.get_next(7, true).unwrap(), Some((8, 8)));
+        assert_eq!(dict.get_or_next(7, true).unwrap(), Some((7, 7)));
+
+        assert_eq!(dict.get_prev(10, true).unwrap(), Some((9, 9)));
+        assert_eq!(dict.get_or_prev(10, true).unwrap(), Some((10, 10)));
+        assert_eq!(dict.get_prev(11, true).unwrap(), Some((10, 10)));
+        assert_eq!(dict.get_or_prev(11, true).unwrap(), Some((10, 10)));
+
+        assert_eq!(dict.get_next(10, true).unwrap(), None);
+        assert_eq!(dict.get_or_next(10, true).unwrap(), Some((10, 10)));
+        assert_eq!(dict.get_next(11, true).unwrap(), None);
+        assert_eq!(dict.get_or_next(11, true).unwrap(), None);
+
+        assert_eq!(dict.get_prev(20, true).unwrap(), Some((10, 10)));
+        assert_eq!(dict.get_or_prev(20, true).unwrap(), Some((10, 10)));
+        assert_eq!(dict.get_next(20, true).unwrap(), None);
+        assert_eq!(dict.get_or_next(20, true).unwrap(), None);
+
+        // Single positive on edge
+        let mut dict = Dict::<i32, i32>::new();
+        dict.set(0, 0).unwrap();
+
+        assert_eq!(dict.get_prev(0, true).unwrap(), None);
+        assert_eq!(dict.get_or_prev(0, true).unwrap(), Some((0, 0)));
+        assert_eq!(dict.get_next(-1, true).unwrap(), Some((0, 0)));
+        assert_eq!(dict.get_or_next(-1, true).unwrap(), Some((0, 0)));
+
+        // Single negative on edge
+        let mut dict = Dict::<i32, i32>::new();
+        dict.set(-1, -1).unwrap();
+
+        assert_eq!(dict.get_prev(0, true).unwrap(), Some((-1, -1)));
+        assert_eq!(dict.get_or_prev(0, true).unwrap(), Some((-1, -1)));
+        assert_eq!(dict.get_next(-1, true).unwrap(), None);
+        assert_eq!(dict.get_or_next(-1, true).unwrap(), Some((-1, -1)));
+    }
+
+    #[test]
+    fn get_signed_next() {
+        let cell = Boc::decode_base64("te6ccgEBCwEAaAACAskDAQIBIAQCAgHOCAgCASAEBAIBIAUFAgEgBgYCASAHBwIBIAgIAgEgCQkBAwDgCgBoQgBAJTazb04k/ooV5DE4d+ixdwixajACdzkuZVb6ymgnqyHc1lAAAAAAAAAAAAAAAAAAAA==").unwrap();
+        let dict = Dict::<i16, Cell>::from_raw(Some(cell));
+
+        for item in dict.iter() {
+            let (key, cell) = item.unwrap();
+            println!("{key}, {}", cell.display_root());
+        }
+
+        let res = dict.get_next(-1, true).unwrap();
+        println!("{res:?}");
     }
 
     #[test]

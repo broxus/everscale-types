@@ -8,9 +8,14 @@ use crate::models::account::StateInit;
 use crate::models::currency::CurrencyCollection;
 
 pub use self::address::*;
+pub use self::envelope::*;
+pub use self::in_message::*;
+pub use self::out_message::*;
 
 mod address;
-
+mod envelope;
+mod in_message;
+mod out_message;
 #[cfg(test)]
 mod tests;
 

@@ -77,6 +77,14 @@ impl IntAddr {
             Self::Var(addr) => addr.bit_len(),
         }
     }
+
+    /// Returns the high bits of the address as a number.
+    pub fn prefix(&self) -> u64 {
+        match self {
+            Self::Std(addr) => addr.prefix(),
+            Self::Var(addr) => addr.prefix(),
+        }
+    }
 }
 
 impl From<(i8, HashBytes)> for IntAddr {
@@ -225,6 +233,14 @@ impl StdAddr {
             bit_len += anycast.bit_len();
         }
         bit_len
+    }
+
+    /// Returns the high bits of the address as a number.
+    pub const fn prefix(&self) -> u64 {
+        let Some(prefix) = self.address.0.first_chunk() else {
+            unsafe { std::hint::unreachable_unchecked() };
+        };
+        u64::from_be_bytes(*prefix)
     }
 }
 
@@ -458,6 +474,14 @@ impl VarAddr {
             bit_len += anycast.bit_len();
         }
         bit_len
+    }
+
+    /// Returns the high bits of the address as a number.
+    pub fn prefix(&self) -> u64 {
+        let mut prefix = [0; 8];
+        let total_bytes = std::cmp::min(self.address.len(), 8);
+        prefix[..total_bytes].copy_from_slice(&self.address[..total_bytes]);
+        u64::from_be_bytes(prefix)
     }
 }
 
@@ -722,5 +746,29 @@ mod tests {
         prefix.store_zeros(2).unwrap();
         let anycast = Anycast::from_slice(&prefix.as_data_slice()).unwrap();
         assert_eq!(anycast.to_string(), "b00b1e52_");
+    }
+
+    #[test]
+    fn address_prefix() {
+        let addr = "0:ece57bcc6c530283becbbd8a3b24d3c5987cdddc3c8b7b33be6e4a6312490415"
+            .parse::<StdAddr>()
+            .unwrap();
+        assert_eq!(addr.prefix(), 0xece57bcc6c530283);
+
+        let var_addr = VarAddr {
+            anycast: None,
+            address_len: Uint9::new(32),
+            workchain: 0,
+            address: vec![0xb0, 0xba, 0xca, 0xfe],
+        };
+        assert_eq!(var_addr.prefix(), 0xb0bacafe00000000);
+
+        let var_addr = VarAddr {
+            anycast: None,
+            address_len: Uint9::new(72),
+            workchain: 0,
+            address: vec![0xb0, 0xba, 0xca, 0xfe, 0xb0, 0x0b, 0x1e, 0x5a, 0xff],
+        };
+        assert_eq!(var_addr.prefix(), 0xb0bacafeb00b1e5a);
     }
 }
