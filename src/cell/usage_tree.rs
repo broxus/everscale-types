@@ -260,7 +260,7 @@ mod sync {
 
     pub type SharedState = Arc<UsageTreeState>;
 
-    type VisitedCells = dashmap::DashSet<HashBytes, ahash::RandomState>;
+    type VisitedCells = scc::HashSet<HashBytes, ahash::RandomState>;
 
     pub struct UsageTreeState {
         mode: UsageTreeMode,
@@ -294,7 +294,7 @@ mod sync {
         #[inline]
         pub fn insert(&self, cell: &Cell, ctx: UsageTreeMode) {
             if self.mode == ctx {
-                self.visited.insert(*cell.repr_hash());
+                _ = self.visited.insert(*cell.repr_hash());
             }
         }
 
