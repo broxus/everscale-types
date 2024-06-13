@@ -20,7 +20,7 @@ fn check_tx(boc: &[u8]) -> Cell {
     let in_msg = tx.load_in_msg().unwrap();
     println!("In message: {in_msg:?}");
 
-    for (i, entry) in tx.out_msgs.iter().enumerate() {
+    for (i, entry) in tx.out_msgs.dict.iter().enumerate() {
         let (number, cell) = entry.unwrap();
         let message = cell.parse::<Message>().unwrap();
         assert_eq!(number, i as u16);
@@ -28,11 +28,11 @@ fn check_tx(boc: &[u8]) -> Cell {
     }
     assert_eq!(
         tx.out_msg_count.into_inner() as usize,
-        tx.out_msgs.raw_values().count()
+        tx.out_msgs.dict.raw_values().count()
     );
 
     let mut out_msg_count = 0;
-    for msg in tx.iter_out_msgs() {
+    for msg in tx.out_msgs.iter() {
         msg.unwrap();
         out_msg_count += 1;
     }

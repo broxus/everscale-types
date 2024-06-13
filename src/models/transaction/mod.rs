@@ -42,7 +42,7 @@ pub struct Transaction {
     pub in_msg: Option<Cell>,
     /// Outgoing messages.
     #[cfg_attr(feature = "serde", serde(with = "serde_out_msgs"))]
-    pub out_msgs: Dict<Uint15, Cell>,
+    pub out_msgs: TransactionOutMsgs,
     /// Total transaction fees (including extra fwd fees).
     pub total_fees: CurrencyCollection,
     /// Account state hashes.
@@ -69,15 +69,23 @@ impl Transaction {
     }
 }
 
-impl Transaction {
+/// Newly created internal and external outgoing messages, in order by lt
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
+pub struct TransactionOutMsgs {
+    /// Underlying dictionary can be iterated
+    /// in the same order as with [`TransactionOutMsgs::iter()`]
+    pub dict: Dict<Uint15, Cell>,
+}
+
+impl TransactionOutMsgs {
     /// Gets an iterator over the output messages of this transaction, in order by lt.
     /// The iterator element type is `Result<Message<'a>>`.
     ///
     /// If the dictionary or message is invalid, finishes after the first invalid element,
     /// returning an error.
-    pub fn iter_out_msgs(&'_ self) -> TxOutMsgIter<'_> {
+    pub fn iter(&'_ self) -> TxOutMsgIter<'_> {
         TxOutMsgIter {
-            inner: self.out_msgs.raw_values(),
+            inner: self.dict.raw_values(),
         }
     }
 }
@@ -128,7 +136,7 @@ mod serde_in_msg {
 mod serde_out_msgs {
     use super::*;
 
-    pub fn serialize<S>(out_msgs: &Dict<Uint15, Cell>, serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(out_msgs: &TransactionOutMsgs, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
@@ -136,7 +144,7 @@ mod serde_out_msgs {
 
         if serializer.is_human_readable() {
             let mut map = ok!(serializer.serialize_map(None));
-            for entry in out_msgs.iter() {
+            for entry in out_msgs.dict.iter() {
                 match entry {
                     Ok((key, value)) => {
                         let message = ok!(value.parse::<Message>().map_err(Error::custom));
@@ -147,11 +155,11 @@ mod serde_out_msgs {
             }
             map.end()
         } else {
-            crate::boc::BocRepr::serialize(out_msgs, serializer)
+            crate::boc::BocRepr::serialize(&out_msgs.dict, serializer)
         }
     }
 
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Dict<Uint15, Cell>, D::Error>
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<TransactionOutMsgs, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
@@ -168,19 +176,19 @@ mod serde_out_msgs {
                 let cell = ok!(CellBuilder::build_from(value).map_err(Error::custom));
                 ok!(dict.set_ext(*key, cell, cx).map_err(Error::custom));
             }
-            Ok(dict)
+            Ok(TransactionOutMsgs { dict })
         } else {
-            crate::boc::BocRepr::deserialize(deserializer)
+            crate::boc::BocRepr::deserialize(deserializer).map(|dict| TransactionOutMsgs { dict })
         }
     }
 }
 
 /// An iterator over the transaction output messages.
 ///
-/// This struct is created by the [`iter_out_msgs`] method on [`Transaction`].
+/// This struct is created by the [`iter`] method on [`TransactionOutMsgs`].
 /// See its documentation for more.
 ///
-/// [`iter_out_msgs`]: Transaction::iter_out_msgs
+/// [`iter`]: TransactionOutMsgs::iter
 #[derive(Clone)]
 pub struct TxOutMsgIter<'a> {
     inner: dict::RawValues<'a>,
@@ -220,7 +228,7 @@ impl Store for Transaction {
         let messages = {
             let mut builder = CellBuilder::new();
             ok!(self.in_msg.store_into(&mut builder, context));
-            ok!(self.out_msgs.store_into(&mut builder, context));
+            ok!(self.out_msgs.dict.store_into(&mut builder, context));
             ok!(builder.build_ext(context))
         };
 
@@ -265,7 +273,7 @@ impl<'a> Load<'a> for Transaction {
             orig_status: ok!(AccountStatus::load_from(slice)),
             end_status: ok!(AccountStatus::load_from(slice)),
             in_msg,
-            out_msgs,
+            out_msgs: TransactionOutMsgs { dict: out_msgs },
             total_fees: ok!(CurrencyCollection::load_from(slice)),
             state_update: ok!(Lazy::<HashUpdate>::load_from(slice)),
             info: ok!(Lazy::<TxInfo>::load_from(slice)),
