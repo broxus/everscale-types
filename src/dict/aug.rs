@@ -123,6 +123,36 @@ impl<K, A: Default, V> AugDict<K, A, V> {
             _value: PhantomData,
         }
     }
+
+    /// Manually constructs the dictionaty from parts.
+    pub const fn from_parts(dict: Dict<K, (A, V)>, extra: A) -> Self {
+        Self {
+            dict,
+            extra,
+            _key: PhantomData,
+            _value: PhantomData,
+        }
+    }
+
+    /// Returns an underlying dictionary and the extra value.
+    pub fn into_parts(self) -> (Dict<K, (A, V)>, A) {
+        (self.dict, self.extra)
+    }
+
+    /// Converts into a dictionary with an equivalent value type.
+    #[inline]
+    pub fn cast_into<Q, T>(self) -> AugDict<Q, A, T>
+    where
+        Q: EquivalentRepr<K>,
+        (A, T): EquivalentRepr<(A, V)>,
+    {
+        AugDict {
+            dict: self.dict.cast_into(),
+            extra: self.extra,
+            _key: PhantomData,
+            _value: PhantomData,
+        }
+    }
 }
 
 impl<K: DictKey, A, V> AugDict<K, A, V> {
@@ -151,7 +181,8 @@ where
     K: DictKey,
     for<'a> A: Default + Load<'a>,
 {
-    fn update_root_extra(&mut self) -> Result<(), Error> {
+    /// Recomputes the root extra value.
+    pub fn update_root_extra(&mut self) -> Result<(), Error> {
         self.extra = match &self.dict.root {
             Some(root) => {
                 let slice = &mut ok!(root.as_slice());

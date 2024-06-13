@@ -126,6 +126,12 @@ impl<const N: u16> RawDict<N> {
         &self.0
     }
 
+    /// Returns the underlying root cell of the dictionary.
+    #[inline]
+    pub fn into_root(self) -> Option<Cell> {
+        self.0
+    }
+
     /// Loads a non-empty dictionary from a root cell.
     #[inline]
     pub fn load_from_root_ext(

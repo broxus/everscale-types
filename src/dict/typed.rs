@@ -124,6 +124,12 @@ impl<K, V> Dict<K, V> {
         &self.root
     }
 
+    /// Returns the underlying root cell of the dictionary.
+    #[inline]
+    pub fn into_root(self) -> Option<Cell> {
+        self.root
+    }
+
     /// Converts into a dictionary with an equivalent value type.
     #[inline]
     pub fn cast_into<Q, T>(self) -> Dict<Q, T>
