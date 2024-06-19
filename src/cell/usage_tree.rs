@@ -102,8 +102,11 @@ impl CellImpl for UsageCell {
     }
 
     fn data(&self) -> &[u8] {
-        if let Some(usage_tree) = self.usage_tree.upgrade() {
-            usage_tree.insert(&self.cell, UsageTreeMode::OnDataAccess);
+        if self.should_insert() {
+            if let Some(usage_tree) = self.usage_tree.upgrade() {
+                usage_tree.insert(&self.cell, UsageTreeMode::OnDataAccess);
+            }
+            self.set_inserted();
         }
         self.cell.data()
     }
@@ -202,6 +205,7 @@ mod rc {
                 cell,
                 usage_tree: Rc::downgrade(self),
                 children: Default::default(),
+                inserted: std::cell::Cell::new(false),
             }) as Rc<DynCell>)
         }
 
@@ -222,9 +226,18 @@ mod rc {
         pub cell: Cell,
         pub usage_tree: std::rc::Weak<UsageTreeState>,
         pub children: std::cell::UnsafeCell<[Option<Rc<Self>>; 4]>,
+        pub inserted: std::cell::Cell<bool>,
     }
 
     impl UsageCell {
+        pub fn should_insert(&self) -> bool {
+            self.inserted.get()
+        }
+
+        pub fn set_inserted(&self) {
+            self.inserted.set(true);
+        }
+
         pub fn load_reference(&self, index: u8) -> Option<&Rc<Self>> {
             if index < 4 {
                 let children = unsafe { &mut *self.children.get() };
@@ -240,6 +253,7 @@ mod rc {
                             cell: child,
                             usage_tree: self.usage_tree.clone(),
                             children: Default::default(),
+                            inserted: std::cell::Cell::new(false),
                         }))
                     }
                 })
@@ -253,6 +267,7 @@ mod rc {
 #[cfg(feature = "sync")]
 mod sync {
     use std::cell::UnsafeCell;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Once};
 
     use super::UsageTreeMode;
@@ -288,6 +303,7 @@ mod sync {
                 usage_tree: Arc::downgrade(self),
                 reference_states: [(); 4].map(|_| Once::new()),
                 reference_data: [(); 4].map(|_| UnsafeCell::new(None)),
+                inserted: AtomicBool::new(false),
             }) as Arc<DynCell>)
         }
 
@@ -310,9 +326,18 @@ mod sync {
         // TODO: Compress into one futex with bitset.
         pub reference_states: [Once; 4],
         pub reference_data: [UnsafeCell<Option<Arc<Self>>>; 4],
+        pub inserted: AtomicBool,
     }
 
     impl UsageCell {
+        pub fn should_insert(&self) -> bool {
+            self.inserted.load(Ordering::Acquire)
+        }
+
+        pub fn set_inserted(&self) {
+            self.inserted.store(true, Ordering::Release);
+        }
+
         pub fn load_reference(&self, index: u8) -> Option<&Arc<Self>> {
             if index < 4 {
                 let mut updated = false;
@@ -331,6 +356,7 @@ mod sync {
                             usage_tree: self.usage_tree.clone(),
                             reference_states: [(); 4].map(|_| Once::new()),
                             reference_data: [(); 4].map(|_| UnsafeCell::new(None)),
+                            inserted: AtomicBool::new(false),
                         }))
                     };
                 });
