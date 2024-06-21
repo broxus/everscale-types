@@ -1507,9 +1507,23 @@ pub const MAX_BIT_LEN: u16 = 1023;
 /// Maximum number of child cells
 pub const MAX_REF_COUNT: usize = 4;
 
+#[cfg(feature = "arbitrary")]
+impl arbitrary::Arbitrary<'_> for Cell {
+    fn arbitrary(u: &mut arbitrary::Unstructured) -> arbitrary::Result<Self> {
+        let builder = CellBuilder::arbitrary(u)?;
+        builder
+            .build()
+            .map_err(|_| arbitrary::Error::IncorrectFormat)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::boc::Boc;
+    use crate::dict::RawDict;
+    use crate::models::Message;
+    use include_dir::Dir;
 
     #[test]
     fn correct_level() {
@@ -1584,5 +1598,101 @@ mod tests {
         let pruned3 = pruned3.virtualize();
         assert_eq!(pruned3.repr_hash(), cell.repr_hash());
         assert_eq!(pruned3.repr_depth(), cell.repr_depth());
+    }
+
+    #[test]
+    fn cell_test() {
+        let data = base64::decode("te6ccgEBAwEACAEABwAAAN4AARcAAbM=").unwrap();
+        let data = [
+            181, 238, 156, 114, 1, 1, 3, 1, 0, 45, 0, 35, 0, 2, 1, 1, 40, 72, 1, 1, 8, 67, 0, 0, 0,
+            0, 0, 16, 0, 255, 255, 5, 255, 0, 0, 0, 0, 0, 40, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 16, 0, 0, 0,
+        ];
+        println!("{}", base64::encode(&data));
+
+        if let Ok(cell) = Boc::decode(&data) {
+            let res = Boc::encode(cell.as_ref());
+            assert_eq!(res, data);
+        }
+
+        fn call_all_cell_methods(cell: &Cell) -> CellTreeStats {
+            let hash = cell.hash(0);
+            let hash = cell.hash(1);
+            let hash = cell.hash(2);
+            let hash = cell.hash(3);
+
+            let _ = cell.virtualize();
+            cell.compute_unique_stats(usize::MAX).unwrap()
+        }
+    }
+
+    #[test]
+    fn miri_from_fuzz_inputs() {
+        static FUZZ_CORPUS: Dir = include_dir::include_dir!("$CARGO_MANIFEST_DIR/fuzz/corpus");
+        
+        let total = FUZZ_CORPUS.get_dir("boc_decode_encode").unwrap().files().count();
+        for (idx,entry) in FUZZ_CORPUS.get_dir("boc_decode_encode").unwrap().files().enumerate() {
+            let bytes = entry.contents();
+            boc_decode_encode(&bytes);
+            println!("{} / {}", idx, total);
+        }
+
+        for entry in FUZZ_CORPUS.get_dir("boc_message").unwrap().files() {
+            let data = entry.contents();
+            if let Ok(cell) = Boc::decode(data) {
+                if cell.parse::<Message>().is_ok() {}
+            }
+        }
+
+        for entry in FUZZ_CORPUS.get_dir("boc_dict").unwrap().files() {
+            let data = entry.contents();
+            if let Ok(cell) = Boc::decode(data) {
+                if let Ok(map) = cell.parse::<RawDict<32>>() {
+                    _ = map.iter().count();
+                }
+            }
+        }
+    }
+
+    fn boc_decode_encode(data: &[u8]) {
+        if let Ok(cell) = Boc::decode(data) {
+            let res = Boc::encode(cell.as_ref());
+            let redecoded = Boc::decode(&res).unwrap();
+            assert_eq!(cell.as_ref(), redecoded.as_ref());
+            let l = call_all_cell_methods(&cell);
+            let r = call_all_cell_methods(&redecoded);
+            assert_eq!(l, r);
+        }
+    }
+
+    fn call_all_cell_methods(cell: &Cell) -> CellTreeStats {
+        let hash = cell.hash(0);
+        let hash = cell.hash(1);
+        let hash = cell.hash(2);
+        let hash = cell.hash(3);
+
+        let _ = cell.virtualize();
+        cell.compute_unique_stats(usize::MAX).unwrap()
+    }
+
+    fn test_cell(bytes: &[u8]) {
+        if let Ok(cell) = Boc::decode(bytes) {
+            if let Ok(mut slice) = cell.as_slice() {
+                _ = slice.get_u8(0);
+                _ = slice.get_u16(0);
+                _ = slice.get_u32(0);
+                _ = slice.get_u64(0);
+                _ = slice.get_u128(0);
+                _ = slice.get_u256(0);
+                if slice.try_advance(3, 0) {
+                    _ = slice.get_u8(0);
+                    _ = slice.get_u16(0);
+                    _ = slice.get_u32(0);
+                    _ = slice.get_u64(0);
+                    _ = slice.get_u128(0);
+                    _ = slice.get_u256(0);
+                }
+            }
+        }
     }
 }
