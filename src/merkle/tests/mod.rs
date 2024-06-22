@@ -154,3 +154,103 @@ fn proof_with_subtree() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+use everscale_types::cell::{Cell, CellBuilder, CellFamily};
+use everscale_types::merkle::{MerkleUpdate, UsageTree};
+use std::collections::HashSet;
+
+fn create_tree(depth: u32, num: u32) -> CellBuilder {
+    let mut builder = CellBuilder::new();
+    builder.store_u32(num).unwrap();
+    if depth > 0 {
+        let cell = create_tree(depth - 1, num);
+        builder.store_reference(cell.build().unwrap()).unwrap();
+    }
+    builder
+}
+
+#[test]
+fn test_merkle_update() {
+    let build_cell = |num: u32| {
+        let mut builder = CellBuilder::new();
+        builder.store_u32(num).unwrap();
+        builder.build().unwrap()
+    };
+
+    // Create two trees with overlapping structure
+    let mut old_tree = create_tree(5, 1);
+    old_tree.store_reference(build_cell(1)).unwrap();
+    let old_tree = old_tree.build().unwrap();
+    let usage_tree = UsageTree::new(UsageTreeMode::OnDataAccess);
+    let old_tree = usage_tree.track(&old_tree);
+
+    let mut new_tree = create_tree(5, 1);
+    new_tree.store_reference(build_cell(2)).unwrap();
+    let new_tree = new_tree.build().unwrap();
+
+    // Create a set of visited cells for the old tree
+    let mut old_cells = HashSet::new();
+    let mut stack = vec![old_tree.as_ref()];
+    while let Some(cell) = stack.pop() {
+        // trigger usage tracking)
+        let _ = cell.data();
+        old_cells.insert(*cell.repr_hash());
+        for child in cell.references() {
+            stack.push(child);
+        }
+    }
+
+    // Create the Merkle update using HashSet
+    let merkle_update = MerkleUpdate::create(old_tree.as_ref(), new_tree.as_ref(), old_cells)
+        .build()
+        .unwrap();
+
+    // Create the Merkle update using UsageTree
+    let merkle_update_with_usage_tree =
+        MerkleUpdate::create(old_tree.as_ref(), new_tree.as_ref(), usage_tree)
+            .build()
+            .unwrap();
+
+    // Print sizes
+    println!(
+        "Old tree size: {} bytes",
+        BocRepr::encode(&old_tree).unwrap().len()
+    );
+    println!(
+        "New tree size: {} bytes",
+        BocRepr::encode(&new_tree).unwrap().len()
+    );
+    println!(
+        "Update size (HashSet): {} bytes",
+        BocRepr::encode(&merkle_update).unwrap().len()
+    );
+    println!(
+        "Update size (UsageTree): {} bytes",
+        BocRepr::encode(&merkle_update_with_usage_tree)
+            .unwrap()
+            .len()
+    );
+
+    // Verify the Merkle updates
+    assert_eq!(merkle_update.old_hash, *old_tree.repr_hash());
+    assert_eq!(merkle_update.new_hash, *new_tree.repr_hash());
+    assert_eq!(
+        merkle_update_with_usage_tree.old_hash,
+        *old_tree.repr_hash()
+    );
+    assert_eq!(
+        merkle_update_with_usage_tree.new_hash,
+        *new_tree.repr_hash()
+    );
+
+    // Apply the Merkle updates to the old tree
+    let result_hashset = merkle_update.apply(&old_tree).unwrap();
+    let result_usage_tree = merkle_update_with_usage_tree.apply(&old_tree).unwrap();
+
+    // Verify that the results match the new tree
+    assert_eq!(result_hashset.as_ref(), new_tree.as_ref());
+    assert_eq!(result_usage_tree.as_ref(), new_tree.as_ref());
+
+    // Check that both Merkle updates are the same
+    assert_eq!(merkle_update, merkle_update_with_usage_tree);
+}
