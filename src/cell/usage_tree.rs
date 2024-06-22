@@ -55,6 +55,11 @@ impl UsageTree {
             subtrees: Default::default(),
         }
     }
+
+    /// Returns the number of cells in the usage tree.
+    pub fn len(&self) -> usize {
+        self.state.len()
+    }
 }
 
 /// Usage tree for a family of cells with subtrees.
@@ -220,6 +225,11 @@ mod rc {
         pub fn contains(&self, repr_hash: &HashBytes) -> bool {
             self.visited.borrow().contains(repr_hash)
         }
+
+        #[inline]
+        pub fn len(&self) -> usize {
+            self.visited.borrow().len()
+        }
     }
 
     pub struct UsageCell {
@@ -317,6 +327,11 @@ mod sync {
         #[inline]
         pub fn contains(&self, repr_hash: &HashBytes) -> bool {
             self.visited.contains(repr_hash)
+        }
+
+        #[inline]
+        pub fn len(&self) -> usize {
+            self.visited.len()
         }
     }
 
