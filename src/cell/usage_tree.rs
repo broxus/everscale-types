@@ -231,7 +231,7 @@ mod rc {
 
     impl UsageCell {
         pub fn should_insert(&self) -> bool {
-            self.inserted.get()
+            !self.inserted.get()
         }
 
         pub fn set_inserted(&self) {
@@ -331,7 +331,7 @@ mod sync {
 
     impl UsageCell {
         pub fn should_insert(&self) -> bool {
-            self.inserted.load(Ordering::Acquire)
+            !self.inserted.load(Ordering::Acquire)
         }
 
         pub fn set_inserted(&self) {
