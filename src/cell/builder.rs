@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::cell::cell_context::{CellContext, CellParts};
 use crate::cell::{
-    Cell, CellDescriptor, CellImpl, CellSlice, CellType, DynCell, HashBytes, LevelMask,
+    Cell, CellDescriptor, CellImpl, CellInner, CellSlice, CellType, DynCell, HashBytes, LevelMask,
     MAX_BIT_LEN, MAX_REF_COUNT,
 };
 use crate::error::Error;
@@ -868,6 +868,8 @@ impl CellBuilder {
     /// returning `false` if there is not enough remaining capacity.
     pub fn store_reference(&mut self, cell: Cell) -> Result<(), Error> {
         if self.references.len() < MAX_REF_COUNT {
+            // TODO: Pass `cell.untrack()` after testing.
+
             // SAFETY: reference count is in the valid range
             unsafe { self.references.push(cell) }
             Ok(())
@@ -1054,6 +1056,8 @@ impl CellRefsBuilder {
     /// returning `false` if there is not enough remaining capacity.
     pub fn store_reference(&mut self, cell: Cell) -> Result<(), Error> {
         if self.0.len() < MAX_REF_COUNT {
+            // TODO: Pass `cell.untrack()` after testing.
+
             // SAFETY: reference count is in the valid range
             unsafe { self.0.push(cell) }
             Ok(())
@@ -1084,6 +1088,10 @@ impl IntermediateDataCell {
 }
 
 impl CellImpl for IntermediateDataCell {
+    fn untrack(self: CellInner<Self>) -> Cell {
+        Cell(self)
+    }
+
     fn descriptor(&self) -> CellDescriptor {
         CellDescriptor {
             d1: 0,
@@ -1152,6 +1160,10 @@ impl IntermediateFullCell {
 }
 
 impl CellImpl for IntermediateFullCell {
+    fn untrack(self: CellInner<Self>) -> Cell {
+        Cell(self)
+    }
+
     fn descriptor(&self) -> CellDescriptor {
         CellDescriptor {
             d1: CellDescriptor::compute_d1(LevelMask::EMPTY, false, self.0.references.len() as u8),

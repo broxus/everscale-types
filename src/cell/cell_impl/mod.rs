@@ -4,7 +4,8 @@ use std::mem::MaybeUninit;
 #[cfg(feature = "stats")]
 use super::CellTreeStats;
 use super::{
-    Cell, CellDescriptor, CellFamily, CellImpl, DynCell, HashBytes, EMPTY_CELL_HASH, MAX_REF_COUNT,
+    Cell, CellDescriptor, CellFamily, CellImpl, CellInner, DynCell, HashBytes, EMPTY_CELL_HASH,
+    MAX_REF_COUNT,
 };
 use crate::util::TryAsMut;
 
@@ -54,6 +55,10 @@ struct HeaderWithData<H, const N: usize> {
 struct EmptyOrdinaryCell;
 
 impl CellImpl for EmptyOrdinaryCell {
+    fn untrack(self: CellInner<Self>) -> Cell {
+        Cell(self)
+    }
+
     fn descriptor(&self) -> CellDescriptor {
         CellDescriptor::new([0, 0])
     }
@@ -136,6 +141,11 @@ impl StaticCell {
 }
 
 impl CellImpl for StaticCell {
+    #[inline]
+    fn untrack(self: CellInner<Self>) -> Cell {
+        Cell(self)
+    }
+
     fn descriptor(&self) -> CellDescriptor {
         self.descriptor
     }
@@ -393,6 +403,11 @@ impl Drop for OrdinaryCellHeader {
 // TODO: merge VTables for different data array sizes
 
 impl<const N: usize> CellImpl for OrdinaryCell<N> {
+    #[inline]
+    fn untrack(self: CellInner<Self>) -> Cell {
+        Cell(self)
+    }
+
     fn descriptor(&self) -> CellDescriptor {
         self.header.descriptor
     }
@@ -461,6 +476,11 @@ impl LibraryReference {
 }
 
 impl CellImpl for LibraryReference {
+    #[inline]
+    fn untrack(self: CellInner<Self>) -> Cell {
+        Cell(self)
+    }
+
     fn descriptor(&self) -> CellDescriptor {
         self.descriptor
     }
@@ -530,6 +550,11 @@ impl PrunedBranchHeader {
 }
 
 impl<const N: usize> CellImpl for PrunedBranch<N> {
+    #[inline]
+    fn untrack(self: CellInner<Self>) -> Cell {
+        Cell(self)
+    }
+
     fn descriptor(&self) -> CellDescriptor {
         self.header.descriptor
     }
@@ -613,6 +638,11 @@ impl<#[cfg(not(feature = "sync"))] T, #[cfg(feature = "sync")] T: Send + Sync> C
 where
     T: AsRef<DynCell> + TryAsMut<DynCell> + 'static,
 {
+    #[inline]
+    fn untrack(self: CellInner<Self>) -> Cell {
+        Cell(self)
+    }
+
     fn descriptor(&self) -> CellDescriptor {
         self.0.as_ref().descriptor()
     }
@@ -685,6 +715,11 @@ impl<#[cfg(not(feature = "sync"))] T, #[cfg(feature = "sync")] T: Send + Sync, c
 where
     T: CellImpl + 'static,
 {
+    #[inline]
+    fn untrack(self: CellInner<Self>) -> Cell {
+        Cell(self)
+    }
+
     fn descriptor(&self) -> CellDescriptor {
         self.0.descriptor()
     }

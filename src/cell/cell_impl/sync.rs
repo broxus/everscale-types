@@ -15,7 +15,18 @@ use crate::util::TryAsMut;
 /// Thread-safe cell.
 #[derive(Clone, Eq)]
 #[repr(transparent)]
-pub struct Cell(Arc<DynCell>);
+pub struct Cell(pub(crate) CellInner);
+
+/// Inner representation of the cell.
+pub type CellInner<T = DynCell> = Arc<T>;
+
+impl Cell {
+    /// Unwraps the root cell from the usage tracking.
+    #[inline]
+    pub fn untrack(self) -> Self {
+        self.0.untrack()
+    }
+}
 
 impl Default for Cell {
     #[inline]

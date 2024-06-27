@@ -1,5 +1,5 @@
 use super::cell_impl::VirtualCellWrapper;
-use super::{Cell, CellDescriptor, CellImpl, DynCell, HashBytes};
+use super::{Cell, CellDescriptor, CellImpl, CellInner, DynCell, HashBytes};
 use crate::util::TryAsMut;
 
 #[cfg(feature = "stats")]
@@ -97,6 +97,11 @@ use self::rc::{SharedState, UsageCell, UsageTreeState};
 use self::sync::{SharedState, UsageCell, UsageTreeState};
 
 impl CellImpl for UsageCell {
+    #[inline]
+    fn untrack(self: CellInner<Self>) -> Cell {
+        UsageCell::untrack_impl(self)
+    }
+
     fn descriptor(&self) -> CellDescriptor {
         self.cell.descriptor()
     }
@@ -230,6 +235,10 @@ mod rc {
     }
 
     impl UsageCell {
+        pub fn untrack_impl(self: Rc<Self>) -> Cell {
+            self.cell.clone()
+        }
+
         pub fn should_insert(&self) -> bool {
             !self.inserted.get()
         }
@@ -330,6 +339,13 @@ mod sync {
     }
 
     impl UsageCell {
+        pub fn untrack_impl(self: Arc<Self>) -> Cell {
+            match Arc::try_unwrap(self) {
+                Ok(inner) => inner.cell,
+                Err(this) => this.cell.clone(),
+            }
+        }
+
         pub fn should_insert(&self) -> bool {
             !self.inserted.load(Ordering::Acquire)
         }

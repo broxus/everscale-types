@@ -10,6 +10,7 @@ pub struct Container<'a> {
     pub attrs: attr::Container,
     pub data: Data<'a>,
     pub generics: &'a syn::Generics,
+    #[allow(unused)]
     pub original: &'a syn::DeriveInput,
 }
 
@@ -93,10 +94,13 @@ pub enum Data<'a> {
 }
 
 pub struct Variant<'a> {
+    #[allow(unused)]
     pub ident: syn::Ident,
     pub attrs: attr::Variant,
+    #[allow(unused)]
     pub style: Style,
     pub fields: Vec<Field<'a>>,
+    #[allow(unused)]
     pub original: &'a syn::Variant,
 }
 

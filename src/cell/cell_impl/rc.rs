@@ -14,7 +14,10 @@ use crate::util::TryAsMut;
 /// Single-threaded cell.
 #[derive(Clone, Eq)]
 #[repr(transparent)]
-pub struct Cell(Rc<DynCell>);
+pub struct Cell(pub(crate) CellInner);
+
+/// Inner representation of the cell.
+pub type CellInner<T = DynCell> = Rc<T>;
 
 impl Default for Cell {
     #[inline]
