@@ -56,6 +56,11 @@ impl UsageTree {
         }
     }
 
+    /// Returns `true` if there are no cells in the usage tree.
+    pub fn is_empty(&self) -> bool {
+        self.state.is_empty()
+    }
+
     /// Returns the number of cells in the usage tree.
     pub fn len(&self) -> usize {
         self.state.len()
@@ -232,6 +237,11 @@ mod rc {
         }
 
         #[inline]
+        pub fn is_empty(&self) -> bool {
+            self.visited.borrow().is_empty()
+        }
+
+        #[inline]
         pub fn len(&self) -> usize {
             self.visited.borrow().len()
         }
@@ -336,6 +346,11 @@ mod sync {
         #[inline]
         pub fn contains(&self, repr_hash: &HashBytes) -> bool {
             self.visited.contains(repr_hash)
+        }
+
+        #[inline]
+        pub fn is_empty(&self) -> bool {
+            self.visited.is_empty()
         }
 
         #[inline]

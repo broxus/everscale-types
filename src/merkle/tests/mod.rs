@@ -155,10 +155,6 @@ fn proof_with_subtree() -> anyhow::Result<()> {
     Ok(())
 }
 
-use everscale_types::cell::{Cell, CellBuilder, CellFamily};
-use everscale_types::merkle::{MerkleUpdate, UsageTree};
-use std::collections::HashSet;
-
 fn create_tree(depth: u32, num: u32) -> CellBuilder {
     let mut builder = CellBuilder::new();
     builder.store_u32(num).unwrap();

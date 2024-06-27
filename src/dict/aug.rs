@@ -754,8 +754,6 @@ mod tests {
     use anyhow::Context;
 
     use super::*;
-    use crate::models::{AccountBlock, CurrencyCollection};
-    use crate::prelude::Boc;
 
     #[derive(Debug, Default, Load, Store, Eq, PartialEq)]
     struct OrCmp(bool);
@@ -906,8 +904,12 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "models")]
     #[test]
     fn aug_test() {
+        use crate::models::{AccountBlock, CurrencyCollection};
+        use crate::prelude::Boc;
+
         let boc = Boc::decode(include_bytes!("./tests/account_blocks_aug_dict.boc")).unwrap();
 
         let original_dict = boc
