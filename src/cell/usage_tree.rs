@@ -10,7 +10,7 @@ use super::CellTreeStats;
 pub enum UsageTreeMode {
     /// Include cell on load.
     OnLoad,
-    /// Include cell only when accessing references or data.
+    /// Include cell only when accessing data.
     OnDataAccess,
 }
 
@@ -38,7 +38,9 @@ impl UsageTree {
     /// Wraps the specified cell in a usage cell to keep track
     /// of the data or links being accessed.
     pub fn track(&self, cell: &Cell) -> Cell {
-        self.state.insert(cell, UsageTreeMode::OnLoad);
+        if self.state.mode == UsageTreeMode::OnLoad {
+            self.state.insert(cell);
+        }
         self.state.wrap(cell.clone())
     }
 
@@ -77,7 +79,9 @@ impl UsageTreeWithSubtrees {
     /// Wraps the specified cell in a usage cell to keep track
     /// of the data or links being accessed.
     pub fn track(&self, cell: &Cell) -> Cell {
-        self.state.as_ref().insert(cell, UsageTreeMode::OnLoad);
+        if self.state.mode == UsageTreeMode::OnLoad {
+            self.state.insert(cell);
+        }
         self.state.wrap(cell.clone())
     }
 
@@ -119,7 +123,7 @@ impl CellImpl for UsageCell {
     fn data(&self) -> &[u8] {
         if self.should_insert() {
             if let Some(usage_tree) = self.usage_tree.upgrade() {
-                usage_tree.insert(&self.cell, UsageTreeMode::OnDataAccess);
+                usage_tree.insert(&self.cell);
             }
             self.set_inserted();
         }
@@ -183,7 +187,7 @@ impl CellImpl for UsageCell {
 
 #[cfg(not(feature = "sync"))]
 mod rc {
-    use std::rc::Rc;
+    use std::rc::{Rc, Weak};
 
     use super::UsageTreeMode;
     use crate::cell::{Cell, DynCell, HashBytes};
@@ -193,8 +197,8 @@ mod rc {
     type VisitedCells = std::cell::RefCell<ahash::HashSet<HashBytes>>;
 
     pub struct UsageTreeState {
-        mode: UsageTreeMode,
-        visited: VisitedCells,
+        pub mode: UsageTreeMode,
+        pub visited: VisitedCells,
     }
 
     impl UsageTreeState {
@@ -216,19 +220,12 @@ mod rc {
         }
 
         pub fn wrap(self: &SharedState, cell: Cell) -> Cell {
-            Cell::from(Rc::new(UsageCell {
-                cell,
-                usage_tree: Rc::downgrade(self),
-                children: Default::default(),
-                inserted: std::cell::Cell::new(false),
-            }) as Rc<DynCell>)
+            Cell::from(Rc::new(UsageCell::new(cell, Rc::downgrade(self), self.mode)) as Rc<DynCell>)
         }
 
         #[inline]
-        pub fn insert(&self, cell: &Cell, ctx: UsageTreeMode) {
-            if self.mode == ctx {
-                self.visited.borrow_mut().insert(*cell.repr_hash());
-            }
+        pub fn insert(&self, cell: &Cell) {
+            self.visited.borrow_mut().insert(*cell.repr_hash());
         }
 
         #[inline]
@@ -249,12 +246,23 @@ mod rc {
 
     pub struct UsageCell {
         pub cell: Cell,
-        pub usage_tree: std::rc::Weak<UsageTreeState>,
+        pub usage_tree: Weak<UsageTreeState>,
         pub children: std::cell::UnsafeCell<[Option<Rc<Self>>; 4]>,
         pub inserted: std::cell::Cell<bool>,
+        pub mode: UsageTreeMode,
     }
 
     impl UsageCell {
+        pub fn new(cell: Cell, usage_tree: Weak<UsageTreeState>, mode: UsageTreeMode) -> Self {
+            Self {
+                cell,
+                usage_tree,
+                children: Default::default(),
+                inserted: std::cell::Cell::new(mode == UsageTreeMode::OnLoad),
+                mode,
+            }
+        }
+
         pub fn untrack_impl(self: Rc<Self>) -> Cell {
             self.cell.clone()
         }
@@ -274,16 +282,17 @@ mod rc {
                     Some(value) => value,
                     slot @ None => {
                         let child = self.cell.as_ref().reference_cloned(index)?;
-                        if let Some(usage_tree) = self.usage_tree.upgrade() {
-                            usage_tree.insert(&child, UsageTreeMode::OnLoad);
+                        if self.mode == UsageTreeMode::OnLoad {
+                            if let Some(usage_tree) = self.usage_tree.upgrade() {
+                                usage_tree.insert(&child);
+                            }
                         }
 
-                        slot.insert(Rc::new(UsageCell {
-                            cell: child,
-                            usage_tree: self.usage_tree.clone(),
-                            children: Default::default(),
-                            inserted: std::cell::Cell::new(false),
-                        }))
+                        slot.insert(Rc::new(UsageCell::new(
+                            child,
+                            self.usage_tree.clone(),
+                            self.mode,
+                        )))
                     }
                 })
             } else {
@@ -297,7 +306,7 @@ mod rc {
 mod sync {
     use std::cell::UnsafeCell;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Arc, Once};
+    use std::sync::{Arc, Once, Weak};
 
     use super::UsageTreeMode;
     use crate::cell::{Cell, DynCell, HashBytes};
@@ -307,8 +316,8 @@ mod sync {
     type VisitedCells = scc::HashSet<HashBytes, ahash::RandomState>;
 
     pub struct UsageTreeState {
-        mode: UsageTreeMode,
-        visited: VisitedCells,
+        pub mode: UsageTreeMode,
+        pub visited: VisitedCells,
     }
 
     impl UsageTreeState {
@@ -327,20 +336,14 @@ mod sync {
         }
 
         pub fn wrap(self: &SharedState, cell: Cell) -> Cell {
-            Cell::from(Arc::new(UsageCell {
-                cell,
-                usage_tree: Arc::downgrade(self),
-                reference_states: [(); 4].map(|_| Once::new()),
-                reference_data: [(); 4].map(|_| UnsafeCell::new(None)),
-                inserted: AtomicBool::new(false),
-            }) as Arc<DynCell>)
+            Cell::from(
+                Arc::new(UsageCell::new(cell, Arc::downgrade(self), self.mode)) as Arc<DynCell>,
+            )
         }
 
         #[inline]
-        pub fn insert(&self, cell: &Cell, ctx: UsageTreeMode) {
-            if self.mode == ctx {
-                _ = self.visited.insert(*cell.repr_hash());
-            }
+        pub fn insert(&self, cell: &Cell) {
+            _ = self.visited.insert(*cell.repr_hash());
         }
 
         #[inline]
@@ -361,14 +364,26 @@ mod sync {
 
     pub struct UsageCell {
         pub cell: Cell,
-        pub usage_tree: std::sync::Weak<UsageTreeState>,
+        pub usage_tree: Weak<UsageTreeState>,
         // TODO: Compress into one futex with bitset.
         pub reference_states: [Once; 4],
         pub reference_data: [UnsafeCell<Option<Arc<Self>>>; 4],
         pub inserted: AtomicBool,
+        pub mode: UsageTreeMode,
     }
 
     impl UsageCell {
+        pub fn new(cell: Cell, usage_tree: Weak<UsageTreeState>, mode: UsageTreeMode) -> Self {
+            Self {
+                cell,
+                usage_tree,
+                reference_states: [(); 4].map(|_| Once::new()),
+                reference_data: [(); 4].map(|_| UnsafeCell::new(None)),
+                inserted: AtomicBool::new(mode == UsageTreeMode::OnLoad),
+                mode,
+            }
+        }
+
         pub fn untrack_impl(self: Arc<Self>) -> Cell {
             match Arc::try_unwrap(self) {
                 Ok(inner) => inner.cell,
@@ -386,33 +401,31 @@ mod sync {
 
         pub fn load_reference(&self, index: u8) -> Option<&Arc<Self>> {
             if index < 4 {
-                let mut updated = false;
+                let mut should_insert = false;
                 self.reference_states[index as usize].call_once_force(|_| {
                     let Some(child) = self.cell.as_ref().reference_cloned(index) else {
                         // NOTE: Don't forget to set `None` here if `MaybeUninit` is used.
                         return;
                     };
 
-                    updated = true;
+                    should_insert = self.mode == UsageTreeMode::OnLoad;
 
                     // SAFETY: `UnsafeCell` data is controlled by the `Once` state.
                     unsafe {
-                        *self.reference_data[index as usize].get() = Some(Arc::new(Self {
-                            cell: child,
-                            usage_tree: self.usage_tree.clone(),
-                            reference_states: [(); 4].map(|_| Once::new()),
-                            reference_data: [(); 4].map(|_| UnsafeCell::new(None)),
-                            inserted: AtomicBool::new(false),
-                        }))
+                        *self.reference_data[index as usize].get() = Some(Arc::new(Self::new(
+                            child,
+                            self.usage_tree.clone(),
+                            self.mode,
+                        )));
                     };
                 });
 
                 // SAFETY: `UnsafeCell` data is controlled by the `Once` state.
                 let child = unsafe { &*self.reference_data[index as usize].get().cast_const() };
-                if crate::util::unlikely(updated) {
+                if crate::util::unlikely(should_insert) {
                     if let Some(child) = child {
                         if let Some(usage_tree) = self.usage_tree.upgrade() {
-                            usage_tree.insert(&child.cell, UsageTreeMode::OnLoad);
+                            usage_tree.insert(&child.cell);
                         }
                     }
                 }
