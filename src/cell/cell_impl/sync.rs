@@ -71,17 +71,24 @@ impl PartialEq for Cell {
     }
 }
 
-impl From<Cell> for Arc<DynCell> {
+impl From<Cell> for CellInner {
     #[inline]
     fn from(value: Cell) -> Self {
         value.0
     }
 }
 
-impl From<Arc<DynCell>> for Cell {
+impl From<CellInner> for Cell {
     #[inline]
-    fn from(value: Arc<DynCell>) -> Self {
+    fn from(value: CellInner) -> Self {
         Self(value)
+    }
+}
+
+impl<T: CellImpl + Send + Sync + 'static> From<CellInner<T>> for Cell {
+    #[inline]
+    fn from(value: CellInner<T>) -> Self {
+        Self(value as CellInner)
     }
 }
 

@@ -70,17 +70,24 @@ impl PartialEq for Cell {
     }
 }
 
-impl From<Cell> for Rc<DynCell> {
+impl From<Cell> for CellInner {
     #[inline]
     fn from(value: Cell) -> Self {
         value.0
     }
 }
 
-impl From<Rc<DynCell>> for Cell {
+impl From<CellInner> for Cell {
     #[inline]
-    fn from(value: Rc<DynCell>) -> Self {
+    fn from(value: CellInner) -> Self {
         Self(value)
+    }
+}
+
+impl<T: CellImpl + 'static> From<CellInner<T>> for Cell {
+    #[inline]
+    fn from(value: CellInner<T>) -> Self {
+        Self(value as CellInner)
     }
 }
 
