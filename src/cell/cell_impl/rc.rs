@@ -19,6 +19,14 @@ pub struct Cell(pub(crate) CellInner);
 /// Inner representation of the cell.
 pub type CellInner<T = DynCell> = Rc<T>;
 
+impl Cell {
+    /// Unwraps the root cell from the usage tracking.
+    #[inline]
+    pub fn untrack(self) -> Self {
+        self.0.untrack()
+    }
+}
+
 impl Default for Cell {
     #[inline]
     fn default() -> Self {
