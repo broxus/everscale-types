@@ -869,7 +869,7 @@ impl CellBuilder {
     pub fn store_reference(&mut self, cell: Cell) -> Result<(), Error> {
         if self.references.len() < MAX_REF_COUNT {
             // SAFETY: reference count is in the valid range
-            unsafe { self.references.push(cell.untrack()) }
+            unsafe { self.references.push(cell) }
             Ok(())
         } else {
             Err(Error::CellOverflow)
@@ -1055,7 +1055,7 @@ impl CellRefsBuilder {
     pub fn store_reference(&mut self, cell: Cell) -> Result<(), Error> {
         if self.0.len() < MAX_REF_COUNT {
             // SAFETY: reference count is in the valid range
-            unsafe { self.0.push(cell.untrack()) }
+            unsafe { self.0.push(cell) }
             Ok(())
         } else {
             Err(Error::CellOverflow)
