@@ -1348,12 +1348,13 @@ pub fn dict_merge(
 /// insertions is too slow.
 pub fn build_dict_from_sorted_vec<K, V, I>(
     entries: I,
+    key_bit_len: u16,
     context: &mut dyn CellContext,
 ) -> Result<Option<Cell>, Error>
 where
     I: IntoIterator<Item = (K, V)>,
-    K: DictKey + Store + std::fmt::Debug,
-    V: Store + std::fmt::Debug,
+    K: Store + Ord,
+    V: Store,
 {
     enum StackItem<V> {
         Leaf {
@@ -1366,44 +1367,6 @@ where
             value: Cell,
             prev_lcp_len: u16,
         },
-    }
-
-    struct DebugBinary<T>(T);
-
-    impl<T: std::fmt::Binary> std::fmt::Debug for DebugBinary<T> {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "{:b}", self.0)
-        }
-    }
-
-    impl<V> std::fmt::Debug for StackItem<V>
-    where
-        V: std::fmt::Debug,
-    {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            match self {
-                Self::Leaf {
-                    prefix,
-                    value,
-                    prev_lcp_len,
-                } => f
-                    .debug_struct("Leaf")
-                    .field("prefix", &DebugBinary(prefix.display_data()))
-                    .field("value", value)
-                    .field("prev_lcp_len", prev_lcp_len)
-                    .finish(),
-                Self::Node {
-                    prefix,
-                    value,
-                    prev_lcp_len,
-                } => f
-                    .debug_struct("Node")
-                    .field("prefix", &DebugBinary(prefix.display_data()))
-                    .field("value", value)
-                    .field("prev_lcp_len", prev_lcp_len)
-                    .finish(),
-            }
-        }
     }
 
     impl<V: Store> StackItem<V> {
@@ -1437,11 +1400,10 @@ where
             key_bit_len: u16,
             context: &mut dyn CellContext,
         ) -> Result<Self, Error> {
+            let left_offset = self.prev_lcp_len();
             let split_at = right.prev_lcp_len();
+
             let label_len = split_at - key_offset;
-
-            println!("key_offset={key_offset}, split_at={split_at}, label_len={label_len} key_bit_len={key_bit_len}");
-
             let leaf_key_bit_len = key_bit_len - split_at - 1;
             let key_bit_len = key_bit_len - key_offset;
 
@@ -1456,12 +1418,6 @@ where
                     // Write the common prefix as a label
                     let mut common_prefix = prefix_slice;
                     ok!(common_prefix.advance(key_offset, 0)); // TODO: Unwrap
-
-                    println!(
-                        "LABEL (leaf): {:b}",
-                        common_prefix.get_prefix(label_len, 0).display_data()
-                    );
-
                     ok!(write_label(
                         &common_prefix.get_prefix(label_len, 0),
                         key_bit_len,
@@ -1479,12 +1435,6 @@ where
                     // Write the common prefix as a label
                     let mut common_prefix = prefix.as_data_slice();
                     ok!(common_prefix.advance(key_offset, 0)); // TODO: Unwrap
-
-                    println!(
-                        "LABEL (node): {:b}",
-                        common_prefix.get_prefix(label_len, 0).display_data()
-                    );
-
                     ok!(write_label(
                         &common_prefix.get_prefix(label_len, 0),
                         key_bit_len,
@@ -1515,22 +1465,32 @@ where
             Ok(StackItem::Node {
                 prefix: result_prefix,
                 value: ok!(builder.build_ext(context)),
-                prev_lcp_len: key_offset,
+                prev_lcp_len: left_offset,
             })
         }
     }
 
     let mut stack = Vec::<StackItem<V>>::new();
 
-    'outer: for (key, value) in entries {
+    let mut prev_key = None::<K>;
+    for (key, value) in entries {
+        if let Some(prev_key) = &prev_key {
+            match key.cmp(prev_key) {
+                // Skip duplicates
+                std::cmp::Ordering::Equal => continue,
+                // Allow only sorted entries
+                std::cmp::Ordering::Greater => {}
+                // Invalid data. TODO: Panic here?
+                std::cmp::Ordering::Less => return Err(Error::InvalidData),
+            }
+        }
+
         let prefix = {
             let mut builder = CellBuilder::new();
             ok!(key.store_into(&mut builder, context));
             builder
         };
-
-        println!("\n\nENTRY: ({key:?}, {value:?})");
-        println!("PREFIX: {:b}", prefix.display_data());
+        prev_key = Some(key);
 
         let mut lcp_len = 0;
         if let Some(last) = stack.last() {
@@ -1539,43 +1499,32 @@ where
 
             let lcp = left_prefix.longest_common_data_prefix(&right_prefix);
             lcp_len = lcp.remaining_bits();
-            println!("lcp_len: {lcp_len}");
 
             match lcp_len.cmp(&last.prev_lcp_len()) {
-                // Skip duplicates and keep only the first one
-                std::cmp::Ordering::Equal => {
-                    println!("continue?");
-                    continue 'outer;
-                }
                 // LCP increased, we might group the current item to the last one
-                std::cmp::Ordering::Greater => {
-                    println!("skip last: {last:?}");
-                }
+                std::cmp::Ordering::Greater => {}
                 // LCP decreased, we are not able to group the current item to the last one.
                 // At this point we can safely reduce the stack.
-                std::cmp::Ordering::Less => {
-                    let mut key_offset = lcp_len + 1;
+                std::cmp::Ordering::Equal | std::cmp::Ordering::Less => {
                     let mut right = stack.pop().unwrap();
-                    println!("right: {right:?}");
-                    while let Some(left) = stack.last() {
-                        println!("left: {left:?}");
-                        if right.prev_lcp_len() < lcp_len {
-                            println!("stop");
+                    while !stack.is_empty() {
+                        if right.prev_lcp_len() <= lcp_len {
                             break;
                         }
                         let left = stack.pop().unwrap();
+                        let key_offset = if stack.is_empty() {
+                            1
+                        } else {
+                            left.prev_lcp_len() + 1
+                        }
+                        .max(lcp_len + 1);
 
-                        key_offset = left.prev_lcp_len().max(key_offset);
-
-                        right = ok!(left.merge(right, key_offset, K::BITS, context));
-                        println!("rebuild right: {right:?}");
+                        right = ok!(left.merge(right, key_offset, key_bit_len, context));
                     }
                     stack.push(right);
                 }
             }
         }
-
-        println!("TOTAL LCP: {lcp_len}");
 
         stack.push(StackItem::Leaf {
             prefix,
@@ -1588,14 +1537,17 @@ where
         return Ok(None);
     };
 
-    println!("\nBUILD FINAL");
     while let Some(left) = stack.pop() {
-        result = ok!(left.merge(result, 0, K::BITS, context));
+        let key_offset = if stack.is_empty() {
+            0
+        } else {
+            left.prev_lcp_len() + 1
+        };
+
+        result = ok!(left.merge(result, key_offset, key_bit_len, context));
     }
 
-    println!("---\n");
-
-    result.build(K::BITS, context).map(Some)
+    result.build(key_bit_len, context).map(Some)
 }
 
 /// Creates a leaf node
@@ -2151,13 +2103,51 @@ mod tests {
 
     #[test]
     fn build_from_array() {
-        let entries = [(0u32, 1u32), (1, 2), (2, 3), (3, 4), (4, 5)];
-        let result = build_dict_from_sorted_vec(entries, &mut Cell::empty_context()).unwrap();
-        println!("{}", result.as_ref().unwrap().display_tree());
+        let entries = [(0u32, 1u32), (1, 2), (2, 4), (2, 3), (3, 4), (4, 5)];
+        // let entries = [
+        //     (534837844, 3117028142),
+        //     (1421713188, 3155891450),
+        //     (1526242096, 2789399854),
+        //     (1971086295, 1228713494),
+        //     (4258889371, 3256452222),
+        // ];
+        let result = build_dict_from_sorted_vec(entries, 32, &mut Cell::empty_context()).unwrap();
 
+        let mut dict = Dict::<u32, u32>::new();
+        for (k, v) in entries {
+            dict.add(k, v).unwrap();
+        }
+
+        println!("{}", result.as_ref().unwrap().display_tree());
         println!(
             "BOC: {}",
-            crate::boc::BocRepr::encode_base64(result).unwrap()
+            crate::boc::BocRepr::encode_base64(&result).unwrap()
         );
+
+        assert_eq!(result, dict.root);
+    }
+
+    #[test]
+    fn build_from_any_array() {
+        for _ in 0..100 {
+            let n = 1 + rand::random::<usize>() % 10000;
+            let mut entries = (0..n)
+                .map(|_| (rand::random::<u32>(), rand::random::<u32>()))
+                .collect::<Vec<_>>();
+            entries.sort_by_key(|(k, _)| *k);
+
+            let built_from_dict =
+                build_dict_from_sorted_vec(entries.iter().copied(), 32, &mut Cell::empty_context())
+                    .unwrap();
+
+            let mut dict = Dict::<u32, u32>::new();
+            for (k, v) in entries {
+                dict.add(k, v).unwrap();
+            }
+
+            // println!("{}", built_from_dict.as_ref().unwrap().display_tree());
+
+            assert_eq!(built_from_dict, dict.root);
+        }
     }
 }
