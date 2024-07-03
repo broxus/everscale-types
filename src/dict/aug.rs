@@ -1,7 +1,8 @@
 use std::borrow::Borrow;
+use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
-use super::{aug_dict_insert, aug_dict_remove_owned, SetMode};
+use super::{aug_dict_insert, aug_dict_remove_owned, build_aug_dict_from_sorted_iter, SetMode};
 use crate::cell::*;
 use crate::error::*;
 use crate::util::*;
@@ -284,6 +285,60 @@ where
     for<'a> A: AugDictExtra + Store + Load<'a>,
     V: Store,
 {
+    /// Builds a dictionary from a sorted collection.
+    pub fn try_from_btree<Q, E, T>(sorted: &BTreeMap<Q, (E, T)>) -> Result<Self, Error>
+    where
+        Q: Borrow<K>,
+        E: Borrow<A>,
+        T: Borrow<V>,
+        K: Ord,
+    {
+        let root = ok!(build_aug_dict_from_sorted_iter(
+            sorted
+                .iter()
+                .map(|(k, (a, v))| (k.borrow(), a.borrow(), v.borrow())),
+            K::BITS,
+            A::comp_add,
+            &mut Cell::empty_context()
+        ));
+
+        let mut result = Self {
+            dict: Dict::from_raw(root),
+            extra: A::default(),
+            _key: PhantomData,
+            _value: PhantomData,
+        };
+        ok!(result.update_root_extra());
+        Ok(result)
+    }
+
+    /// Builds a dictionary from a sorted slice.
+    pub fn try_from_sorted_slice<Q, E, T>(sorted: &[(Q, E, T)]) -> Result<Self, Error>
+    where
+        Q: Borrow<K>,
+        E: Borrow<A>,
+        T: Borrow<V>,
+        K: Ord,
+    {
+        let root = ok!(build_aug_dict_from_sorted_iter(
+            sorted
+                .iter()
+                .map(|(k, a, v)| (k.borrow(), a.borrow(), v.borrow())),
+            K::BITS,
+            A::comp_add,
+            &mut Cell::empty_context()
+        ));
+
+        let mut result = Self {
+            dict: Dict::from_raw(root),
+            extra: A::default(),
+            _key: PhantomData,
+            _value: PhantomData,
+        };
+        ok!(result.update_root_extra());
+        Ok(result)
+    }
+
     /// Sets the augmented value associated with the key in the aug dictionary.
     ///
     /// Use [`set_ext`] if you need to use a custom cell context.
@@ -787,6 +842,13 @@ mod tests {
         }
     }
 
+    impl rand::distributions::Distribution<SomeValue> for rand::distributions::Standard {
+        #[inline]
+        fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> SomeValue {
+            SomeValue(rand::distributions::Standard.sample(rng))
+        }
+    }
+
     #[test]
     fn dict_set() {
         let mut dict = AugDict::<u32, OrCmp, u16>::new();
@@ -936,5 +998,67 @@ mod tests {
         }
         assert!(new_dict.is_empty());
         assert_eq!(new_dict.root_extra(), &CurrencyCollection::ZERO);
+    }
+
+    #[test]
+    fn build_from_array() {
+        let entries = [
+            (0u32, SomeValue(123), 1u32),
+            (1, SomeValue(10), 2),
+            (2, SomeValue(20), 4),
+            (2, SomeValue(20), 3),
+            (3, SomeValue(40), 4),
+            (4, SomeValue(50), 5),
+        ];
+        // let entries = [
+        //     (534837844, SomeValue(331123), 3117028142),
+        //     (1421713188, SomeValue(5345345), 3155891450),
+        //     (1526242096, SomeValue(567567), 2789399854),
+        //     (1971086295, SomeValue(5345), 1228713494),
+        //     (4258889371, SomeValue(4956495), 3256452222),
+        // ];
+        let result = AugDict::<u32, SomeValue, u32>::try_from_sorted_slice(&entries).unwrap();
+
+        let mut dict = AugDict::<u32, SomeValue, u32>::new();
+        for (k, a, v) in entries {
+            dict.add(k, a, v).unwrap();
+        }
+
+        println!("{}", result.dict.root.as_ref().unwrap().display_tree());
+        println!(
+            "BOC: {}",
+            crate::boc::BocRepr::encode_base64(&result).unwrap()
+        );
+
+        assert_eq!(result, dict);
+    }
+
+    #[test]
+    fn build_from_any_array() {
+        for _ in 0..100 {
+            let n = 1 + rand::random::<usize>() % 1000;
+            let mut entries = (0..n)
+                .map(|_| {
+                    (
+                        rand::random::<u32>(),
+                        rand::random::<SomeValue>(),
+                        rand::random::<u32>(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            entries.sort_by_key(|(k, _, _)| *k);
+
+            let built_from_dict =
+                AugDict::<u32, SomeValue, u32>::try_from_sorted_slice(&entries).unwrap();
+
+            let mut dict = AugDict::<u32, SomeValue, u32>::new();
+            for (k, a, v) in entries {
+                dict.add(k, a, v).unwrap();
+            }
+
+            // println!("{}", built_from_dict.as_ref().unwrap().display_tree());
+
+            assert_eq!(built_from_dict, dict);
+        }
     }
 }
