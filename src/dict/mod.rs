@@ -1346,7 +1346,7 @@ pub fn dict_merge(
 ///
 /// It is a preferred way to build a large `Dict` as doing lots of
 /// insertions is too slow.
-pub fn build_dict_from_sorted_vec<K, V, I>(
+pub fn build_dict_from_sorted_iter<K, V, I>(
     entries: I,
     key_bit_len: u16,
     context: &mut dyn CellContext,
@@ -1500,29 +1500,25 @@ where
             let lcp = left_prefix.longest_common_data_prefix(&right_prefix);
             lcp_len = lcp.remaining_bits();
 
-            match lcp_len.cmp(&last.prev_lcp_len()) {
-                // LCP increased, we might group the current item to the last one
-                std::cmp::Ordering::Greater => {}
+            if lcp_len <= last.prev_lcp_len() {
                 // LCP decreased, we are not able to group the current item to the last one.
                 // At this point we can safely reduce the stack.
-                std::cmp::Ordering::Equal | std::cmp::Ordering::Less => {
-                    let mut right = stack.pop().unwrap();
-                    while !stack.is_empty() {
-                        if right.prev_lcp_len() <= lcp_len {
-                            break;
-                        }
-                        let left = stack.pop().unwrap();
-                        let key_offset = if stack.is_empty() {
-                            1
-                        } else {
-                            left.prev_lcp_len() + 1
-                        }
-                        .max(lcp_len + 1);
-
-                        right = ok!(left.merge(right, key_offset, key_bit_len, context));
+                let mut right = stack.pop().unwrap();
+                while !stack.is_empty() {
+                    if right.prev_lcp_len() <= lcp_len {
+                        break;
                     }
-                    stack.push(right);
+                    let left = stack.pop().unwrap();
+                    let key_offset = if stack.is_empty() {
+                        1
+                    } else {
+                        left.prev_lcp_len() + 1
+                    }
+                    .max(lcp_len + 1);
+
+                    right = ok!(left.merge(right, key_offset, key_bit_len, context));
                 }
+                stack.push(right);
             }
         }
 
@@ -2111,7 +2107,7 @@ mod tests {
         //     (1971086295, 1228713494),
         //     (4258889371, 3256452222),
         // ];
-        let result = build_dict_from_sorted_vec(entries, 32, &mut Cell::empty_context()).unwrap();
+        let result = build_dict_from_sorted_iter(entries, 32, &mut Cell::empty_context()).unwrap();
 
         let mut dict = Dict::<u32, u32>::new();
         for (k, v) in entries {
@@ -2136,9 +2132,12 @@ mod tests {
                 .collect::<Vec<_>>();
             entries.sort_by_key(|(k, _)| *k);
 
-            let built_from_dict =
-                build_dict_from_sorted_vec(entries.iter().copied(), 32, &mut Cell::empty_context())
-                    .unwrap();
+            let built_from_dict = build_dict_from_sorted_iter(
+                entries.iter().copied(),
+                32,
+                &mut Cell::empty_context(),
+            )
+            .unwrap();
 
             let mut dict = Dict::<u32, u32>::new();
             for (k, v) in entries {
