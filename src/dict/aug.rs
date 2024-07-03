@@ -1002,35 +1002,38 @@ mod tests {
 
     #[test]
     fn build_from_array() {
-        let entries = [
-            (0u32, SomeValue(123), 1u32),
-            (1, SomeValue(10), 2),
-            (2, SomeValue(20), 4),
-            (2, SomeValue(20), 3),
-            (3, SomeValue(40), 4),
-            (4, SomeValue(50), 5),
-        ];
-        // let entries = [
-        //     (534837844, SomeValue(331123), 3117028142),
-        //     (1421713188, SomeValue(5345345), 3155891450),
-        //     (1526242096, SomeValue(567567), 2789399854),
-        //     (1971086295, SomeValue(5345), 1228713494),
-        //     (4258889371, SomeValue(4956495), 3256452222),
-        // ];
-        let result = AugDict::<u32, SomeValue, u32>::try_from_sorted_slice(&entries).unwrap();
+        for entries in [
+            &[
+                (0u32, SomeValue(123), 1u32),
+                (1, SomeValue(10), 2),
+                (2, SomeValue(20), 4),
+                (2, SomeValue(20), 3),
+                (3, SomeValue(40), 4),
+                (4, SomeValue(50), 5),
+            ][..],
+            &[
+                (534837844, SomeValue(331123), 3117028142),
+                (1421713188, SomeValue(5345345), 3155891450),
+                (1526242096, SomeValue(567567), 2789399854),
+                (1971086295, SomeValue(5345), 1228713494),
+                (4258889371, SomeValue(4956495), 3256452222),
+            ],
+        ] {
+            let result = AugDict::<u32, SomeValue, u32>::try_from_sorted_slice(&entries).unwrap();
 
-        let mut dict = AugDict::<u32, SomeValue, u32>::new();
-        for (k, a, v) in entries {
-            dict.add(k, a, v).unwrap();
+            let mut dict = AugDict::<u32, SomeValue, u32>::new();
+            for (k, a, v) in entries {
+                dict.add(k, a, v).unwrap();
+            }
+
+            println!("{}", result.dict.root.as_ref().unwrap().display_tree());
+            println!(
+                "BOC: {}",
+                crate::boc::BocRepr::encode_base64(&result).unwrap()
+            );
+
+            assert_eq!(result, dict);
         }
-
-        println!("{}", result.dict.root.as_ref().unwrap().display_tree());
-        println!(
-            "BOC: {}",
-            crate::boc::BocRepr::encode_base64(&result).unwrap()
-        );
-
-        assert_eq!(result, dict);
     }
 
     #[test]

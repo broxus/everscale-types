@@ -2368,28 +2368,36 @@ mod tests {
 
     #[test]
     fn build_from_array() {
-        let entries = [(0u32, 1u32), (1, 2), (2, 4), (2, 3), (3, 4), (4, 5)];
-        // let entries = [
-        //     (534837844, 3117028142),
-        //     (1421713188, 3155891450),
-        //     (1526242096, 2789399854),
-        //     (1971086295, 1228713494),
-        //     (4258889371, 3256452222),
-        // ];
-        let result = build_dict_from_sorted_iter(entries, 32, &mut Cell::empty_context()).unwrap();
+        for entries in [
+            &[(0u32, 1u32), (1, 2), (2, 4), (2, 3), (3, 4), (4, 5)][..],
+            &[
+                (534837844, 3117028142),
+                (1421713188, 3155891450),
+                (1526242096, 2789399854),
+                (1971086295, 1228713494),
+                (4258889371, 3256452222),
+            ],
+        ] {
+            let result = build_dict_from_sorted_iter(
+                entries.iter().copied(),
+                32,
+                &mut Cell::empty_context(),
+            )
+            .unwrap();
 
-        let mut dict = Dict::<u32, u32>::new();
-        for (k, v) in entries {
-            dict.add(k, v).unwrap();
+            let mut dict = Dict::<u32, u32>::new();
+            for (k, v) in entries {
+                dict.add(k, v).unwrap();
+            }
+
+            println!("{}", result.as_ref().unwrap().display_tree());
+            println!(
+                "BOC: {}",
+                crate::boc::BocRepr::encode_base64(&result).unwrap()
+            );
+
+            assert_eq!(result, dict.root);
         }
-
-        println!("{}", result.as_ref().unwrap().display_tree());
-        println!(
-            "BOC: {}",
-            crate::boc::BocRepr::encode_base64(&result).unwrap()
-        );
-
-        assert_eq!(result, dict.root);
     }
 
     #[test]
