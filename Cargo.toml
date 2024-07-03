@@ -21,6 +21,10 @@ harness = false
 name = "usage_cell"
 harness = false
 
+[[bench]]
+name = "dict_from_slice"
+harness = false
+
 [workspace]
 members = ["proc"]
 
