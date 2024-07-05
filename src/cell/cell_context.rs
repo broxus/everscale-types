@@ -1,3 +1,5 @@
+use std::mem::MaybeUninit;
+
 use sha2::digest::Digest;
 
 use crate::cell::{Cell, CellDescriptor, CellType, DynCell, HashBytes, LevelMask, MAX_REF_COUNT};
@@ -157,14 +159,17 @@ impl<'a> CellParts<'a> {
         let level_offset = cell_type.is_merkle() as u8;
         let is_pruned = cell_type.is_pruned_branch();
 
+        // SAFETY: An uninitialized `[MaybeUninit<_>; LEN]` is valid.
+        const MAX_CELL_SIZE: usize = 2 + 128 + MAX_REF_COUNT * (2 + 32);
+        let mut data_to_hash =
+            unsafe { MaybeUninit::<[MaybeUninit<u8>; MAX_CELL_SIZE]>::uninit().assume_init() };
+
         let mut hashes = Vec::<(HashBytes, u16)>::with_capacity(hashes_len);
         for level in 0..4 {
             // Skip non-zero levels for pruned branches and insignificant hashes for other cells
             if level != 0 && (is_pruned || !level_mask.contains(level)) {
                 continue;
             }
-
-            let mut hasher = sha2::Sha256::new();
 
             let level_mask = if is_pruned {
                 level_mask
@@ -174,15 +179,25 @@ impl<'a> CellParts<'a> {
 
             descriptor.d1 &= !(CellDescriptor::LEVEL_MASK | CellDescriptor::STORE_HASHES_MASK);
             descriptor.d1 |= u8::from(level_mask) << 5;
-            hasher.update([descriptor.d1, descriptor.d2]);
 
+            data_to_hash[0] = MaybeUninit::new(descriptor.d1);
+            data_to_hash[1] = MaybeUninit::new(descriptor.d2);
+
+            let hash_ptr = unsafe { data_to_hash.as_mut_ptr().add(2) };
+            let mut hashed_len;
             if level == 0 {
-                hasher.update(self.data);
+                hashed_len = self.data.len();
+                unsafe {
+                    std::ptr::copy_nonoverlapping(self.data.as_ptr().cast(), hash_ptr, hashed_len)
+                }
             } else {
+                hashed_len = 32;
                 // SAFETY: new hash is added on each iteration, so there will
                 // definitely be a hash, when level>0
-                let prev_hash = unsafe { hashes.last().unwrap_unchecked() };
-                hasher.update(prev_hash.0.as_slice());
+                unsafe {
+                    let (prev_hash, _) = hashes.last().unwrap_unchecked();
+                    std::ptr::copy_nonoverlapping(prev_hash.as_ptr().cast(), hash_ptr, 32);
+                }
             }
 
             let mut depth = 0;
@@ -194,15 +209,33 @@ impl<'a> CellParts<'a> {
                 };
                 depth = std::cmp::max(depth, next_depth);
 
-                hasher.update(child_depth.to_be_bytes());
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        child_depth.to_be_bytes().as_ptr().cast(),
+                        hash_ptr.add(hashed_len),
+                        2,
+                    );
+                };
+
+                hashed_len += 2;
             }
 
             for child in references {
                 let child_hash = child.as_ref().hash(level + level_offset);
-                hasher.update(child_hash.as_slice());
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        child_hash.as_ptr().cast(),
+                        hash_ptr.add(hashed_len),
+                        32,
+                    );
+                }
+                hashed_len += 32;
             }
 
-            let hash = hasher.finalize().into();
+            let hash = sha2::Sha256::digest(unsafe {
+                std::slice::from_raw_parts(data_to_hash.as_ptr().cast::<u8>(), 2 + hashed_len)
+            })
+            .into();
             hashes.push((hash, depth));
         }
 
