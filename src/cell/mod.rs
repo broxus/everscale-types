@@ -603,6 +603,15 @@ impl HashBytes {
     pub const fn as_ptr(&self) -> *const u8 {
         &self.0 as *const [u8] as *const u8
     }
+
+    /// Returns a first chunk of 8 bytes.
+    pub const fn first_chunk(&self) -> &[u8; 8] {
+        match self.0.first_chunk::<8>() {
+            Some(chunk) => chunk,
+            // SAFETY: Const unwrap go brr
+            None => unsafe { std::hint::unreachable_unchecked() },
+        }
+    }
 }
 
 impl Default for HashBytes {
