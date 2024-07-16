@@ -694,6 +694,46 @@ mod tests {
     }
 
     #[test]
+    fn dict_merkle_update_with_usage_tree() {
+        // Serialize old dict
+        let old_dict_cell = {
+            // Create dict with keys 0..10
+            let mut dict = Dict::<u32, u32>::new();
+            for i in 0..10 {
+                dict.add(i, i * 10).unwrap();
+            }
+
+            CellBuilder::build_from(&dict).unwrap()
+        };
+
+        let usage_tree = UsageTree::new(UsageTreeMode::OnLoad);
+        let old_dict_cell_tracked = usage_tree.track(&old_dict_cell);
+
+        // Serialize new dict
+        let new_dict_cell = {
+            let mut dict = old_dict_cell_tracked.parse::<Dict<u32, u32>>().unwrap();
+            dict.set(0, 1).unwrap();
+            dict.set(10, 321).unwrap();
+            CellBuilder::build_from(dict).unwrap()
+        };
+
+        assert_ne!(old_dict_cell.as_ref(), new_dict_cell.as_ref());
+
+        // Create merkle update
+        let merkle_update =
+            MerkleUpdate::create(old_dict_cell.as_ref(), new_dict_cell.as_ref(), usage_tree)
+                .build()
+                .unwrap();
+
+        // Test serialization
+        let merkle_update_cell = CellBuilder::build_from(&merkle_update).unwrap();
+        println!("BOC: {}", Boc::encode_base64(merkle_update_cell));
+
+        let after_apply = merkle_update.apply(&old_dict_cell).unwrap();
+        assert_eq!(after_apply.as_ref(), new_dict_cell.as_ref());
+    }
+
+    #[test]
     fn dict_removed_cells_diff() {
         // Create dict with keys 0..10
         let mut dict = Dict::<u32, u32>::new();

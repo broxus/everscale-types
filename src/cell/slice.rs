@@ -1208,7 +1208,7 @@ impl<'a> CellSlice<'a> {
                     }
 
                     // Shift right, putting `ovf` to the high bits
-                    Ok(std::mem::transmute([
+                    Ok(std::mem::transmute::<[[u8; 16]; 2], HashBytes>([
                         (hi >> shift | ((ovf as u128) << rev_shift)).to_be_bytes(),
                         (lo >> shift | (hi << rev_shift)).to_be_bytes(),
                     ]))

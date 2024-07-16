@@ -6,6 +6,14 @@ use crate::models::block::ShardIdent;
 use crate::num::*;
 use crate::util::*;
 
+/// Basic internal address trait.
+pub trait Addr {
+    /// Returns the workchain part of the address.
+    fn workchain(&self) -> i32;
+    /// Returns the high bits of the address as a number.
+    fn prefix(&self) -> u64;
+}
+
 /// Internal message address.
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub enum IntAddr {
@@ -84,6 +92,18 @@ impl IntAddr {
             Self::Std(addr) => addr.prefix(),
             Self::Var(addr) => addr.prefix(),
         }
+    }
+}
+
+impl Addr for IntAddr {
+    #[inline]
+    fn workchain(&self) -> i32 {
+        IntAddr::workchain(self)
+    }
+
+    #[inline]
+    fn prefix(&self) -> u64 {
+        IntAddr::prefix(self)
     }
 }
 
@@ -237,10 +257,19 @@ impl StdAddr {
 
     /// Returns the high bits of the address as a number.
     pub const fn prefix(&self) -> u64 {
-        let Some(prefix) = self.address.0.first_chunk() else {
-            unsafe { std::hint::unreachable_unchecked() };
-        };
-        u64::from_be_bytes(*prefix)
+        u64::from_be_bytes(*self.address.first_chunk())
+    }
+}
+
+impl Addr for StdAddr {
+    #[inline]
+    fn workchain(&self) -> i32 {
+        self.workchain as i32
+    }
+
+    #[inline]
+    fn prefix(&self) -> u64 {
+        StdAddr::prefix(self)
     }
 }
 
@@ -377,7 +406,7 @@ impl crate::dict::DictKey for StdAddr {
 
         // SAFETY: transmuting [[u8; 16]; 2] to [u8; 32] is safe
         result.address = unsafe {
-            std::mem::transmute([
+            std::mem::transmute::<[[u8; 16]; 2], HashBytes>([
                 (hi >> SHIFT | ((*second_byte as u128) << REV_SHIFT)).to_be_bytes(),
                 (lo >> SHIFT | (hi << REV_SHIFT)).to_be_bytes(),
             ])
@@ -506,6 +535,18 @@ impl Store for VarAddr {
         ok!(self.address_len.store_into(builder, context));
         ok!(builder.store_u32(self.workchain as u32));
         builder.store_raw(&self.address, self.address_len.into_inner())
+    }
+}
+
+impl Addr for VarAddr {
+    #[inline]
+    fn workchain(&self) -> i32 {
+        self.workchain
+    }
+
+    #[inline]
+    fn prefix(&self) -> u64 {
+        VarAddr::prefix(self)
     }
 }
 

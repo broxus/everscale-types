@@ -1,4 +1,5 @@
 use std::borrow::Borrow;
+use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
 use crate::cell::*;
@@ -7,8 +8,8 @@ use crate::error::Error;
 use crate::util::*;
 
 use super::{
-    dict_find_bound, dict_find_owned, dict_get, dict_insert, dict_load_from_root,
-    dict_split_by_prefix, DictBound, DictKey, SetMode,
+    build_dict_from_sorted_iter, dict_find_bound, dict_find_owned, dict_get, dict_insert,
+    dict_load_from_root, dict_split_by_prefix, DictBound, DictKey, SetMode,
 };
 use super::{dict_remove_bound_owned, raw::*};
 
@@ -122,6 +123,12 @@ impl<K, V> Dict<K, V> {
     #[inline]
     pub const fn root(&self) -> &Option<Cell> {
         &self.root
+    }
+
+    /// Returns the underlying root cell of the dictionary.
+    #[inline]
+    pub fn into_root(self) -> Option<Cell> {
+        self.root
     }
 
     /// Converts into a dictionary with an equivalent value type.
@@ -357,6 +364,44 @@ where
     K: Store + DictKey,
     V: Store,
 {
+    /// Builds a dictionary from a sorted collection.
+    pub fn try_from_btree<Q, T>(sorted: &BTreeMap<Q, T>) -> Result<Self, Error>
+    where
+        Q: Borrow<K>,
+        T: Borrow<V>,
+        K: Ord,
+    {
+        let root = ok!(build_dict_from_sorted_iter(
+            sorted.iter().map(|(k, v)| (k.borrow(), v.borrow())),
+            K::BITS,
+            &mut Cell::empty_context()
+        ));
+        Ok(Self {
+            root,
+            _key: PhantomData,
+            _value: PhantomData,
+        })
+    }
+
+    /// Builds a dictionary from a sorted slice.
+    pub fn try_from_sorted_slice<Q, T>(sorted: &[(Q, T)]) -> Result<Self, Error>
+    where
+        Q: Borrow<K>,
+        T: Borrow<V>,
+        K: Ord,
+    {
+        let root = ok!(build_dict_from_sorted_iter(
+            sorted.iter().map(|(k, v)| (k.borrow(), v.borrow())),
+            K::BITS,
+            &mut Cell::empty_context()
+        ));
+        Ok(Self {
+            root,
+            _key: PhantomData,
+            _value: PhantomData,
+        })
+    }
+
     /// Sets the value associated with the key in the dictionary.
     ///
     /// Use [`set_ext`] if you need to use a custom cell context.

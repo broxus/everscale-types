@@ -13,10 +13,10 @@ pub use self::slice::{CellSlice, CellSliceParts, CellSliceRange, CellSliceSize, 
 pub use self::usage_tree::{UsageTree, UsageTreeMode, UsageTreeWithSubtrees};
 
 #[cfg(not(feature = "sync"))]
-pub use self::cell_impl::rc::Cell;
+pub use self::cell_impl::rc::{Cell, CellInner};
 
 #[cfg(feature = "sync")]
-pub use self::cell_impl::sync::Cell;
+pub use self::cell_impl::sync::{Cell, CellInner};
 
 pub use everscale_types_proc::{Load, Store};
 
@@ -103,6 +103,9 @@ impl AsMut<DynCell> for DynCell {
 /// Since all basic operations are implements via dynamic dispatch,
 /// all high-level helper methods are implemented for `dyn Cell`.
 pub trait CellImpl {
+    /// Unwraps the root cell from the usage tracking.
+    fn untrack(self: CellInner<Self>) -> Cell;
+
     /// Returns cell descriptor.
     ///
     /// # See also
@@ -599,6 +602,15 @@ impl HashBytes {
     #[inline(always)]
     pub const fn as_ptr(&self) -> *const u8 {
         &self.0 as *const [u8] as *const u8
+    }
+
+    /// Returns a first chunk of 8 bytes.
+    pub const fn first_chunk(&self) -> &[u8; 8] {
+        match self.0.first_chunk::<8>() {
+            Some(chunk) => chunk,
+            // SAFETY: Const unwrap go brr
+            None => unsafe { std::hint::unreachable_unchecked() },
+        }
     }
 }
 

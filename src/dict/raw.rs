@@ -1,11 +1,13 @@
+use std::collections::BTreeMap;
+
 use crate::cell::*;
 use crate::error::Error;
 use crate::util::{unlikely, IterStatus};
 
 use super::{
-    dict_find_bound, dict_find_bound_owned, dict_find_owned, dict_get, dict_get_owned,
-    dict_get_subdict, dict_insert, dict_load_from_root, dict_remove_bound_owned, dict_remove_owned,
-    dict_split_by_prefix, read_label, DictBound, DictOwnedEntry, SetMode,
+    build_dict_from_sorted_iter, dict_find_bound, dict_find_bound_owned, dict_find_owned, dict_get,
+    dict_get_owned, dict_get_subdict, dict_insert, dict_load_from_root, dict_remove_bound_owned,
+    dict_remove_owned, dict_split_by_prefix, read_label, DictBound, DictOwnedEntry, SetMode,
 };
 
 /// Dictionary with fixed length keys (where `N` is a number of bits in each key).
@@ -115,6 +117,34 @@ impl<const N: u16> RawDict<N> {
         Self(None)
     }
 
+    /// Builds a dictionary from a sorted collection.
+    pub fn try_from_btree<K, V>(sorted: &BTreeMap<K, V>) -> Result<Self, Error>
+    where
+        K: Store + Ord,
+        V: Store,
+    {
+        let root = ok!(build_dict_from_sorted_iter(
+            sorted,
+            N,
+            &mut Cell::empty_context()
+        ));
+        Ok(Self(root))
+    }
+
+    /// Builds a dictionary from a sorted slice.
+    pub fn try_from_sorted_slice<K, V>(sorted: &[(K, V)]) -> Result<Self, Error>
+    where
+        K: Store + Ord,
+        V: Store,
+    {
+        let root = ok!(build_dict_from_sorted_iter(
+            sorted.iter().map(|(k, v)| (k, v)),
+            N,
+            &mut Cell::empty_context()
+        ));
+        Ok(Self(root))
+    }
+
     /// Returns `true` if the dictionary contains no elements.
     pub const fn is_empty(&self) -> bool {
         self.0.is_none()
@@ -124,6 +154,12 @@ impl<const N: u16> RawDict<N> {
     #[inline]
     pub const fn root(&self) -> &Option<Cell> {
         &self.0
+    }
+
+    /// Returns the underlying root cell of the dictionary.
+    #[inline]
+    pub fn into_root(self) -> Option<Cell> {
+        self.0
     }
 
     /// Loads a non-empty dictionary from a root cell.

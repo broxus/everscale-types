@@ -2,6 +2,7 @@ use std::str::FromStr;
 
 use crate::cell::*;
 use crate::error::{Error, ParseBlockIdError};
+use crate::models::Addr;
 
 /// Full block id.
 #[derive(Debug, Default, Clone, Copy, Eq, Hash, PartialEq, Ord, PartialOrd, Store, Load)]
@@ -379,9 +380,18 @@ impl ShardIdent {
         self.prefix_len() < Self::MAX_SPLIT_DEPTH as u16
     }
 
+    /// Returns `true` if the specified address could be stored in the current shard.
+    pub fn contains_address<T: Addr>(&self, address: &T) -> bool {
+        self.workchain == address.workchain()
+            && self.contains_account_prefix(&address.prefix().to_be_bytes())
+    }
+
     /// Returns `true` if the specified account could be stored in the current shard.
     pub const fn contains_account(&self, account: &HashBytes) -> bool {
-        let account = &account.0;
+        self.contains_account_prefix(account.first_chunk())
+    }
+
+    const fn contains_account_prefix(&self, account: &[u8; 8]) -> bool {
         let mut bits = self.prefix_len();
 
         let mut byte = 0;

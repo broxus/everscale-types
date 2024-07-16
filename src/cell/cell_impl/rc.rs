@@ -14,7 +14,18 @@ use crate::util::TryAsMut;
 /// Single-threaded cell.
 #[derive(Clone, Eq)]
 #[repr(transparent)]
-pub struct Cell(Rc<DynCell>);
+pub struct Cell(pub(crate) CellInner);
+
+/// Inner representation of the cell.
+pub type CellInner<T = DynCell> = Rc<T>;
+
+impl Cell {
+    /// Unwraps the root cell from the usage tracking.
+    #[inline]
+    pub fn untrack(self) -> Self {
+        self.0.untrack()
+    }
+}
 
 impl Default for Cell {
     #[inline]
@@ -59,17 +70,24 @@ impl PartialEq for Cell {
     }
 }
 
-impl From<Cell> for Rc<DynCell> {
+impl From<Cell> for CellInner {
     #[inline]
     fn from(value: Cell) -> Self {
         value.0
     }
 }
 
-impl From<Rc<DynCell>> for Cell {
+impl From<CellInner> for Cell {
     #[inline]
-    fn from(value: Rc<DynCell>) -> Self {
+    fn from(value: CellInner) -> Self {
         Self(value)
+    }
+}
+
+impl<T: CellImpl + 'static> From<CellInner<T>> for Cell {
+    #[inline]
+    fn from(value: CellInner<T>) -> Self {
+        Self(value as CellInner)
     }
 }
 
