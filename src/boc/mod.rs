@@ -7,6 +7,9 @@ pub mod de;
 /// BOC encoder implementation.
 pub mod ser;
 
+#[cfg(feature = "rayon")]
+mod test;
+
 /// BOC file magic number.
 #[derive(Default, Copy, Clone, Eq, PartialEq)]
 pub enum BocTag {
@@ -133,6 +136,21 @@ impl Boc {
         fn encode_impl(cell: &DynCell) -> Vec<u8> {
             let mut result = Vec::new();
             ser::BocHeader::<ahash::RandomState>::new(cell).encode(&mut result);
+            result
+        }
+        encode_impl(cell.as_ref())
+    }
+
+    /// Encodes the specified cell tree as BOC.
+    /// Uses rayon under the hood to parallelize encoding.
+    #[cfg(feature = "rayon")]
+    pub fn encode_par<T>(cell: T) -> Vec<u8>
+    where
+        T: AsRef<DynCell>,
+    {
+        fn encode_impl(cell: &DynCell) -> Vec<u8> {
+            let mut result = Vec::new();
+            ser::BocHeader::<ahash::RandomState>::new(cell).encode_par(&mut result);
             result
         }
         encode_impl(cell.as_ref())
@@ -302,6 +320,15 @@ impl BocRepr {
         Self::encode_ext(data, &mut Cell::empty_context())
     }
 
+    /// Encodes the specified cell tree as BOC using an empty cell context.
+    #[cfg(feature = "rayon")]
+    pub fn encode_par<T>(data: T) -> Result<Vec<u8>, crate::error::Error>
+    where
+        T: Store,
+    {
+        Self::encode_ext_par(data, &mut Cell::empty_context())
+    }
+
     /// Decodes a `base64` encoded BOC into an object
     /// using an empty cell context.
     #[cfg(any(feature = "base64", test))]
@@ -357,6 +384,28 @@ impl BocRepr {
             ok!(data.store_into(&mut builder, context));
             let cell = ok!(builder.build_ext(context));
             Ok(Boc::encode(cell))
+        }
+        encode_ext_impl(&data, context)
+    }
+
+    /// Encodes the specified object as BOC.
+    /// Uses rayon under the hood to parallelize encoding.
+    #[cfg(feature = "rayon")]
+    pub fn encode_ext_par<T>(
+        data: T,
+        context: &mut dyn CellContext,
+    ) -> Result<Vec<u8>, crate::error::Error>
+    where
+        T: Store,
+    {
+        fn encode_ext_impl(
+            data: &dyn Store,
+            context: &mut dyn CellContext,
+        ) -> Result<Vec<u8>, crate::error::Error> {
+            let mut builder = CellBuilder::new();
+            ok!(data.store_into(&mut builder, context));
+            let cell = ok!(builder.build_ext(context));
+            Ok(Boc::encode_par(cell))
         }
         encode_ext_impl(&data, context)
     }
