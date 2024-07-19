@@ -2,6 +2,9 @@ on: [push, pull_request]
 
 name: master
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   check:
     name: Check
@@ -41,7 +44,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --features base64,serde,models,sync,abi
+          args: --features base64,serde,models,sync,abi,rayon
 
   lints:
     name: Lints

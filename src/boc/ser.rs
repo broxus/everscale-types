@@ -16,13 +16,10 @@ pub struct BocHeader<'a, S = ahash::RandomState> {
     include_crc: bool,
 }
 
-impl<'a, S> BocHeader<'a, S>
-where
-    S: BuildHasher + Default,
-{
-    /// Creates an intermediate BOC serializer state with a single root.
-    pub fn new(root: &'a DynCell) -> Self {
-        let mut res = Self {
+impl<S: BuildHasher + Default> Default for BocHeader<'_, S> {
+    #[inline]
+    fn default() -> Self {
+        Self {
             root_rev_indices: Default::default(),
             rev_indices: Default::default(),
             rev_cells: Default::default(),
@@ -31,7 +28,41 @@ where
             cell_count: 0,
             without_hashes: false,
             include_crc: false,
-        };
+        }
+    }
+}
+
+impl<'a, S> BocHeader<'a, S>
+where
+    S: BuildHasher + Default,
+{
+    /// Creates an intermediate BOC serializer state with a single root.
+    pub fn with_root(root: &'a DynCell) -> Self {
+        let mut res = Self::default();
+        res.add_root(root);
+        res
+    }
+
+    /// Creates an empty intermediate BOC serializer state.
+    /// Reserves space for the specified number of cells.
+    #[inline]
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            root_rev_indices: Default::default(),
+            rev_indices: HashMap::with_capacity_and_hasher(capacity, S::default()),
+            rev_cells: Vec::with_capacity(capacity),
+            total_data_size: 0,
+            reference_count: 0,
+            cell_count: 0,
+            without_hashes: false,
+            include_crc: false,
+        }
+    }
+
+    /// Creates an intermediate BOC serializer state with a single root.
+    /// Reserves space for the specified number of cells.
+    pub fn with_capacity_and_root(capacity: usize, root: &'a DynCell) -> Self {
+        let mut res = Self::with_capacity(capacity);
         res.add_root(root);
         res
     }
@@ -41,6 +72,16 @@ impl<'a, S> BocHeader<'a, S>
 where
     S: BuildHasher,
 {
+    /// Clears the header, removing all cells. Keeps the allocated memory for reuse.
+    pub fn clear(&mut self) {
+        self.root_rev_indices.clear();
+        self.rev_indices.clear();
+        self.rev_cells.clear();
+        self.total_data_size = 0;
+        self.reference_count = 0;
+        self.cell_count = 0;
+    }
+
     /// Adds an additional root to the state.
     pub fn add_root(&mut self, root: &'a DynCell) {
         let root_rev_index = self.fill(root);
@@ -64,7 +105,60 @@ where
     }
 
     /// Encodes cell trees into bytes.
-    pub fn encode(self, target: &mut Vec<u8>) {
+    pub fn encode(&self, target: &mut Vec<u8>) {
+        let target_len_before = target.len();
+        let header = self.encode_header(target);
+        self.encode_cells_chunk(&self.rev_cells, header.ref_size, target);
+        self.encode_crc(target_len_before, target);
+
+        debug_assert_eq!(
+            target.len() as u64,
+            target_len_before as u64 + header.total_size
+        );
+    }
+
+    /// Encodes cell trees into bytes.
+    /// Uses `rayon` under the hood.
+    #[cfg(feature = "rayon")]
+    pub fn encode_rayon(&self, target: &mut Vec<u8>)
+    where
+        S: Send + Sync,
+    {
+        use rayon::iter::{IndexedParallelIterator, ParallelIterator};
+        use rayon::slice::ParallelSlice;
+
+        const CELLS_CHUNK_SIZE: usize = 5_000;
+
+        let target_len_before = target.len();
+        let header = self.encode_header(target);
+
+        if self.rev_cells.len() < CELLS_CHUNK_SIZE * 2 {
+            self.encode_cells_chunk(&self.rev_cells, header.ref_size, target);
+        } else {
+            let mut chunks = Vec::new();
+            self.rev_cells
+                .par_rchunks(CELLS_CHUNK_SIZE)
+                .map(|chunk| {
+                    let mut target = Vec::with_capacity(chunk.len() * 256);
+                    self.encode_cells_chunk(chunk, header.ref_size, &mut target);
+                    target
+                })
+                .collect_into_vec(&mut chunks);
+            for chunk in chunks {
+                target.extend_from_slice(&chunk);
+            }
+        }
+
+        self.encode_crc(target_len_before, target);
+
+        debug_assert_eq!(
+            target.len() as u64,
+            target_len_before as u64 + header.total_size
+        );
+    }
+
+    #[inline]
+    fn encode_header(&self, target: &mut Vec<u8>) -> EncodedHeader {
         let root_count = self.root_rev_indices.len();
 
         let ref_size = number_of_bytes_to_fit(self.cell_count as u64);
@@ -101,8 +195,6 @@ where
             + u64::from(self.include_crc) * 4;
         target.reserve(total_size as usize);
 
-        let target_len_before = target.len();
-
         target.extend_from_slice(&BocTag::GENERIC);
         target.extend_from_slice(&[flags, offset_size as u8]);
         target.extend_from_slice(&self.cell_count.to_be_bytes()[4 - ref_size..]);
@@ -110,14 +202,24 @@ where
         target.extend_from_slice(&[0; 4][4 - ref_size..]);
         target.extend_from_slice(&total_cells_size.to_be_bytes()[8 - offset_size..]);
 
-        for rev_index in self.root_rev_indices {
+        for rev_index in &self.root_rev_indices {
             let root_index = self.cell_count - rev_index - 1;
             target.extend_from_slice(&root_index.to_be_bytes()[4 - ref_size..]);
         }
 
-        for cell in self.rev_cells.into_iter().rev() {
+        EncodedHeader {
+            ref_size,
+            total_size,
+        }
+    }
+
+    #[inline]
+    fn encode_cells_chunk(&self, chunk: &[&DynCell], ref_size: usize, target: &mut Vec<u8>) {
+        let descriptor_mask = !(u8::from(self.without_hashes) * CellDescriptor::STORE_HASHES_MASK);
+
+        for cell in chunk.iter().rev() {
             let mut descriptor = cell.descriptor();
-            descriptor.d1 &= !(u8::from(self.without_hashes) * CellDescriptor::STORE_HASHES_MASK);
+            descriptor.d1 &= descriptor_mask;
             target.extend_from_slice(&[descriptor.d1, descriptor.d2]);
             if descriptor.store_hashes() {
                 let level_mask = descriptor.level_mask();
@@ -138,7 +240,10 @@ where
                 }
             }
         }
+    }
 
+    #[inline]
+    fn encode_crc(&self, target_len_before: usize, target: &mut Vec<u8>) {
         if self.include_crc {
             let target_len_after = target.len();
             debug_assert!(target_len_before < target_len_after);
@@ -146,8 +251,6 @@ where
             let crc = crc32c::crc32c(&target[target_len_before..target_len_after]);
             target.extend_from_slice(&crc.to_le_bytes());
         }
-
-        debug_assert_eq!(target.len() as u64, target_len_before as u64 + total_size);
     }
 
     fn fill(&mut self, root: &'a DynCell) -> u32 {
@@ -221,6 +324,12 @@ impl CellDescriptor {
         }
         byte_len
     }
+}
+
+#[derive(Copy, Clone)]
+struct EncodedHeader {
+    ref_size: usize,
+    total_size: u64,
 }
 
 fn number_of_bytes_to_fit(l: u64) -> usize {
