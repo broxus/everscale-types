@@ -400,6 +400,61 @@ pub(crate) fn debug_struct_field2_finish(
     builder.finish()
 }
 
+pub struct BloomedMap<K, V, S> {
+    hashmap: hashbrown::HashMap<K, V, S>,
+    bloom: fastbloom::BloomFilter<64, S>,
+}
+
+impl<K, V, S> BloomedMap<K, V, S>
+where
+    K: std::hash::Hash + Eq,
+    S: std::hash::BuildHasher + Default + Clone,
+{
+    pub fn with_capacity_and_hasher(expected_items: usize, hasher: S) -> Self {
+        let bloom = fastbloom::BloomFilter::with_false_pos(0.1)
+            .hasher(hasher.clone())
+            .block_size_64()
+            .expected_items(expected_items);
+
+        BloomedMap {
+            hashmap: hashbrown::HashMap::with_hasher(hasher),
+            bloom,
+        }
+    }
+
+    pub fn insert(&mut self, key: K, value: V) -> Option<V> {
+        self.bloom.insert(&key);
+        self.hashmap.insert(key, value)
+    }
+
+    pub fn get(&self, key: &K) -> Option<&V> {
+        if self.bloom.contains(key) {
+            self.hashmap.get(key)
+        } else {
+            None
+        }
+    }
+
+    pub fn contains_key(&self, key: &K) -> bool {
+        self.bloom.contains(key) && self.hashmap.contains_key(key)
+    }
+
+    pub fn dont_have_key(&self, key: &K) -> bool {
+        !self.contains_key(key)
+    }
+
+    pub fn clear(&mut self) {
+        self.hashmap.clear();
+        self.bloom.clear();
+    }
+}
+
+impl<K, V, S> BloomedMap<K, V, S> {
+    pub fn len(&self) -> usize {
+        self.hashmap.len()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

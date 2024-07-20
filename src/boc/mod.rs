@@ -1,5 +1,6 @@
 //! BOC (Bag Of Cells) implementation.
 
+use crate::boc::ser::PreHashedHasher;
 use crate::cell::{Cell, CellBuilder, CellContext, CellFamily, DynCell, HashBytes, Load, Store};
 
 /// BOC decoder implementation.
@@ -108,7 +109,7 @@ impl Boc {
     {
         fn encode_impl(cell: &DynCell) -> Vec<u8> {
             let mut result = Vec::new();
-            ser::BocHeader::<ahash::RandomState>::new(cell).encode(&mut result);
+            ser::BocHeader::new(cell, ahash::RandomState::new()).encode(&mut result);
             result
         }
         encode_impl(cell.as_ref())
@@ -122,7 +123,7 @@ impl Boc {
     {
         fn encode_pair_impl(cell1: &DynCell, cell2: &DynCell) -> Vec<u8> {
             let mut result = Vec::new();
-            let mut encoder = ser::BocHeader::<ahash::RandomState>::new(cell1);
+            let mut encoder = ser::BocHeader::new(cell1, ahash::RandomState::new());
             encoder.add_root(cell2);
             encoder.encode(&mut result);
             result
@@ -483,7 +484,7 @@ mod tests {
         let cell = Boc::decode(&boc_without_crc).unwrap();
 
         let mut boc_with_crc = Vec::new();
-        ser::BocHeader::<ahash::RandomState>::new(cell.as_ref())
+        ser::BocHeader::<ahash::RandomState>::new(cell.as_ref(), ahash::RandomState::new())
             .with_crc(true)
             .encode(&mut boc_with_crc);
         assert_eq!(boc_without_crc.len() + 4, boc_with_crc.len());

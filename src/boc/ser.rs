@@ -1,13 +1,12 @@
-use std::collections::HashMap;
-use std::hash::BuildHasher;
-
 use super::BocTag;
 use crate::cell::{CellDescriptor, DynCell, HashBytes};
+use crate::util::BloomedMap;
+use std::hash::{BuildHasher, Hash, Hasher};
 
 /// Intermediate BOC serializer state.
-pub struct BocHeader<'a, S = ahash::RandomState> {
+pub struct BocHeader<'a, S = PreHashedHasher> {
     root_rev_indices: Vec<u32>,
-    rev_indices: HashMap<&'a HashBytes, u32, S>,
+    rev_indices: BloomedMap<&'a HashBytes, u32, S>,
     rev_cells: Vec<&'a DynCell>,
     total_data_size: u64,
     reference_count: u64,
@@ -18,13 +17,13 @@ pub struct BocHeader<'a, S = ahash::RandomState> {
 
 impl<'a, S> BocHeader<'a, S>
 where
-    S: BuildHasher + Default,
+    S: BuildHasher + Default + Clone,
 {
     /// Creates an intermediate BOC serializer state with a single root.
-    pub fn new(root: &'a DynCell) -> Self {
+    pub fn new(root: &'a DynCell, hasher: S) -> Self {
         let mut res = Self {
             root_rev_indices: Default::default(),
-            rev_indices: Default::default(),
+            rev_indices: BloomedMap::with_capacity_and_hasher(400_000, hasher),
             rev_cells: Default::default(),
             total_data_size: 0,
             reference_count: 0,
@@ -39,7 +38,7 @@ where
 
 impl<'a, S> BocHeader<'a, S>
 where
-    S: BuildHasher,
+    S: BuildHasher + Default + Clone,
 {
     /// Adds an additional root to the state.
     pub fn add_root(&mut self, root: &'a DynCell) {
@@ -65,6 +64,7 @@ where
 
     /// Encodes cell trees into bytes.
     pub fn encode(self, target: &mut Vec<u8>) {
+        let start = std::time::Instant::now();
         let root_count = self.root_rev_indices.len();
 
         let ref_size = number_of_bytes_to_fit(self.cell_count as u64);
@@ -110,10 +110,13 @@ where
         target.extend_from_slice(&[0; 4][4 - ref_size..]);
         target.extend_from_slice(&total_cells_size.to_be_bytes()[8 - offset_size..]);
 
+        println!("header: {:?}", start.elapsed());
         for rev_index in self.root_rev_indices {
             let root_index = self.cell_count - rev_index - 1;
             target.extend_from_slice(&root_index.to_be_bytes()[4 - ref_size..]);
         }
+
+        println!("root: {:?}", start.elapsed());
 
         for cell in self.rev_cells.into_iter().rev() {
             let mut descriptor = cell.descriptor();
@@ -130,7 +133,7 @@ where
             }
             target.extend_from_slice(cell.data());
             for child in cell.references() {
-                if let Some(rev_index) = self.rev_indices.get(child.repr_hash()) {
+                if let Some(rev_index) = self.rev_indices.get(&child.repr_hash()) {
                     let rev_index = self.cell_count - *rev_index - 1;
                     target.extend_from_slice(&rev_index.to_be_bytes()[4 - ref_size..]);
                 } else {
@@ -146,6 +149,7 @@ where
             let crc = crc32c::crc32c(&target[target_len_before..target_len_after]);
             target.extend_from_slice(&crc.to_le_bytes());
         }
+        println!("encode: {:?}", start.elapsed());
 
         debug_assert_eq!(target.len() as u64, target_len_before as u64 + total_size);
     }
@@ -153,7 +157,7 @@ where
     fn fill(&mut self, root: &'a DynCell) -> u32 {
         const SAFE_DEPTH: u16 = 128;
 
-        if let Some(index) = self.rev_indices.get(root.repr_hash()) {
+        if let Some(index) = self.rev_indices.get(&root.repr_hash()) {
             return *index;
         }
 
@@ -170,11 +174,12 @@ where
 
     fn fill_recursive(&mut self, cell: &'a DynCell) {
         for child in cell.references() {
-            if !self.rev_indices.contains_key(child.repr_hash()) {
+            if self.rev_indices.dont_have_key(&child.repr_hash()) {
                 self.fill_recursive(child);
             }
         }
 
+        // println!("v: {}", self.cell_count);
         self.rev_indices.insert(cell.repr_hash(), self.cell_count);
         self.rev_cells.push(cell);
 
@@ -193,7 +198,7 @@ where
 
         while let Some(children) = stack.last_mut() {
             if let Some(cell) = children.next() {
-                if !self.rev_indices.contains_key(cell.repr_hash()) {
+                if self.rev_indices.dont_have_key(&cell.repr_hash()) {
                     stack.push(cell.references());
                 }
             } else {
@@ -225,4 +230,32 @@ impl CellDescriptor {
 
 fn number_of_bytes_to_fit(l: u64) -> usize {
     (8 - l.leading_zeros() / 8) as usize
+}
+
+#[derive(Default)]
+pub struct PreHashedHasher {
+    hash: u64,
+}
+
+impl Hasher for PreHashedHasher {
+    fn finish(&self) -> u64 {
+        self.hash
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        debug_assert!(bytes.len() >= 8);
+
+        // Use the first 8 bytes of the hash as the u64 hash value
+        unsafe {
+            self.hash = u64::from_ne_bytes(bytes[..8].try_into().unwrap_unchecked());
+        }
+    }
+}
+
+impl BuildHasher for PreHashedHasher {
+    type Hasher = Self;
+
+    fn build_hasher(&self) -> Self {
+        Self::default()
+    }
 }
