@@ -712,6 +712,14 @@ impl From<sha2::digest::Output<sha2::Sha256>> for HashBytes {
     }
 }
 
+#[cfg(feature = "blake3")]
+impl From<blake3::Hash> for HashBytes {
+    #[inline(always)]
+    fn from(value: blake3::Hash) -> Self {
+        Self(value.into())
+    }
+}
+
 impl From<HashBytes> for [u8; 32] {
     #[inline(always)]
     fn from(value: HashBytes) -> Self {

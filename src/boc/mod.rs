@@ -91,6 +91,30 @@ impl Boc {
         sha2::Sha256::digest(data).into()
     }
 
+    /// Computes a Blake3 hash of the data.
+    #[cfg(feature = "blake3")]
+    #[inline]
+    pub fn file_hash_blake(data: impl AsRef<[u8]>) -> HashBytes {
+        #[cfg(not(feature = "rayon"))]
+        {
+            blake3::hash(data.as_ref()).into()
+        }
+
+        #[cfg(feature = "rayon")]
+        {
+            // Use Rayon for parallel hashing if data is larger than 256 KB.
+            const RAYON_THRESHOLD: usize = 256 * 1024;
+
+            let data = data.as_ref();
+            if data.len() < RAYON_THRESHOLD {
+                blake3::hash(data)
+            } else {
+                blake3::Hasher::new().update_rayon(data).finalize()
+            }
+            .into()
+        }
+    }
+
     /// Encodes the specified cell tree as BOC and
     /// returns the `base64` encoded bytes as a string.
     #[cfg(any(feature = "base64", test))]
