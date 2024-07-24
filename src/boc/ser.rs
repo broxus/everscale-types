@@ -128,6 +128,7 @@ where
         use rayon::slice::ParallelSlice;
 
         const CELLS_CHUNK_SIZE: usize = 5_000;
+        const P95_CELL_SIZE: usize = 128;
 
         let target_len_before = target.len();
         let header = self.encode_header(target);
@@ -139,7 +140,7 @@ where
             self.rev_cells
                 .par_rchunks(CELLS_CHUNK_SIZE)
                 .map(|chunk| {
-                    let mut target = Vec::with_capacity(chunk.len() * 256);
+                    let mut target = Vec::with_capacity(chunk.len() * P95_CELL_SIZE);
                     self.encode_cells_chunk(chunk, header.ref_size, &mut target);
                     target
                 })
