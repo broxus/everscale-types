@@ -13,18 +13,18 @@
 //! ## `Cell` vs `CellSlice` vs `CellBuilder`
 //!
 //! - [`Cell`] is an immutable tree and provides only basic methods for accessing
-//! nodes and some meta info.
+//!   nodes and some meta info.
 //!
 //! - [`CellSlice`] is a read-only view for a part of some cell. It can only
-//! be obtained from an existing cell. A cell contains **up to 1023 bits** and
-//! **up to 4 references**. Minimal data unit is bit, so a cell slice is similar
-//! to a couple of ranges (bit range and refs range).
+//!   be obtained from an existing cell. A cell contains **up to 1023 bits** and
+//!   **up to 4 references**. Minimal data unit is bit, so a cell slice is similar
+//!   to a couple of ranges (bit range and refs range).
 //!
 //! - [`CellBuilder`] is used to create a new cell. It is used as an append-only
-//! data structure and is the only way to create a new cell with the provided data.
-//! Cell creation depends on a context (e.g. message creation in a wallet or a
-//! TVM execution with gas tracking), so [`CellBuilder::build_ext`] accepts
-//! a [`CellContext`] parameter which can be used to track and modify cells creation.
+//!   data structure and is the only way to create a new cell with the provided data.
+//!   Cell creation depends on a context (e.g. message creation in a wallet or a
+//!   TVM execution with gas tracking), so [`CellBuilder::build_ext`] accepts
+//!   a [`CellContext`] parameter which can be used to track and modify cells creation.
 //!
 //! ## BOC
 //!
@@ -36,15 +36,15 @@
 //! ### Merkle stuff
 //!
 //! - Pruned branch is a "building block" of merkle structures. A single pruned branch
-//! cell replaces a whole subtree and contains just the hash of its root cell hash.
+//!   cell replaces a whole subtree and contains just the hash of its root cell hash.
 //!
 //! - [`MerkleProof`] contains a subset of original tree of cells. In most cases
-//! it is created from [`UsageTree`] of some visited cells. Merkle proof is used
-//! to proof that something was presented in the origin tree and provide some additional
-//! context.
+//!   it is created from [`UsageTree`] of some visited cells. Merkle proof is used
+//!   to proof that something was presented in the origin tree and provide some additional
+//!   context.
 //!
 //! - [`MerkleUpdate`] describes a difference between two trees of cells. It can be
-//! applied to old cell to create a new cell.
+//!   applied to old cell to create a new cell.
 //!
 //! ### Numeric stuff
 //!
@@ -69,15 +69,15 @@
 //! All models implement [`Load`] and [`Store`] traits for conversion from/to cells.
 //!
 //! - [`RawDict`] constrains only key size in bits. It is useful when a dictionary
-//! can contain multiple types of values.
+//!   can contain multiple types of values.
 //!
 //! - [`Dict`] is a strongly typed version of definition and is a preferable way
-//! of working with this data structure. Key type must implement [`DictKey`] trait,
-//! which is implemented for numbers and addresses.
+//!   of working with this data structure. Key type must implement [`DictKey`] trait,
+//!   which is implemented for numbers and addresses.
 //!
 //! - [`AugDict`] adds additional values for all nodes. You can use it to quickly
-//! access a subtotal of values for each subtree.
-//! NOTE: this type is partially implemented due to its complexity.
+//!   access a subtotal of values for each subtree.
+//!   NOTE: this type is partially implemented due to its complexity.
 //!
 //! ## Supported Rust Versions
 //!

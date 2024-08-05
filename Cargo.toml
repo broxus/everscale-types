@@ -87,6 +87,9 @@ tycho = []
 [profile.release]
 debug = true
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
+
 [profile.dev.package.hex]
 opt-level = 3
 [profile.dev.package.base64]
