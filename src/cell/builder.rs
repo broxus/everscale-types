@@ -14,6 +14,8 @@ use crate::util::{ArrayVec, Bitstring};
 use super::CellFamily;
 #[cfg(feature = "stats")]
 use super::CellTreeStats;
+#[cfg(feature = "arbitrary")]
+use arbitrary::{Arbitrary, Result as ArbitraryResult, Unstructured};
 
 /// A data structure that can be serialized into cells.
 pub trait Store {
@@ -786,6 +788,30 @@ impl CellBuilder {
             Err(Error::CellOverflow)
         }
     }
+
+    #[cfg(feature = "arbitrary")]
+    fn arbitrary_with_depth(u: &mut Unstructured, depth: usize) -> ArbitraryResult<Self> {
+        let mut builder = CellBuilder::new();
+
+        // Generate a random bit length within the valid range
+        let random_bit_len = u.int_in_range(0..=MAX_BIT_LEN)?;
+        let random_bytes = u.bytes(random_bit_len as usize / 8 + 1)?;
+        builder
+            .store_raw(random_bytes, random_bit_len)
+            .expect("valid bit length");
+
+        if depth > 0 {
+            let ref_count = u.int_in_range(0..=MAX_REF_COUNT as u8)?;
+            for _ in 0..ref_count {
+                let child = Self::arbitrary_with_depth(u, depth - 1)?
+                    .build()
+                    .map_err(|_| arbitrary::Error::IncorrectFormat)?;
+                builder.store_reference(child).expect("reference fits");
+            }
+        }
+
+        Ok(builder)
+    }
 }
 
 #[inline]
@@ -882,7 +908,7 @@ impl CellBuilder {
     }
 
     /// Tries to append a builder (its data and references),
-    /// returning `false` if there is not enough remaining capacity.
+    /// returning `Error::CellOverflow` if there is not enough remaining capacity.
     pub fn store_builder(&mut self, builder: &Self) -> Result<(), Error> {
         if self.bit_len + builder.bit_len <= MAX_BIT_LEN
             && self.references.len() + builder.references.len() <= MAX_REF_COUNT
@@ -1216,6 +1242,33 @@ impl CellImpl for IntermediateFullCell {
             bit_count: self.0.bit_len as u64,
             cell_count: 1 + self.0.references.len() as u64,
         }
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl<'a> Arbitrary<'a> for CellBuilder {
+    fn arbitrary(u: &mut Unstructured<'a>) -> ArbitraryResult<Self> {
+        let depth = u.int_in_range(0..=5)?;
+        Self::arbitrary_with_depth(u, depth)
+    }
+
+    fn size_hint(depth: usize) -> (usize, Option<usize>) {
+        let bit_len_hint = (0, Some((MAX_BIT_LEN / 8 + 1 + 2) as usize)); // from 0 to MAX_BIT_LEN bits + bit len
+
+        // Base case: if depth is zero, we do not include recursive cell hints
+        if depth == 0 {
+            return bit_len_hint;
+        }
+
+        // Recursive case: include recursive cell hints
+        let child_hint = <CellBuilder as Arbitrary>::size_hint(depth - 1);
+
+        let lower = bit_len_hint.0 + child_hint.0 * MAX_REF_COUNT;
+        let upper = bit_len_hint
+            .1
+            .and_then(|x| child_hint.1.map(|y| x + y * MAX_REF_COUNT));
+
+        (lower, upper)
     }
 }
 
