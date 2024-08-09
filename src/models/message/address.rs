@@ -682,7 +682,7 @@ impl Anycast {
 
     /// Constructs anycast info from rewrite prefix.
     pub fn from_slice(rewrite_prefix: &CellSlice<'_>) -> Result<Self, Error> {
-        let depth = ok!(SplitDepth::from_bit_len(rewrite_prefix.remaining_bits()));
+        let depth = ok!(SplitDepth::from_bit_len(rewrite_prefix.size_bits()));
 
         let mut data = vec![0; (depth.into_bit_len() as usize + 7) / 8];
         ok!(rewrite_prefix.get_raw(0, &mut data, depth.into_bit_len()));

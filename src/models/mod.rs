@@ -3,7 +3,7 @@
 use std::marker::PhantomData;
 
 use crate::cell::{
-    Cell, CellBuilder, CellContext, CellSlice, CellSliceSize, DynCell, EquivalentRepr, Load, Store,
+    Cell, CellBuilder, CellContext, CellSlice, DynCell, EquivalentRepr, Load, Size, Store,
 };
 use crate::error::Error;
 use crate::util::*;
@@ -49,8 +49,8 @@ pub struct Lazy<T> {
 
 impl<T> crate::cell::ExactSize for Lazy<T> {
     #[inline]
-    fn exact_size(&self) -> CellSliceSize {
-        CellSliceSize { bits: 0, refs: 1 }
+    fn exact_size(&self) -> Size {
+        Size { bits: 0, refs: 1 }
     }
 }
 

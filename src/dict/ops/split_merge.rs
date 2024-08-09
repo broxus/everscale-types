@@ -24,7 +24,7 @@ pub fn dict_split_by_prefix(
     let subdict_bit_len = match root_label.strip_data_prefix(key_prefix) {
         // Root label == key prefix
         Some(root_label_rem) if root_label_rem.is_data_empty() => {
-            match key_bit_len.checked_sub(root_label.remaining_bits() + 1) {
+            match key_bit_len.checked_sub(root_label.size_bits() + 1) {
                 Some(bit_len) => bit_len,
                 None => return Err(Error::CellUnderflow),
             }
@@ -89,7 +89,7 @@ pub fn dict_merge(
 
             let mut right_dict_iter = RawIter::new(right, key_bit_length);
             while let Some(Ok((key, value))) = right_dict_iter.next() {
-                let current_bit_len = key.bit_len();
+                let current_bit_len = key.size_bits();
 
                 dict_insert(
                     left,

@@ -264,17 +264,17 @@ impl AbiHeader {
         match ty {
             AbiHeaderType::Time => {
                 ok!(preload_bits(64, slice));
-                slice.advance(64, 0)?;
+                slice.skip_first(64, 0)?;
             }
             AbiHeaderType::Expire => {
                 ok!(preload_bits(32, slice));
-                slice.advance(32, 0)?;
+                slice.skip_first(32, 0)?;
             }
             AbiHeaderType::PublicKey => {
                 ok!(preload_bits(1, slice));
                 if slice.load_bit()? {
                     ok!(preload_bits(256, slice));
-                    slice.advance(256, 0)?;
+                    slice.skip_first(256, 0)?;
                 }
             }
         }
@@ -315,7 +315,7 @@ fn preload_bits(bits: u16, slice: &mut CellSlice) -> Result<()> {
         return Ok(());
     }
 
-    let remaining_bits = slice.remaining_bits();
+    let remaining_bits = slice.size_bits();
     if remaining_bits == 0 {
         let first_ref = slice.load_reference_as_slice()?;
 
@@ -415,9 +415,9 @@ fn load_varuint_raw(size: NonZeroU8, slice: &mut CellSlice) -> Result<Vec<u8>> {
 }
 
 fn load_cell(version: AbiVersion, last: bool, slice: &mut CellSlice) -> Result<Cell> {
-    if slice.remaining_refs() == 1
+    if slice.size_refs() == 1
         && (version.major == 1 && slice.cell().reference_count() as usize == MAX_REF_COUNT
-            || version.major > 1 && !last && slice.remaining_bits() == 0)
+            || version.major > 1 && !last && slice.size_bits() == 0)
     {
         *slice = slice.load_reference_as_slice()?;
     }
@@ -796,7 +796,7 @@ mod tests {
             // 4 refs with empty cells
             let cell = Boc::decode_base64("te6ccgEBAgEACAAEAAEBAQEAAA==")?;
             let slice = &mut cell.as_slice()?;
-            slice.try_advance(0, 3);
+            slice.skip_first(0, 3)?;
 
             assert_basic_err!(
                 AbiValue::load(&AbiType::Cell, AbiVersion::V1_0, slice),
@@ -806,7 +806,7 @@ mod tests {
             // 3 refs with empty cells + last ref with a cell with 1 ref
             let cell = Boc::decode_base64("te6ccgEBAwEACwAEAAICAgEBAAIAAA==")?;
             let slice = &mut cell.as_slice()?;
-            slice.try_advance(0, 3);
+            slice.skip_first(0, 3)?;
 
             assert_eq!(
                 AbiValue::load(&AbiType::Cell, AbiVersion::V1_0, slice)?,
@@ -825,7 +825,7 @@ mod tests {
             // 4 refs with empty cells
             let cell = Boc::decode_base64("te6ccgEBAgEACAAEAAEBAQEAAA==")?;
             let slice = &mut cell.as_slice()?;
-            slice.try_advance(0, 3);
+            slice.skip_first(0, 3)?;
 
             assert_eq!(
                 AbiValue::load(&AbiType::Cell, v, slice)?,

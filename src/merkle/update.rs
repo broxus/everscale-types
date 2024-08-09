@@ -55,27 +55,30 @@ impl Default for MerkleUpdate {
 
 impl Load<'_> for MerkleUpdate {
     fn load_from(s: &mut CellSlice) -> Result<Self, Error> {
-        if !s.has_remaining(Self::BITS, Self::REFS) {
+        if !s.is_full() || s.size_bits() != Self::BITS || s.size_refs() != Self::REFS {
             return Err(Error::CellUnderflow);
         }
 
-        if ok!(s.get_u8(0)) != CellType::MerkleUpdate.to_byte() {
+        if !s.cell().descriptor().is_exotic()
+            || ok!(s.load_u8()) != CellType::MerkleUpdate.to_byte()
+        {
             return Err(Error::InvalidCell);
         }
 
         let res = Self {
-            old_hash: ok!(s.get_u256(8)),
-            new_hash: ok!(s.get_u256(8 + 256)),
-            old_depth: ok!(s.get_u16(8 + 256 * 2)),
-            new_depth: ok!(s.get_u16(8 + 256 * 2 + 16)),
-            old: ok!(s.get_reference_cloned(0)),
-            new: ok!(s.get_reference_cloned(1)),
+            old_hash: ok!(s.load_u256()),
+            new_hash: ok!(s.load_u256()),
+            old_depth: ok!(s.load_u16()),
+            new_depth: ok!(s.load_u16()),
+            old: ok!(s.load_reference_cloned()),
+            new: ok!(s.load_reference_cloned()),
         };
+        debug_assert!(s.is_data_empty() && s.is_refs_empty());
+
         if res.old.as_ref().hash(0) == &res.old_hash
             && res.old.as_ref().depth(0) == res.old_depth
             && res.new.as_ref().hash(0) == &res.new_hash
             && res.new.as_ref().depth(0) == res.new_depth
-            && s.try_advance(Self::BITS, Self::REFS)
         {
             Ok(res)
         } else {

@@ -14,7 +14,7 @@ pub fn dict_remove_owned(
     allow_subtree: bool,
     context: &mut dyn CellContext,
 ) -> Result<Option<CellSliceParts>, Error> {
-    if !allow_subtree && key.remaining_bits() != key_bit_len {
+    if !allow_subtree && key.size_bits() != key_bit_len {
         return Err(Error::CellUnderflow);
     }
 
@@ -52,7 +52,7 @@ pub fn aug_dict_remove_owned(
     comparator: AugDictFn,
     context: &mut dyn CellContext,
 ) -> Result<Option<CellSliceParts>, Error> {
-    if !allow_subtree && key.remaining_bits() != key_bit_len {
+    if !allow_subtree && key.size_bits() != key_bit_len {
         return Err(Error::CellUnderflow);
     }
 
@@ -92,20 +92,20 @@ fn dict_find_value_to_remove<'a>(
 
     let mut stack = Vec::<Segment>::new();
 
-    let mut prev_key_bit_len = key.remaining_bits();
+    let mut prev_key_bit_len = key.size_bits();
     let removed = loop {
         let mut remaining_data: CellSlice<'_> = ok!(data.as_slice());
 
         // Read the next part of the key from the current data
-        let prefix = &mut ok!(read_label(&mut remaining_data, key.remaining_bits()));
+        let prefix = &mut ok!(read_label(&mut remaining_data, key.size_bits()));
 
         // Match the prefix with the key
         let lcp = key.longest_common_data_prefix(prefix);
-        match lcp.remaining_bits().cmp(&key.remaining_bits()) {
+        match lcp.size_bits().cmp(&key.size_bits()) {
             // If all bits match, an existing value was found
             std::cmp::Ordering::Equal => break remaining_data.range(),
             // LCP is less than prefix, an edge to slice was found
-            std::cmp::Ordering::Less if lcp.remaining_bits() < prefix.remaining_bits() => {
+            std::cmp::Ordering::Less if lcp.size_bits() < prefix.size_bits() => {
                 return Ok(None);
             }
             // The key contains the entire prefix, but there are still some bits left
@@ -116,8 +116,8 @@ fn dict_find_value_to_remove<'a>(
                 }
 
                 // Remove the LCP from the key
-                prev_key_bit_len = key.remaining_bits();
-                key.try_advance(lcp.remaining_bits(), 0);
+                prev_key_bit_len = key.size_bits();
+                key.skip_first(lcp.size_bits(), 0).ok();
 
                 // Load the next branch
                 let next_branch = Branch::from(ok!(key.load_bit()));
@@ -177,10 +177,10 @@ pub fn dict_remove_bound_owned(
             ok!(key.store_slice_data(prefix));
         }
 
-        match key_bit_len.checked_sub(prefix.remaining_bits()) {
+        match key_bit_len.checked_sub(prefix.size_bits()) {
             Some(0) => break remaining_data.range(),
             Some(remaining) => {
-                if remaining_data.remaining_refs() < 2 {
+                if remaining_data.size_refs() < 2 {
                     return Err(Error::CellUnderflow);
                 }
                 prev_key_bit_len = key_bit_len;

@@ -12,7 +12,7 @@ pub fn dict_find_owned(
     signed: bool,
     context: &mut dyn CellContext,
 ) -> Result<Option<DictOwnedEntry>, Error> {
-    if key.remaining_bits() != key_bit_len {
+    if key.size_bits() != key_bit_len {
         return Err(Error::CellUnderflow);
     }
 
@@ -38,18 +38,18 @@ pub fn dict_find_owned(
         let mut remaining_data = ok!(data.as_slice());
 
         // Read the next part of the key from the current data
-        let prefix = &mut ok!(read_label(&mut remaining_data, key.remaining_bits()));
+        let prefix = &mut ok!(read_label(&mut remaining_data, key.size_bits()));
 
         // Match the prefix with the key
         let lcp = key.longest_common_data_prefix(prefix);
-        let lcp_len = lcp.remaining_bits();
-        match lcp_len.cmp(&key.remaining_bits()) {
+        let lcp_len = lcp.size_bits();
+        match lcp_len.cmp(&key.size_bits()) {
             // If all bits match, an existing value was found
             std::cmp::Ordering::Equal => break Leaf::Value(remaining_data.range()),
             // LCP is less than prefix, an edge to slice was found
             std::cmp::Ordering::Less => {
                 // LCP is less than prefix, an edge to slice was found
-                if lcp_len < prefix.remaining_bits() {
+                if lcp_len < prefix.size_bits() {
                     let mut next_branch = Branch::from(ok!(key.get_bit(lcp_len)));
                     if signed && stack.is_empty() && lcp_len == 0 {
                         next_branch = next_branch.reversed();
@@ -65,7 +65,7 @@ pub fn dict_find_owned(
                 }
 
                 // Remove the LCP from the key
-                key.try_advance(lcp.remaining_bits(), 0);
+                key.skip_first(lcp.size_bits(), 0).ok();
 
                 // Load the next branch
                 let next_branch = Branch::from(ok!(key.load_bit()));
@@ -79,7 +79,7 @@ pub fn dict_find_owned(
                 stack.push(Segment {
                     data,
                     next_branch,
-                    key_bit_len: key.remaining_bits(),
+                    key_bit_len: key.size_bits(),
                 });
                 prev = Some((data, next_branch));
                 data = child;
@@ -117,7 +117,7 @@ pub fn dict_find_owned(
         if let Leaf::Divergence(next_branch) = value_range {
             if next_branch == rev_direction {
                 // Skip rewinding if the key diverged towards the opposite direction.
-                let remaining_bits = key.remaining_bits();
+                let remaining_bits = key.size_bits();
                 let prefix_len = key_bit_len - remaining_bits;
                 original_key_range = original_key_range.get_prefix(prefix_len, 0);
                 let _compatibility_gas = ok!(context.load_dyn_cell(data, LoadMode::UseGas));
@@ -178,10 +178,10 @@ pub fn dict_find_owned(
             ok!(result_key.store_slice_data(prefix));
         }
 
-        match remaining_bits.checked_sub(prefix.remaining_bits()) {
+        match remaining_bits.checked_sub(prefix.size_bits()) {
             Some(0) => break remaining_data.range(),
             Some(remaining) => {
-                if remaining_data.remaining_refs() < 2 {
+                if remaining_data.size_refs() < 2 {
                     return Err(Error::CellUnderflow);
                 }
                 remaining_bits = remaining - 1;
@@ -237,10 +237,10 @@ pub fn dict_find_bound<'a: 'b, 'b>(
             ok!(key.store_slice_data(prefix));
         }
 
-        match key_bit_len.checked_sub(prefix.remaining_bits()) {
+        match key_bit_len.checked_sub(prefix.size_bits()) {
             Some(0) => break,
             Some(remaining) => {
-                if data.remaining_refs() < 2 {
+                if data.size_refs() < 2 {
                     return Err(Error::CellUnderflow);
                 }
                 key_bit_len = remaining - 1;
@@ -291,10 +291,10 @@ pub fn dict_find_bound_owned(
             ok!(key.store_slice_data(prefix));
         }
 
-        match key_bit_len.checked_sub(prefix.remaining_bits()) {
+        match key_bit_len.checked_sub(prefix.size_bits()) {
             Some(0) => break,
             Some(remaining) => {
-                if data.remaining_refs() < 2 {
+                if data.size_refs() < 2 {
                     return Err(Error::CellUnderflow);
                 }
                 key_bit_len = remaining - 1;

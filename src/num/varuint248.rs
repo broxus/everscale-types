@@ -1,7 +1,7 @@
 use std::mem::MaybeUninit;
 use std::str::FromStr;
 
-use crate::cell::{CellBuilder, CellContext, CellSlice, CellSliceSize, ExactSize, Load, Store};
+use crate::cell::{CellBuilder, CellContext, CellSlice, ExactSize, Load, Size, Store};
 use crate::error::Error;
 use crate::util::unlikely;
 
@@ -205,8 +205,8 @@ impl_from! { u8, u16, u32, u64, u128, usize }
 
 impl ExactSize for VarUint248 {
     #[inline]
-    fn exact_size(&self) -> CellSliceSize {
-        CellSliceSize {
+    fn exact_size(&self) -> Size {
+        Size {
             bits: self.bit_len().unwrap_or_default(),
             refs: 0,
         }

@@ -104,6 +104,15 @@ impl<T, const N: usize> ArrayVec<T, N> {
     /// Ensure that provided length is small enough.
     const _ASSERT_LEN: () = assert!(N <= u8::MAX as usize);
 
+    /// Returns an empty vector.
+    pub const fn new() -> Self {
+        Self {
+            // SAFETY: An uninitialized `[MaybeUninit<_>; LEN]` is valid.
+            inner: unsafe { MaybeUninit::<[MaybeUninit<T>; N]>::uninit().assume_init() },
+            len: 0,
+        }
+    }
+
     /// Returns the number of elements in the vector, also referred to as its ‘length’.
     #[inline]
     pub const fn len(&self) -> usize {
@@ -157,11 +166,7 @@ impl<T, const N: usize> ArrayVec<T, N> {
 impl<T, const N: usize> Default for ArrayVec<T, N> {
     #[inline]
     fn default() -> Self {
-        Self {
-            // SAFETY: An uninitialized `[MaybeUninit<_>; LEN]` is valid.
-            inner: unsafe { MaybeUninit::<[MaybeUninit<T>; N]>::uninit().assume_init() },
-            len: 0,
-        }
+        Self::new()
     }
 }
 
