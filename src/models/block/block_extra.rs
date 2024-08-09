@@ -17,6 +17,7 @@ use super::ShardBlockRefs;
 
 /// Block content.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct BlockExtra {
     /// Inbound message description.
     pub in_msg_description: Lazy<InMsgDescr>,
@@ -182,6 +183,7 @@ pub type AccountBlocks = AugDict<HashBytes, CurrencyCollection, AccountBlock>;
 
 /// A group of account transactions.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct AccountBlock {
     /// Account id.
     pub account: HashBytes,
@@ -237,6 +239,7 @@ pub type OutMsgDescr = AugDict<HashBytes, CurrencyCollection, OutMsg>;
 
 /// Additional content for masterchain blocks.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct McBlockExtra {
     /// A tree of the most recent descriptions for all currently existing shards
     /// for all workchains except the masterchain.
@@ -250,6 +253,7 @@ pub struct McBlockExtra {
     /// An optional message with minting.
     pub mint_msg: Option<Lazy<InMsg>>,
     /// Copyleft messages if present.
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub copyleft_msgs: Dict<Uint15, Cell>,
     /// Blockchain config (if the block is a key block).
     pub config: Option<BlockchainConfig>,
@@ -409,8 +413,20 @@ impl From<ShardIdent> for ShardIdentFull {
     }
 }
 
+#[cfg(feature = "serde")]
+impl serde::Serialize for ShardIdentFull {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        if serializer.is_human_readable() {
+            serializer.collect_str(&format_args!("{}:{:08x}", self.workchain, self.prefix))
+        } else {
+            (self.workchain, self.prefix).serialize(serializer)
+        }
+    }
+}
+
 /// Collected fees/created funds.
 #[derive(Debug, Clone, Default, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct ShardFeeCreated {
     /// Collected fees.
     pub fees: CurrencyCollection,
@@ -437,6 +453,7 @@ impl AugDictExtra for ShardFeeCreated {
 
 /// Block signature pair.
 #[derive(Debug, Clone, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct BlockSignature {
     /// Signer node short id.
     pub node_id_short: HashBytes,
@@ -525,5 +542,41 @@ impl<'a> Load<'a> for Signature {
             Ok(_) => Ok(result),
             Err(e) => Err(e),
         }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for Signature {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use base64::prelude::{Engine as _, BASE64_STANDARD};
+
+        const fn encoded_len(len: usize) -> usize {
+            (len * 4 / 3 + 3) & !3
+        }
+
+        if serializer.is_human_readable() {
+            const BUFFER_SIZE: usize = encoded_len(64);
+
+            let mut buffer = [0; { BUFFER_SIZE }];
+            let n = BASE64_STANDARD
+                .encode_slice(self.0.as_slice(), &mut buffer)
+                .unwrap();
+            debug_assert_eq!(n, BUFFER_SIZE);
+
+            // SAFETY: `BASE64_STANDARD` always returns a valid UTF-8 string.
+            serializer.serialize_str(unsafe { std::str::from_utf8_unchecked(&buffer) })
+        } else {
+            self.0.serialize(serializer)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_signature() {
+        let res = super::Signature([123; 64]);
+        serde_json::to_string(&res).unwrap();
     }
 }

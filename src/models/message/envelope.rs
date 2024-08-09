@@ -8,6 +8,8 @@ use super::IntMsgInfo;
 
 /// Next-hop address for a message.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(tag = "ty"))]
 pub enum IntermediateAddr {
     /// Destination prefix length whithin the same workchain.
     Regular(IntermediateAddrRegular),
@@ -113,6 +115,7 @@ impl<'a> Load<'a> for IntermediateAddr {
 
 /// Destination prefix length whithin the same workchain.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[tlb(validate_with = "Self::is_valid")]
 pub struct IntermediateAddrRegular {
     /// Destination address prefix length in bits.
@@ -153,6 +156,7 @@ impl IntermediateAddrRegular {
 
 /// Address prefix with a basic workchain id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Load, Store)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct IntermediateAddrSimple {
     /// Basic workchain id.
     ///
@@ -162,20 +166,25 @@ pub struct IntermediateAddrSimple {
     pub workchain: i8,
 
     /// High 64 bits of the address.
+    #[cfg_attr(feature = "serde", serde(serialize_with = "serialize_account_prefix"))]
     pub address_prefix: u64,
 }
 
 /// Address prefix with an extended workchain id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct IntermediateAddrExt {
     /// Workchain ID
     pub workchain: i32,
-    /// Address prefix
+
+    /// High 64 bits of the address.
+    #[cfg_attr(feature = "serde", serde(serialize_with = "serialize_account_prefix"))]
     pub address_prefix: u64,
 }
 
 /// Message with routing information.
 #[derive(Clone, Debug, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[tlb(tag = "#4")]
 pub struct MsgEnvelope {
     /// Current address.
@@ -185,6 +194,7 @@ pub struct MsgEnvelope {
     /// Remaining transit fee.
     pub fwd_fee_remaining: Tokens,
     /// The message itself.
+    #[cfg_attr(feature = "serde", serde(serialize_with = "Lazy::serialize_repr_hash"))]
     pub message: Lazy<OwnedMessage>,
 }
 
@@ -223,4 +233,12 @@ impl MsgEnvelope {
             None => false,
         }
     }
+}
+
+#[cfg(feature = "serde")]
+fn serialize_account_prefix<S>(prefix: &u64, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&format!("{:08x}", prefix))
 }

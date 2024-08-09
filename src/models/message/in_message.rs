@@ -9,6 +9,7 @@ use crate::num::Tokens;
 
 /// Inbound message import fees.
 #[derive(Default, PartialEq, Eq, Clone, Debug, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ImportFees {
     /// Fees collected from the message.
     pub fees_collected: Tokens,
@@ -39,6 +40,8 @@ impl AugDictExtra for ImportFees {
 
 /// Inbound message.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(tag = "ty"))]
 pub enum InMsg {
     /// Inbound external message.
     External(InMsgExternal),
@@ -242,10 +245,14 @@ impl<'a> Load<'a> for InMsg {
 
 /// Inbound external message.
 #[derive(Clone, Debug, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(tag = "ty"))]
 pub struct InMsgExternal {
     /// External message itself.
+    #[cfg_attr(feature = "serde", serde(serialize_with = "Lazy::serialize_repr_hash"))]
     pub in_msg: Lazy<OwnedMessage>,
     /// Executed transaction for this external message.
+    #[cfg_attr(feature = "serde", serde(serialize_with = "Lazy::serialize_repr_hash"))]
     pub transaction: Lazy<Transaction>,
 }
 
@@ -277,10 +284,12 @@ impl InMsgExternal {
 
 /// Executed inbound internal message.
 #[derive(Clone, Debug, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct InMsgFinal {
     /// Old envelope.
     pub in_msg_envelope: Lazy<MsgEnvelope>,
     /// Transaction
+    #[cfg_attr(feature = "serde", serde(serialize_with = "Lazy::serialize_repr_hash"))]
     pub transaction: Lazy<Transaction>,
     /// Forward fee.
     pub fwd_fee: Tokens,
@@ -333,6 +342,7 @@ impl InMsgFinal {
 
 /// Internal message that was not processed in this block.
 #[derive(Clone, Debug, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct InMsgTransit {
     /// Old envelope.
     pub in_msg_envelope: Lazy<MsgEnvelope>,

@@ -7,6 +7,7 @@ use crate::models::{
 
 /// Outbound message queue entry.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct EnqueuedMsg {
     /// Enqueued message lt.
     pub enqueued_lt: u64,
@@ -45,6 +46,8 @@ impl EnqueuedMsg {
 
 /// Outbound message.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(tag = "ty"))]
 pub enum OutMsg {
     /// External outbound message.
     External(OutMsgExternal),
@@ -215,10 +218,14 @@ impl<'a> Load<'a> for OutMsg {
 
 /// External outbound message.
 #[derive(Clone, Debug, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct OutMsgExternal {
     /// External message itself.
+    #[cfg_attr(feature = "serde", serde(serialize_with = "Lazy::serialize_repr_hash"))]
     pub out_msg: Lazy<OwnedMessage>,
+
     /// The source transaction of this external message.
+    #[cfg_attr(feature = "serde", serde(serialize_with = "Lazy::serialize_repr_hash"))]
     pub transaction: Lazy<Transaction>,
 }
 
@@ -250,10 +257,12 @@ impl OutMsgExternal {
 
 /// Immediately processed internal outbound message.
 #[derive(Clone, Debug, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct OutMsgImmediate {
     /// Outbound message envelope.
     pub out_msg_envelope: Lazy<MsgEnvelope>,
     /// The source transaction of this message.
+    #[cfg_attr(feature = "serde", serde(serialize_with = "Lazy::serialize_repr_hash"))]
     pub transaction: Lazy<Transaction>,
     /// The destination reimport message.
     pub reimport: Lazy<InMsg>,
@@ -302,10 +311,12 @@ impl OutMsgImmediate {
 /// Ordinary (internal) outbound message, generated in this block and
 /// included into the outbound queue.
 #[derive(Clone, Debug, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct OutMsgNew {
     /// Outbound message envelope.
     pub out_msg_envelope: Lazy<MsgEnvelope>,
     /// The source transaction of this message.
+    #[cfg_attr(feature = "serde", serde(serialize_with = "Lazy::serialize_repr_hash"))]
     pub transaction: Lazy<Transaction>,
 }
 
@@ -347,6 +358,7 @@ impl OutMsgNew {
 /// A message that was dequeued from the outbound queue
 /// and immediately queued in the same block.
 #[derive(Clone, Debug, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct OutMsgDequeueImmediate {
     /// Outbound message envelope.
     pub out_msg_envelope: Lazy<MsgEnvelope>,
@@ -391,6 +403,7 @@ impl OutMsgDequeueImmediate {
 
 /// A message that was dequeued from the outbound queue.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct OutMsgDequeueShort {
     /// Message envelope hash.
     pub msg_env_hash: HashBytes,

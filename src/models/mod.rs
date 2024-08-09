@@ -3,7 +3,7 @@
 use std::marker::PhantomData;
 
 use crate::cell::{
-    Cell, CellBuilder, CellContext, CellSlice, CellSliceSize, EquivalentRepr, Load, Store,
+    Cell, CellBuilder, CellContext, CellSlice, CellSliceSize, DynCell, EquivalentRepr, Load, Store,
 };
 use crate::error::Error;
 use crate::util::*;
@@ -118,6 +118,22 @@ impl<T> Lazy<T> {
     {
         // SAFETY: Lazy is #[repr(transparent)]
         unsafe { &*(self as *const Self as *const Lazy<Q>) }
+    }
+
+    /// Serializes only the root hash of the cell.
+    #[cfg(feature = "serde")]
+    pub fn serialize_repr_hash<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serde::Serialize::serialize(self.cell.repr_hash(), serializer)
+    }
+}
+
+impl<T> AsRef<DynCell> for Lazy<T> {
+    #[inline]
+    fn as_ref(&self) -> &DynCell {
+        self.cell.as_ref()
     }
 }
 

@@ -29,6 +29,7 @@ mod tests;
 
 /// Shard block.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Block {
     /// Global network id.
     pub global_id: i32,

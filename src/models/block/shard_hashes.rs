@@ -358,8 +358,26 @@ impl Iterator for WorkchainLatestBlocksIter<'_> {
     }
 }
 
+#[cfg(feature = "serde")]
+impl serde::Serialize for ShardHashes {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::{Error, SerializeMap};
+
+        let mut map = serializer.serialize_map(None)?;
+        for entry in self.iter() {
+            let (shard, descr) = entry.map_err(Error::custom)?;
+            map.serialize_entry(&shard, &descr)?;
+        }
+        map.end()
+    }
+}
+
 /// Description of the most recent state of the shard.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct ShardDescription {
     /// Sequence number of the latest block in the shard.
     pub seqno: u32,
@@ -401,6 +419,7 @@ pub struct ShardDescription {
     /// Copyleft rewards if present.
     pub copyleft_rewards: Dict<HashBytes, Tokens>,
     /// Proofs from other workchains.
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub proof_chain: Option<ProofChain>,
     /// Collator ranges for all possible validator sets.
     #[cfg(feature = "venom")]
@@ -613,6 +632,8 @@ fn parse_block_id(shard: ShardIdent, mut value: CellSlice) -> Result<BlockId, Er
 
 /// Time window for shard split/merge.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(tag = "ty"))]
 pub enum FutureSplitMerge {
     /// Shard split window info.
     Split {
@@ -705,6 +726,7 @@ impl<'a> Load<'a> for ProofChain {
 /// Collator range description.
 #[cfg(feature = "venom")]
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct CollatorRange {
     /// Collator index in validator set.
     pub collator: u16,
@@ -717,6 +739,7 @@ pub struct CollatorRange {
 /// Collator ranges for all possible validator sets.
 #[cfg(feature = "venom")]
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[tlb(tag = "#1")]
 pub struct ShardCollators {
     /// Range for the previous collator.
@@ -736,6 +759,7 @@ pub struct ShardCollators {
 /// Shard block reference.
 #[cfg(feature = "venom")]
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct ShardBlockRef {
     /// Sequence number of the referenced block.
     pub seqno: u32,
@@ -788,6 +812,20 @@ impl ShardBlockRefs {
     /// Returns `true` if the dictionary contains a workchain for the specified id.
     pub fn contains_workchain<Q>(&self, workchain: i32) -> Result<bool, Error> {
         self.0.contains_key(workchain)
+    }
+}
+
+#[cfg(all(feature = "venom", feature = "serde"))]
+impl serde::Serialize for ShardBlockRefs {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::{Error, SerializeMap};
+
+        let mut map = serializer.serialize_map(None)?;
+        for entry in self.iter() {
+            let (shard, descr) = entry.map_err(Error::custom)?;
+            map.serialize_entry(&shard, &descr)?;
+        }
+        map.end()
     }
 }
 
