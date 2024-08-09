@@ -375,42 +375,42 @@ impl<'a> Load<'a> for LibDescr {
 #[derive(Debug, Default, Clone, Store, Load)]
 pub struct ProcessedUptoInfo {
     /// Externals processed up to point and range
-    /// to reproduce last messages set
+    /// to reproduce last messages buffer
     /// (if it was not fully processed in prev block collation).
     pub externals: Option<ExternalsProcessedUpto>,
     /// Internals processed up to points and ranges by shards
-    /// to reproduce last messages set
+    /// to reproduce last messages buffer
     /// (if it was not fully processed in prev block collation).
     pub internals: Dict<ShardIdentFull, InternalsProcessedUpto>,
-    /// Offset of processed messages from last set.
-    /// Will be `!=0` if th set was not fully processed in prev block collation.
+    /// Offset of processed messages from buffer.
+    /// Will be `!=0` if the buffer was not fully processed in prev block collation.
     pub processed_offset: u32,
 }
 
 /// Describes the processed up to point and range of externals
-/// that we should read to reproduce the same messages set
+/// that we should read to reproduce the same messages buffer
 /// on which the previous block collation stopped:
-/// from message in FROM achor to message in TO anchor.
+/// from message in FROM achor up to message in TO anchor: (FROM..TO].
 ///
-/// If last read messages set was fully processed then
+/// If last buffer was fully processed then
 /// will be `processed_to == read_to`.
-/// So we do not need to reproduce the last messages set
+/// So we do not need to reproduce the last buffer
 /// and we can continue to read externals from `read_to`.
 #[cfg(feature = "tycho")]
 #[derive(Debug, Clone, Store, Load)]
 pub struct ExternalsProcessedUpto {
-    /// Externals processed up to (anchor, len).
-    /// Means that all externals upto this point
+    /// Externals processed to (anchor, len).
+    /// All externals to this point
     /// already processed during previous blocks collations.
     ///
-    /// Needs to read externals from this point to reproduce messages set for collation.
+    /// Needs to read next externals after this point to reproduce messages buffer for collation.
     pub processed_to: (u32, u64),
-    /// Needs to read externals to this point to reproduce messages set for collation.
+    /// Needs to read externals up to this point to reproduce messages buffer for collation.
     pub read_to: (u32, u64),
 }
 
 /// Describes the processed up to point and range of internals
-/// that we should read from shard to reproduce the same messages set
+/// that we should read from shard to reproduce the same messages buffer
 /// on which the previous block collation stopped:
 /// from message LT_HASH to message LT_HASH.
 ///
@@ -420,18 +420,17 @@ pub struct ExternalsProcessedUpto {
 /// processed_to_msg == read_to_msg
 /// ```
 ///
-/// So we do not need to reproduce the last messages set
-/// and we can continue to read internals from
-/// `read_to_msg_lt` and `read_to_msg_hash`.
+/// So we do not need to reproduce the last messages buffer
+/// and we can continue to read internals after `read_to_msg`.
 #[cfg(feature = "tycho")]
 #[derive(Debug, Clone, Store, Load)]
 pub struct InternalsProcessedUpto {
     /// Internals processed up to message (LT, Hash).
-    /// All internals upto this point
-    /// already processed during previous blocks collations.
+    /// All internals upto this point already processed
+    /// during previous blocks collations.
     ///
-    /// Needs to read internals from this point to reproduce messages set for collation.
+    /// Needs to read next internals after this point to reproduce messages buffer for collation.
     pub processed_to_msg: (u64, HashBytes),
-    /// Needs to read internals to this point to reproduce messages set for collation (LT, Hash).
+    /// Needs to read internals up to this point to reproduce messages buffer for collation.
     pub read_to_msg: (u64, HashBytes),
 }
