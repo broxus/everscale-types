@@ -405,7 +405,14 @@ pub struct ShardDescription {
     /// Catchain seqno in the next block.
     pub next_catchain_seqno: u32,
     /// Duplicates the shard ident for the latest block in this shard.
+    #[cfg(not(feature = "tycho"))]
     pub next_validator_shard: u64,
+    /// Top processed to anchor with externals from mempool in the shard.
+    #[cfg(feature = "tycho")]
+    pub ext_processed_to_anchor_id: u32,
+    /// Indicates if any shard block was collated since the previous master.
+    #[cfg(feature = "tycho")]
+    pub top_sc_block_updated: bool,
     /// Minimal referenced seqno of the masterchain block.
     pub min_ref_mc_seqno: u32,
     /// Unix timestamp when the latest block in this shard was created.
@@ -465,6 +472,8 @@ impl Store for ShardDescription {
             | ((self.want_split as u8) << 5)
             | ((self.want_merge as u8) << 4)
             | ((self.nx_cc_updated as u8) << 3);
+        #[cfg(feature = "tycho")]
+        let flags = flags | ((self.top_sc_block_updated as u8) << 2);
 
         ok!(builder.store_small_uint(tag, Self::TAG_LEN));
         ok!(builder.store_u32(self.seqno));
@@ -475,7 +484,10 @@ impl Store for ShardDescription {
         ok!(builder.store_u256(&self.file_hash));
         ok!(builder.store_u8(flags));
         ok!(builder.store_u32(self.next_catchain_seqno));
+        #[cfg(not(feature = "tycho"))]
         ok!(builder.store_u64(self.next_validator_shard));
+        #[cfg(feature = "tycho")]
+        ok!(builder.store_u32(self.ext_processed_to_anchor_id));
         ok!(builder.store_u32(self.min_ref_mc_seqno));
         ok!(builder.store_u32(self.gen_utime));
         ok!(self.split_merge_at.store_into(builder, context));
@@ -540,12 +552,15 @@ impl<'a> Load<'a> for ShardDescription {
         let file_hash = ok!(slice.load_u256());
 
         let flags = ok!(slice.load_u8());
-        if flags & 0b111 != 0 {
+        if flags & 0b11 != 0 {
             return Err(Error::InvalidData);
         }
 
         let next_catchain_seqno = ok!(slice.load_u32());
+        #[cfg(not(feature = "tycho"))]
         let next_validator_shard = ok!(slice.load_u64());
+        #[cfg(feature = "tycho")]
+        let ext_processed_to_anchor_id = ok!(slice.load_u32());
         let min_ref_mc_seqno = ok!(slice.load_u32());
         let gen_utime = ok!(slice.load_u32());
         let split_merge_at = ok!(Option::<FutureSplitMerge>::load_from(slice));
@@ -596,8 +611,13 @@ impl<'a> Load<'a> for ShardDescription {
             want_split: flags & 0b00100000 != 0,
             want_merge: flags & 0b00010000 != 0,
             nx_cc_updated: flags & 0b00001000 != 0,
+            #[cfg(feature = "tycho")]
+            top_sc_block_updated: flags & 0b00000100 != 0,
             next_catchain_seqno,
+            #[cfg(not(feature = "tycho"))]
             next_validator_shard,
+            #[cfg(feature = "tycho")]
+            ext_processed_to_anchor_id,
             min_ref_mc_seqno,
             gen_utime,
             split_merge_at,
@@ -1223,7 +1243,12 @@ mod test {
             want_merge: false,
             nx_cc_updated: false,
             next_catchain_seqno: 0,
+            #[cfg(not(feature = "tycho"))]
             next_validator_shard: 0,
+            #[cfg(feature = "tycho")]
+            ext_processed_to_anchor_id: 4,
+            #[cfg(feature = "tycho")]
+            top_sc_block_updated: true,
             min_ref_mc_seqno: 0,
             gen_utime: 0,
             split_merge_at: None,
@@ -1244,6 +1269,10 @@ mod test {
         let serialized = BocRepr::encode(&hashes).unwrap();
         let deserialized = BocRepr::decode(serialized).unwrap();
         assert_eq!(hashes, deserialized);
+
+        for item in deserialized.iter() {
+            let (_, _) = item.unwrap();
+        }
 
         // one missing
         let input = HashMap::from([
