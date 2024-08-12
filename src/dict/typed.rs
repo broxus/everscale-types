@@ -23,8 +23,8 @@ pub struct Dict<K, V> {
 
 impl<K, V> ExactSize for Dict<K, V> {
     #[inline]
-    fn exact_size(&self) -> CellSliceSize {
-        CellSliceSize {
+    fn exact_size(&self) -> Size {
+        Size {
             bits: 1,
             refs: self.root.is_some() as u8,
         }

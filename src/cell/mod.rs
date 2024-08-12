@@ -9,7 +9,7 @@ use crate::util::Bitstring;
 pub use self::builder::{CellBuilder, CellRefsBuilder, Store};
 pub use self::cell_context::{CellContext, CellParts, LoadMode};
 pub use self::cell_impl::{StaticCell, VirtualCellWrapper};
-pub use self::slice::{CellSlice, CellSliceParts, CellSliceRange, CellSliceSize, ExactSize, Load};
+pub use self::slice::{CellSlice, CellSliceParts, CellSliceRange, ExactSize, Load};
 pub use self::usage_tree::{UsageTree, UsageTreeMode, UsageTreeWithSubtrees};
 
 #[cfg(not(feature = "sync"))]
@@ -1244,6 +1244,109 @@ impl Iterator for LevelMaskIter {
     }
 }
 
+/// A size of a cell.
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+pub struct Size {
+    /// Total number of bits in cell slice.
+    pub bits: u16,
+    /// Total number refs in cell slice.
+    pub refs: u8,
+}
+
+impl Size {
+    /// The additive identity for this type, i.e. `0`.
+    pub const ZERO: Self = Self { bits: 0, refs: 0 };
+
+    /// The multiplicative bits identity for this type, i.e. `1 bit`.
+    pub const BIT: Self = Self { bits: 1, refs: 0 };
+
+    /// The multiplicative refs identity for this type, i.e. `1 ref`.
+    pub const REF: Self = Self { bits: 0, refs: 1 };
+
+    /// The largest valid value that can be represented by this type.
+    pub const MAX: Self = Self {
+        bits: MAX_BIT_LEN,
+        refs: MAX_REF_COUNT as _,
+    };
+
+    /// Returns true if the number of bits and refs is in the valid range for the cell.
+    #[inline]
+    pub const fn fits_into_cell(&self) -> bool {
+        self.bits <= MAX_BIT_LEN && self.refs <= MAX_REF_COUNT as _
+    }
+
+    /// Saturating size addition. Computes self + rhs for bits and refs,
+    /// saturating at the numeric bounds instead of overflowing.
+    #[inline]
+    pub const fn saturating_add(self, rhs: Self) -> Self {
+        Self {
+            bits: self.bits.saturating_add(rhs.bits),
+            refs: self.refs.saturating_add(rhs.refs),
+        }
+    }
+
+    /// Saturating size substraction. Computes self - rhs for bits and refs,
+    /// saturating at the numeric bounds instead of overflowing.
+    #[inline]
+    pub const fn saturating_sub(self, rhs: Self) -> Self {
+        Self {
+            bits: self.bits.saturating_sub(rhs.bits),
+            refs: self.refs.saturating_sub(rhs.refs),
+        }
+    }
+
+    /// Returns true if there are no bits and refs.
+    pub const fn is_zero(self) -> bool {
+        self.bits == 0 && self.refs == 0
+    }
+}
+
+impl From<Size> for CellTreeStats {
+    #[inline]
+    fn from(value: Size) -> Self {
+        Self {
+            bit_count: value.bits as _,
+            cell_count: value.refs as _,
+        }
+    }
+}
+
+impl std::ops::Add for Size {
+    type Output = Self;
+
+    #[inline]
+    fn add(mut self, rhs: Self) -> Self::Output {
+        self += rhs;
+        self
+    }
+}
+
+impl std::ops::AddAssign for Size {
+    #[inline]
+    fn add_assign(&mut self, rhs: Self) {
+        self.bits += rhs.bits;
+        self.refs += rhs.refs;
+    }
+}
+
+impl std::ops::Sub for Size {
+    type Output = Self;
+
+    #[inline]
+    fn sub(mut self, rhs: Self) -> Self::Output {
+        self -= rhs;
+        self
+    }
+}
+
+impl std::ops::SubAssign for Size {
+    #[inline]
+    fn sub_assign(&mut self, rhs: Self) {
+        self.bits -= rhs.bits;
+        self.refs -= rhs.refs;
+    }
+}
+
 /// Cell tree storage stats.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CellTreeStats {
@@ -1281,11 +1384,11 @@ impl std::ops::AddAssign for CellTreeStats {
     }
 }
 
-impl std::ops::Add<CellSliceSize> for CellTreeStats {
+impl std::ops::Add<Size> for CellTreeStats {
     type Output = Self;
 
     #[inline]
-    fn add(self, rhs: CellSliceSize) -> Self::Output {
+    fn add(self, rhs: Size) -> Self::Output {
         Self {
             bit_count: self.bit_count.saturating_add(rhs.bits as _),
             cell_count: self.cell_count.saturating_add(rhs.refs as _),
@@ -1304,8 +1407,8 @@ impl std::iter::Sum for CellTreeStats {
     }
 }
 
-impl std::ops::AddAssign<CellSliceSize> for CellTreeStats {
-    fn add_assign(&mut self, rhs: CellSliceSize) {
+impl std::ops::AddAssign<Size> for CellTreeStats {
+    fn add_assign(&mut self, rhs: Size) {
         self.bit_count = self.bit_count.saturating_add(rhs.bits as _);
         self.cell_count = self.cell_count.saturating_add(rhs.refs as _);
     }
@@ -1329,9 +1432,9 @@ impl std::ops::SubAssign for CellTreeStats {
     }
 }
 
-impl std::ops::SubAssign<CellSliceSize> for CellTreeStats {
+impl std::ops::SubAssign<Size> for CellTreeStats {
     #[inline]
-    fn sub_assign(&mut self, rhs: CellSliceSize) {
+    fn sub_assign(&mut self, rhs: Size) {
         self.bit_count = self.bit_count.saturating_sub(rhs.bits as _);
         self.cell_count = self.cell_count.saturating_sub(rhs.refs as _);
     }
@@ -1419,7 +1522,7 @@ impl<'a> StorageStat<'a> {
     ///
     /// Returns `false` if the limit was reached.
     pub fn add_slice(&mut self, slice: &CellSlice<'a>) -> bool {
-        self.stats.bit_count += slice.remaining_bits() as u64;
+        self.stats.bit_count += slice.size_bits() as u64;
 
         self.stack.clear();
         self.stack.push(slice.references());

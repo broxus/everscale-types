@@ -422,8 +422,8 @@ macro_rules! impl_var_uints {
 
         impl ExactSize for $ident {
             #[inline]
-            fn exact_size(&self) -> CellSliceSize {
-                CellSliceSize {
+            fn exact_size(&self) -> Size {
+                Size {
                     bits: self.bit_len().unwrap_or_default(),
                     refs: 0,
                 }
@@ -680,8 +680,8 @@ macro_rules! impl_small_uints {
 
         impl ExactSize for $ident {
             #[inline]
-            fn exact_size(&self) -> CellSliceSize {
-                CellSliceSize { bits: $bits, refs: 0 }
+            fn exact_size(&self) -> Size {
+                Size { bits: $bits, refs: 0 }
             }
         }
 
@@ -784,8 +784,8 @@ impl SplitDepth {
 
 impl ExactSize for SplitDepth {
     #[inline]
-    fn exact_size(&self) -> CellSliceSize {
-        CellSliceSize {
+    fn exact_size(&self) -> Size {
+        Size {
             bits: Self::BITS,
             refs: 0,
         }

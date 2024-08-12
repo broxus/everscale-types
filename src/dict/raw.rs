@@ -40,8 +40,8 @@ pub struct RawDict<const N: u16>(pub(crate) Option<Cell>);
 
 impl<const N: u16> ExactSize for RawDict<N> {
     #[inline]
-    fn exact_size(&self) -> CellSliceSize {
-        CellSliceSize {
+    fn exact_size(&self) -> Size {
+        Size {
             bits: 1,
             refs: self.0.is_some() as u8,
         }
@@ -794,7 +794,7 @@ impl<'a> RawIter<'a> {
             Ok((key, slice)) => {
                 let parent = match self.segments.last() {
                     Some(segment) => {
-                        let refs_offset = segment.data.refs_offset();
+                        let refs_offset = segment.data.offset_refs();
                         debug_assert!(
                             segment.prefix.is_some() && (refs_offset == 1 || refs_offset == 2)
                         );
@@ -864,7 +864,7 @@ impl<'a> Iterator for RawIter<'a> {
                         break segment;
                     };
 
-                    let refs_offset = segment.data.refs_offset();
+                    let refs_offset = segment.data.offset_refs();
                     if refs_offset < 2 {
                         // Found the latest unprocessed slice
                         let remaining_bit_len = segment.remaining_bit_len;
@@ -873,7 +873,7 @@ impl<'a> Iterator for RawIter<'a> {
                             ^ (signed && is_root && prefix.is_data_empty());
 
                         let data = ok!(segment.data.cell().get_reference_as_slice(next_bit as u8));
-                        segment.data.try_advance(0, 1);
+                        segment.data.skip_first(0, 1).ok();
 
                         ok!(builder.rewind(to_rewind));
                         ok!(builder.store_bit(next_bit));
@@ -886,7 +886,7 @@ impl<'a> Iterator for RawIter<'a> {
                         break (unsafe { segments.last_mut().unwrap_unchecked() });
                     } else {
                         // Rewind prefix
-                        to_rewind += prefix.remaining_bits();
+                        to_rewind += prefix.size_bits();
                         // Pop processed segments
                         segments.pop();
                         // Rewind reference bit (if any)
@@ -898,10 +898,7 @@ impl<'a> Iterator for RawIter<'a> {
                 let prefix = ok!(read_label(&mut segment.data, segment.remaining_bit_len));
 
                 // Check remaining bits
-                return match segment
-                    .remaining_bit_len
-                    .checked_sub(prefix.remaining_bits())
-                {
+                return match segment.remaining_bit_len.checked_sub(prefix.size_bits()) {
                     // Return value if there are no remaining bits to read
                     Some(0) => {
                         // Try to store the last prefix into the result key
@@ -918,7 +915,7 @@ impl<'a> Iterator for RawIter<'a> {
                     }
                     // Append prefix to builder and proceed to the next segment
                     Some(remaining) => {
-                        if segment.data.remaining_refs() < 2 {
+                        if segment.data.size_refs() < 2 {
                             return Err(Error::CellUnderflow);
                         }
 
@@ -1114,7 +1111,7 @@ impl<'a> Iterator for UnionRawIter<'a> {
                         reversed ^= left_is_neg != right_is_neg;
                     }
 
-                    let cmp = match left_key.cmp_by_content_only(&right_key) {
+                    let cmp = match left_key.lex_cmp(&right_key) {
                         Ok(cmp) => cmp,
                         Err(e) => return Some(Err(self.finish(e))),
                     };
@@ -1285,7 +1282,7 @@ impl<'a> Iterator for RawOwnedValues<'a> {
             Ok(slice) => {
                 let parent = match self.inner.segments.last() {
                     Some(segment) => {
-                        let refs_offset = segment.data.refs_offset();
+                        let refs_offset = segment.data.offset_refs();
                         debug_assert!(refs_offset > 0);
                         match segment.data.cell().reference_cloned(refs_offset - 1) {
                             Some(cell) => cell,
@@ -1416,11 +1413,11 @@ impl<'a> Iterator for RawValues<'a> {
                         return Ok(None);
                     };
 
-                    if segment.data.bits_offset() == 0 {
+                    if segment.data.offset_bits() == 0 {
                         break segment;
                     }
 
-                    let refs_offset = segment.data.refs_offset();
+                    let refs_offset = segment.data.offset_refs();
                     if refs_offset < 2 {
                         // Found the latest unprocessed slice
                         let remaining_bit_len = segment.remaining_bit_len;
@@ -1428,7 +1425,7 @@ impl<'a> Iterator for RawValues<'a> {
                             ^ reverse
                             ^ (signed && is_root && segment.data.is_data_empty());
                         let data = ok!(segment.data.cell().get_reference_as_slice(next_bit as u8));
-                        segment.data.try_advance(0, 1);
+                        segment.data.skip_first(0, 1).ok();
 
                         segments.push(ValuesSegment {
                             data,
@@ -1445,10 +1442,7 @@ impl<'a> Iterator for RawValues<'a> {
                 let prefix = ok!(read_label(&mut segment.data, segment.remaining_bit_len));
 
                 // Check remaining bits
-                return match segment
-                    .remaining_bit_len
-                    .checked_sub(prefix.remaining_bits())
-                {
+                return match segment.remaining_bit_len.checked_sub(prefix.size_bits()) {
                     // Return value if there are no remaining bits to read
                     Some(0) => {
                         let data = segment.data;
@@ -1458,7 +1452,7 @@ impl<'a> Iterator for RawValues<'a> {
                     }
                     // Append prefix to builder and proceed to the next segment
                     Some(remaining) => {
-                        if segment.data.remaining_refs() < 2 {
+                        if segment.data.size_refs() < 2 {
                             return Err(Error::CellUnderflow);
                         }
                         segment.remaining_bit_len = remaining - 1;
@@ -1534,7 +1528,7 @@ mod tests {
                 total += 1;
                 let (key, value) = item?;
                 let key = key.build()?;
-                assert_eq!(value.remaining_bits(), 1);
+                assert_eq!(value.size_bits(), 1);
                 assert_eq!(key.bit_len(), 32);
                 let key = key.as_slice()?.load_u32()?;
                 assert_eq!(key, i as u32);
@@ -1566,7 +1560,7 @@ mod tests {
             .get(build_cell(|b| b.store_u32(123)).as_slice()?)
             .unwrap()
             .unwrap();
-        assert_eq!(value.remaining_bits(), 1);
+        assert_eq!(value.size_bits(), 1);
         assert_eq!(value.load_bit(), Ok(true));
 
         Ok(())
@@ -1581,13 +1575,13 @@ mod tests {
         //
         dict.add(key.as_slice()?, false)?;
         let mut value = dict.get(key.as_slice()?)?.unwrap();
-        assert_eq!(value.remaining_bits(), 1);
+        assert_eq!(value.size_bits(), 1);
         assert_eq!(value.load_bit(), Ok(false));
 
         //
         dict.add(key.as_slice()?, true)?;
         let mut value = dict.get(key.as_slice()?)?.unwrap();
-        assert_eq!(value.remaining_bits(), 1);
+        assert_eq!(value.size_bits(), 1);
         assert_eq!(value.load_bit(), Ok(false));
 
         Ok(())
@@ -1743,10 +1737,7 @@ mod tests {
 
             let (rev_key, rev_value) = rev_iter_items.next().unwrap().unwrap();
             assert_eq!(key, rev_key);
-            assert_eq!(
-                value.cmp_by_content(&rev_value),
-                Ok(std::cmp::Ordering::Equal)
-            );
+            assert_eq!(value.lex_cmp(&rev_value), Ok(std::cmp::Ordering::Equal));
 
             let key = {
                 let key_cell = key.build()?;
@@ -1762,7 +1753,7 @@ mod tests {
 
             {
                 let mut slice = range.apply(&cell).unwrap();
-                assert_eq!(slice.remaining_bits(), 32);
+                assert_eq!(slice.size_bits(), 32);
                 u32::load_from(&mut slice).unwrap();
             }
 
@@ -1782,7 +1773,7 @@ mod tests {
             let (cell, range) = value_owned.unwrap();
             let value_owned = range.apply(&cell).unwrap();
             assert_eq!(
-                value_ref.cmp_by_content(&value_owned),
+                value_ref.lex_cmp(&value_owned),
                 Ok(std::cmp::Ordering::Equal)
             );
         }

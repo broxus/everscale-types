@@ -3,8 +3,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::cell::{
-    Cell, CellTreeStats, CellType, DynCell, HashBytes, LevelMask, RefsIter, StorageStat,
-    MAX_BIT_LEN, MAX_REF_COUNT,
+    Cell, CellTreeStats, CellType, DynCell, HashBytes, LevelMask, RefsIter, Size, StorageStat,
 };
 use crate::error::Error;
 use crate::util::{unlikely, Bitstring};
@@ -88,8 +87,8 @@ impl<'a, T: Load<'a>> Load<'a> for Option<T> {
 
 impl<T: ExactSize> ExactSize for Option<T> {
     #[inline]
-    fn exact_size(&self) -> CellSliceSize {
-        let mut total = CellSliceSize { bits: 1, refs: 0 };
+    fn exact_size(&self) -> Size {
+        let mut total = Size { bits: 1, refs: 0 };
         if let Some(this) = self {
             total += this.exact_size();
         }
@@ -168,8 +167,8 @@ impl<'a> Load<'a> for &'a DynCell {
 
 impl ExactSize for DynCell {
     #[inline]
-    fn exact_size(&self) -> CellSliceSize {
-        CellSliceSize { bits: 0, refs: 1 }
+    fn exact_size(&self) -> Size {
+        Size { bits: 0, refs: 1 }
     }
 }
 
@@ -181,8 +180,8 @@ impl<'a> Load<'a> for Cell {
 
 impl ExactSize for Cell {
     #[inline]
-    fn exact_size(&self) -> CellSliceSize {
-        CellSliceSize { bits: 0, refs: 1 }
+    fn exact_size(&self) -> Size {
+        Size { bits: 0, refs: 1 }
     }
 }
 
@@ -191,8 +190,8 @@ pub type CellSliceParts = (Cell, CellSliceRange);
 
 impl ExactSize for CellSliceParts {
     #[inline]
-    fn exact_size(&self) -> CellSliceSize {
-        self.1.exact_size_const()
+    fn exact_size(&self) -> Size {
+        self.1.size()
     }
 }
 
@@ -265,7 +264,7 @@ impl CellSliceRange {
     /// The following must be true:
     /// - cell is not pruned
     /// - range is in cell bounds
-    pub unsafe fn apply_unchecked<T>(self, cell: &T) -> CellSlice<'_>
+    pub fn apply_allow_special<T>(self, cell: &T) -> CellSlice<'_>
     where
         T: AsRef<DynCell> + ?Sized,
     {
@@ -276,15 +275,15 @@ impl CellSliceRange {
     }
 
     /// Returns the number of remaining bits and refs in the slice.
-    pub const fn exact_size_const(&self) -> CellSliceSize {
-        CellSliceSize {
-            bits: self.remaining_bits(),
-            refs: self.remaining_refs(),
+    pub const fn size(&self) -> Size {
+        Size {
+            bits: self.size_bits(),
+            refs: self.size_refs(),
         }
     }
 
     /// Returns the number of remaining bits of data in the slice.
-    pub const fn remaining_bits(&self) -> u16 {
+    pub const fn size_bits(&self) -> u16 {
         if self.bits_start > self.bits_end {
             0
         } else {
@@ -293,12 +292,17 @@ impl CellSliceRange {
     }
 
     /// Returns the number of remaining references in the slice.
-    pub const fn remaining_refs(&self) -> u8 {
+    pub const fn size_refs(&self) -> u8 {
         if self.refs_start > self.refs_end {
             0
         } else {
             self.refs_end - self.refs_start
         }
+    }
+
+    /// Returns whether there are no data bits and refs left.
+    pub const fn is_empty(&self) -> bool {
+        self.is_data_empty() && self.is_refs_empty()
     }
 
     /// Returns whether there are no bits of data left.
@@ -311,13 +315,21 @@ impl CellSliceRange {
         self.refs_start >= self.refs_end
     }
 
+    /// Returns the start of data and reference windows.
+    pub const fn offset(&self) -> Size {
+        Size {
+            bits: self.bits_start,
+            refs: self.refs_start,
+        }
+    }
+
     /// Returns the start of the data window.
-    pub const fn bits_offset(&self) -> u16 {
+    pub const fn offset_bits(&self) -> u16 {
         self.bits_start
     }
 
     /// Returns the start of the references window.
-    pub const fn refs_offset(&self) -> u8 {
+    pub const fn offset_refs(&self) -> u8 {
         self.refs_start
     }
 
@@ -326,25 +338,56 @@ impl CellSliceRange {
         self.bits_start + bits <= self.bits_end && self.refs_start + refs <= self.refs_end
     }
 
-    /// Tries to advance the start of data and refs windows,
-    /// returns `false` if `bits` or `refs` are greater than the remainder.
-    pub fn try_advance(&mut self, bits: u16, refs: u8) -> bool {
-        if self.bits_start + bits <= self.bits_end && self.refs_start + refs <= self.refs_end {
-            self.bits_start += bits;
-            self.refs_start += refs;
-            true
-        } else {
-            false
+    /// Tries to advance the start of data and refs windows.
+    pub fn skip_first(&mut self, bits: u16, refs: u8) -> Result<(), Error> {
+        if unlikely(
+            self.bits_start + bits > self.bits_end || self.refs_start + refs > self.refs_end,
+        ) {
+            return Err(Error::CellUnderflow);
         }
+
+        self.bits_start += bits;
+        self.refs_start += refs;
+        Ok(())
     }
 
-    /// Tries to advance the start of data and refs windows.
-    pub fn advance(&mut self, bits: u16, refs: u8) -> Result<(), Error> {
-        if self.try_advance(bits, refs) {
-            Ok(())
-        } else {
-            Err(Error::CellUnderflow)
+    /// Leaves only the first `bits` and `refs` in the slice.
+    pub fn only_first(&mut self, bits: u16, refs: u8) -> Result<(), Error> {
+        if unlikely(
+            self.bits_start + bits > self.bits_end || self.refs_start + refs > self.refs_end,
+        ) {
+            return Err(Error::CellUnderflow);
         }
+
+        self.bits_end = self.bits_start + bits;
+        self.refs_end = self.refs_start + refs;
+        Ok(())
+    }
+
+    /// Removes the last `bits` and `refs` from the slice.
+    pub fn skip_last(&mut self, bits: u16, refs: u8) -> Result<(), Error> {
+        if unlikely(
+            self.bits_start + bits > self.bits_end || self.refs_start + refs > self.refs_end,
+        ) {
+            return Err(Error::CellUnderflow);
+        }
+
+        self.bits_end -= bits;
+        self.refs_end -= refs;
+        Ok(())
+    }
+
+    /// Leaves only the last `bits` and `refs` in the slice.
+    pub fn only_last(&mut self, bits: u16, refs: u8) -> Result<(), Error> {
+        if unlikely(
+            self.bits_start + bits > self.bits_end || self.refs_start + refs > self.refs_end,
+        ) {
+            return Err(Error::CellUnderflow);
+        }
+
+        self.bits_start = self.bits_end - bits;
+        self.refs_start = self.refs_end - refs;
+        Ok(())
     }
 
     /// Returns a slice range starting at the same bits and refs offsets,
@@ -455,6 +498,11 @@ impl<'a> CellSlice<'a> {
         self.cell.level_mask()
     }
 
+    /// Returns whether there are no data bits and refs left.
+    pub const fn is_empty(&self) -> bool {
+        self.range.is_empty()
+    }
+
     /// Returns whether there are no bits of data left.
     ///
     /// # Examples
@@ -504,18 +552,23 @@ impl<'a> CellSlice<'a> {
     }
 
     /// Returns the number of remaining bits and refs in the slice.
-    pub const fn exact_size_const(&self) -> CellSliceSize {
-        self.range.exact_size_const()
+    pub const fn size(&self) -> Size {
+        self.range.size()
     }
 
     /// Returns the number of remaining bits of data in the slice.
-    pub const fn remaining_bits(&self) -> u16 {
-        self.range.remaining_bits()
+    pub const fn size_bits(&self) -> u16 {
+        self.range.size_bits()
     }
 
     /// Returns the number of remaining references in the slice.
-    pub const fn remaining_refs(&self) -> u8 {
-        self.range.remaining_refs()
+    pub const fn size_refs(&self) -> u8 {
+        self.range.size_refs()
+    }
+
+    /// Returns the start of data and reference windows.
+    pub const fn offset(&self) -> Size {
+        self.range.offset()
     }
 
     /// Returns the start of the data window.
@@ -532,12 +585,12 @@ impl<'a> CellSlice<'a> {
     /// };
     /// let mut slice = cell.as_slice()?;
     /// slice.load_u8()?;
-    /// assert_eq!(slice.bits_offset(), 8);
+    /// assert_eq!(slice.offset_bits(), 8);
     /// # Ok(()) }
     /// ```
     #[inline]
-    pub const fn bits_offset(&self) -> u16 {
-        self.range.bits_offset()
+    pub const fn offset_bits(&self) -> u16 {
+        self.range.offset_bits()
     }
 
     /// Returns the start of the references window.
@@ -555,12 +608,12 @@ impl<'a> CellSlice<'a> {
     /// let mut slice = cell.as_slice()?;
     ///
     /// slice.load_reference()?;
-    /// assert_eq!(slice.refs_offset(), 1);
+    /// assert_eq!(slice.offset_refs(), 1);
     /// # Ok(()) }
     /// ```
     #[inline]
-    pub const fn refs_offset(&self) -> u8 {
-        self.range.refs_offset()
+    pub const fn offset_refs(&self) -> u8 {
+        self.range.offset_refs()
     }
 
     /// Returns true if the slice contains at least `bits` and `refs`.
@@ -605,74 +658,89 @@ impl<'a> CellSlice<'a> {
         StorageStat::compute_for_slice(self, limit)
     }
 
-    /// Tries to advance the start of data and refs windows,
-    /// returns `false` if `bits` or `refs` are greater than the remainder.
-    pub fn try_advance(&mut self, bits: u16, refs: u8) -> bool {
-        self.range.try_advance(bits, refs)
-    }
-
     /// Tries to advance the start of data and refs windows.
-    pub fn advance(&mut self, bits: u16, refs: u8) -> Result<(), Error> {
-        self.range.advance(bits, refs)
+    pub fn skip_first(&mut self, bits: u16, refs: u8) -> Result<(), Error> {
+        self.range.skip_first(bits, refs)
     }
 
-    /// Compares two slices by their data window **content** and refs.
+    /// Leaves only the first `bits` and `refs` in the slice.
+    pub fn only_first(&mut self, bits: u16, refs: u8) -> Result<(), Error> {
+        self.range.only_first(bits, refs)
+    }
+
+    /// Removes the last `bits` and `refs` from the slice.
+    pub fn skip_last(&mut self, bits: u16, refs: u8) -> Result<(), Error> {
+        self.range.skip_last(bits, refs)
+    }
+
+    /// Leaves only the last `bits` and `refs` in the slice.
+    pub fn only_last(&mut self, bits: u16, refs: u8) -> Result<(), Error> {
+        self.range.only_last(bits, refs)
+    }
+
+    /// Lexicographically compares slice data.
     ///
     /// NOTE: this method is quite computationally heavy as it compares the content
     /// of two potentially unaligned slices. Use it with caution or check by cell.
-    pub fn cmp_by_content(&self, b: &CellSlice) -> Result<std::cmp::Ordering, Error> {
-        let a = self;
-
-        // Fast check
-        if a.cell == b.cell
-            && a.bits_offset() == b.bits_offset()
-            && a.refs_offset() == b.refs_offset()
-        {
-            return Ok((a.remaining_bits(), a.remaining_refs())
-                .cmp(&(b.remaining_bits(), b.remaining_refs())));
-        }
-
-        // Slow path
-        self.cmp_by_content_only(b)
-    }
-
-    pub(crate) fn cmp_by_content_only(&self, b: &CellSlice) -> Result<std::cmp::Ordering, Error> {
+    pub fn lex_cmp(&self, rhs: &CellSlice) -> Result<std::cmp::Ordering, Error> {
         use std::cmp::Ordering;
 
-        let a = self;
+        let lhs = self;
+        let lhs_bits = lhs.size_bits();
+        let rhs_bits = rhs.size_bits();
 
-        // Slow path
-        match (a.remaining_bits(), a.remaining_refs())
-            .cmp(&(b.remaining_bits(), b.remaining_refs()))
-        {
-            Ordering::Equal => {}
-            ord => return Ok(ord),
-        };
+        // Fast check
 
-        let bits = a.remaining_bits();
+        // NOTE: We can ignore pointer metadata since we are comparing only bits,
+        // and custom implementations of `CellImpl` do not alter data behavior.
+        if std::ptr::addr_eq(lhs.cell, rhs.cell) && lhs.offset_bits() == rhs.offset_bits() {
+            return Ok(lhs_bits.cmp(&rhs_bits));
+        }
+
+        // Full check
+        let bits = std::cmp::min(lhs_bits, rhs_bits);
         let rem = bits % 32;
         for offset in (0..bits - rem).step_by(32) {
-            match ok!(a.get_u32(offset)).cmp(&ok!(b.get_u32(offset))) {
+            match ok!(lhs.get_u32(offset)).cmp(&ok!(rhs.get_u32(offset))) {
                 Ordering::Equal => {}
                 ord => return Ok(ord),
             }
         }
 
         if rem > 0 {
-            match ok!(a.get_uint(bits - rem, rem)).cmp(&ok!(b.get_uint(bits - rem, rem))) {
+            match ok!(lhs.get_uint(bits - rem, rem)).cmp(&ok!(rhs.get_uint(bits - rem, rem))) {
                 Ordering::Equal => {}
                 ord => return Ok(ord),
             }
         }
 
-        for (a, b) in self.references().zip(b.references()) {
-            match a.repr_hash().cmp(b.repr_hash()) {
-                Ordering::Equal => {}
-                ord => return Ok(ord),
+        Ok(lhs_bits.cmp(&rhs_bits))
+    }
+
+    /// Returns `true` if two slices have the same data bits and refs.
+    ///
+    /// NOTE: this method is quite computationally heavy as it compares the content
+    /// of two potentially unaligned slices. Use it with caution or check by cell.
+    pub fn contents_eq(&self, rhs: &CellSlice) -> Result<bool, Error> {
+        let lhs = self;
+
+        // Fast check
+        if lhs.size_bits() != rhs.size_bits() || lhs.size_refs() != rhs.size_refs() {
+            return Ok(false);
+        }
+
+        // Full check
+        if ok!(self.lex_cmp(rhs)).is_ne() {
+            return Ok(false);
+        }
+
+        for (lhs, rhs) in self.references().zip(rhs.references()) {
+            if lhs.repr_hash() != rhs.repr_hash() {
+                return Ok(false);
             }
         }
 
-        Ok(Ordering::Equal)
+        Ok(true)
     }
 
     /// Returns a slice starting at the same bits and refs offsets,
@@ -684,16 +752,32 @@ impl<'a> CellSlice<'a> {
         }
     }
 
-    /// Shrinks the slice down to a prefix of the specified length.
-    pub fn shrink(&mut self, bits: Option<u16>, refs: Option<u8>) -> Result<(), Error> {
-        let bits = bits.unwrap_or_else(|| self.remaining_bits());
-        let refs = refs.unwrap_or_else(|| self.remaining_refs());
-        if self.has_remaining(bits, refs) {
-            *self = self.get_prefix(bits, refs);
-            Ok(())
-        } else {
-            Err(Error::CellUnderflow)
+    /// Returns `true` if this slice data is a prefix of the other slice data.
+    pub fn is_data_prefix_of(&self, other: &Self) -> Result<bool, Error> {
+        let bits = self.size_bits();
+        if bits > other.size_bits() {
+            return Ok(false);
         }
+
+        let mut other = other.clone();
+        let ok = other.only_first(bits, 0).is_ok();
+        debug_assert!(ok);
+
+        Ok(ok!(self.lex_cmp(&other)).is_eq())
+    }
+
+    /// Returns `true` if this slice data is a suffix of the other slice data.
+    pub fn is_data_suffix_of(&self, other: &Self) -> Result<bool, Error> {
+        let bits = self.size_bits();
+        if bits > other.size_bits() {
+            return Ok(false);
+        }
+
+        let mut other = other.clone();
+        let ok = other.only_last(bits, 0).is_ok();
+        debug_assert!(ok);
+
+        Ok(ok!(self.lex_cmp(&other)).is_eq())
     }
 
     /// Returns a subslice with the data prefix removed.
@@ -726,15 +810,15 @@ impl<'a> CellSlice<'a> {
     /// # Ok(()) }
     /// ```
     pub fn strip_data_prefix<'b>(&self, prefix: &CellSlice<'b>) -> Option<CellSlice<'a>> {
-        let prefix_len = prefix.remaining_bits();
+        let prefix_len = prefix.size_bits();
         if prefix_len == 0 {
             Some(*self)
-        } else if self.remaining_bits() < prefix_len {
+        } else if self.size_bits() < prefix_len {
             None
         } else {
             let mut result = *self;
             let lcp = self.longest_common_data_prefix_impl(prefix, prefix_len);
-            if prefix_len <= lcp && result.try_advance(prefix_len, 0) {
+            if prefix_len <= lcp && result.skip_first(prefix_len, 0).is_ok() {
                 Some(result)
             } else {
                 None
@@ -766,7 +850,7 @@ impl<'a> CellSlice<'a> {
     ///
     /// let lcp = slice.longest_common_data_prefix(&prefix.as_slice()?);
     /// assert_eq!(lcp.get_u16(0)?, 0xdead);
-    /// assert_eq!(lcp.remaining_bits(), 16);
+    /// assert_eq!(lcp.size_bits(), 16);
     /// # Ok(()) }
     /// ```
     pub fn longest_common_data_prefix(&self, other: &Self) -> Self {
@@ -1542,7 +1626,7 @@ impl<'a> CellSlice<'a> {
             s: &'b CellSlice<'a>,
             bytes: &'b mut [u8; 128],
         ) -> Result<Bitstring<'b>, std::fmt::Error> {
-            let bit_len = s.remaining_bits();
+            let bit_len = s.size_bits();
             if s.get_raw(0, bytes, bit_len).is_err() {
                 return Err(std::fmt::Error);
             }
@@ -1571,56 +1655,56 @@ impl<'a> CellSlice<'a> {
 
 impl ExactSize for CellSlice<'_> {
     #[inline]
-    fn exact_size(&self) -> CellSliceSize {
-        self.exact_size_const()
+    fn exact_size(&self) -> Size {
+        self.size()
     }
 }
 
 /// A type with a known size in bits and refs.
 pub trait ExactSize {
     /// Exact size of the value when it is stored in a slice.
-    fn exact_size(&self) -> CellSliceSize;
+    fn exact_size(&self) -> Size;
 }
 
 impl<T: ExactSize> ExactSize for &T {
     #[inline]
-    fn exact_size(&self) -> CellSliceSize {
+    fn exact_size(&self) -> Size {
         T::exact_size(self)
     }
 }
 
 impl<T: ExactSize> ExactSize for &mut T {
     #[inline]
-    fn exact_size(&self) -> CellSliceSize {
+    fn exact_size(&self) -> Size {
         T::exact_size(self)
     }
 }
 
 impl<T: ExactSize> ExactSize for Box<T> {
     #[inline]
-    fn exact_size(&self) -> CellSliceSize {
+    fn exact_size(&self) -> Size {
         T::exact_size(self)
     }
 }
 
 impl<T: ExactSize> ExactSize for Arc<T> {
     #[inline]
-    fn exact_size(&self) -> CellSliceSize {
+    fn exact_size(&self) -> Size {
         T::exact_size(self)
     }
 }
 
 impl<T: ExactSize> ExactSize for Rc<T> {
     #[inline]
-    fn exact_size(&self) -> CellSliceSize {
+    fn exact_size(&self) -> Size {
         T::exact_size(self)
     }
 }
 
 impl ExactSize for () {
     #[inline]
-    fn exact_size(&self) -> CellSliceSize {
-        CellSliceSize::ZERO
+    fn exact_size(&self) -> Size {
+        Size::ZERO
     }
 }
 
@@ -1633,7 +1717,7 @@ macro_rules! strip_plus {
 macro_rules! impl_exact_size_for_tuples {
     ($( ($($tt:tt: $t:ident),+) ),*$(,)?) => {$(
         impl<$($t: ExactSize),+> ExactSize for ($($t),*,) {
-            fn exact_size(&self) -> CellSliceSize {
+            fn exact_size(&self) -> Size {
                 strip_plus!($(+ ExactSize::exact_size(&self.$tt))+)
             }
         }
@@ -1647,98 +1731,6 @@ impl_exact_size_for_tuples! {
     (0: T0, 1: T1, 2: T2, 3: T3),
     (0: T0, 1: T1, 2: T2, 3: T3, 4: T4),
     (0: T0, 1: T1, 2: T2, 3: T3, 4: T4, 5: T5),
-}
-
-/// A size of a cell slice.
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
-pub struct CellSliceSize {
-    /// Total number of bits in cell slice.
-    pub bits: u16,
-    /// Total number refs in cell slice.
-    pub refs: u8,
-}
-
-impl CellSliceSize {
-    /// The additive identity for this type, i.e. `0`.
-    pub const ZERO: Self = Self { bits: 0, refs: 0 };
-
-    /// The largest valid value that can be represented by this type.
-    pub const MAX: Self = Self {
-        bits: MAX_BIT_LEN,
-        refs: MAX_REF_COUNT as _,
-    };
-
-    /// Returns true if the number of bits and refs is in the valid range for the cell.
-    #[inline]
-    pub const fn fits_into_cell(&self) -> bool {
-        self.bits <= MAX_BIT_LEN && self.refs <= MAX_REF_COUNT as _
-    }
-
-    /// Saturating size addition. Computes self + rhs for bits and refs,
-    /// saturating at the numeric bounds instead of overflowing.
-    #[inline]
-    pub const fn saturating_add(self, rhs: Self) -> Self {
-        Self {
-            bits: self.bits.saturating_add(rhs.bits),
-            refs: self.refs.saturating_add(rhs.refs),
-        }
-    }
-
-    /// Saturating size substraction. Computes self - rhs for bits and refs,
-    /// saturating at the numeric bounds instead of overflowing.
-    #[inline]
-    pub const fn saturating_sub(self, rhs: Self) -> Self {
-        Self {
-            bits: self.bits.saturating_sub(rhs.bits),
-            refs: self.refs.saturating_sub(rhs.refs),
-        }
-    }
-}
-
-impl From<CellSliceSize> for CellTreeStats {
-    #[inline]
-    fn from(value: CellSliceSize) -> Self {
-        Self {
-            bit_count: value.bits as _,
-            cell_count: value.refs as _,
-        }
-    }
-}
-
-impl std::ops::Add for CellSliceSize {
-    type Output = Self;
-
-    #[inline]
-    fn add(mut self, rhs: Self) -> Self::Output {
-        self += rhs;
-        self
-    }
-}
-
-impl std::ops::AddAssign for CellSliceSize {
-    #[inline]
-    fn add_assign(&mut self, rhs: Self) {
-        self.bits += rhs.bits;
-        self.refs += rhs.refs;
-    }
-}
-
-impl std::ops::Sub for CellSliceSize {
-    type Output = Self;
-
-    #[inline]
-    fn sub(mut self, rhs: Self) -> Self::Output {
-        self -= rhs;
-        self
-    }
-}
-
-impl std::ops::SubAssign for CellSliceSize {
-    #[inline]
-    fn sub_assign(&mut self, rhs: Self) {
-        self.bits -= rhs.bits;
-        self.refs -= rhs.refs;
-    }
 }
 
 #[cfg(test)]
@@ -1792,7 +1784,7 @@ mod tests {
             b.store_u16(0xffff)
         });
         let mut slice1 = cell1.as_slice()?;
-        slice1.try_advance(4, 0);
+        slice1.skip_first(4, 0)?;
 
         let cell2 = build_cell(|b| {
             b.store_uint(0xbcd, 12)?;
@@ -1816,11 +1808,11 @@ mod tests {
     fn longest_common_data_prefix() -> anyhow::Result<()> {
         let cell1 = build_cell(|b| b.store_u64(0xffffffff00000000));
         let mut slice1 = cell1.as_slice()?;
-        slice1.try_advance(1, 0);
+        slice1.skip_first(1, 0)?;
 
         let cell2 = build_cell(|b| b.store_u64(0xfffffff000000000));
         let mut slice2 = cell2.as_slice()?;
-        slice2.try_advance(6, 0);
+        slice2.skip_first(6, 0)?;
 
         let prefix = slice1.longest_common_data_prefix(&slice2);
 
@@ -1835,32 +1827,32 @@ mod tests {
         let prefix = cell1
             .as_slice()?
             .longest_common_data_prefix(&cell2.as_slice()?);
-        assert_eq!(prefix.remaining_bits(), 31);
+        assert_eq!(prefix.size_bits(), 31);
 
         //
         let cell1 = build_cell(|b| b.store_raw(&[0, 0, 2, 2], 32));
         let mut slice1 = cell1.as_slice()?;
-        slice1.try_advance(23, 0);
+        slice1.skip_first(23, 0)?;
 
         let cell2 = build_cell(|b| b.store_raw(&[0; 128], 1023));
         let slice2 = cell2.as_slice()?.get_prefix(8, 0);
 
         let prefix = slice1.longest_common_data_prefix(&slice2);
-        assert_eq!(prefix.remaining_bits(), 7);
+        assert_eq!(prefix.size_bits(), 7);
 
         //
         let cell1 = build_cell(|b| b.store_u16(0));
         let mut slice1 = cell1.as_slice()?;
-        slice1.try_advance(5, 0);
+        slice1.skip_first(5, 0)?;
 
         let cell2 = build_cell(|b| b.store_u8(0));
         let mut slice2 = cell2.as_slice()?;
-        slice2.try_advance(2, 0);
+        slice2.skip_first(2, 0)?;
 
         let prefix = slice1
             .get_prefix(5, 0)
             .longest_common_data_prefix(&slice2.get_prefix(5, 0));
-        assert_eq!(prefix.remaining_bits(), 5);
+        assert_eq!(prefix.size_bits(), 5);
 
         Ok(())
     }
@@ -1872,21 +1864,18 @@ mod tests {
 
         let unaligned = {
             let mut raw_key = raw_key.as_slice()?;
-            raw_key.try_advance(4, 0);
+            raw_key.skip_first(4, 0)?;
             raw_key.get_prefix(267, 0)
         };
         let aligned = CellBuilder::build_from(unaligned)?;
         let aligned = aligned.as_slice()?;
 
-        assert_eq!(
-            unaligned.cmp_by_content(&aligned)?,
-            std::cmp::Ordering::Equal
-        );
+        assert_eq!(unaligned.lex_cmp(&aligned)?, std::cmp::Ordering::Equal);
 
         let prefix = Boc::decode_base64("te6ccgEBAwEAjgACB4HQAsACAQCBvwFNima9rQU2tAaEHK+4fSc/aaYcTkT20uyfZuGbZjVMAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAIAgb8RUsb7kteM/ARjNwkzPPYoytZRb4Ic9epNxxLMl/2h7AAAAAAAAAAAAAAAAAAAAADMzMzMzMzMzMzMzMzMzMzO")?;
         let prefix = {
             let mut prefix = prefix.as_slice()?;
-            prefix.try_advance(11, 0);
+            prefix.skip_first(11, 0)?;
             prefix.get_prefix(14, 0)
         };
 
@@ -1894,7 +1883,7 @@ mod tests {
         let lcp_aligned = aligned.longest_common_data_prefix(&prefix);
 
         assert_eq!(
-            lcp_unaligned.cmp_by_content(&lcp_aligned)?,
+            lcp_unaligned.lex_cmp(&lcp_aligned)?,
             std::cmp::Ordering::Equal
         );
 
@@ -1946,7 +1935,7 @@ mod tests {
             b.store_uint(u64::MAX, 29)
         });
         let mut slice = cell.as_slice()?;
-        slice.try_advance(1, 0);
+        slice.skip_first(1, 0)?;
         assert_eq!(slice.test_uniform(), Some(true));
 
         Ok(())
@@ -1961,7 +1950,7 @@ mod tests {
         {
             let cell1 = build_cell(l);
             let cell2 = build_cell(r);
-            cell1.as_slice()?.cmp_by_content(&cell2.as_slice()?)
+            cell1.as_slice()?.lex_cmp(&cell2.as_slice()?)
         }
 
         assert_eq!(
@@ -1995,6 +1984,104 @@ mod tests {
             )?,
             std::cmp::Ordering::Less
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn is_prefix_of() -> anyhow::Result<()> {
+        let left = build_cell(|b| b.store_u64(0xabcdef1234567890));
+        let right = build_cell(|b| b.store_u64(0xabcdef0000000000));
+
+        // Not a prefix
+        {
+            let left = left.as_slice()?;
+            let right = right.as_slice()?;
+            assert!(!right.is_data_prefix_of(&left).unwrap());
+        }
+
+        // Aligned prefix
+        {
+            let left = left.as_slice()?;
+            let mut right = right.as_slice()?;
+            right.only_first(24, 0)?;
+            assert!(right.is_data_prefix_of(&left).unwrap());
+        }
+
+        // Shifted prefix
+        {
+            let mut left = left.as_slice()?;
+            left.skip_first(3, 0)?;
+
+            let mut right = right.as_slice()?;
+            right.skip_first(3, 0)?;
+            right.only_first(21, 0)?;
+
+            assert!(right.is_data_prefix_of(&left).unwrap());
+        }
+
+        // Empty prefix
+        {
+            let left = left.as_slice()?;
+            let right = Cell::empty_cell_ref().as_slice()?;
+            assert!(right.is_data_prefix_of(&left).unwrap());
+        }
+
+        // Not as prefix of an empty prefix
+        {
+            let left = Cell::empty_cell_ref().as_slice()?;
+            let right = right.as_slice()?;
+            assert!(!right.is_data_prefix_of(&left).unwrap());
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn is_suffix_of() -> anyhow::Result<()> {
+        let left = build_cell(|b| b.store_u64(0xabcdef1234567890));
+        let right = build_cell(|b| b.store_u64(0x0000001234567890));
+
+        // Not a suffix
+        {
+            let left = left.as_slice()?;
+            let right = right.as_slice()?;
+            assert!(!right.is_data_suffix_of(&left).unwrap());
+        }
+
+        // Aligned suffix
+        {
+            let left = left.as_slice()?;
+            let mut right = right.as_slice()?;
+            right.only_last(40, 0)?;
+            assert!(right.is_data_suffix_of(&left).unwrap());
+        }
+
+        // Shifted suffix
+        {
+            let mut left = left.as_slice()?;
+            left.skip_last(3, 0)?;
+
+            let mut right = right.as_slice()?;
+            right.skip_last(3, 0)?;
+            right.only_last(37, 0)?;
+
+            assert!(right.is_data_suffix_of(&left).unwrap());
+        }
+
+        // Empty suffix
+        {
+            let left = left.as_slice()?;
+            let right = Cell::empty_cell_ref().as_slice()?;
+            assert!(right.is_data_suffix_of(&left).unwrap());
+        }
+
+        // Not as suffix of an empty suffix
+        {
+            let left = Cell::empty_cell_ref().as_slice()?;
+            let right = right.as_slice()?;
+            assert!(!right.is_data_suffix_of(&left).unwrap());
+        }
 
         Ok(())
     }

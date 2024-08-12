@@ -77,7 +77,7 @@ where
 
                     // Write the common prefix as a label
                     let mut common_prefix = prefix_slice;
-                    ok!(common_prefix.advance(key_offset, 0)); // TODO: Unwrap
+                    ok!(common_prefix.skip_first(key_offset, 0)); // TODO: Unwrap
                     ok!(write_label(
                         &common_prefix.get_prefix(label_len, 0),
                         key_bit_len,
@@ -85,7 +85,7 @@ where
                     ));
 
                     // Build leaf from value
-                    ok!(prefix_slice.advance(split_at + 1, 0)); // TODO: Unwrap
+                    ok!(prefix_slice.skip_first(split_at + 1, 0)); // TODO: Unwrap
                     let value = ok!(make_leaf(&prefix_slice, leaf_key_bit_len, &value, context));
 
                     result_prefix = prefix;
@@ -94,7 +94,7 @@ where
                 Self::Node { prefix, value, .. } => {
                     // Write the common prefix as a label
                     let mut common_prefix = prefix.as_data_slice();
-                    ok!(common_prefix.advance(key_offset, 0)); // TODO: Unwrap
+                    ok!(common_prefix.skip_first(key_offset, 0)); // TODO: Unwrap
                     ok!(write_label(
                         &common_prefix.get_prefix(label_len, 0),
                         key_bit_len,
@@ -111,7 +111,7 @@ where
             let left_cell = match self {
                 Self::Leaf { prefix, value, .. } => {
                     let mut prefix_slice = prefix.as_data_slice();
-                    ok!(prefix_slice.advance(split_at + 1, 0)); // TODO: Unwrap
+                    ok!(prefix_slice.skip_first(split_at + 1, 0)); // TODO: Unwrap
                     ok!(make_leaf(&prefix_slice, leaf_key_bit_len, &value, context))
                 }
                 Self::Node { value, .. } => value,
@@ -155,7 +155,7 @@ where
             let right_prefix = prefix.as_data_slice();
 
             let lcp = left_prefix.longest_common_data_prefix(&right_prefix);
-            lcp_len = lcp.remaining_bits();
+            lcp_len = lcp.size_bits();
 
             if lcp_len <= last.prev_lcp_len() {
                 // LCP decreased, we are not able to group the current item to the last one.
@@ -300,7 +300,7 @@ where
 
                     // Write the common prefix as a label
                     let mut common_prefix = prefix_slice;
-                    ok!(common_prefix.advance(key_offset, 0)); // TODO: Unwrap
+                    ok!(common_prefix.skip_first(key_offset, 0)); // TODO: Unwrap
                     ok!(write_label(
                         &common_prefix.get_prefix(label_len, 0),
                         key_bit_len,
@@ -308,11 +308,11 @@ where
                     ));
 
                     // Build leaf from value
-                    ok!(prefix_slice.advance(split_at + 1, 0)); // TODO: Unwrap
+                    ok!(prefix_slice.skip_first(split_at + 1, 0)); // TODO: Unwrap
                     let value = {
                         let mut builder = CellBuilder::new();
                         ok!(write_label(&prefix_slice, leaf_key_bit_len, &mut builder));
-                        right_extra_offset = (builder.bit_len(), 0u8);
+                        right_extra_offset = (builder.size_bits(), 0u8);
                         ok!(extra.store_into(&mut builder, context));
                         ok!(value.store_into(&mut builder, context));
                         ok!(builder.build_ext(context))
@@ -329,7 +329,7 @@ where
                 } => {
                     // Write the common prefix as a label
                     let mut common_prefix = prefix.as_data_slice();
-                    ok!(common_prefix.advance(key_offset, 0)); // TODO: Unwrap
+                    ok!(common_prefix.skip_first(key_offset, 0)); // TODO: Unwrap
                     ok!(write_label(
                         &common_prefix.get_prefix(label_len, 0),
                         key_bit_len,
@@ -353,11 +353,11 @@ where
                     ..
                 } => {
                     let mut prefix_slice = prefix.as_data_slice();
-                    ok!(prefix_slice.advance(split_at + 1, 0)); // TODO: Unwrap
+                    ok!(prefix_slice.skip_first(split_at + 1, 0)); // TODO: Unwrap
 
                     let mut builder = CellBuilder::new();
                     ok!(write_label(&prefix_slice, leaf_key_bit_len, &mut builder));
-                    left_extra_offset = (builder.bit_len(), 0u8);
+                    left_extra_offset = (builder.size_bits(), 0u8);
                     ok!(extra.store_into(&mut builder, context));
                     ok!(value.store_into(&mut builder, context));
                     ok!(builder.build_ext(context))
@@ -376,13 +376,17 @@ where
             ok!(builder.store_reference(left_cell.clone()));
             ok!(builder.store_reference(right_cell.clone()));
 
-            let extra_offset = builder.bit_len();
+            let extra_offset = builder.size_bits();
 
             let mut left_extra_slice = ok!(left_cell.as_slice());
-            left_extra_slice.try_advance(left_extra_offset.0, left_extra_offset.1);
+            left_extra_slice
+                .skip_first(left_extra_offset.0, left_extra_offset.1)
+                .ok();
 
             let mut right_extra_slice = ok!(right_cell.as_slice());
-            right_extra_slice.try_advance(right_extra_offset.0, right_extra_offset.1);
+            right_extra_slice
+                .skip_first(right_extra_offset.0, right_extra_offset.1)
+                .ok();
 
             ok!(comparator(
                 &mut left_extra_slice,
@@ -426,7 +430,7 @@ where
             let right_prefix = prefix.as_data_slice();
 
             let lcp = left_prefix.longest_common_data_prefix(&right_prefix);
-            lcp_len = lcp.remaining_bits();
+            lcp_len = lcp.size_bits();
 
             if lcp_len <= last.prev_lcp_len() {
                 // LCP decreased, we are not able to group the current item to the last one.

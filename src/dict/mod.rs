@@ -147,19 +147,17 @@ fn split_edge(
     context: &mut dyn CellContext,
 ) -> Result<Cell, Error> {
     // Advance the key
-    let prev_key_bit_len = key.remaining_bits();
-    if !key.try_advance(lcp.remaining_bits() + 1, 0) {
-        return Err(Error::CellUnderflow);
-    }
+    let prev_key_bit_len = key.size_bits();
+    ok!(key.skip_first(lcp.size_bits() + 1, 0));
 
     // Read the next bit from the data
-    prefix.try_advance(lcp.remaining_bits(), 0);
+    prefix.skip_first(lcp.size_bits(), 0).ok();
     let old_to_right = ok!(prefix.load_bit());
 
     // Create a leaf for the old value
-    let mut left = ok!(make_leaf(prefix, key.remaining_bits(), data, context));
+    let mut left = ok!(make_leaf(prefix, key.size_bits(), data, context));
     // Create a leaf for the right value
-    let mut right = ok!(make_leaf(key, key.remaining_bits(), value, context));
+    let mut right = ok!(make_leaf(key, key.size_bits(), value, context));
 
     // The part that starts with 1 goes to the right cell
     if old_to_right {
@@ -186,21 +184,19 @@ fn split_aug_edge(
     context: &mut dyn CellContext,
 ) -> Result<Cell, Error> {
     // Advance the key
-    let prev_key_bit_len = key.remaining_bits();
-    if !key.try_advance(lcp.remaining_bits() + 1, 0) {
-        return Err(Error::CellUnderflow);
-    }
+    let prev_key_bit_len = key.size_bits();
+    ok!(key.skip_first(lcp.size_bits() + 1, 0));
 
     // Read the next bit from the data
-    prefix.try_advance(lcp.remaining_bits(), 0);
+    prefix.skip_first(lcp.size_bits(), 0).ok();
     let old_to_right = ok!(prefix.load_bit());
 
     // Create a leaf for the old value
-    let mut left = ok!(make_leaf(prefix, key.remaining_bits(), data, context));
+    let mut left = ok!(make_leaf(prefix, key.size_bits(), data, context));
     // Create a leaf for the new value
     let mut right = ok!(make_leaf_with_extra(
         key,
-        key.remaining_bits(),
+        key.size_bits(),
         extra,
         value,
         context
@@ -212,8 +208,8 @@ fn split_aug_edge(
 
     let left_slice = &mut ok!(left.as_slice());
     let right_slice = &mut ok!(right.as_slice());
-    ok!(read_label(left_slice, key.remaining_bits()));
-    ok!(read_label(right_slice, key.remaining_bits()));
+    ok!(read_label(left_slice, key.size_bits()));
+    ok!(read_label(right_slice, key.size_bits()));
 
     // Create fork edge
     let mut builder = CellBuilder::new();
@@ -275,12 +271,10 @@ pub fn dict_load_from_root(
     let mut root = *slice;
 
     let label = ok!(read_label(slice, key_bit_len));
-    if label.remaining_bits() != key_bit_len {
-        if !slice.try_advance(0, 2) {
-            return Err(Error::CellUnderflow);
-        }
-        let root_bits = root.remaining_bits() - slice.remaining_bits();
-        let root_refs = root.remaining_refs() - slice.remaining_refs();
+    if label.size_bits() != key_bit_len {
+        ok!(slice.skip_first(0, 2));
+        let root_bits = root.size_bits() - slice.size_bits();
+        let root_refs = root.size_refs() - slice.size_refs();
         root = root.get_prefix(root_bits, root_refs)
     } else {
         slice.load_remaining();
@@ -343,7 +337,7 @@ fn rebuild_aug_dict_from_stack(
         let last_data_slice = ok!(last.data.as_slice());
         let last_label = ok!(read_label(&mut last_data_slice.clone(), last.key_bit_len));
 
-        let child_key_bit_len = last.key_bit_len - last_label.remaining_bits() - 1;
+        let child_key_bit_len = last.key_bit_len - last_label.size_bits() - 1;
 
         let left_slice = &mut left.as_slice()?;
         let right_slice = &mut right.as_slice()?;
@@ -401,7 +395,7 @@ impl Segment<'_> {
                 .and_then(CellSlice::new)),
             None => return Err(Error::CellUnderflow),
         };
-        let rem = ok!(read_label(&mut opposite, key.remaining_bits()));
+        let rem = ok!(read_label(&mut opposite, key.size_bits()));
 
         // Build an edge cell
         let mut builder = CellBuilder::new();
@@ -426,7 +420,7 @@ fn write_label(key: &CellSlice, key_bit_len: u16, label: &mut CellBuilder) -> Re
 
     let bits_for_len = (16 - key_bit_len.leading_zeros()) as u16;
 
-    let remaining_bits = key.remaining_bits();
+    let remaining_bits = key.size_bits();
 
     let hml_short_len = 2 + 2 * remaining_bits;
     let hml_long_len = 2 + bits_for_len + remaining_bits;
@@ -464,7 +458,7 @@ fn write_label_parts(
 
     let bits_for_len = (16 - key_bit_len.leading_zeros()) as u16;
 
-    let remaining_bits = pfx.remaining_bits() + 1 + rem.remaining_bits();
+    let remaining_bits = pfx.size_bits() + 1 + rem.size_bits();
 
     let hml_short_len = 2 + 2 * remaining_bits;
     let hml_long_len = 2 + bits_for_len + remaining_bits;
@@ -532,11 +526,8 @@ fn read_hml_short<'a>(label: &mut CellSlice<'a>) -> Result<CellSlice<'a>, Error>
         len += 1;
     }
     let result = *label;
-    if label.try_advance(len, 0) {
-        Ok(result.get_prefix(len, 0))
-    } else {
-        Err(Error::CellUnderflow)
-    }
+    ok!(label.skip_first(len, 0));
+    Ok(result.get_prefix(len, 0))
 }
 
 fn write_hml_long_tag(len: u16, bits_for_len: u16, label: &mut CellBuilder) -> Result<(), Error> {
@@ -548,11 +539,8 @@ fn write_hml_long_tag(len: u16, bits_for_len: u16, label: &mut CellBuilder) -> R
 fn read_hml_long<'a>(label: &mut CellSlice<'a>, bits_for_len: u16) -> Result<CellSlice<'a>, Error> {
     let len = ok!(label.load_uint(bits_for_len)) as u16;
     let result = *label;
-    if label.try_advance(len, 0) {
-        Ok(result.get_prefix(len, 0))
-    } else {
-        Err(Error::CellUnderflow)
-    }
+    ok!(label.skip_first(len, 0));
+    Ok(result.get_prefix(len, 0))
 }
 
 fn write_hml_same(

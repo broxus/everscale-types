@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::cell::cell_context::{CellContext, CellParts};
 use crate::cell::{
     Cell, CellDescriptor, CellImpl, CellInner, CellSlice, CellType, DynCell, HashBytes, LevelMask,
-    MAX_BIT_LEN, MAX_REF_COUNT,
+    Size, MAX_BIT_LEN, MAX_REF_COUNT,
 };
 use crate::error::Error;
 use crate::util::{ArrayVec, Bitstring};
@@ -318,12 +318,12 @@ impl CellBuilder {
     }
 
     /// Creates an empty cell builder.
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             data: [0; 128],
             bit_len: 0,
             is_exotic: false,
-            references: Default::default(),
+            references: ArrayVec::new(),
         }
     }
 
@@ -354,43 +354,59 @@ impl CellBuilder {
 
     /// Returns an underlying cell data.
     #[inline]
-    pub fn raw_data(&self) -> &[u8; 128] {
+    pub const fn raw_data(&self) -> &[u8; 128] {
         &self.data
+    }
+
+    /// Returns the stored cell size.
+    pub const fn size(&self) -> Size {
+        Size {
+            bits: self.bit_len,
+            refs: self.references.len() as u8,
+        }
     }
 
     /// Returns the data size of this cell in bits.
     #[inline]
-    pub fn bit_len(&self) -> u16 {
+    pub const fn size_bits(&self) -> u16 {
         self.bit_len
     }
 
     /// Returns child cell count.
     #[inline(always)]
-    pub const fn reference_count(&self) -> u8 {
+    pub const fn size_refs(&self) -> u8 {
         self.references.len() as u8
+    }
+
+    /// Returns the remaining capacity in bits and references.
+    pub const fn spare_capacity(&self) -> Size {
+        Size {
+            bits: self.spare_capacity_bits(),
+            refs: self.spare_capacity_refs(),
+        }
     }
 
     /// Returns remaining data capacity in bits.
     #[inline]
-    pub fn spare_bits_capacity(&self) -> u16 {
+    pub const fn spare_capacity_bits(&self) -> u16 {
         MAX_BIT_LEN - self.bit_len
     }
 
     /// Returns remaining references capacity.
     #[inline]
-    pub fn spare_refs_capacity(&self) -> u8 {
+    pub const fn spare_capacity_refs(&self) -> u8 {
         (MAX_REF_COUNT - self.references.len()) as u8
     }
 
     /// Returns true if there is enough remaining capacity to fit `bits` and `refs`.
     #[inline]
-    pub fn has_capacity(&self, bits: u16, refs: u8) -> bool {
+    pub const fn has_capacity(&self, bits: u16, refs: u8) -> bool {
         self.bit_len + bits <= MAX_BIT_LEN && self.references.len() + refs as usize <= MAX_REF_COUNT
     }
 
     /// Returns whether this cell will be built as an exotic.
     #[inline]
-    pub fn is_exotic(&self) -> bool {
+    pub const fn is_exotic(&self) -> bool {
         self.is_exotic
     }
 
@@ -727,7 +743,7 @@ impl CellBuilder {
             builder: &mut CellBuilder,
             value: &CellSlice<'_>,
         ) -> Result<(), Error> {
-            let bits = value.remaining_bits();
+            let bits = value.size_bits();
             if builder.bit_len + bits <= MAX_BIT_LEN {
                 // SAFETY: An uninitialized `[MaybeUninit<_>; LEN]` is valid.
                 let mut slice_data =
@@ -905,8 +921,8 @@ impl CellBuilder {
         T: AsRef<CellSlice<'a>>,
     {
         fn store_slice_impl(builder: &mut CellBuilder, value: &CellSlice<'_>) -> Result<(), Error> {
-            if builder.bit_len + value.remaining_bits() <= MAX_BIT_LEN
-                && builder.references.len() + value.remaining_refs() as usize <= MAX_REF_COUNT
+            if builder.bit_len + value.size_bits() <= MAX_BIT_LEN
+                && builder.references.len() + value.size_refs() as usize <= MAX_REF_COUNT
             {
                 ok!(builder.store_slice_data(value));
                 for cell in value.references().cloned() {
@@ -1273,15 +1289,15 @@ mod tests {
     fn rewind_builder() {
         let mut builder = CellBuilder::new();
         builder.store_u32(0xdeafbeaf).unwrap();
-        assert_eq!(builder.bit_len(), 32);
+        assert_eq!(builder.size_bits(), 32);
         assert_eq!(builder.data[..4], 0xdeafbeaf_u32.to_be_bytes());
 
         builder.rewind(5).unwrap();
-        assert_eq!(builder.bit_len(), 27);
+        assert_eq!(builder.size_bits(), 27);
         assert_eq!(builder.data[..4], 0xdeafbea0_u32.to_be_bytes());
 
         builder.store_u32(0xdeafbeaf).unwrap();
-        assert_eq!(builder.bit_len(), 32 + 27);
+        assert_eq!(builder.size_bits(), 32 + 27);
         assert_eq!(
             builder.data[..8],
             [0xde, 0xaf, 0xbe, 0xbb, 0xd5, 0xf7, 0xd5, 0xe0]
@@ -1295,23 +1311,23 @@ mod tests {
         assert_eq!(builder.rewind(32), Err(Error::CellUnderflow));
 
         builder.rewind(27).unwrap();
-        assert_eq!(builder.bit_len(), 0);
+        assert_eq!(builder.size_bits(), 0);
         assert_eq!(builder.data, [0u8; 128]);
 
         builder.store_raw(&[0xff; 128], MAX_BIT_LEN).unwrap();
-        assert_eq!(builder.bit_len(), MAX_BIT_LEN);
+        assert_eq!(builder.size_bits(), MAX_BIT_LEN);
 
         let mut target = [0xff; 128];
         target[127] = 0xfe;
         assert_eq!(builder.data, target);
 
         builder.rewind(3).unwrap();
-        assert_eq!(builder.bit_len(), MAX_BIT_LEN - 3);
+        assert_eq!(builder.size_bits(), MAX_BIT_LEN - 3);
         target[127] = 0xf0;
         assert_eq!(builder.data, target);
 
         builder.rewind(8).unwrap();
-        assert_eq!(builder.bit_len(), MAX_BIT_LEN - 3 - 8);
+        assert_eq!(builder.size_bits(), MAX_BIT_LEN - 3 - 8);
         target[126] = 0xf0;
         target[127] = 0x00;
         assert_eq!(builder.data, target);
@@ -1356,7 +1372,7 @@ mod tests {
 
         let mut builder = CellBuilder::new();
         let mut slice = cell.as_slice()?;
-        assert!(slice.try_advance(3, 0));
+        slice.skip_first(3, 0)?;
         builder.store_slice(slice)?;
         let cell = builder.build()?;
         println!("{}", cell.display_tree());

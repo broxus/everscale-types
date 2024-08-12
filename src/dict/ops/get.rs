@@ -9,7 +9,7 @@ pub fn dict_get<'a: 'b, 'b>(
     mut key: CellSlice<'b>,
     context: &mut dyn CellContext,
 ) -> Result<Option<CellSlice<'a>>, Error> {
-    if key.remaining_bits() != key_bit_len {
+    if key.size_bits() != key_bit_len {
         return Err(Error::CellUnderflow);
     }
 
@@ -23,7 +23,7 @@ pub fn dict_get<'a: 'b, 'b>(
     // Try to find the required leaf
     let is_key_empty = loop {
         // Read the key part written in the current edge
-        let prefix = ok!(read_label(&mut data, key.remaining_bits()));
+        let prefix = ok!(read_label(&mut data, key.size_bits()));
 
         // Remove this prefix from the key
         match key.strip_data_prefix(&prefix) {
@@ -31,7 +31,7 @@ pub fn dict_get<'a: 'b, 'b>(
                 if stripped_key.is_data_empty() {
                     // All key parts were collected <=> value found
                     break true;
-                } else if data.remaining_refs() < 2 {
+                } else if data.size_refs() < 2 {
                     // Reached leaf while key was not fully constructed
                     return Ok(None);
                 } else {
@@ -62,7 +62,7 @@ pub fn dict_get_owned(
     mut key: CellSlice<'_>,
     context: &mut dyn CellContext,
 ) -> Result<Option<CellSliceParts>, Error> {
-    if key.remaining_bits() != key_bit_len {
+    if key.size_bits() != key_bit_len {
         return Err(Error::CellUnderflow);
     }
 
@@ -76,7 +76,7 @@ pub fn dict_get_owned(
     // Try to find the required leaf
     let is_key_empty = loop {
         // Read the key part written in the current edge
-        let prefix = ok!(read_label(&mut data, key.remaining_bits()));
+        let prefix = ok!(read_label(&mut data, key.size_bits()));
 
         // Remove this prefix from the key
         match key.strip_data_prefix(&prefix) {
@@ -84,7 +84,7 @@ pub fn dict_get_owned(
                 if stripped_key.is_data_empty() {
                     // All key parts were collected <=> value found
                     break true;
-                } else if data.remaining_refs() < 2 {
+                } else if data.size_refs() < 2 {
                     // Reached leaf while key was not fully constructed
                     return Ok(None);
                 } else {
@@ -136,7 +136,7 @@ pub fn dict_get_subdict<'a: 'b, 'b>(
     match dict {
         None => Ok(None),
         Some(cell) => {
-            let prefix_len = prefix.remaining_bits();
+            let prefix_len = prefix.size_bits();
             if prefix_len == 0 || key_bit_len < prefix_len {
                 return Ok(Some(cell.clone()));
             }
@@ -151,15 +151,15 @@ pub fn dict_get_subdict<'a: 'b, 'b>(
             // Try to find the required root
             let subtree = loop {
                 // Read the key part written in the current edge
-                let label = &mut ok!(read_label(&mut data, prefix.remaining_bits()));
+                let label = &mut ok!(read_label(&mut data, prefix.size_bits()));
                 let lcp = prefix.longest_common_data_prefix(label);
-                match lcp.remaining_bits().cmp(&prefix.remaining_bits()) {
+                match lcp.size_bits().cmp(&prefix.size_bits()) {
                     std::cmp::Ordering::Equal => {
                         // Found exact key
-                        let new_leaf = ok!(make_leaf(label, lcp.remaining_bits(), &data, context));
+                        let new_leaf = ok!(make_leaf(label, lcp.size_bits(), &data, context));
                         break new_leaf;
                     }
-                    std::cmp::Ordering::Less if lcp.remaining_bits() < label.remaining_bits() => {
+                    std::cmp::Ordering::Less if lcp.size_bits() < label.size_bits() => {
                         // Have to split edge
                         let value = ok!(CellBuilder::new().build_ext(context));
                         let split_edge =
@@ -170,7 +170,7 @@ pub fn dict_get_subdict<'a: 'b, 'b>(
                         if data.cell().reference_count() != 2 {
                             return Err(Error::CellUnderflow);
                         }
-                        prefix.try_advance(lcp.remaining_bits(), 0);
+                        prefix.skip_first(lcp.size_bits(), 0).ok();
                         let next_branch = match prefix.load_bit() {
                             Ok(bit) => Branch::from(bit),
                             Err(e) => return Err(e),

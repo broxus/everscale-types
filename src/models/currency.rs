@@ -117,7 +117,7 @@ impl From<Tokens> for CurrencyCollection {
 
 impl ExactSize for CurrencyCollection {
     #[inline]
-    fn exact_size(&self) -> CellSliceSize {
+    fn exact_size(&self) -> Size {
         self.tokens.exact_size() + self.other.exact_size()
     }
 }
@@ -218,7 +218,7 @@ impl From<Dict<u32, VarUint248>> for ExtraCurrencyCollection {
 
 impl ExactSize for ExtraCurrencyCollection {
     #[inline]
-    fn exact_size(&self) -> CellSliceSize {
+    fn exact_size(&self) -> Size {
         self.0.exact_size()
     }
 }

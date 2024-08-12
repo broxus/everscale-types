@@ -158,7 +158,7 @@ where
             }
             None => MessageLayout::compute(info_size, self.init.as_ref(), body_size),
         };
-        let CellSliceSize { bits, refs } = size;
+        let Size { bits, refs } = size;
 
         // Check capacity
         if !builder.has_capacity(bits, refs) {
@@ -372,10 +372,10 @@ impl MessageLayout {
     /// Computes the number of bits and refs for this layout for the root cell.
     pub const fn compute_full_size(
         &self,
-        info_size: CellSliceSize,
+        info_size: Size,
         init: Option<&StateInit>,
-        body_size: CellSliceSize,
-    ) -> CellSliceSize {
+        body_size: Size,
+    ) -> Size {
         let l = DetailedMessageLayout::compute(info_size, init, body_size);
 
         let mut total = l.info;
@@ -402,10 +402,10 @@ impl MessageLayout {
     /// Computes the most optimal layout of the message parts.
     /// Also returns the number of bits and refs for the root cell.
     pub const fn compute(
-        info_size: CellSliceSize,
+        info_size: Size,
         init: Option<&StateInit>,
-        body_size: CellSliceSize,
-    ) -> (Self, CellSliceSize) {
+        body_size: Size,
+    ) -> (Self, Size) {
         let l = DetailedMessageLayout::compute(info_size, init, body_size);
 
         // Try plain layout
@@ -418,7 +418,7 @@ impl MessageLayout {
             };
             return (
                 layout,
-                CellSliceSize {
+                Size {
                     bits: total_bits,
                     refs: total_refs,
                 },
@@ -435,7 +435,7 @@ impl MessageLayout {
             };
             return (
                 layout,
-                CellSliceSize {
+                Size {
                     bits: total_bits,
                     refs: total_refs + 1,
                 },
@@ -452,7 +452,7 @@ impl MessageLayout {
             };
             return (
                 layout,
-                CellSliceSize {
+                Size {
                     bits: total_bits,
                     refs: total_refs + 1,
                 },
@@ -466,7 +466,7 @@ impl MessageLayout {
         };
         (
             layout,
-            CellSliceSize {
+            Size {
                 bits: l.info.bits,
                 refs: l.info.refs + 2,
             },
@@ -475,17 +475,13 @@ impl MessageLayout {
 }
 
 struct DetailedMessageLayout {
-    info: CellSliceSize,
-    init: CellSliceSize,
-    body: CellSliceSize,
+    info: Size,
+    init: Size,
+    body: Size,
 }
 
 impl DetailedMessageLayout {
-    const fn compute(
-        mut info: CellSliceSize,
-        init: Option<&StateInit>,
-        body: CellSliceSize,
-    ) -> Self {
+    const fn compute(mut info: Size, init: Option<&StateInit>, body: Size) -> Self {
         info.bits += 2; // (Maybe X) (1bit) + (Either X) (1bit)
 
         let init = match init {
@@ -493,7 +489,7 @@ impl DetailedMessageLayout {
                 info.bits += 1; // (Either X) (1bit)
                 init.exact_size_const()
             }
-            None => CellSliceSize::ZERO,
+            None => Size::ZERO,
         };
 
         Self { info, init, body }
@@ -513,8 +509,8 @@ pub enum RelaxedMsgInfo {
 
 impl RelaxedMsgInfo {
     /// Exact size of this value when it is stored in slice.
-    pub const fn exact_size_const(&self) -> CellSliceSize {
-        CellSliceSize {
+    pub const fn exact_size_const(&self) -> Size {
+        Size {
             bits: self.bit_len(),
             refs: self.has_references() as u8,
         }
@@ -538,7 +534,7 @@ impl RelaxedMsgInfo {
 
 impl ExactSize for RelaxedMsgInfo {
     #[inline]
-    fn exact_size(&self) -> CellSliceSize {
+    fn exact_size(&self) -> Size {
         self.exact_size_const()
     }
 }
@@ -595,8 +591,8 @@ pub enum MsgInfo {
 
 impl MsgInfo {
     /// Exact size of this value when it is stored in slice.
-    pub const fn exact_size_const(&self) -> CellSliceSize {
-        CellSliceSize {
+    pub const fn exact_size_const(&self) -> Size {
+        Size {
             bits: self.bit_len(),
             refs: self.has_references() as u8,
         }
@@ -621,7 +617,7 @@ impl MsgInfo {
 
 impl ExactSize for MsgInfo {
     #[inline]
-    fn exact_size(&self) -> CellSliceSize {
+    fn exact_size(&self) -> Size {
         self.exact_size_const()
     }
 }

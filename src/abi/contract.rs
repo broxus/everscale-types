@@ -10,8 +10,7 @@ use sha2::Digest;
 use crate::abi::value::ser::AbiSerializer;
 use crate::abi::AbiHeader;
 use crate::cell::{
-    Cell, CellBuilder, CellFamily, CellSlice, CellSliceRange, CellSliceSize, DynCell, HashBytes,
-    Store,
+    Cell, CellBuilder, CellFamily, CellSlice, CellSliceRange, DynCell, HashBytes, Size, Store,
 };
 use crate::dict::RawDict;
 use crate::models::{
@@ -494,7 +493,7 @@ impl Function {
         } else {
             // Skip signature
             if slice.load_bit()? {
-                slice.advance(512, 0)?;
+                slice.skip_first(512, 0)?;
             }
             // Skip headers
             ok!(AbiHeader::skip_all(&self.headers, slice));
@@ -732,7 +731,7 @@ impl<'f, 'a> ExternalInput<'f, 'a> {
         if reserve_signature {
             serializer.add_offset(if abi_version.major == 1 {
                 // Reserve reference for signature
-                CellSliceSize { bits: 0, refs: 1 }
+                Size { bits: 0, refs: 1 }
             } else {
                 let bits = if abi_version >= AbiVersion::V2_3 {
                     // Reserve only for address as it also ensures the the signature will fit
@@ -741,7 +740,7 @@ impl<'f, 'a> ExternalInput<'f, 'a> {
                     // Reserve for `Some` non-empty signature
                     1 + 512
                 };
-                CellSliceSize { bits, refs: 0 }
+                Size { bits, refs: 0 }
             });
         }
 

@@ -397,8 +397,8 @@ impl Default for StateInit {
 
 impl StateInit {
     /// Exact size of this value when it is stored in slice.
-    pub const fn exact_size_const(&self) -> CellSliceSize {
-        CellSliceSize {
+    pub const fn exact_size_const(&self) -> Size {
+        Size {
             bits: self.bit_len(),
             refs: self.reference_count(),
         }
@@ -419,7 +419,7 @@ impl StateInit {
 
 impl ExactSize for StateInit {
     #[inline]
-    fn exact_size(&self) -> CellSliceSize {
+    fn exact_size(&self) -> Size {
         self.exact_size_const()
     }
 }

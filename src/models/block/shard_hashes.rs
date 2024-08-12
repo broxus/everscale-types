@@ -612,18 +612,14 @@ impl<'a> Load<'a> for ShardDescription {
 }
 
 fn parse_block_id(shard: ShardIdent, mut value: CellSlice) -> Result<BlockId, Error> {
-    if !value.try_advance(ShardDescription::TAG_LEN, 0) {
-        return Err(Error::CellUnderflow);
-    }
+    ok!(value.skip_first(ShardDescription::TAG_LEN, 0));
 
     Ok(BlockId {
         shard,
         seqno: ok!(value.load_u32()),
         root_hash: {
             // Skip some fields (reg_mc_seqno: u32, start_lt: u64, end_lt: u64)
-            if !value.try_advance(32 + 64 + 64, 0) {
-                return Err(Error::CellUnderflow);
-            }
+            ok!(value.skip_first(32 + 64 + 64, 0));
             ok!(value.load_u256())
         },
         file_hash: ok!(value.load_u256()),

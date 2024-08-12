@@ -53,7 +53,7 @@ pub struct AugDict<K, A, V> {
 
 impl<K, A: ExactSize, V> ExactSize for AugDict<K, A, V> {
     #[inline]
-    fn exact_size(&self) -> CellSliceSize {
+    fn exact_size(&self) -> Size {
         self.dict.exact_size() + self.extra.exact_size()
     }
 }
@@ -188,8 +188,8 @@ where
             Some(root) => {
                 let slice = &mut ok!(root.as_slice());
                 let prefix = ok!(read_label(slice, K::BITS));
-                if prefix.remaining_bits() != K::BITS {
-                    ok!(slice.advance(0, 2));
+                if prefix.size_bits() != K::BITS {
+                    ok!(slice.skip_first(0, 2));
                 }
                 ok!(A::load_from(slice))
             }
@@ -211,10 +211,8 @@ where
     let root = *slice;
 
     let label = ok!(read_label(slice, key_bit_len));
-    let extra = if label.remaining_bits() != key_bit_len {
-        if !slice.try_advance(0, 2) {
-            return Err(Error::CellUnderflow);
-        }
+    let extra = if label.size_bits() != key_bit_len {
+        ok!(slice.skip_first(0, 2));
         ok!(A::load_from(slice))
     } else {
         let extra = ok!(A::load_from(slice));
@@ -222,8 +220,8 @@ where
         extra
     };
 
-    let root_bits = root.remaining_bits() - slice.remaining_bits();
-    let root_refs = root.remaining_refs() - slice.remaining_refs();
+    let root_bits = root.size_bits() - slice.size_bits();
+    let root_refs = root.size_refs() - slice.size_refs();
 
     let mut b = CellBuilder::new();
     ok!(b.store_slice(root.get_prefix(root_bits, root_refs)));

@@ -39,23 +39,24 @@ impl Default for MerkleProofRef<'_> {
 
 impl<'a> Load<'a> for MerkleProofRef<'a> {
     fn load_from(s: &mut CellSlice<'a>) -> Result<Self, Error> {
-        if !s.has_remaining(MerkleProof::BITS, MerkleProof::REFS) {
+        if !s.is_full() || s.size_bits() != MerkleProof::BITS || s.size_refs() != MerkleProof::REFS
+        {
             return Err(Error::CellUnderflow);
         }
 
-        if ok!(s.get_u8(0)) != CellType::MerkleProof.to_byte() {
+        if !s.cell().descriptor().is_exotic() || ok!(s.get_u8(0)) != CellType::MerkleProof.to_byte()
+        {
             return Err(Error::InvalidCell);
         }
 
         let res = Self {
-            hash: ok!(s.get_u256(8)),
-            depth: ok!(s.get_u16(8 + 256)),
-            cell: ok!(s.get_reference(0)),
+            hash: ok!(s.load_u256()),
+            depth: ok!(s.load_u16()),
+            cell: ok!(s.load_reference()),
         };
-        if res.cell.hash(0) == &res.hash
-            && res.cell.depth(0) == res.depth
-            && s.try_advance(MerkleProof::BITS, MerkleProof::REFS)
-        {
+        debug_assert!(s.is_empty());
+
+        if res.cell.hash(0) == &res.hash && res.cell.depth(0) == res.depth {
             Ok(res)
         } else {
             Err(Error::InvalidCell)
@@ -100,23 +101,24 @@ impl Default for MerkleProof {
 
 impl Load<'_> for MerkleProof {
     fn load_from(s: &mut CellSlice) -> Result<Self, Error> {
-        if !s.has_remaining(Self::BITS, Self::REFS) {
+        if !s.is_full() || s.size_bits() != MerkleProof::BITS || s.size_refs() != MerkleProof::REFS
+        {
             return Err(Error::CellUnderflow);
         }
 
-        if ok!(s.get_u8(0)) != CellType::MerkleProof.to_byte() {
+        if !s.cell().descriptor().is_exotic() || ok!(s.load_u8()) != CellType::MerkleProof.to_byte()
+        {
             return Err(Error::InvalidCell);
         }
 
         let res = Self {
-            hash: ok!(s.get_u256(8)),
-            depth: ok!(s.get_u16(8 + 256)),
-            cell: ok!(s.get_reference_cloned(0)),
+            hash: ok!(s.load_u256()),
+            depth: ok!(s.load_u16()),
+            cell: ok!(s.load_reference_cloned()),
         };
-        if res.cell.as_ref().hash(0) == &res.hash
-            && res.cell.as_ref().depth(0) == res.depth
-            && s.try_advance(Self::BITS, Self::REFS)
-        {
+        debug_assert!(s.is_empty());
+
+        if res.cell.hash(0) == &res.hash && res.cell.depth(0) == res.depth {
             Ok(res)
         } else {
             Err(Error::InvalidCell)
