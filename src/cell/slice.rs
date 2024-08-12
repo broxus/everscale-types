@@ -752,6 +752,34 @@ impl<'a> CellSlice<'a> {
         }
     }
 
+    /// Returns `true` if this slice data is a prefix of the other slice data.
+    pub fn is_data_prefix_of(&self, other: &Self) -> Result<bool, Error> {
+        let bits = self.size_bits();
+        if bits > other.size_bits() {
+            return Ok(false);
+        }
+
+        let mut other = other.clone();
+        let ok = other.only_first(bits, 0).is_ok();
+        debug_assert!(ok);
+
+        Ok(ok!(self.lex_cmp(&other)).is_eq())
+    }
+
+    /// Returns `true` if this slice data is a suffix of the other slice data.
+    pub fn is_data_suffix_of(&self, other: &Self) -> Result<bool, Error> {
+        let bits = self.size_bits();
+        if bits > other.size_bits() {
+            return Ok(false);
+        }
+
+        let mut other = other.clone();
+        let ok = other.only_last(bits, 0).is_ok();
+        debug_assert!(ok);
+
+        Ok(ok!(self.lex_cmp(&other)).is_eq())
+    }
+
     /// Returns a subslice with the data prefix removed.
     ///
     /// If the slice starts with `prefix`, returns the subslice after the prefix, wrapped in `Some`.
@@ -1956,6 +1984,104 @@ mod tests {
             )?,
             std::cmp::Ordering::Less
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn is_prefix_of() -> anyhow::Result<()> {
+        let left = build_cell(|b| b.store_u64(0xabcdef1234567890));
+        let right = build_cell(|b| b.store_u64(0xabcdef0000000000));
+
+        // Not a prefix
+        {
+            let left = left.as_slice()?;
+            let right = right.as_slice()?;
+            assert!(!right.is_data_prefix_of(&left).unwrap());
+        }
+
+        // Aligned prefix
+        {
+            let left = left.as_slice()?;
+            let mut right = right.as_slice()?;
+            right.only_first(24, 0)?;
+            assert!(right.is_data_prefix_of(&left).unwrap());
+        }
+
+        // Shifted prefix
+        {
+            let mut left = left.as_slice()?;
+            left.skip_first(3, 0)?;
+
+            let mut right = right.as_slice()?;
+            right.skip_first(3, 0)?;
+            right.only_first(21, 0)?;
+
+            assert!(right.is_data_prefix_of(&left).unwrap());
+        }
+
+        // Empty prefix
+        {
+            let left = left.as_slice()?;
+            let right = Cell::empty_cell_ref().as_slice()?;
+            assert!(right.is_data_prefix_of(&left).unwrap());
+        }
+
+        // Not as prefix of an empty prefix
+        {
+            let left = Cell::empty_cell_ref().as_slice()?;
+            let right = right.as_slice()?;
+            assert!(!right.is_data_prefix_of(&left).unwrap());
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn is_suffix_of() -> anyhow::Result<()> {
+        let left = build_cell(|b| b.store_u64(0xabcdef1234567890));
+        let right = build_cell(|b| b.store_u64(0x0000001234567890));
+
+        // Not a suffix
+        {
+            let left = left.as_slice()?;
+            let right = right.as_slice()?;
+            assert!(!right.is_data_suffix_of(&left).unwrap());
+        }
+
+        // Aligned suffix
+        {
+            let left = left.as_slice()?;
+            let mut right = right.as_slice()?;
+            right.only_last(40, 0)?;
+            assert!(right.is_data_suffix_of(&left).unwrap());
+        }
+
+        // Shifted suffix
+        {
+            let mut left = left.as_slice()?;
+            left.skip_last(3, 0)?;
+
+            let mut right = right.as_slice()?;
+            right.skip_last(3, 0)?;
+            right.only_last(37, 0)?;
+
+            assert!(right.is_data_suffix_of(&left).unwrap());
+        }
+
+        // Empty suffix
+        {
+            let left = left.as_slice()?;
+            let right = Cell::empty_cell_ref().as_slice()?;
+            assert!(right.is_data_suffix_of(&left).unwrap());
+        }
+
+        // Not as suffix of an empty suffix
+        {
+            let left = Cell::empty_cell_ref().as_slice()?;
+            let right = right.as_slice()?;
+            assert!(!right.is_data_suffix_of(&left).unwrap());
+        }
 
         Ok(())
     }
