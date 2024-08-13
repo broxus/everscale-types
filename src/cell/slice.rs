@@ -759,7 +759,7 @@ impl<'a> CellSlice<'a> {
             return Ok(false);
         }
 
-        let mut other = other.clone();
+        let mut other = *other;
         let ok = other.only_first(bits, 0).is_ok();
         debug_assert!(ok);
 
@@ -773,7 +773,7 @@ impl<'a> CellSlice<'a> {
             return Ok(false);
         }
 
-        let mut other = other.clone();
+        let mut other = *other;
         let ok = other.only_last(bits, 0).is_ok();
         debug_assert!(ok);
 
@@ -942,6 +942,42 @@ impl<'a> CellSlice<'a> {
         std::cmp::min(prefix_len, max_bit_len)
     }
 
+    /// Returns the number of leading bits of `self`.
+    pub fn count_leading(&self, bit: bool) -> Result<u16, Error> {
+        if self.range.bits_start >= self.range.bits_end {
+            return Ok(0);
+        }
+        let data = self.cell.data();
+
+        // Check if data is enough
+        if (self.range.bits_end + 7) / 8 > data.len() as u16 {
+            return Err(Error::CellUnderflow);
+        }
+
+        let bit_count = self.range.bits_end - self.range.bits_start;
+
+        // SAFETY: `bits_end` is in data range
+        Ok(unsafe { bits_memscan(data, self.range.bits_start, bit_count, bit) })
+    }
+
+    /// Returns the number of trailing bits of `self`.
+    pub fn count_trailing(&self, bit: bool) -> Result<u16, Error> {
+        if self.range.bits_start >= self.range.bits_end {
+            return Ok(0);
+        }
+        let data = self.cell.data();
+
+        // Check if data is enough
+        if (self.range.bits_end + 7) / 8 > data.len() as u16 {
+            return Err(Error::CellUnderflow);
+        }
+
+        let bit_count = self.range.bits_end - self.range.bits_start;
+
+        // SAFETY: `bits_end` is in data range
+        Ok(unsafe { bits_memscan_rev(data, self.range.bits_start, bit_count, bit) })
+    }
+
     /// Checks whether the current slice consists of the same bits,
     /// returns `None` if there are 0s and 1s, returns `Some(bit)` otherwise.
     ///
@@ -976,7 +1012,6 @@ impl<'a> CellSlice<'a> {
         if self.range.bits_start >= self.range.bits_end {
             return None;
         }
-        let mut remaining_bits = self.range.bits_end - self.range.bits_start;
         let data = self.cell.data();
 
         // Check if data is enough
@@ -984,18 +1019,22 @@ impl<'a> CellSlice<'a> {
             return None;
         }
 
-        let r = self.range.bits_start % 8;
-        let q = (self.range.bits_start / 8) as usize;
+        let mut bit_count = self.range.bits_end - self.range.bits_start;
 
-        unsafe {
-            let mut data_ptr = data.as_ptr().add(q);
-            let first_byte = *data_ptr;
+        let r = self.range.bits_start & 0b111;
+        let q = self.range.bits_start >> 3;
 
-            let target = ((first_byte >> (7 - r)) & 1) * u8::MAX;
+        // SAFETY: q is in data range
+        let mut data_ptr = unsafe { data.as_ptr().add(q as usize) };
+        let first_byte = unsafe { *data_ptr };
+        let bit = (first_byte >> (7 - r)) & 1 != 0;
+
+        if bit_count < 64 {
+            let target = (bit as u8) * u8::MAX;
             let first_byte_mask: u8 = 0xff >> r;
-            let last_byte_mask: u8 = 0xff << ((8 - (remaining_bits + r) % 8) % 8);
+            let last_byte_mask: u8 = 0xff << ((8 - (bit_count + r) % 8) % 8);
 
-            if r + remaining_bits <= 8 {
+            if r + bit_count <= 8 {
                 // Special case if all remaining_bits are in the first byte
                 if ((first_byte ^ target) & first_byte_mask & last_byte_mask) != 0 {
                     return None;
@@ -1006,25 +1045,31 @@ impl<'a> CellSlice<'a> {
                     return None;
                 }
 
-                // Check all full bytes
-                remaining_bits -= 8 - r;
-                for _ in 0..(remaining_bits / 8) {
-                    data_ptr = data_ptr.add(1);
-                    if *data_ptr != target {
-                        return None;
+                unsafe {
+                    // Check all full bytes
+                    bit_count -= 8 - r;
+                    for _ in 0..(bit_count / 8) {
+                        data_ptr = data_ptr.add(1);
+                        if *data_ptr != target {
+                            return None;
+                        }
                     }
-                }
 
-                // Check the last byte (if not aligned)
-                if remaining_bits % 8 != 0 {
-                    data_ptr = data_ptr.add(1);
-                    if (*data_ptr ^ target) & last_byte_mask != 0 {
-                        return None;
+                    // Check the last byte (if not aligned)
+                    if bit_count % 8 != 0 {
+                        data_ptr = data_ptr.add(1);
+                        if (*data_ptr ^ target) & last_byte_mask != 0 {
+                            return None;
+                        }
                     }
                 }
             }
 
-            Some(target != 0)
+            Some(bit)
+        } else {
+            // SAFETY: `bits_end` is in data range
+            let same_bits = unsafe { bits_memscan(data, self.range.bits_start, bit_count, bit) };
+            (same_bits == bit_count).then_some(bit)
         }
     }
 
@@ -1733,6 +1778,149 @@ impl_exact_size_for_tuples! {
     (0: T0, 1: T1, 2: T2, 3: T3, 4: T4, 5: T5),
 }
 
+/// # Safety
+/// The following must be true:
+/// - (offset + bit_count + 7) / 8 <= data.len()
+unsafe fn bits_memscan(data: &[u8], mut offset: u16, bit_count: u16, cmp_to: bool) -> u16 {
+    #[inline]
+    const fn is_aligned_to_u64(ptr: *const u8) -> bool {
+        // SAFETY: Pointer-to-integer transmutes are valid (if you are okay with losing the
+        // provenance).
+        let addr: usize = unsafe { std::mem::transmute(ptr.cast::<()>()) };
+        addr & (std::mem::align_of::<u64>() - 1) == 0
+    }
+
+    if bit_count == 0 {
+        return 0;
+    }
+    debug_assert!((offset + bit_count + 7) as usize / 8 <= data.len());
+
+    let xor_value = cmp_to as u8 * u8::MAX;
+
+    // Apply offset to byte level
+    let mut ptr = data.as_ptr().add(offset as usize >> 3);
+    offset &= 0b111;
+
+    let mut rem = bit_count;
+    if offset > 0 {
+        // NOTE: `offset` is in range 1..=7
+        let v = (*ptr ^ xor_value) << offset;
+        let c = v.leading_zeros() as u16;
+        let l = 8 - offset;
+        if c < l || bit_count <= l {
+            return c.min(bit_count);
+        }
+
+        ptr = ptr.add(1);
+        rem -= l;
+    }
+
+    while rem >= 8 && !is_aligned_to_u64(ptr) {
+        let v = *ptr ^ xor_value;
+        if v > 0 {
+            return bit_count - rem + v.leading_zeros() as u16;
+        }
+
+        ptr = ptr.add(1);
+        rem -= 8;
+    }
+
+    let xor_value_l = cmp_to as u64 * u64::MAX;
+    while rem >= 64 {
+        #[cfg(target_endian = "little")]
+        let z = { (*ptr.cast::<u64>()).swap_bytes() ^ xor_value_l };
+        #[cfg(not(target_endian = "little"))]
+        let z = { *ptr.cast::<u64>() ^ xor_value_l };
+
+        if z > 0 {
+            return bit_count - rem + z.leading_zeros() as u16;
+        }
+
+        ptr = ptr.add(8);
+        rem -= 64;
+    }
+
+    while rem >= 8 {
+        let v = *ptr ^ xor_value;
+        if v > 0 {
+            return bit_count - rem + v.leading_zeros() as u16;
+        }
+
+        ptr = ptr.add(1);
+        rem -= 8;
+    }
+
+    if rem > 0 {
+        let v = *ptr ^ xor_value;
+        let c = v.leading_zeros() as u16;
+        if c < rem {
+            return bit_count - rem + c;
+        }
+    }
+
+    bit_count
+}
+
+// # Safety
+/// The following must be true:
+/// - (offset + bit_count + 7) / 8 <= data.len()
+unsafe fn bits_memscan_rev(data: &[u8], mut offset: u16, mut bit_count: u16, cmp_to: bool) -> u16 {
+    if bit_count == 0 {
+        return 0;
+    }
+    debug_assert!((offset + bit_count + 7) as usize / 8 <= data.len());
+
+    let xor_value = cmp_to as u8 * u8::MAX;
+    let mut ptr = data.as_ptr().add((offset + bit_count) as usize >> 3);
+    offset = (offset + bit_count) & 0b111;
+
+    let mut res = offset;
+    if offset > 0 {
+        let v = (*ptr >> (8 - offset)) ^ xor_value;
+        let c = v.trailing_zeros() as u16;
+        if c < offset || res >= bit_count {
+            return c.min(bit_count);
+        }
+        bit_count -= res;
+    }
+
+    let xor_value_l = cmp_to as u32 * u32::MAX;
+    while bit_count >= 32 {
+        ptr = ptr.sub(4);
+
+        #[cfg(target_endian = "little")]
+        let v = { ptr.cast::<u32>().read_unaligned().swap_bytes() ^ xor_value_l };
+        #[cfg(not(target_endian = "little"))]
+        let v = { ptr.cast::<u32>().read_unaligned() ^ xor_value_l };
+
+        if v > 0 {
+            return res + v.trailing_zeros() as u16;
+        }
+
+        res += 32;
+        bit_count -= 32;
+    }
+
+    while bit_count >= 8 {
+        ptr = ptr.sub(1);
+        let v = *ptr ^ xor_value;
+        if v > 0 {
+            return res + v.trailing_zeros() as u16;
+        }
+
+        res += 8;
+        bit_count -= 8;
+    }
+
+    if bit_count > 0 {
+        ptr = ptr.sub(1);
+        let v = *ptr ^ xor_value;
+        res + std::cmp::min(v.trailing_zeros() as u16, bit_count)
+    } else {
+        res
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::error::Error;
@@ -2081,6 +2269,104 @@ mod tests {
             let left = Cell::empty_cell_ref().as_slice()?;
             let right = right.as_slice()?;
             assert!(!right.is_data_suffix_of(&left).unwrap());
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn leading_bits() -> anyhow::Result<()> {
+        // Empty slice has zero leading bits
+        assert_eq!(Cell::empty_cell_ref().as_slice()?.count_leading(false)?, 0);
+        assert_eq!(Cell::empty_cell_ref().as_slice()?.count_leading(true)?, 0);
+
+        // Full slice has all bits set
+        assert_eq!(
+            Cell::all_zeros_ref().as_slice()?.count_leading(false)?,
+            1023
+        );
+        assert_eq!(Cell::all_ones_ref().as_slice()?.count_leading(true)?, 1023);
+
+        // Full slice has no leading other bits
+        assert_eq!(Cell::all_zeros_ref().as_slice()?.count_leading(true)?, 0);
+        assert_eq!(Cell::all_ones_ref().as_slice()?.count_leading(false)?, 0);
+
+        // Test for different alignments
+        for shift_before in [false, true] {
+            for shift_after in [false, true] {
+                for i in 0..128 {
+                    let mut builder = CellBuilder::new();
+
+                    if shift_before {
+                        builder.store_ones(7)?;
+                    };
+                    builder.store_u128(1 << i)?;
+                    if shift_after {
+                        builder.store_ones(14)?;
+                    }
+
+                    let mut slice = builder.as_data_slice();
+
+                    if shift_before {
+                        slice.skip_first(7, 0)?;
+                    }
+                    if shift_after {
+                        slice.only_first(128, 0)?;
+                    }
+
+                    assert_eq!(slice.count_leading(false)?, 127 - i);
+                    assert_eq!(slice.count_leading(true)?, (i == 127) as u16);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn trailing_bits() -> anyhow::Result<()> {
+        // Empty slice has zero trailing bits
+        assert_eq!(Cell::empty_cell_ref().as_slice()?.count_trailing(false)?, 0);
+        assert_eq!(Cell::empty_cell_ref().as_slice()?.count_trailing(true)?, 0);
+
+        // Full slice has all bits set
+        assert_eq!(
+            Cell::all_zeros_ref().as_slice()?.count_trailing(false)?,
+            1023
+        );
+        assert_eq!(Cell::all_ones_ref().as_slice()?.count_trailing(true)?, 1023);
+
+        // Full slice has no trailing other bits
+        assert_eq!(Cell::all_zeros_ref().as_slice()?.count_trailing(true)?, 0);
+        assert_eq!(Cell::all_ones_ref().as_slice()?.count_trailing(false)?, 0);
+
+        // Test for different alignments
+        for shift_before in [false, true] {
+            for shift_after in [false, true] {
+                for i in 0..128 {
+                    let mut builder = CellBuilder::new();
+
+                    if shift_before {
+                        builder.store_ones(7)?;
+                    };
+                    builder.store_u128(1 << i)?;
+                    if shift_after {
+                        builder.store_ones(14)?;
+                    }
+
+                    let mut slice = builder.as_data_slice();
+
+                    if shift_before {
+                        slice.skip_first(7, 0)?;
+                    }
+                    if shift_after {
+                        slice.only_first(128, 0)?;
+                    }
+
+                    assert_eq!(slice.count_trailing(false)?, i);
+                    assert_eq!(slice.count_trailing(true)?, (i == 0) as u16);
+                }
+            }
         }
 
         Ok(())

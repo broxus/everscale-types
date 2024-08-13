@@ -23,15 +23,13 @@ impl Eq for MerkleProofRef<'_> {}
 
 impl PartialEq for MerkleProofRef<'_> {
     fn eq(&self, other: &Self) -> bool {
-        self.hash == other.hash && self.depth == other.depth && self.cell == other.cell
+        self.hash == other.hash && self.depth == other.depth && *self.cell == *other.cell
     }
 }
 
 impl PartialEq<MerkleProof> for MerkleProofRef<'_> {
     fn eq(&self, other: &MerkleProof) -> bool {
-        self.hash == other.hash
-            && self.depth == other.depth
-            && self.cell.as_ref() == other.cell.as_ref()
+        self.hash == other.hash && self.depth == other.depth && *self.cell == *other.cell
     }
 }
 
@@ -99,9 +97,7 @@ impl PartialEq for MerkleProof {
 
 impl PartialEq<MerkleProofRef<'_>> for MerkleProof {
     fn eq(&self, other: &MerkleProofRef<'_>) -> bool {
-        self.hash == other.hash
-            && self.depth == other.depth
-            && self.cell.as_ref() == other.cell.as_ref()
+        self.hash == other.hash && self.depth == other.depth && *self.cell == *other.cell
     }
 }
 

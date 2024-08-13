@@ -14,15 +14,19 @@ name = "boc"
 harness = false
 
 [[bench]]
+name = "dict_from_slice"
+harness = false
+
+[[bench]]
 name = "dict"
 harness = false
 
 [[bench]]
-name = "usage_cell"
+name = "slice_uniform"
 harness = false
 
 [[bench]]
-name = "dict_from_slice"
+name = "usage_cell"
 harness = false
 
 [workspace]
