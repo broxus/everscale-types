@@ -27,6 +27,14 @@ impl PartialEq for MerkleProofRef<'_> {
     }
 }
 
+impl PartialEq<MerkleProof> for MerkleProofRef<'_> {
+    fn eq(&self, other: &MerkleProof) -> bool {
+        self.hash == other.hash
+            && self.depth == other.depth
+            && self.cell.as_ref() == other.cell.as_ref()
+    }
+}
+
 impl Default for MerkleProofRef<'_> {
     fn default() -> Self {
         Self {
@@ -44,7 +52,7 @@ impl<'a> Load<'a> for MerkleProofRef<'a> {
             return Err(Error::CellUnderflow);
         }
 
-        if !s.cell().descriptor().is_exotic() || ok!(s.get_u8(0)) != CellType::MerkleProof.to_byte()
+        if !s.cell().descriptor().is_exotic() || ok!(s.load_u8()) != CellType::MerkleProof.to_byte()
         {
             return Err(Error::InvalidCell);
         }
@@ -83,6 +91,14 @@ impl Eq for MerkleProof {}
 
 impl PartialEq for MerkleProof {
     fn eq(&self, other: &Self) -> bool {
+        self.hash == other.hash
+            && self.depth == other.depth
+            && self.cell.as_ref() == other.cell.as_ref()
+    }
+}
+
+impl PartialEq<MerkleProofRef<'_>> for MerkleProof {
+    fn eq(&self, other: &MerkleProofRef<'_>) -> bool {
         self.hash == other.hash
             && self.depth == other.depth
             && self.cell.as_ref() == other.cell.as_ref()

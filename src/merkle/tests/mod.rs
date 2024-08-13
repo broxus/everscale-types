@@ -10,6 +10,9 @@ fn correct_proof_store_load() {
 
     let parsed = cell.as_ref().parse::<MerkleProof>().unwrap();
     assert_eq!(parsed, proof);
+
+    let parsed = cell.as_ref().parse::<MerkleProofRef<'_>>().unwrap();
+    assert_eq!(parsed, proof);
 }
 
 #[test]
