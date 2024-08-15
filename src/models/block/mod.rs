@@ -40,12 +40,17 @@ pub struct Block {
     /// Merkle update for the shard state.
     pub state_update: Lazy<MerkleUpdate>,
     /// Merkle updates for the outgoing messages queue.
+    #[cfg(not(feature = "tycho"))]
     pub out_msg_queue_updates: Option<Dict<u32, Lazy<MerkleUpdate>>>,
+    /// Processed upto and diff hash queue msg update
+    #[cfg(feature = "tycho")]
+    pub out_msg_queue_updates: MsgQueueUpdates,
     /// Block content.
     pub extra: Lazy<BlockExtra>,
 }
 
 impl Block {
+    #[cfg(not(feature = "tycho"))]
     const TAG_V1: u32 = 0x11ef55aa;
     const TAG_V2: u32 = 0x11ef55bb;
 
@@ -88,17 +93,21 @@ impl Store for Block {
         builder: &mut CellBuilder,
         context: &mut dyn CellContext,
     ) -> Result<(), Error> {
+        #[cfg(not(feature = "tycho"))]
         let tag = if self.out_msg_queue_updates.is_none() {
             Self::TAG_V1
         } else {
             Self::TAG_V2
         };
+        #[cfg(feature = "tycho")]
+        let tag = Self::TAG_V2;
 
         ok!(builder.store_u32(tag));
         ok!(builder.store_u32(self.global_id as u32));
         ok!(builder.store_reference(self.info.cell.clone()));
         ok!(builder.store_reference(self.value_flow.cell.clone()));
 
+        #[cfg(not(feature = "tycho"))]
         ok!(
             if let Some(out_msg_queue_updates) = &self.out_msg_queue_updates {
                 let cell = {
@@ -112,6 +121,16 @@ impl Store for Block {
                 self.state_update.store_into(builder, context)
             }
         );
+        #[cfg(feature = "tycho")]
+        ok!({
+            let cell = {
+                let mut builder = CellBuilder::new();
+                ok!(self.state_update.store_into(&mut builder, context));
+                ok!(self.out_msg_queue_updates.store_into(&mut builder, context));
+                ok!(builder.build_ext(context))
+            };
+            builder.store_reference(cell)
+        });
 
         self.extra.store_into(builder, context)
     }
@@ -119,8 +138,14 @@ impl Store for Block {
 
 impl<'a> Load<'a> for Block {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
+        #[cfg(not(feature = "tycho"))]
         let with_out_msg_queue_updates = match ok!(slice.load_u32()) {
             Self::TAG_V1 => false,
+            Self::TAG_V2 => true,
+            _ => return Err(Error::InvalidTag),
+        };
+        #[cfg(feature = "tycho")]
+        match ok!(slice.load_u32()) {
             Self::TAG_V2 => true,
             _ => return Err(Error::InvalidTag),
         };
@@ -128,6 +153,8 @@ impl<'a> Load<'a> for Block {
         let global_id = ok!(slice.load_u32()) as i32;
         let info = ok!(Lazy::load_from(slice));
         let value_flow = ok!(Lazy::load_from(slice));
+
+        #[cfg(not(feature = "tycho"))]
         let (state_update, out_msg_queue_updates) = if with_out_msg_queue_updates {
             let slice = &mut ok!(slice.load_reference_as_slice());
             (
@@ -136,6 +163,14 @@ impl<'a> Load<'a> for Block {
             )
         } else {
             (ok!(Lazy::load_from(slice)), None)
+        };
+        #[cfg(feature = "tycho")]
+        let (state_update, out_msg_queue_updates) = {
+            let slice = &mut ok!(slice.load_reference_as_slice());
+            (
+                ok!(Lazy::load_from(slice)),
+                ok!(MsgQueueUpdates::load_from(slice)),
+            )
         };
 
         Ok(Self {
@@ -668,4 +703,13 @@ impl<'a> Load<'a> for ValueFlow {
             copyleft_rewards,
         })
     }
+}
+
+#[cfg(feature = "tycho")]
+/// Message queue updates
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct MsgQueueUpdates {
+    /// Diff hash
+    pub diff_hash: HashBytes,
 }
