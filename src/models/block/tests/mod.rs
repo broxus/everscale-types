@@ -351,3 +351,116 @@ fn proof_for_shardchain_block() {
 
     assert_eq!(serialize_any(proof).as_ref(), boc.as_ref());
 }
+
+#[test]
+#[cfg(feature = "tycho")]
+fn block_with_tycho_updates_store_load() {
+    use crate::models::{ExtraCurrencyCollection, GlobalCapabilities};
+
+    let block = Block {
+        global_id: 42,
+        info: Lazy::new(&BlockInfo {
+            version: 0,
+            gen_utime_ms: 123,
+            after_merge: false,
+            before_split: false,
+            after_split: false,
+            want_split: false,
+            want_merge: true,
+            key_block: false,
+            flags: 1,
+            seqno: 24721433,
+            vert_seqno: 0,
+            shard: ShardIdent::new(-1, 0x8000000000000000).unwrap(),
+            gen_utime: 1674507085,
+            start_lt: 34671157000000,
+            end_lt: 34671157000005,
+            gen_validator_list_hash_short: 3236125243,
+            gen_catchain_seqno: 343054,
+            min_ref_mc_seqno: 24721430,
+            prev_key_block_seqno: 24715347,
+            gen_software: GlobalVersion {
+                version: 34,
+                capabilities: GlobalCapabilities::new(464814),
+            },
+            master_ref: None,
+            prev_ref: Cell::empty_cell(),
+            prev_vert_ref: None,
+        })
+        .unwrap(),
+        value_flow: Lazy::new(&ValueFlow {
+            from_prev_block: CurrencyCollection {
+                tokens: Tokens::new(3610625966274374005),
+                other: ExtraCurrencyCollection::new(),
+            },
+            to_next_block: CurrencyCollection {
+                tokens: Tokens::new(3610625969470214036),
+                other: ExtraCurrencyCollection::new(),
+            },
+            imported: CurrencyCollection {
+                tokens: Tokens::new(0),
+                other: ExtraCurrencyCollection::new(),
+            },
+            exported: CurrencyCollection {
+                tokens: Tokens::new(0),
+                other: ExtraCurrencyCollection::new(),
+            },
+            fees_collected: CurrencyCollection {
+                tokens: Tokens::new(3195840031),
+                other: ExtraCurrencyCollection::new(),
+            },
+            fees_imported: CurrencyCollection {
+                tokens: Tokens::new(1495840031),
+                other: ExtraCurrencyCollection::new(),
+            },
+            recovered: CurrencyCollection {
+                tokens: Tokens::new(3195840031),
+                other: ExtraCurrencyCollection::new(),
+            },
+            created: CurrencyCollection {
+                tokens: Tokens::new(1700000000),
+                other: ExtraCurrencyCollection::new(),
+            },
+            minted: CurrencyCollection {
+                tokens: Tokens::new(0),
+                other: ExtraCurrencyCollection::new(),
+            },
+            copyleft_rewards: Dict::new(),
+        })
+        .unwrap(),
+        state_update: Lazy::new(&MerkleUpdate {
+            old_hash: HashBytes::ZERO,
+            new_hash: HashBytes::ZERO,
+            old_depth: 182,
+            new_depth: 182,
+            old: Cell::empty_cell(),
+            new: Cell::empty_cell(),
+        })
+        .unwrap(),
+        extra: Lazy::new(&BlockExtra {
+            in_msg_description: Lazy::new(&AugDict::new()).unwrap(),
+            out_msg_description: Lazy::new(&AugDict::new()).unwrap(),
+            account_blocks: Lazy::new(&AugDict::new()).unwrap(),
+            rand_seed: HashBytes::ZERO,
+            created_by: HashBytes::ZERO,
+            custom: None,
+        })
+        .unwrap(),
+        out_msg_queue_updates: OutMsgQueueUpdates {
+            diff_hash: HashBytes::ZERO,
+        },
+    };
+    let encoded = BocRepr::encode(&block).unwrap();
+
+    let cell = Boc::decode(&*encoded).unwrap();
+
+    let decoded = cell.parse::<Block>().unwrap();
+    assert_eq!(decoded, block);
+
+    assert_eq!(
+        decoded.out_msg_queue_updates,
+        OutMsgQueueUpdates {
+            diff_hash: HashBytes::ZERO,
+        }
+    );
+}
