@@ -127,6 +127,44 @@ pub struct BlockIdShort {
     pub seqno: u32,
 }
 
+impl BlockIdShort {
+    /// Returns `true` if this block id is for a masterchain block.
+    ///
+    /// See [`ShardIdent::MASTERCHAIN`]
+    #[inline]
+    pub const fn is_masterchain(&self) -> bool {
+        self.shard.is_masterchain()
+    }
+
+    /// Returns a previous block id.
+    pub fn saturating_prev(&self) -> Self {
+        self.saturating_sub(1)
+    }
+
+    /// Returns a next block id.
+    pub fn saturating_next(&self) -> Self {
+        self.saturating_add(1)
+    }
+
+    /// Returns a new block id with the seqno
+    /// increased at most by the specified value.
+    pub fn saturating_add(&self, seqno: u32) -> Self {
+        Self {
+            shard: self.shard,
+            seqno: self.seqno.saturating_add(seqno),
+        }
+    }
+
+    /// Returns a new block id with the seqno
+    /// decreased at most by the specified value.
+    pub fn saturating_sub(&self, seqno: u32) -> Self {
+        Self {
+            shard: self.shard,
+            seqno: self.seqno.saturating_sub(seqno),
+        }
+    }
+}
+
 impl std::fmt::Display for BlockIdShort {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("{}:{}", self.shard, self.seqno))

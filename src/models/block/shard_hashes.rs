@@ -442,6 +442,16 @@ impl ShardDescription {
     const TAG_V4: u8 = 0xd;
     #[cfg(feature = "venom")]
     const TAG_V5: u8 = 0xe;
+
+    /// Converts a `ShardDescription` to a `BlockId` given a shard identifier.
+    pub fn as_block_id(&self, shard: ShardIdent) -> BlockId {
+        BlockId {
+            shard,
+            seqno: self.seqno,
+            root_hash: self.root_hash,
+            file_hash: self.file_hash,
+        }
+    }
 }
 
 impl Store for ShardDescription {
