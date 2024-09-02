@@ -108,3 +108,6 @@ opt-level = 1
 
 [package.metadata.docs.rs]
 features = ["base64", "serde", "models", "sync", "stats", "abi"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }

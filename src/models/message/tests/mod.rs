@@ -37,6 +37,8 @@ fn check_message(boc: &[u8]) -> Cell {
 #[test]
 fn external_message() -> anyhow::Result<()> {
     let boc = check_message(include_bytes!("external_message.boc"));
+    assert_eq!(boc.parse::<MsgType>()?, MsgType::ExtIn);
+
     let body = Boc::decode(include_bytes!("external_message_body.boc")).unwrap();
     let serialized = serialize_message(Message {
         info: MsgInfo::ExtIn(ExtInMsgInfo {
@@ -57,6 +59,8 @@ fn external_message() -> anyhow::Result<()> {
 #[test]
 fn external_outgoing() {
     let boc = check_message(include_bytes!("external_out_message.boc"));
+    assert_eq!(boc.parse::<MsgType>().unwrap(), MsgType::ExtOut);
+
     let body = Boc::decode_base64("te6ccgEBAQEADgAAGJMdgs1k/wsgCERmwQ==").unwrap();
     let serialized = serialize_message(Message {
         info: MsgInfo::ExtOut(ExtOutMsgInfo {
@@ -77,6 +81,7 @@ fn external_outgoing() {
 #[test]
 fn internal_message_empty() {
     let boc = check_message(include_bytes!("empty_internal_message.boc"));
+    assert_eq!(boc.parse::<MsgType>().unwrap(), MsgType::Int);
 
     let serialized = serialize_message(Message {
         info: MsgInfo::Int(IntMsgInfo {
@@ -103,6 +108,8 @@ fn internal_message_empty() {
 #[test]
 fn internal_message_with_body() -> anyhow::Result<()> {
     let boc = check_message(include_bytes!("internal_message_with_body.boc"));
+    assert_eq!(boc.parse::<MsgType>().unwrap(), MsgType::Int);
+
     let body = Boc::decode(include_bytes!("internal_message_body.boc")).unwrap();
 
     let serialized = serialize_message(Message {
@@ -132,6 +139,7 @@ fn internal_message_with_body() -> anyhow::Result<()> {
 #[test]
 fn internal_message_with_deploy() -> anyhow::Result<()> {
     let boc = check_message(include_bytes!("internal_message_with_deploy.boc"));
+    assert_eq!(boc.parse::<MsgType>().unwrap(), MsgType::Int);
 
     let init = Boc::decode(include_bytes!(
         "internal_message_with_deploy_state_init.boc"
@@ -170,6 +178,7 @@ fn internal_message_with_deploy_special() -> anyhow::Result<()> {
     use crate::models::account::*;
 
     let boc = check_message(include_bytes!("internal_message_with_deploy_special.boc"));
+    assert_eq!(boc.parse::<MsgType>().unwrap(), MsgType::Int);
 
     let init = StateInit {
         split_depth: None,
