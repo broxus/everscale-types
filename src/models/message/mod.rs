@@ -1,5 +1,7 @@
 //! Message models.
 
+use std::borrow::Borrow;
+
 use crate::cell::*;
 use crate::error::Error;
 use crate::num::*;
@@ -128,6 +130,13 @@ where
         } else {
             crate::boc::BocRepr::deserialize(deserializer)
         }
+    }
+}
+
+impl<I: Borrow<MsgInfo>, B> BaseMessage<I, B> {
+    /// Returns the type of this message.
+    pub fn ty(&self) -> MsgType {
+        self.info.borrow().ty()
     }
 }
 
@@ -576,6 +585,56 @@ impl<'a> Load<'a> for RelaxedMsgInfo {
     }
 }
 
+/// Message type.
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+pub enum MsgType {
+    /// Internal message.
+    Int,
+    /// External incoming message.
+    ExtIn,
+    /// External outgoing message.
+    ExtOut,
+}
+
+impl MsgType {
+    /// Returns whether this message is internal.
+    pub const fn is_internal(&self) -> bool {
+        matches!(self, Self::Int)
+    }
+
+    /// Returns whether this message is external incoming.
+    pub const fn is_external_in(&self) -> bool {
+        matches!(self, Self::ExtIn)
+    }
+
+    /// Returns whether this message is external outgoing.
+    pub const fn is_external_out(&self) -> bool {
+        matches!(self, Self::ExtOut)
+    }
+}
+
+impl Store for MsgType {
+    fn store_into(&self, b: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+        match self {
+            Self::Int => b.store_bit_zero(),
+            Self::ExtIn => b.store_small_uint(0b10, 2),
+            Self::ExtOut => b.store_small_uint(0b11, 2),
+        }
+    }
+}
+
+impl<'a> Load<'a> for MsgType {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
+        Ok(if !ok!(slice.load_bit()) {
+            Self::Int
+        } else if !ok!(slice.load_bit()) {
+            Self::ExtIn
+        } else {
+            Self::ExtOut
+        })
+    }
+}
+
 /// Message info.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -590,6 +649,30 @@ pub enum MsgInfo {
 }
 
 impl MsgInfo {
+    /// Returns the type of this message info.
+    pub const fn ty(&self) -> MsgType {
+        match self {
+            Self::Int(_) => MsgType::Int,
+            Self::ExtIn(_) => MsgType::ExtIn,
+            Self::ExtOut(_) => MsgType::ExtOut,
+        }
+    }
+
+    /// Returns whether this message is internal.
+    pub const fn is_internal(&self) -> bool {
+        matches!(self, Self::Int(_))
+    }
+
+    /// Returns whether this message is external incoming.
+    pub const fn is_external_in(&self) -> bool {
+        matches!(self, Self::ExtIn(_))
+    }
+
+    /// Returns whether this message is external outgoing.
+    pub const fn is_external_out(&self) -> bool {
+        matches!(self, Self::ExtOut(_))
+    }
+
     /// Exact size of this value when it is stored in slice.
     pub const fn exact_size_const(&self) -> Size {
         Size {
