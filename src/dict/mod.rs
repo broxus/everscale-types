@@ -1,5 +1,7 @@
 //! Dictionary implementation.
 
+use std::ops::ControlFlow;
+
 pub use self::aug::*;
 pub use self::ops::*;
 pub use self::raw::*;
@@ -14,7 +16,9 @@ mod typed;
 
 mod ops {
     pub use self::build::{build_aug_dict_from_sorted_iter, build_dict_from_sorted_iter};
-    pub use self::find::{dict_find_bound, dict_find_bound_owned, dict_find_owned};
+    pub use self::find::{
+        aug_dict_find_by_extra, dict_find_bound, dict_find_bound_owned, dict_find_owned,
+    };
     pub use self::get::{dict_get, dict_get_owned, dict_get_subdict};
     pub use self::insert::{aug_dict_insert, dict_insert, dict_insert_owned};
     pub use self::remove::{aug_dict_remove_owned, dict_remove_bound_owned, dict_remove_owned};
@@ -69,6 +73,48 @@ impl_dict_key! {
      (u64, u32) => 96 => |d| {
         (u64::from_be_bytes(d[..8].try_into().unwrap()), u32::from_be_bytes(d[8..12].try_into().unwrap()))
     },
+}
+
+/// `AugDict` search control flow.
+pub trait SearchByExtra<A> {
+    /// Returns if the leaf extra satisfies the condition.
+    fn on_leaf(&mut self, leaf_extra: &A) -> bool {
+        _ = leaf_extra;
+        true
+    }
+
+    /// Returns which branch satisfies the condition.
+    fn on_edge(&mut self, left_extra: &A, right_extra: &A) -> ControlFlow<(), Branch>;
+}
+
+impl<A, T: SearchByExtra<A>> SearchByExtra<A> for &mut T {
+    #[inline]
+    fn on_leaf(&mut self, leaf_extra: &A) -> bool {
+        T::on_leaf(self, leaf_extra)
+    }
+
+    #[inline]
+    fn on_edge(&mut self, left_extra: &A, right_extra: &A) -> ControlFlow<(), Branch> {
+        T::on_edge(self, left_extra, right_extra)
+    }
+}
+
+impl<A> SearchByExtra<A> for Branch {
+    #[inline]
+    fn on_edge(&mut self, _: &A, _: &A) -> ControlFlow<(), Branch> {
+        ControlFlow::Continue(*self)
+    }
+}
+
+impl<A: Ord> SearchByExtra<A> for std::cmp::Ordering {
+    #[inline]
+    fn on_edge(&mut self, left_extra: &A, right_extra: &A) -> ControlFlow<(), Branch> {
+        ControlFlow::Continue(if *self == left_extra.cmp(right_extra) {
+            Branch::Left
+        } else {
+            Branch::Right
+        })
+    }
 }
 
 /// Dictionary insertion mode.
@@ -565,20 +611,23 @@ fn read_hml_same<'a>(label: &mut CellSlice<'a>, bits_for_len: u16) -> Result<Cel
     Ok(slice.get_prefix(len, 0))
 }
 
+/// Which branch to take when traversing the tree.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-enum Branch {
-    // Branch for a key part that starts with bit 0
+pub enum Branch {
+    /// Branch for a key part that starts with bit 0
     Left = 0,
-    // Branch for a key part that starts with bit 1
+    /// Branch for a key part that starts with bit 1
     Right = 1,
 }
 
 impl Branch {
-    fn into_bit(self) -> bool {
+    /// Converts the branch to a boolean value.
+    pub fn into_bit(self) -> bool {
         self == Self::Right
     }
 
-    fn reversed(self) -> Self {
+    /// Returns the opposite branch.
+    pub fn reversed(self) -> Self {
         match self {
             Self::Left => Self::Right,
             Self::Right => Self::Left,

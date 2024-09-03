@@ -1,5 +1,7 @@
+use std::ops::ControlFlow;
+
 use crate::cell::*;
-use crate::dict::{read_label, Branch, DictBound, DictOwnedEntry, Segment};
+use crate::dict::{read_label, Branch, DictBound, DictOwnedEntry, SearchByExtra, Segment};
 use crate::error::Error;
 
 /// Returns cell slice parts of the value corresponding to the key.
@@ -232,7 +234,6 @@ pub fn dict_find_bound<'a: 'b, 'b>(
     loop {
         // Read the key part written in the current edge
         let prefix = ok!(read_label(&mut data, key_bit_len));
-        #[allow(clippy::needless_borrow)]
         if !prefix.is_data_empty() {
             ok!(key.store_slice_data(prefix));
         }
@@ -330,4 +331,133 @@ pub fn dict_find_bound_owned(
 
     // Return the last slice as data
     Ok(Some((key, slice)))
+}
+
+/// Searches for an item using a predicate on extra values.
+pub fn aug_dict_find_by_extra<'a, A, S>(
+    dict: Option<&'a Cell>,
+    mut key_bit_len: u16,
+    mut flow: S,
+) -> Result<Option<(CellBuilder, A, CellSlice<'a>)>, Error>
+where
+    S: SearchByExtra<A>,
+    A: Load<'a> + 'a,
+{
+    struct Leaf<'a, A> {
+        prefix: CellSlice<'a>,
+        extra: A,
+        value: CellSlice<'a>,
+    }
+
+    struct Edge<'a, A> {
+        prefix: CellSlice<'a>,
+        key_bit_len: u16,
+        extra: A,
+        left: &'a DynCell,
+        right: &'a DynCell,
+    }
+
+    enum Next<'a, A> {
+        Leaf(Leaf<'a, A>),
+        Edge(Edge<'a, A>),
+    }
+
+    impl<'a, A> Next<'a, A> {
+        fn prefix(&self) -> &CellSlice<'a> {
+            match self {
+                Self::Leaf(leaf) => &leaf.prefix,
+                Self::Edge(edge) => &edge.prefix,
+            }
+        }
+
+        fn extra(&'a self) -> &'a A {
+            match self {
+                Self::Leaf(leaf) => &leaf.extra,
+                Self::Edge(edge) => &edge.extra,
+            }
+        }
+    }
+
+    fn preload_branch<'a, A>(data: &'a DynCell, mut key_bit_len: u16) -> Result<Next<'a, A>, Error>
+    where
+        A: Load<'a> + 'a,
+    {
+        let mut data = ok!(data.as_slice());
+        let prefix = ok!(read_label(&mut data, key_bit_len));
+
+        let is_edge = match key_bit_len.checked_sub(prefix.size_bits()) {
+            Some(0) => false,
+            Some(remaining) => {
+                if data.size_refs() < 2 {
+                    return Err(Error::CellUnderflow);
+                }
+                key_bit_len = remaining - 1;
+                true
+            }
+            None => return Err(Error::CellUnderflow),
+        };
+
+        let mut children = None;
+        if is_edge {
+            let left = ok!(data.load_reference());
+            let right = ok!(data.load_reference());
+            children = Some((left, right));
+        };
+        let extra = ok!(A::load_from(&mut data));
+
+        Ok(match children {
+            None => Next::Leaf(Leaf {
+                prefix,
+                extra,
+                value: data,
+            }),
+            Some((left, right)) => Next::Edge(Edge {
+                prefix,
+                key_bit_len,
+                extra,
+                left,
+                right,
+            }),
+        })
+    }
+
+    let data = match dict {
+        Some(data) => data.as_ref(),
+        None => return Ok(None),
+    };
+
+    let mut key_builder = CellBuilder::new();
+
+    let mut next = ok!(preload_branch::<A>(data, key_bit_len));
+    loop {
+        let prefix = next.prefix();
+        if !prefix.is_data_empty() {
+            ok!(key_builder.store_slice_data(prefix));
+        }
+
+        match next {
+            Next::Leaf(leaf) if flow.on_leaf(&leaf.extra) => {
+                break Ok(Some((key_builder, leaf.extra, leaf.value)));
+            }
+            Next::Leaf(_) => break Ok(None),
+            Next::Edge(edge) => {
+                key_bit_len = edge.key_bit_len;
+
+                let left = ok!(preload_branch::<A>(edge.left, key_bit_len));
+                let right = ok!(preload_branch::<A>(edge.right, key_bit_len));
+
+                next = match flow.on_edge(left.extra(), right.extra()) {
+                    ControlFlow::Continue(Branch::Left) => {
+                        ok!(key_builder.store_bit_zero());
+                        left
+                    }
+                    ControlFlow::Continue(Branch::Right) => {
+                        ok!(key_builder.store_bit_one());
+                        right
+                    }
+                    ControlFlow::Break(()) => return Ok(None),
+                };
+            }
+        }
+    }
 }
