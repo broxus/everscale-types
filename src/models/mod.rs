@@ -1,12 +1,11 @@
 //! Blockchain models.
 
-use std::marker::PhantomData;
-
 use crate::cell::{
     Cell, CellBuilder, CellContext, CellSlice, DynCell, EquivalentRepr, Load, Size, Store,
 };
 use crate::error::Error;
 use crate::util::*;
+use std::sync::OnceLock;
 
 pub use account::*;
 pub use block::*;
@@ -41,10 +40,9 @@ mod __checks {
 }
 
 /// Lazy-loaded model.
-#[repr(transparent)]
 pub struct Lazy<T> {
     cell: Cell,
-    _marker: PhantomData<T>,
+    cache: OnceLock<Result<T, Error>>,
 }
 
 impl<T> crate::cell::ExactSize for Lazy<T> {
@@ -68,12 +66,15 @@ impl<T> PartialEq for Lazy<T> {
     }
 }
 
-impl<T> Clone for Lazy<T> {
+impl<T> Clone for Lazy<T>
+where
+    T: Clone,
+{
     #[inline]
     fn clone(&self) -> Self {
         Self {
             cell: self.cell.clone(),
-            _marker: PhantomData,
+            cache: self.cache.clone(),
         }
     }
 }
@@ -84,7 +85,7 @@ impl<T> Lazy<T> {
     pub fn from_raw(cell: Cell) -> Self {
         Self {
             cell,
-            _marker: PhantomData,
+            cache: OnceLock::new(),
         }
     }
 
@@ -107,7 +108,7 @@ impl<T> Lazy<T> {
     {
         Lazy {
             cell: self.cell,
-            _marker: PhantomData,
+            cache: OnceLock::new(),
         }
     }
 
@@ -155,6 +156,11 @@ impl<'a, T: Load<'a> + 'a> Lazy<T> {
     pub fn load(&'a self) -> Result<T, Error> {
         self.cell.as_ref().parse::<T>()
     }
+
+    /// Parses `T` from the cell or returns the cached result if this method was called before.
+    pub fn load_cached(&'a self) -> &Result<T, Error> {
+        self.cache.get_or_init(|| self.cell.as_ref().parse::<T>())
+    }
 }
 
 impl<T> Store for Lazy<T> {
@@ -168,7 +174,7 @@ impl<'a, T> Load<'a> for Lazy<T> {
         match slice.load_reference_cloned() {
             Ok(cell) => Ok(Self {
                 cell,
-                _marker: PhantomData,
+                cache: OnceLock::new(),
             }),
             Err(e) => Err(e),
         }
@@ -185,7 +191,14 @@ where
         S: serde::Serializer,
     {
         if serializer.is_human_readable() {
-            let value = ok!(self.load().map_err(serde::ser::Error::custom));
+            let value = match self
+                .load_cached()
+                .as_ref()
+                .map_err(serde::ser::Error::custom)
+            {
+                Ok(value) => value,
+                Err(e) => return Err(e),
+            };
             value.serialize(serializer)
         } else {
             crate::boc::Boc::serialize(&self.cell, serializer)

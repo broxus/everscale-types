@@ -1,7 +1,7 @@
 //! Common error types.
 
 /// Error type for cell related errors.
-#[derive(Debug, Clone, Eq, PartialEq, thiserror::Error)]
+#[derive(Debug, Clone, Eq, PartialEq, thiserror::Error, Copy)]
 pub enum Error {
     /// There were not enough bits or refs in the cell slice.
     #[error("cell underflow")]

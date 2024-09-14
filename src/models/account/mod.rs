@@ -158,6 +158,15 @@ impl ShardAccount {
         let OptionalAccount(account) = ok!(self.account.load());
         Ok(account)
     }
+
+    /// Tires to load account data from cache.
+    pub fn load_account_cached(&self) -> Result<Option<&Account>, Error> {
+        let OptionalAccount(account) = match self.account.load_cached() {
+            Ok(val) => val,
+            Err(err) => return Err(*err),
+        };
+        Ok(account.as_ref())
+    }
 }
 
 /// A wrapper for `Option<Account>` with customized representation.
