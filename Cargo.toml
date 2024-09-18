@@ -29,6 +29,10 @@ harness = false
 name = "usage_cell"
 harness = false
 
+[[bench]]
+name = "mine"
+harness = false
+
 [workspace]
 members = ["proc"]
 
