@@ -85,6 +85,9 @@ pub enum ParseAddrError {
     /// Too many address parts.
     #[error("unexpected address part")]
     UnexpectedPart,
+    /// Unexpected or invalid address format.
+    #[error("invalid address format")]
+    BadFormat,
 }
 
 /// Error type for block id parsing related errors.

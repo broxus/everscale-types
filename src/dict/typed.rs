@@ -461,7 +461,7 @@ where
     ///
     /// [`values`]: Dict::values
     /// [`raw_values`]: Dict::raw_values
-    pub fn iter<'a>(&'a self) -> Iter<'_, K, V>
+    pub fn iter<'a>(&'a self) -> Iter<'a, K, V>
     where
         V: Load<'a>,
     {
@@ -478,7 +478,7 @@ where
     ///
     /// In the current implementation, iterating over dictionary builds a key
     /// for each element.
-    pub fn iter_union<'a>(&'a self, other: &'a Self) -> UnionIter<'_, K, V>
+    pub fn iter_union<'a>(&'a self, other: &'a Self) -> UnionIter<'a, K, V>
     where
         V: Load<'a>,
     {

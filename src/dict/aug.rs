@@ -592,7 +592,7 @@ where
     ///
     /// [`values`]: Dict::values
     /// [`raw_values`]: Dict::raw_values
-    pub fn iter<'a>(&'a self) -> AugIter<'_, K, A, V>
+    pub fn iter<'a>(&'a self) -> AugIter<'a, K, A, V>
     where
         V: Load<'a>,
     {
@@ -1017,7 +1017,7 @@ mod tests {
                 (4258889371, SomeValue(4956495), 3256452222),
             ],
         ] {
-            let result = AugDict::<u32, SomeValue, u32>::try_from_sorted_slice(&entries).unwrap();
+            let result = AugDict::<u32, SomeValue, u32>::try_from_sorted_slice(entries).unwrap();
 
             let mut dict = AugDict::<u32, SomeValue, u32>::new();
             for (k, a, v) in entries {

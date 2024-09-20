@@ -238,6 +238,51 @@ impl StdAddr {
         }
     }
 
+    /// Parses a base64-encoded address.
+    #[cfg(feature = "base64")]
+    pub fn from_str_ext(
+        s: &str,
+        format: StdAddrFormat,
+    ) -> Result<(Self, Base64StdAddrFlags), ParseAddrError> {
+        use base64::prelude::{Engine as _, BASE64_STANDARD, BASE64_URL_SAFE};
+
+        match s.len() {
+            0 => Err(ParseAddrError::Empty),
+            66..=69 if format.allow_raw => Self::from_str(s).map(|addr| (addr, Default::default())),
+            48 if format.allow_base64 || format.allow_base64_url => {
+                let mut buffer = [0u8; 36];
+
+                let base64_url = s.contains(['_', '-']);
+
+                let Ok(36) = if base64_url {
+                    BASE64_URL_SAFE
+                } else {
+                    BASE64_STANDARD
+                }
+                .decode_slice(s, &mut buffer) else {
+                    return Err(ParseAddrError::BadFormat);
+                };
+
+                let crc = crc_16(&buffer[..34]);
+                if buffer[34] as u16 != (crc >> 8) || buffer[35] as u16 != (crc & 0xff) {
+                    return Err(ParseAddrError::BadFormat);
+                }
+
+                let addr = StdAddr::new(
+                    buffer[1] as i8,
+                    HashBytes(buffer[2..34].try_into().unwrap()),
+                );
+                let flags = Base64StdAddrFlags {
+                    testnet: buffer[0] & 0x80 != 0,
+                    base64_url,
+                    bounceable: buffer[0] & 0x40 == 0,
+                };
+                Ok((addr, flags))
+            }
+            _ => Err(ParseAddrError::BadFormat),
+        }
+    }
+
     /// Returns `true` if this address is for a masterchain block.
     ///
     /// See [`ShardIdent::MASTERCHAIN`]
@@ -258,6 +303,32 @@ impl StdAddr {
     /// Returns the high bits of the address as a number.
     pub const fn prefix(&self) -> u64 {
         u64::from_be_bytes(*self.address.first_chunk())
+    }
+
+    /// Returns a pretty-printer for base64-encoded address.
+    #[cfg(feature = "base64")]
+    pub const fn display_base64(&self, bounceable: bool) -> DisplayBase64StdAddr<'_> {
+        DisplayBase64StdAddr {
+            addr: self,
+            flags: Base64StdAddrFlags {
+                testnet: false,
+                base64_url: false,
+                bounceable,
+            },
+        }
+    }
+
+    /// Returns a pretty-printer for URL-safe base64-encoded address.
+    #[cfg(feature = "base64")]
+    pub const fn display_base64_url(&self, bounceable: bool) -> DisplayBase64StdAddr<'_> {
+        DisplayBase64StdAddr {
+            addr: self,
+            flags: Base64StdAddrFlags {
+                testnet: false,
+                base64_url: true,
+                bounceable,
+            },
+        }
     }
 }
 
@@ -461,6 +532,132 @@ impl<'de> serde::Deserialize<'de> for StdAddr {
             <(i8, HashBytes)>::deserialize(deserializer)
                 .map(|(workchain, address)| Self::new(workchain, address))
         }
+    }
+}
+
+/// A helper struct to work with base64-encoded addresses.
+#[cfg(feature = "base64")]
+pub struct StdAddrBase64Repr<const URL_SAFE: bool = true>;
+
+#[cfg(all(feature = "base64", feature = "serde"))]
+impl<const URL_SAFE: bool> StdAddrBase64Repr<URL_SAFE> {
+    /// Serializes address into a base64-encoded string.
+    pub fn serialize<S>(addr: &StdAddr, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_str(&DisplayBase64StdAddr {
+            addr,
+            flags: Base64StdAddrFlags {
+                testnet: false,
+                base64_url: URL_SAFE,
+                bounceable: false,
+            },
+        })
+    }
+
+    /// Deserializes address as a base64-encoded string.
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<StdAddr, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{Error, Visitor};
+
+        struct StdAddrBase64Visitor;
+
+        impl<'de> Visitor<'de> for StdAddrBase64Visitor {
+            type Value = StdAddr;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a standard address")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                StdAddr::from_str_ext(v, StdAddrFormat::any())
+                    .map(|(addr, _)| addr)
+                    .map_err(E::custom)
+            }
+        }
+
+        deserializer.deserialize_str(StdAddrBase64Visitor)
+    }
+}
+
+/// Parsing options for [`StdAddr::from_str_ext`]
+#[cfg(feature = "base64")]
+#[derive(Debug, Clone, Copy)]
+pub struct StdAddrFormat {
+    /// Allow raw address (0:000...000).
+    pub allow_raw: bool,
+    /// Allow base64-encoded address.
+    pub allow_base64: bool,
+    /// Allow URL-safe base64 encoding.
+    pub allow_base64_url: bool,
+}
+
+#[cfg(feature = "base64")]
+impl StdAddrFormat {
+    /// Allows any address format.
+    pub const fn any() -> Self {
+        StdAddrFormat {
+            allow_raw: true,
+            allow_base64: true,
+            allow_base64_url: true,
+        }
+    }
+}
+
+/// Base64-encoded address flags.
+#[cfg(feature = "base64")]
+#[derive(Default, Debug, Copy, Clone, Eq, PartialEq)]
+pub struct Base64StdAddrFlags {
+    /// Address belongs to testnet.
+    pub testnet: bool,
+    /// Use URL-safe base64 encoding.
+    pub base64_url: bool,
+    /// Whether to set `bounce` flag during transfer.
+    pub bounceable: bool,
+}
+
+/// Pretty-printer for [`StdAddr`] in base64 format.
+#[cfg(feature = "base64")]
+pub struct DisplayBase64StdAddr<'a> {
+    /// Address to display.
+    pub addr: &'a StdAddr,
+    /// Encoding flags.
+    pub flags: Base64StdAddrFlags,
+}
+
+#[cfg(feature = "base64")]
+impl std::fmt::Display for DisplayBase64StdAddr<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use base64::prelude::{Engine as _, BASE64_STANDARD, BASE64_URL_SAFE};
+
+        let mut buffer = [0u8; 36];
+        buffer[0] = (0x51 - (self.flags.bounceable as i32) * 0x40
+            + (self.flags.testnet as i32) * 0x80) as u8;
+        buffer[1] = self.addr.workchain as u8;
+        buffer[2..34].copy_from_slice(self.addr.address.as_array());
+
+        let crc = crc_16(&buffer[..34]);
+        buffer[34] = (crc >> 8) as u8;
+        buffer[35] = (crc & 0xff) as u8;
+
+        let mut output = [0u8; 48];
+        if self.flags.base64_url {
+            BASE64_URL_SAFE
+        } else {
+            BASE64_STANDARD
+        }
+        .encode_slice(buffer, &mut output)
+        .unwrap();
+
+        // SAFETY: output is guaranteed to contain only ASCII.
+        let output = unsafe { std::str::from_utf8_unchecked(&output) };
+        f.write_str(output)
     }
 }
 
@@ -811,5 +1008,84 @@ mod tests {
             address: vec![0xb0, 0xba, 0xca, 0xfe, 0xb0, 0x0b, 0x1e, 0x5a, 0xff],
         };
         assert_eq!(var_addr.prefix(), 0xb0bacafeb00b1e5a);
+    }
+
+    #[test]
+    fn base64_address() {
+        let addr = "0:84545d4d2cada0ce811705d534c298ca42d29315d03a16eee794cefd191dfa79"
+            .parse::<StdAddr>()
+            .unwrap();
+        assert_eq!(
+            addr.display_base64(true).to_string(),
+            "EQCEVF1NLK2gzoEXBdU0wpjKQtKTFdA6Fu7nlM79GR36eWpw"
+        );
+        assert_eq!(
+            StdAddr::from_str_ext(
+                "EQCEVF1NLK2gzoEXBdU0wpjKQtKTFdA6Fu7nlM79GR36eWpw",
+                StdAddrFormat::any()
+            )
+            .unwrap(),
+            (
+                addr,
+                Base64StdAddrFlags {
+                    testnet: false,
+                    base64_url: false,
+                    bounceable: true,
+                }
+            )
+        );
+
+        let addr = "0:dddde93b1d3398f0b4305c08de9a032e0bc1b257c4ce2c72090aea1ff3e9ecfd"
+            .parse::<StdAddr>()
+            .unwrap();
+        assert_eq!(
+            addr.display_base64_url(false).to_string(),
+            "UQDd3ek7HTOY8LQwXAjemgMuC8GyV8TOLHIJCuof8-ns_Tyv"
+        );
+        assert_eq!(
+            addr.display_base64(false).to_string(),
+            "UQDd3ek7HTOY8LQwXAjemgMuC8GyV8TOLHIJCuof8+ns/Tyv"
+        );
+
+        assert_eq!(
+            StdAddr::from_str_ext(
+                "UQDd3ek7HTOY8LQwXAjemgMuC8GyV8TOLHIJCuof8+ns/Tyv",
+                StdAddrFormat::any()
+            )
+            .unwrap(),
+            (
+                addr.clone(),
+                Base64StdAddrFlags {
+                    testnet: false,
+                    base64_url: false,
+                    bounceable: false,
+                }
+            )
+        );
+
+        assert_eq!(
+            addr.display_base64_url(true).to_string(),
+            "EQDd3ek7HTOY8LQwXAjemgMuC8GyV8TOLHIJCuof8-ns_WFq"
+        );
+        assert_eq!(
+            addr.display_base64(true).to_string(),
+            "EQDd3ek7HTOY8LQwXAjemgMuC8GyV8TOLHIJCuof8+ns/WFq"
+        );
+
+        assert_eq!(
+            StdAddr::from_str_ext(
+                "EQDd3ek7HTOY8LQwXAjemgMuC8GyV8TOLHIJCuof8-ns_WFq",
+                StdAddrFormat::any()
+            )
+            .unwrap(),
+            (
+                addr,
+                Base64StdAddrFlags {
+                    testnet: false,
+                    base64_url: true,
+                    bounceable: true,
+                }
+            )
+        );
     }
 }

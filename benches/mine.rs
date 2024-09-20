@@ -189,7 +189,9 @@ fn mine_address(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(nonce), &nonce, move |b, _| {
             b.iter(|| {
                 thread_local! {
-                    static CODE_CELL: std::cell::UnsafeCell<Option<Cell>> = std::cell::UnsafeCell::new(None);
+                    static CODE_CELL: std::cell::UnsafeCell<Option<Cell>> = const {
+                        std::cell::UnsafeCell::new(None)
+                    };
                 }
 
                 CODE_CELL.with(|code_cell| {
