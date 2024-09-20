@@ -263,9 +263,12 @@ impl StdAddr {
                     return Err(ParseAddrError::BadFormat);
                 };
 
-                let crc = crc_16(&buffer[..34]);
-                if buffer[34] as u16 != (crc >> 8) || buffer[35] as u16 != (crc & 0xff) {
-                    return Err(ParseAddrError::BadFormat);
+                #[cfg(not(fuzzing))]
+                {
+                    let crc = crc_16(&buffer[..34]);
+                    if buffer[34] as u16 != (crc >> 8) || buffer[35] as u16 != (crc & 0xff) {
+                        return Err(ParseAddrError::BadFormat);
+                    }
                 }
 
                 let addr = StdAddr::new(
