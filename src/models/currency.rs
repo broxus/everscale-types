@@ -8,6 +8,7 @@ use crate::num::{Tokens, VarUint248};
 /// Amounts collection.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[must_use]
 pub struct CurrencyCollection {
     /// Amount in native currency.
     pub tokens: Tokens,
@@ -138,6 +139,7 @@ impl AugDictExtra for CurrencyCollection {
 /// Dictionary with amounts for multiple currencies.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[must_use]
 #[repr(transparent)]
 pub struct ExtraCurrencyCollection(Dict<u32, VarUint248>);
 
@@ -220,5 +222,24 @@ impl ExactSize for ExtraCurrencyCollection {
     #[inline]
     fn exact_size(&self) -> Size {
         self.0.exact_size()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn _cc_must_use() -> anyhow::Result<()> {
+        #[expect(unused_must_use)]
+        {
+            CurrencyCollection::new(10).checked_add(&CurrencyCollection::ZERO)?;
+        }
+
+        #[expect(unused_must_use)]
+        {
+            ExtraCurrencyCollection::new().checked_add(&ExtraCurrencyCollection::new())?;
+        }
+
+        Ok(())
     }
 }

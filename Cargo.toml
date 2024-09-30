@@ -3,7 +3,7 @@ name = "everscale-types"
 description = "A set of primitive types and utilities for the Everscale blockchain."
 authors = ["Ivan Kalinin <i.kalinin@dexpa.io>"]
 repository = "https://github.com/broxus/everscale-types"
-version = "0.1.0-rc.6"
+version = "0.1.0-rc.8"
 edition = "2021"
 rust-version = "1.77"
 include = ["src/**/*.rs", "benches/**/*.rs", "LICENSE-*", "README.md"]
@@ -29,18 +29,22 @@ harness = false
 name = "usage_cell"
 harness = false
 
+[[bench]]
+name = "mine"
+harness = false
+
 [workspace]
 members = ["proc"]
 
 [dependencies]
-ahash = "0.8"
+ahash = "0.8.11"
 anyhow = { version = "1.0", optional = true }
 base64 = { version = "0.22", optional = true }
 bitflags = "2.3"
 blake3 = { version = "1.5", optional = true }
 bytes = { version = "1.4", optional = true }
-crc32c = "0.6"
-ed25519-dalek = { version = "2.0", optional = true }
+crc32c = "0.6.8"
+ed25519-dalek = { version = "2.1.1", optional = true }
 everscale-crypto = { version = "0.2", features = ["tl-proto"], optional = true }
 hex = "0.4"
 num-bigint = { version = "0.4", optional = true }

@@ -13,10 +13,17 @@ libfuzzer-sys = "0.4"
 
 [dependencies.everscale-types]
 path = ".."
+features = ["base64"]
 
 # Prevent this from interfering with workspaces
 [workspace]
 members = ["."]
+
+[[bin]]
+name = "base64_addr"
+path = "fuzz_targets/base64_addr.rs"
+test = false
+doc = false
 
 [[bin]]
 name = "boc_decode"

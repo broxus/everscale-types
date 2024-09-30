@@ -117,6 +117,49 @@ where
         );
     }
 
+    /// Writes cell trees into the writer.
+    ///
+    /// NOTE: Use [`BocHeader::encode`] when possible since it's faster.
+    pub fn encode_to_writer<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
+        const CELLS_CHUNK_SIZE: usize = 1000;
+        const P95_CELL_SIZE: usize = 128;
+
+        let mut crc = self.include_crc.then_some(0u32);
+        let mut total_size = 0;
+
+        let mut reset_chunk = |chunk: &mut Vec<u8>| {
+            if let Some(crc) = &mut crc {
+                *crc = crc32c::crc32c_append(*crc, chunk);
+            }
+            total_size += chunk.len() as u64;
+            chunk.clear();
+        };
+
+        let mut chunk = Vec::new();
+
+        // Write header
+        let header = self.encode_header(&mut chunk);
+        ok!(writer.write_all(&chunk));
+        reset_chunk(&mut chunk);
+
+        // Write cells
+        for cells in self.rev_cells.rchunks(CELLS_CHUNK_SIZE) {
+            chunk.reserve(cells.len() * P95_CELL_SIZE);
+            self.encode_cells_chunk(cells, header.ref_size, &mut chunk);
+            ok!(writer.write_all(&chunk));
+            reset_chunk(&mut chunk);
+        }
+
+        debug_assert!(chunk.is_empty());
+
+        if let Some(crc) = crc {
+            ok!(writer.write_all(&crc.to_le_bytes()));
+        }
+
+        debug_assert_eq!(total_size, header.total_size);
+        Ok(())
+    }
+
     /// Encodes cell trees into bytes.
     /// Uses `rayon` under the hood.
     #[cfg(feature = "rayon")]
@@ -158,25 +201,16 @@ where
         );
     }
 
-    #[inline]
-    fn encode_header(&self, target: &mut Vec<u8>) -> EncodedHeader {
+    /// Computes the encoded BOC size and other stuff.
+    pub fn compute_stats(&self) -> BocHeaderStats {
         let root_count = self.root_rev_indices.len();
 
         let ref_size = number_of_bytes_to_fit(self.cell_count as u64);
-        // NOTE: `ref_size` will be in range 1..=4 because `self.cell_count`
-        // is `u32`, and there is at least one cell (see Self::new)
-        debug_assert!((1..=4).contains(&ref_size));
 
-        let total_cells_size: u64 = self.total_data_size
+        let total_cells_size = self.total_data_size
             + (self.cell_count as u64 * 2) // all descriptor bytes
             + (ref_size as u64 * self.reference_count);
         let offset_size = number_of_bytes_to_fit(total_cells_size);
-
-        // NOTE: `offset_size` will be in range 1..=8 because `self.cell_count`
-        // is at least 1, and `total_cells_size` is `u64`
-        debug_assert!((1..=8).contains(&offset_size));
-
-        let flags = (ref_size as u8) | (u8::from(self.include_crc) * 0b0100_0000);
 
         // 4 bytes - BOC tag
         // 1 byte - flags
@@ -194,24 +228,46 @@ where
             + (offset_size as u64)
             + total_cells_size
             + u64::from(self.include_crc) * 4;
-        target.reserve(total_size as usize);
+
+        BocHeaderStats {
+            offset_size,
+            ref_size,
+            total_cells_size,
+            total_size,
+        }
+    }
+
+    #[inline]
+    fn encode_header(&self, target: &mut Vec<u8>) -> BocHeaderStats {
+        let stats = self.compute_stats();
+
+        let root_count = self.root_rev_indices.len();
+
+        // NOTE: `ref_size` will be in range 1..=4 because `self.cell_count`
+        // is `u32`, and there is at least one cell (see Self::new)
+        debug_assert!((1..=4).contains(&stats.ref_size));
+
+        // NOTE: `offset_size` will be in range 1..=8 because `self.cell_count`
+        // is at least 1, and `total_cells_size` is `u64`
+        debug_assert!((1..=8).contains(&stats.offset_size));
+
+        let flags = (stats.ref_size as u8) | (u8::from(self.include_crc) * 0b0100_0000);
+
+        target.reserve(stats.total_size as usize);
 
         target.extend_from_slice(&BocTag::GENERIC);
-        target.extend_from_slice(&[flags, offset_size as u8]);
-        target.extend_from_slice(&self.cell_count.to_be_bytes()[4 - ref_size..]);
-        target.extend_from_slice(&(root_count as u32).to_be_bytes()[4 - ref_size..]);
-        target.extend_from_slice(&[0; 4][4 - ref_size..]);
-        target.extend_from_slice(&total_cells_size.to_be_bytes()[8 - offset_size..]);
+        target.extend_from_slice(&[flags, stats.offset_size as u8]);
+        target.extend_from_slice(&self.cell_count.to_be_bytes()[4 - stats.ref_size..]);
+        target.extend_from_slice(&(root_count as u32).to_be_bytes()[4 - stats.ref_size..]);
+        target.extend_from_slice(&[0; 4][4 - stats.ref_size..]);
+        target.extend_from_slice(&stats.total_cells_size.to_be_bytes()[8 - stats.offset_size..]);
 
         for rev_index in &self.root_rev_indices {
             let root_index = self.cell_count - rev_index - 1;
-            target.extend_from_slice(&root_index.to_be_bytes()[4 - ref_size..]);
+            target.extend_from_slice(&root_index.to_be_bytes()[4 - stats.ref_size..]);
         }
 
-        EncodedHeader {
-            ref_size,
-            total_size,
-        }
+        stats
     }
 
     #[inline]
@@ -327,10 +383,22 @@ impl CellDescriptor {
     }
 }
 
+/// An info about the encoded BOC.
 #[derive(Copy, Clone)]
-struct EncodedHeader {
-    ref_size: usize,
-    total_size: u64,
+pub struct BocHeaderStats {
+    /// Size of the offset numbers in bytes.
+    pub offset_size: usize,
+    /// Size of the reference indices in bytes.
+    pub ref_size: usize,
+    /// The total size of cells part in the resulting BOC.
+    ///
+    /// NOTE: Use [`total_size`] for the full BOC size.
+    ///
+    /// [`total_size`]: Self::total_size
+    pub total_cells_size: u64,
+
+    /// Total size of the encoded BOC in bytes.
+    pub total_size: u64,
 }
 
 fn number_of_bytes_to_fit(l: u64) -> usize {

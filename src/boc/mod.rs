@@ -119,6 +119,15 @@ impl Boc {
     }
 
     /// Encodes the specified cell tree as BOC and
+    /// returns the `hex` encoded bytes as a string.
+    pub fn encode_hex<T>(cell: T) -> String
+    where
+        T: AsRef<DynCell>,
+    {
+        hex::encode(Self::encode(cell))
+    }
+
+    /// Encodes the specified cell tree as BOC and
     /// returns the `base64` encoded bytes as a string.
     #[cfg(any(feature = "base64", test))]
     pub fn encode_base64<T>(cell: T) -> String
@@ -126,6 +135,18 @@ impl Boc {
         T: AsRef<DynCell>,
     {
         crate::util::encode_base64(Self::encode(cell))
+    }
+
+    /// Encodes the specified cell tree as BOC and
+    /// returns the `hex` encoded bytes as a string.
+    ///
+    /// Uses `rayon` under the hood to parallelize encoding.
+    #[cfg(feature = "rayon")]
+    pub fn encode_hex_rayon<T>(cell: T) -> String
+    where
+        T: AsRef<DynCell>,
+    {
+        hex::encode(Self::encode_rayon(cell))
     }
 
     /// Encodes the specified cell tree as BOC and
@@ -183,6 +204,18 @@ impl Boc {
             result
         }
         encode_pair_impl(cell1.as_ref(), cell2.as_ref())
+    }
+
+    /// Decodes a `hex` encoded BOC into a cell tree
+    /// using an empty cell context.
+    pub fn decode_hex<T: AsRef<[u8]>>(data: T) -> Result<Cell, de::Error> {
+        fn decode_hex_impl(data: &[u8]) -> Result<Cell, de::Error> {
+            match hex::decode(data) {
+                Ok(data) => Boc::decode_ext(data.as_slice(), &mut Cell::empty_context()),
+                Err(_) => Err(de::Error::UnknownBocTag),
+            }
+        }
+        decode_hex_impl(data.as_ref())
     }
 
     /// Decodes a `base64` encoded BOC into a cell tree
@@ -315,6 +348,16 @@ pub struct BocRepr;
 
 impl BocRepr {
     /// Encodes the specified cell tree as BOC using an empty cell context and
+    /// returns the `hex` encoded bytes as a string.
+    pub fn encode_hex<T>(data: T) -> Result<String, crate::error::Error>
+    where
+        T: Store,
+    {
+        let boc = ok!(Self::encode_ext(data, &mut Cell::empty_context()));
+        Ok(hex::encode(boc))
+    }
+
+    /// Encodes the specified cell tree as BOC using an empty cell context and
     /// returns the `base64` encoded bytes as a string.
     #[cfg(any(feature = "base64", test))]
     pub fn encode_base64<T>(data: T) -> Result<String, crate::error::Error>
@@ -323,6 +366,19 @@ impl BocRepr {
     {
         let boc = ok!(Self::encode_ext(data, &mut Cell::empty_context()));
         Ok(crate::util::encode_base64(boc))
+    }
+
+    /// Encodes the specified cell tree as BOC using an empty cell context and
+    /// returns the `hex` encoded bytes as a string.
+    ///
+    /// Uses `rayon` under the hood to parallelize encoding.
+    #[cfg(feature = "rayon")]
+    pub fn encode_hex_rayon<T>(data: T) -> Result<String, crate::error::Error>
+    where
+        T: Store,
+    {
+        let boc = ok!(Self::encode_rayon_ext(data, &mut Cell::empty_context()));
+        Ok(hex::encode(boc))
     }
 
     /// Encodes the specified cell tree as BOC using an empty cell context and
@@ -355,6 +411,26 @@ impl BocRepr {
         T: Store,
     {
         Self::encode_rayon_ext(data, &mut Cell::empty_context())
+    }
+
+    /// Decodes a `hex` encoded BOC into an object
+    /// using an empty cell context.
+    #[inline]
+    pub fn decode_hex<T, D>(data: D) -> Result<T, BocReprError>
+    where
+        for<'a> T: Load<'a>,
+        D: AsRef<[u8]>,
+    {
+        fn decode_hex_impl<T>(data: &[u8]) -> Result<T, BocReprError>
+        where
+            for<'a> T: Load<'a>,
+        {
+            match hex::decode(data) {
+                Ok(data) => BocRepr::decode_ext(data.as_slice(), &mut Cell::empty_context()),
+                Err(_) => Err(BocReprError::InvalidBoc(de::Error::UnknownBocTag)),
+            }
+        }
+        decode_hex_impl::<T>(data.as_ref())
     }
 
     /// Decodes a `base64` encoded BOC into an object
