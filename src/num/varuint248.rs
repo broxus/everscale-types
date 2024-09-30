@@ -103,6 +103,7 @@ impl VarUint248 {
 
     /// Checked integer addition. Computes `self + rhs`,
     /// returning `None` if overflow occurred.
+    #[must_use]
     pub const fn checked_add(&self, rhs: &Self) -> Option<Self> {
         let (lo, carry_lo) = self.low().overflowing_add(*rhs.low());
         let (hi, carry_c) = self.high().overflowing_add(carry_lo as _);
@@ -117,6 +118,7 @@ impl VarUint248 {
 
     /// Checked integer subtraction. Computes `self - rhs`,
     /// returning `None` if overflow occurred.
+    #[must_use]
     pub const fn checked_sub(&self, rhs: &Self) -> Option<Self> {
         let (lo, carry_lo) = self.low().overflowing_sub(*rhs.low());
         let (hi, carry_c) = self.high().overflowing_sub(carry_lo as _);
@@ -131,6 +133,7 @@ impl VarUint248 {
 
     /// Checked integer multiplication. Computes `self * rhs`,
     /// returning `None` if overflow occurred.
+    #[must_use]
     pub fn checked_mul(&self, rhs: &Self) -> Option<Self> {
         let mut res = umulddi3(self.low(), rhs.low());
 

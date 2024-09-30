@@ -384,6 +384,7 @@ macro_rules! impl_var_uints {
 
             /// Checked integer addition. Computes `self + rhs`, returning `None` if overflow occurred.
             #[inline]
+            #[must_use]
             pub const fn checked_add(self, rhs: Self) -> Option<Self> {
                 match self.0.checked_add(rhs.0) {
                     Some(value) if value <= Self::MAX.0 => Some($ident(value)),
@@ -393,6 +394,7 @@ macro_rules! impl_var_uints {
 
             /// Checked integer subtraction. Computes `self - rhs`, returning `None` if overflow occurred.
             #[inline]
+            #[must_use]
             pub const fn checked_sub(self, rhs: Self) -> Option<Self> {
                 match self.0.checked_sub(rhs.0) {
                     Some(value) if value <= Self::MAX.0 => Some($ident(value)),
@@ -402,6 +404,7 @@ macro_rules! impl_var_uints {
 
             /// Checked integer multiplication. Computes `self * rhs`, returning `None` if overflow occurred.
             #[inline]
+            #[must_use]
             pub const fn checked_mul(self, rhs: Self) -> Option<Self> {
                 match self.0.checked_mul(rhs.0) {
                     Some(value) if value <= Self::MAX.0 => Some($ident(value)),
@@ -412,6 +415,7 @@ macro_rules! impl_var_uints {
             /// Checked integer division. Computes `self / rhs`, returning None if `rhs == 0`
             /// or overflow occurred.
             #[inline]
+            #[must_use]
             pub const fn checked_div(self, rhs: Self) -> Option<Self> {
                 match self.0.checked_div(rhs.0) {
                     Some(value) if value <= Self::MAX.0 => Some($ident(value)),
@@ -642,6 +646,7 @@ macro_rules! impl_small_uints {
 
             /// Checked integer addition. Computes `self + rhs`, returning `None` if overflow occurred.
             #[inline]
+            #[must_use]
             pub const fn checked_add(self, rhs: Self) -> Option<Self> {
                 match self.0.checked_add(rhs.0) {
                     Some(value) if value <= Self::MAX.0 => Some($ident(value)),
@@ -651,6 +656,7 @@ macro_rules! impl_small_uints {
 
             /// Checked integer subtraction. Computes `self - rhs`, returning `None` if overflow occurred.
             #[inline]
+            #[must_use]
             pub const fn checked_sub(self, rhs: Self) -> Option<Self> {
                 match self.0.checked_sub(rhs.0) {
                     Some(value) if value <= Self::MAX.0 => Some($ident(value)),
@@ -660,6 +666,7 @@ macro_rules! impl_small_uints {
 
             /// Checked integer multiplication. Computes `self * rhs`, returning `None` if overflow occurred.
             #[inline]
+            #[must_use]
             pub const fn checked_mul(self, rhs: Self) -> Option<Self> {
                 match self.0.checked_mul(rhs.0) {
                     Some(value) if value <= Self::MAX.0 => Some($ident(value)),
@@ -670,6 +677,7 @@ macro_rules! impl_small_uints {
             /// Checked integer division. Computes `self / rhs`, returning None if `rhs == 0`
             /// or overflow occurred.
             #[inline]
+            #[must_use]
             pub const fn checked_div(self, rhs: Self) -> Option<Self> {
                 match self.0.checked_div(rhs.0) {
                     Some(value) if value <= Self::MAX.0 => Some($ident(value)),
@@ -1054,5 +1062,42 @@ mod tests {
     #[test]
     fn tokens_deserialization() {
         impl_deserialization_tests!(Tokens, 120, 0xabcdef89abcdefdeadbeeffafacafe);
+    }
+
+    fn _num_must_use() {
+        #[expect(unused_must_use)]
+        {
+            Uint9::new(10).checked_add(Uint9::ZERO);
+        }
+
+        #[expect(unused_must_use)]
+        {
+            Uint12::new(10).checked_add(Uint12::ZERO);
+        }
+
+        #[expect(unused_must_use)]
+        {
+            Uint15::new(10).checked_add(Uint15::ZERO);
+        }
+
+        #[expect(unused_must_use)]
+        {
+            VarUint24::new(10).checked_add(VarUint24::ZERO);
+        }
+
+        #[expect(unused_must_use)]
+        {
+            VarUint56::new(10).checked_add(VarUint56::ZERO);
+        }
+
+        #[expect(unused_must_use)]
+        {
+            Tokens::new(10).checked_add(Tokens::ZERO);
+        }
+
+        #[expect(unused_must_use)]
+        {
+            VarUint248::new(10).checked_add(&VarUint248::ZERO);
+        }
     }
 }
