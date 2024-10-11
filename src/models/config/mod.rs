@@ -422,6 +422,16 @@ impl BlockchainConfigParams {
         Ok(ok!(self.contains::<ConfigParam36>()) || ok!(self.contains::<ConfigParam37>()))
     }
 
+    /// Returns the previous validator set.
+    ///
+    /// Uses [`ConfigParam33`] (temp prev validators) or [`ConfigParam32`] (prev validators).
+    pub fn get_previous_validator_set(&self) -> Result<Option<ValidatorSet>, Error> {
+        match ok!(self.get::<ConfigParam33>()) {
+            None => self.get::<ConfigParam32>(),
+            set => Ok(set),
+        }
+    }
+
     /// Returns the current validator set.
     ///
     /// Uses [`ConfigParam35`] (temp validators) or [`ConfigParam34`] (current validators).
@@ -429,6 +439,16 @@ impl BlockchainConfigParams {
         match ok!(self.get::<ConfigParam35>()) {
             Some(set) => Ok(set),
             None => ok!(self.get::<ConfigParam34>()).ok_or(Error::CellUnderflow),
+        }
+    }
+
+    /// Returns the next validator set.
+    ///
+    /// Uses [`ConfigParam37`] (temp next validators) or [`ConfigParam36`] (next validators).
+    pub fn get_next_validator_set(&self) -> Result<Option<ValidatorSet>, Error> {
+        match ok!(self.get::<ConfigParam37>()) {
+            None => self.get::<ConfigParam36>(),
+            set => Ok(set),
         }
     }
 
