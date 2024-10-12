@@ -1,50 +1,51 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use everscale_types::cell::RefsIter;
 use everscale_types::prelude::*;
+use iai_callgrind::{library_benchmark, library_benchmark_group, main};
+use std::collections::HashSet;
+use std::hint::black_box;
 
 const BOC: &str = "te6ccgECCAEAAWQAAnPP9noJKCEBL3oZerOiIcNghuL96V3wIcuYOWQdvNC+2fqCEIJDQAAAAAAAAAAAAAAAAZa8xB6QABNAAgEAUO3QlUyMI4dEepUMw3Ou6oSqq8+1lyHkjOGFK6DAn6TXAAAAAAAAAAABFP8A9KQT9LzyyAsDAgEgBwQC5vJx1wEBwADyeoMI1xjtRNCDB9cB1ws/yPgozxYjzxbJ+QADcdcBAcMAmoMH1wFRE7ry4GTegEDXAYAg1wGAINcBVBZ1+RDyqPgju/J5Zr74I4EHCKCBA+ioUiC8sfJ0AiCCEEzuZGy64w8ByMv/yz/J7VQGBQA+ghAWnj4Ruo4R+AACkyDXSpd41wHUAvsA6NGTMvI84gCYMALXTND6QIMG1wFx1wF41wHXTPgAcIAQBKoCFLHIywVQBc8WUAP6AstpItAhzzEh10mghAm5mDNwAcsAWM8WlzBxAcsAEsziyQH7AAAE0jA=";
 
-fn traverse_cell_ordinary(c: &mut Criterion) {
+#[library_benchmark]
+fn traverse_cell_ordinary() {
     let cell = Boc::decode_base64(BOC).unwrap();
 
-    c.bench_function("traverse cell ordinary", |b| {
-        b.iter(|| {
-            let mut visitor = Visitor::default();
-            black_box(visitor.add_cell(cell.as_ref()));
-        })
-    });
+    let mut visitor = Visitor::new();
+    black_box(visitor.add_cell(cell.as_ref()));
 }
 
-fn traverse_cell_storage_cell(c: &mut Criterion) {
+#[library_benchmark]
+fn traverse_cell_storage_cell() {
     let cell = Boc::decode_base64(BOC).unwrap();
     let usage_tree = UsageTree::new(UsageTreeMode::OnDataAccess);
     let cell = usage_tree.track(&cell);
 
-    c.bench_function("traverse cell usage tree", |b| {
-        b.iter(|| {
-            let mut visitor = Visitor::default();
-            black_box(visitor.add_cell(cell.as_ref()));
-        })
-    });
+    let mut visitor = Visitor::new();
+    black_box(visitor.add_cell(cell.as_ref()));
 }
 
-fn traverse_cell_storage_cell_with_capacity(c: &mut Criterion) {
+#[library_benchmark]
+fn traverse_cell_storage_cell_with_capacity() {
     let cell = Boc::decode_base64(BOC).unwrap();
     let usage_tree = UsageTree::with_mode_and_capacity(UsageTreeMode::OnDataAccess, 100);
     let cell = usage_tree.track(&cell);
 
-    c.bench_function("traverse cell usage tree with capacity", |b| {
-        b.iter(|| {
-            let mut visitor = Visitor::default();
-            black_box(visitor.add_cell(cell.as_ref()));
-        })
-    });
+    let mut visitor = Visitor::new();
+    black_box(visitor.add_cell(cell.as_ref()));
 }
 
-#[derive(Default)]
 struct Visitor<'a> {
     visited: ahash::HashSet<&'a HashBytes>,
     stack: Vec<RefsIter<'a>>,
+}
+
+impl<'a> Visitor<'a> {
+    fn new() -> Self {
+        Self {
+            visited: HashSet::with_hasher(ahash::RandomState::with_seed(0)),
+            stack: Vec::new(),
+        }
+    }
 }
 
 impl<'a> Visitor<'a> {
@@ -85,10 +86,9 @@ impl<'a> Visitor<'a> {
     }
 }
 
-criterion_group!(
-    benches,
-    traverse_cell_ordinary,
-    traverse_cell_storage_cell,
-    traverse_cell_storage_cell_with_capacity
+library_benchmark_group!(
+    name = traverse_cell;
+    benchmarks = traverse_cell_ordinary, traverse_cell_storage_cell, traverse_cell_storage_cell_with_capacity
 );
-criterion_main!(benches);
+
+main!(library_benchmark_groups = traverse_cell);
