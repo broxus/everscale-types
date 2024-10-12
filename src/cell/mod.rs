@@ -1153,7 +1153,7 @@ impl LevelMask {
 
     /// Returns whether the specified level is included into the mask.
     pub const fn contains(self, level: u8) -> bool {
-        level == 0 || self.0 & LevelMask::from_level(level).0 != 0
+        level == 0 || self.0 & (1 << (level - 1)) != 0
     }
 
     /// Creates a new mask, shifted by the offset.
