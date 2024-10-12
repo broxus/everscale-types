@@ -90,7 +90,7 @@ impl<'a> CellParts<'a> {
         let references = self.references.as_ref();
 
         // `hashes_len` is guaranteed to be in range 1..4
-        let mut hashes_len = level + 1;
+        let mut old_hashes_len = level + 1;
 
         let (cell_type, computed_level_mask) = if unlikely(descriptor.is_exotic()) {
             let Some(&first_byte) = self.data.first() else {
@@ -114,7 +114,7 @@ impl<'a> CellParts<'a> {
                         return Err(Error::InvalidCell);
                     }
 
-                    hashes_len = 1;
+                    old_hashes_len = 1;
                     (CellType::PrunedBranch, level_mask)
                 }
                 // 8 bits type, hash, depth
@@ -157,7 +157,20 @@ impl<'a> CellParts<'a> {
         let level_offset = cell_type.is_merkle() as u8;
         let is_pruned = cell_type.is_pruned_branch();
 
-        let mut hashes = Vec::<(HashBytes, u16)>::with_capacity(hashes_len);
+        // this calculation mimics the underlying loop to avoid reallocations
+        let mut hashes = {
+            let mut hashes_len = 0;
+            for lvl in 0..4 {
+                // Skip non-zero levels for pruned branches and insignificant hashes for other cells
+                if lvl != 0 && (is_pruned || !level_mask.contains(lvl)) {
+                    continue;
+                }
+                hashes_len += 1;
+            }
+            assert_eq!(hashes_len, old_hashes_len);
+            Vec::<(HashBytes, u16)>::with_capacity(hashes_len)
+        };
+
         for level in 0..4 {
             // Skip non-zero levels for pruned branches and insignificant hashes for other cells
             if level != 0 && (is_pruned || !level_mask.contains(level)) {
