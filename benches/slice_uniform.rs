@@ -1,28 +1,24 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use everscale_types::prelude::*;
+use iai_callgrind::{library_benchmark, library_benchmark_group, main};
+use std::hint::black_box;
 
-fn test_uniform(c: &mut Criterion) {
-    let cells = (0..=32)
-        .chain([
-            40, 60, 64, 80, 96, 127, 128, 160, 196, 200, 255, 256, 300, 400, 500, 600, 700, 800,
-            900, 1000, 1023,
-        ])
-        .map(|bits| {
-            let mut builder = CellBuilder::new();
-            builder.store_zeros(bits).unwrap();
-            builder.build().unwrap()
-        })
-        .collect::<Vec<_>>();
+#[library_benchmark]
+#[bench::small(2)]
+#[bench::medium(4)]
+#[bench::large(8)]
+#[bench::xlarge(10)]
+fn test(bits: u32) {
+    let mut builder = CellBuilder::new();
+    builder.store_zeros(2u16.pow(bits) - 1u16).unwrap();
+    let cell = builder.build().unwrap();
 
-    for cell in cells {
-        let slice = cell.as_slice().unwrap();
-        c.bench_with_input(
-            BenchmarkId::new("test slice uniform", slice.size_bits()),
-            &slice,
-            |b, slice| b.iter(|| black_box(slice.test_uniform())),
-        );
-    }
+    let slice = cell.as_slice().unwrap();
+    black_box(slice.test_uniform());
 }
 
-criterion_group!(benches, test_uniform);
-criterion_main!(benches);
+library_benchmark_group!(
+    name = test_uniform;
+    benchmarks = test
+);
+
+main!(library_benchmark_groups = test_uniform);
