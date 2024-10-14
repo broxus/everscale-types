@@ -703,4 +703,7 @@ impl<'a> Load<'a> for ValueFlow {
 pub struct OutMsgQueueUpdates {
     /// Hash of the serialized queue diff.
     pub diff_hash: HashBytes,
+    /// The number of additional queue diffs, excluding the current one,
+    /// that may still be required by other shards.
+    pub tail_len: u32,
 }
