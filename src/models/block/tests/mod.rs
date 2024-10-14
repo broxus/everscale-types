@@ -448,6 +448,7 @@ fn block_with_tycho_updates_store_load() {
         .unwrap(),
         out_msg_queue_updates: OutMsgQueueUpdates {
             diff_hash: HashBytes::ZERO,
+            tail_len: 123,
         },
     };
     let encoded = BocRepr::encode(&block).unwrap();
@@ -461,6 +462,7 @@ fn block_with_tycho_updates_store_load() {
         decoded.out_msg_queue_updates,
         OutMsgQueueUpdates {
             diff_hash: HashBytes::ZERO,
+            tail_len: 123
         }
     );
 }
