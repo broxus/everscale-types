@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::num::{NonZeroU16, NonZeroU32, NonZeroU8};
+use std::num::{NonZeroU16, NonZeroU32};
 
 use everscale_crypto::ed25519;
 
@@ -500,7 +500,74 @@ impl<'a> Load<'a> for CatchainConfig {
     }
 }
 
+/// DAG Consensus configuration params
+///
+/// ```tlb
+/// consensus_config_tycho#d8
+///     clock_skew_millis:uint16
+///     payload_batch_bytes:uint32
+///     commit_history_rounds:uint8
+///     deduplicate_rounds:uint16
+///     max_consensus_lag_rounds:uint16
+///     payload_buffer_bytes:uint32
+///     broadcast_retry_millis:uint8
+///     download_retry_millis:uint8
+///     download_peers:uint8
+///     download_tasks:uint16
+///     sync_support_rounds:uint16
+///     = ConsensusConfig;
+/// ```
+#[cfg(feature = "tycho")]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[tlb(tag = "#d8")]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ConsensusConfig {
+    /// TODO: Add docs.
+    ///
+    /// **NOTE: Affects overlay id.**
+    pub clock_skew_millis: u16,
+
+    /// TODO: Add docs.
+    ///
+    /// **NOTE: Affects overlay id.**
+    pub payload_batch_bytes: u32,
+
+    /// TODO: Add docs.
+    ///
+    /// **NOTE: Affects overlay id.**
+    pub commit_history_rounds: u8,
+
+    /// TODO: Add docs.
+    ///
+    /// **NOTE: Affects overlay id.**
+    pub deduplicate_rounds: u16,
+
+    /// TODO: Add docs.
+    ///
+    /// **NOTE: Affects overlay id.**
+    pub max_consensus_lag_rounds: u16,
+
+    /// TODO: Add docs.
+    pub payload_buffer_bytes: u32,
+
+    /// TODO: Add docs.
+    pub broadcast_retry_millis: u8,
+
+    /// TODO: Add docs.
+    pub download_retry_millis: u8,
+
+    /// TODO: Add docs.
+    pub download_peers: u8,
+
+    /// TODO: Add docs.
+    pub download_tasks: u16,
+
+    /// TODO: Add docs.
+    pub sync_support_rounds: u16,
+}
+
 /// Consensus configuration params.
+#[cfg(not(feature = "tycho"))]
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ConsensusConfig {
@@ -524,11 +591,13 @@ pub struct ConsensusConfig {
     pub max_collated_bytes: u32,
 }
 
+#[cfg(not(feature = "tycho"))]
 impl ConsensusConfig {
     const TAG_V1: u8 = 0xd6;
     const TAG_V2: u8 = 0xd7;
 }
 
+#[cfg(not(feature = "tycho"))]
 impl Store for ConsensusConfig {
     fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         let flags = self.new_catchain_ids as u8;
@@ -546,8 +615,11 @@ impl Store for ConsensusConfig {
     }
 }
 
+#[cfg(not(feature = "tycho"))]
 impl<'a> Load<'a> for ConsensusConfig {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
+        use std::num::NonZeroU8;
+
         let (flags, round_candidates) = match slice.load_u8() {
             Ok(Self::TAG_V1) => (0, ok!(NonZeroU32::load_from(slice))),
             Ok(Self::TAG_V2) => {

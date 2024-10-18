@@ -1,12 +1,13 @@
-use std::num::NonZeroU32;
-
 use super::*;
 use crate::boc::BocRepr;
 use crate::models::{ShardIdent, ShardStateUnsplit};
 use crate::prelude::Boc;
 
+#[cfg(not(feature = "tycho"))]
 #[test]
 fn simple_config() {
+    use std::num::NonZeroU32;
+
     let data = Boc::decode(include_bytes!("simple_config.boc")).unwrap();
     let blockchain_config = data.parse::<BlockchainConfig>().unwrap();
 
