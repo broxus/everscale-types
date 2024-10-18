@@ -374,10 +374,10 @@ pub struct StateInit {
     /// Optional special contract flags.
     pub special: Option<SpecialFlags>,
     /// Optional contract code.
-    #[cfg_attr(feature = "serde", serde(with = "crate::boc::OptionBoc"))]
+    #[cfg_attr(feature = "serde", serde(with = "crate::boc::Boc"))]
     pub code: Option<Cell>,
     /// Optional contract data.
-    #[cfg_attr(feature = "serde", serde(with = "crate::boc::OptionBoc"))]
+    #[cfg_attr(feature = "serde", serde(with = "crate::boc::Boc"))]
     pub data: Option<Cell>,
     /// Libraries used in smart-contract.
     pub libraries: Dict<HashBytes, SimpleLib>,

@@ -9,6 +9,3 @@ pub use crate::cell::{
     UsageTree, UsageTreeMode,
 };
 pub use crate::dict::{AugDict, Dict, RawDict};
-
-#[cfg(feature = "serde")]
-pub use crate::boc::OptionBoc;
