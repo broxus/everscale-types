@@ -48,7 +48,7 @@ impl<T> From<T> for SerdeBoc<T> {
     }
 }
 
-impl<T: SerializeAsBoc> Serialize for SerdeBoc<T> {
+impl<T: SerializeAsBoc + ?Sized> Serialize for SerdeBoc<T> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         self.0.serialize_as_boc(serializer)
     }
@@ -83,7 +83,7 @@ impl SerializeAsBoc for DynCell {
     }
 }
 
-impl<T: SerializeAsBoc> SerializeAsBoc for &'_ T {
+impl<T: SerializeAsBoc + ?Sized> SerializeAsBoc for &'_ T {
     #[inline]
     fn serialize_as_boc<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         T::serialize_as_boc(self, serializer)
@@ -97,21 +97,21 @@ impl<T: SerializeAsBoc> SerializeAsBoc for Option<T> {
     }
 }
 
-impl<T: SerializeAsBoc> SerializeAsBoc for Box<T> {
+impl<T: SerializeAsBoc + ?Sized> SerializeAsBoc for Box<T> {
     #[inline]
     fn serialize_as_boc<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         T::serialize_as_boc(self.as_ref(), serializer)
     }
 }
 
-impl<T: SerializeAsBoc> SerializeAsBoc for Rc<T> {
+impl<T: SerializeAsBoc + ?Sized> SerializeAsBoc for Rc<T> {
     #[inline]
     fn serialize_as_boc<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         T::serialize_as_boc(self.as_ref(), serializer)
     }
 }
 
-impl<T: SerializeAsBoc> SerializeAsBoc for Arc<T> {
+impl<T: SerializeAsBoc + ?Sized> SerializeAsBoc for Arc<T> {
     #[inline]
     fn serialize_as_boc<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         T::serialize_as_boc(self.as_ref(), serializer)
@@ -394,4 +394,25 @@ where
     }
 
     deserializer.deserialize_bytes(CowBytesVisitor)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::cell::CellFamily;
+
+    use super::*;
+
+    #[derive(serde::Serialize)]
+    struct StructWithDynCell<'a> {
+        #[serde(with = "crate::boc::Boc")]
+        cell: &'a DynCell,
+    }
+
+    #[test]
+    fn serde_dyn_cell_works() {
+        serde_json::to_string(&StructWithDynCell {
+            cell: Cell::empty_cell_ref(),
+        })
+        .unwrap();
+    }
 }
