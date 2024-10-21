@@ -8,6 +8,28 @@ use crate::models::config::BlockchainConfig;
 use crate::models::currency::CurrencyCollection;
 
 /// Additional content for masterchain state.
+///
+/// # TLB scheme
+///
+/// ```text
+/// copyleft_rewards#_ counters:(HashmapE 256 Grams) = CopyleftRewards;
+///
+/// masterchain_state_extra#cc26
+///     shard_hashes:ShardHashes
+///     config:ConfigParams
+///     ^[
+///         flags:(## 16) { flags <= 7 }
+///         validator_info:ValidatorInfo
+///         prev_blocks:OldMcBlocksInfo
+///         after_key_block:Bool
+///         last_key_block:(Maybe ExtBlkRef)
+///         block_create_stats:(flags . 0)?BlockCreateStats
+///         copyleft_rewards:(flags . 1)?CopyleftRewards
+///         consensus_info:(flags . 2)?ConsensusInfo
+///     ]
+///     global_balance:CurrencyCollection
+///     = McStateExtra;
+/// ```
 #[derive(Debug, Clone)]
 pub struct McStateExtra {
     /// A tree of the most recent descriptions for all currently existing shards
@@ -17,6 +39,9 @@ pub struct McStateExtra {
     pub config: BlockchainConfig,
     /// Brief validator info.
     pub validator_info: ValidatorInfo,
+    /// Brief consensus bounds info.
+    #[cfg(feature = "tycho")]
+    pub consensus_info: ConsensusInfo,
     /// A dictionary with previous masterchain blocks.
     pub prev_blocks: AugDict<u32, KeyMaxLt, KeyBlockRef>,
     /// Whether this state was produced after the key block.
@@ -42,8 +67,16 @@ impl Store for McStateExtra {
         builder: &mut CellBuilder,
         context: &mut dyn CellContext,
     ) -> Result<(), Error> {
-        let flags = ((!self.copyleft_rewards.is_empty() as u16) << 1)
+        #[allow(unused_mut)]
+        let mut flags = ((!self.copyleft_rewards.is_empty() as u16) << 1)
             | (self.block_create_stats.is_some() as u16);
+
+        #[cfg(feature = "tycho")]
+        let has_consensus_info = {
+            let non_default_info = !self.consensus_info.is_zerostate();
+            flags |= (non_default_info as u16) << 2;
+            non_default_info
+        };
 
         let cell = {
             let mut builder = CellBuilder::new();
@@ -60,6 +93,11 @@ impl Store for McStateExtra {
 
             if !self.copyleft_rewards.is_empty() {
                 ok!(self.copyleft_rewards.store_into(&mut builder, context));
+            }
+
+            #[cfg(feature = "tycho")]
+            if has_consensus_info {
+                ok!(self.consensus_info.store_into(&mut builder, context));
             }
 
             ok!(builder.build_ext(context))
@@ -87,7 +125,12 @@ impl<'a> Load<'a> for McStateExtra {
         let child_slice = &mut ok!(slice.load_reference_as_slice());
         let flags = ok!(child_slice.load_u16());
 
-        if flags >> 2 != 0 {
+        #[cfg(not(feature = "tycho"))]
+        const RESERVED_BITS: usize = 2;
+        #[cfg(feature = "tycho")]
+        const RESERVED_BITS: usize = 3;
+
+        if flags >> RESERVED_BITS != 0 {
             return Err(Error::InvalidData);
         }
 
@@ -98,7 +141,7 @@ impl<'a> Load<'a> for McStateExtra {
             prev_blocks: ok!(AugDict::load_from(child_slice)),
             after_key_block: ok!(child_slice.load_bit()),
             last_key_block: ok!(Option::<BlockRef>::load_from(child_slice)),
-            block_create_stats: if flags & 0b01 != 0 {
+            block_create_stats: if flags & 0b001 != 0 {
                 if ok!(child_slice.load_u8()) != Self::BLOCK_STATS_TAG {
                     return Err(Error::InvalidTag);
                 }
@@ -107,10 +150,16 @@ impl<'a> Load<'a> for McStateExtra {
                 None
             },
             global_balance: ok!(CurrencyCollection::load_from(slice)),
-            copyleft_rewards: if flags & 0b10 != 0 {
+            copyleft_rewards: if flags & 0b010 != 0 {
                 ok!(Dict::load_from(child_slice))
             } else {
                 Dict::new()
+            },
+            #[cfg(feature = "tycho")]
+            consensus_info: if flags & 0b100 != 0 {
+                ok!(ConsensusInfo::load_from(child_slice))
+            } else {
+                ConsensusInfo::ZEROSTATE
             },
         })
     }
@@ -135,6 +184,46 @@ pub struct ValidatorBaseInfo {
     pub validator_list_hash_short: u32,
     /// Seqno of the catchain session.
     pub catchain_seqno: u32,
+}
+
+/// Brief consensus bounds info.
+///
+/// ```text
+/// consensus_info#_
+///     config_update_round:uint32
+///     prev_config_round:uint32
+///     genesis_round:uint32
+///     genesis_millis:uint64
+///     = ConsensusInfo;
+/// ```
+#[derive(Default, Debug, Copy, Clone, Eq, PartialEq, Store, Load)]
+pub struct ConsensusInfo {
+    /// The most recent round from which the mempool session starts.
+    pub config_update_round: u32,
+
+    /// The round from which the previous mempool session was started.
+    pub prev_config_round: u32,
+
+    /// Mempool genesis round (affects the overlay id).
+    pub genesis_round: u32,
+
+    /// Mempool genesis generation timestamp in milliseconds (affects the overlay id).
+    pub genesis_millis: u64,
+}
+
+impl ConsensusInfo {
+    /// Initial consensus info state.
+    pub const ZEROSTATE: Self = Self {
+        config_update_round: 0,
+        prev_config_round: 0,
+        genesis_round: 0,
+        genesis_millis: 0,
+    };
+
+    /// Returns whether this info corresponds to the zerostate info.
+    pub fn is_zerostate(&self) -> bool {
+        self == &Self::ZEROSTATE
+    }
 }
 
 /// Entry value for the [`OldMcBlocksInfo`] dictionary.

@@ -502,7 +502,7 @@ impl<'a> Load<'a> for CatchainConfig {
 
 /// DAG Consensus configuration params
 ///
-/// ```tlb
+/// ```text
 /// consensus_config_tycho#d8
 ///     clock_skew_millis:uint16
 ///     payload_batch_bytes:uint32
@@ -535,7 +535,7 @@ pub struct ConsensusConfig {
     /// TODO: Add docs.
     ///
     /// **NOTE: Affects overlay id.**
-    pub commit_history_rounds: u8,
+    pub commit_history_rounds: u16,
 
     /// TODO: Add docs.
     ///
@@ -551,10 +551,10 @@ pub struct ConsensusConfig {
     pub payload_buffer_bytes: u32,
 
     /// TODO: Add docs.
-    pub broadcast_retry_millis: u8,
+    pub broadcast_retry_millis: u16,
 
     /// TODO: Add docs.
-    pub download_retry_millis: u8,
+    pub download_retry_millis: u16,
 
     /// TODO: Add docs.
     pub download_peers: u8,
