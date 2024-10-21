@@ -666,107 +666,122 @@ impl ValidatorSet {
     const TAG_V1: u8 = 0x11;
     const TAG_V2: u8 = 0x12;
 
-    /// Compoutes a validator subset using a zero seed.
+    /// Computes a validator subset using a zero seed.
     pub fn compute_subset(
         &self,
         shard_ident: ShardIdent,
         cc_config: &CatchainConfig,
         cc_seqno: u32,
     ) -> Option<(Vec<ValidatorDescription>, u32)> {
+        if shard_ident.is_masterchain() {
+            return self.compute_mc_subset(cc_seqno, cc_config.shuffle_mc_validators);
+        }
+
         let total = self.list.len();
         let main = self.main.get() as usize;
 
-        let subset = if shard_ident.is_masterchain() {
-            let count = std::cmp::min(total, main);
-            if !cc_config.shuffle_mc_validators {
-                self.list[0..count].to_vec()
-            } else {
-                let mut prng = ValidatorSetPRNG::new(shard_ident, cc_seqno);
+        let mut prng = ValidatorSetPRNG::new(shard_ident, cc_seqno);
 
-                let mut indices = vec![0; count];
-                for i in 0..count {
-                    let j = prng.next_ranged(i as u64 + 1) as usize; // number 0 .. i
-                    debug_assert!(j <= i);
-                    indices[i] = indices[j];
-                    indices[j] = i;
-                }
-
-                let mut subset = Vec::with_capacity(count);
-                for index in indices.into_iter().take(count) {
-                    subset.push(self.list[index].clone());
-                }
-                subset
+        let vset = if cc_config.isolate_mc_validators {
+            if total <= main {
+                return None;
             }
+
+            let mut list = self.list[main..].to_vec();
+
+            let mut total_weight = 0u64;
+            for descr in &mut list {
+                descr.prev_total_weight = total_weight;
+                total_weight += descr.weight;
+            }
+
+            Cow::Owned(Self {
+                utime_since: self.utime_since,
+                utime_until: self.utime_until,
+                main: self.main,
+                total_weight,
+                list,
+            })
         } else {
-            let mut prng = ValidatorSetPRNG::new(shard_ident, cc_seqno);
-
-            let vset = if cc_config.isolate_mc_validators {
-                if total <= main {
-                    return None;
-                }
-
-                let mut list = self.list[main..].to_vec();
-
-                let mut total_weight = 0u64;
-                for descr in &mut list {
-                    descr.prev_total_weight = total_weight;
-                    total_weight += descr.weight;
-                }
-
-                Cow::Owned(Self {
-                    utime_since: self.utime_since,
-                    utime_until: self.utime_until,
-                    main: self.main,
-                    total_weight,
-                    list,
-                })
-            } else {
-                Cow::Borrowed(self)
-            };
-
-            let count = std::cmp::min(vset.list.len(), cc_config.shard_validators_num as usize);
-
-            let mut nodes = Vec::with_capacity(count);
-            let mut holes = Vec::<(u64, u64)>::with_capacity(count);
-            let mut total_wt = vset.total_weight;
-
-            for _ in 0..count {
-                debug_assert!(total_wt > 0);
-
-                // Generate a pseudo-random number 0..total_wt-1
-                let mut p = prng.next_ranged(total_wt);
-
-                for (prev_total_weight, weight) in &holes {
-                    if p < *prev_total_weight {
-                        break;
-                    }
-                    p += weight;
-                }
-
-                let entry = vset.at_weight(p);
-
-                nodes.push(ValidatorDescription {
-                    public_key: entry.public_key,
-                    weight: 1,
-                    adnl_addr: entry.adnl_addr,
-                    mc_seqno_since: 0,
-                    prev_total_weight: 0,
-                });
-                debug_assert!(total_wt >= entry.weight);
-                total_wt -= entry.weight;
-
-                let new_hole = (entry.prev_total_weight, entry.weight);
-                let i = holes.partition_point(|item| item <= &new_hole);
-                debug_assert!(i == 0 || holes[i - 1] < new_hole);
-
-                holes.insert(i, new_hole);
-            }
-
-            nodes
+            Cow::Borrowed(self)
         };
 
-        let hash_short = Self::compute_subset_hash_short(subset.as_slice(), cc_seqno);
+        let count = std::cmp::min(vset.list.len(), cc_config.shard_validators_num as usize);
 
+        let mut nodes = Vec::with_capacity(count);
+        let mut holes = Vec::<(u64, u64)>::with_capacity(count);
+        let mut total_wt = vset.total_weight;
+
+        for _ in 0..count {
+            debug_assert!(total_wt > 0);
+
+            // Generate a pseudo-random number 0..total_wt-1
+            let mut p = prng.next_ranged(total_wt);
+
+            for (prev_total_weight, weight) in &holes {
+                if p < *prev_total_weight {
+                    break;
+                }
+                p += weight;
+            }
+
+            let entry = vset.at_weight(p);
+
+            nodes.push(ValidatorDescription {
+                public_key: entry.public_key,
+                weight: 1,
+                adnl_addr: entry.adnl_addr,
+                mc_seqno_since: 0,
+                prev_total_weight: 0,
+            });
+            debug_assert!(total_wt >= entry.weight);
+            total_wt -= entry.weight;
+
+            let new_hole = (entry.prev_total_weight, entry.weight);
+            let i = holes.partition_point(|item| item <= &new_hole);
+            debug_assert!(i == 0 || holes[i - 1] < new_hole);
+
+            holes.insert(i, new_hole);
+        }
+
+        let hash_short = Self::compute_subset_hash_short(&nodes, cc_seqno);
+
+        Some((nodes, hash_short))
+    }
+
+    /// Computes a masterchain validator subset using a zero seed.
+    ///
+    /// NOTE: In most cases you should use the more generic [`ValidatorSet::compute_subset`].
+    pub fn compute_mc_subset(
+        &self,
+        cc_seqno: u32,
+        shuffle: bool,
+    ) -> Option<(Vec<ValidatorDescription>, u32)> {
+        let total = self.list.len();
+        let main = self.main.get() as usize;
+
+        let count = std::cmp::min(total, main);
+        let subset = if !shuffle {
+            self.list[0..count].to_vec()
+        } else {
+            let mut prng = ValidatorSetPRNG::new(ShardIdent::MASTERCHAIN, cc_seqno);
+
+            let mut indices = vec![0; count];
+            for i in 0..count {
+                let j = prng.next_ranged(i as u64 + 1) as usize; // number 0 .. i
+                debug_assert!(j <= i);
+                indices[i] = indices[j];
+                indices[j] = i;
+            }
+
+            let mut subset = Vec::with_capacity(count);
+            for index in indices.into_iter().take(count) {
+                subset.push(self.list[index].clone());
+            }
+            subset
+        };
+
+        let hash_short = Self::compute_subset_hash_short(&subset, cc_seqno);
         Some((subset, hash_short))
     }
 
