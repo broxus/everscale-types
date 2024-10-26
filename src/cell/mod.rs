@@ -13,10 +13,10 @@ pub use self::slice::{CellSlice, CellSliceParts, CellSliceRange, ExactSize, Load
 pub use self::usage_tree::{UsageTree, UsageTreeMode, UsageTreeWithSubtrees};
 
 #[cfg(not(feature = "sync"))]
-pub use self::cell_impl::rc::{Cell, CellInner};
+pub use self::cell_impl::rc::{Cell, CellInner, WeakCell};
 
 #[cfg(feature = "sync")]
-pub use self::cell_impl::sync::{Cell, CellInner};
+pub use self::cell_impl::sync::{Cell, CellInner, WeakCell};
 
 pub use everscale_types_proc::{Load, Store};
 
