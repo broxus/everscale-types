@@ -1,7 +1,7 @@
 use std::alloc::Layout;
 use std::borrow::Borrow;
 use std::sync::atomic::AtomicUsize;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, OnceLock, Weak};
 
 use super::{
     EmptyOrdinaryCell, HeaderWithData, LibraryReference, OrdinaryCell, OrdinaryCellHeader,
@@ -25,6 +25,11 @@ impl Cell {
     #[inline]
     pub fn untrack(self) -> Self {
         self.0.untrack()
+    }
+
+    /// Creates a new [`WeakCell`] reference to this cell.
+    pub fn downgrade(this: &Cell) -> WeakCell {
+        WeakCell(Arc::downgrade(&this.0))
     }
 }
 
@@ -143,6 +148,22 @@ impl TryAsMut<DynCell> for Cell {
     #[inline]
     fn try_as_mut(&mut self) -> Option<&mut DynCell> {
         Arc::get_mut(&mut self.0)
+    }
+}
+
+/// A non-owning reference to a [`Cell`].
+#[derive(Clone)]
+#[repr(transparent)]
+pub struct WeakCell(Weak<DynCell>);
+
+impl WeakCell {
+    /// Attempts to upgrade the `WeakCell` to a [`Cell`],
+    /// extending the lifetime of the data.
+    ///
+    /// Returns [`None`] if the inner value has since been dropped.
+    #[inline]
+    pub fn upgrade(&self) -> Option<Cell> {
+        self.0.upgrade().map(Cell)
     }
 }
 
