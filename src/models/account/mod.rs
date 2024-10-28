@@ -307,6 +307,7 @@ pub struct Account {
 /// State of an existing account.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "status"))]
 pub enum AccountState {
     /// Account exists but has not yet been deployed.
     Uninit,
