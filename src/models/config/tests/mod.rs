@@ -1,6 +1,6 @@
 use super::*;
 use crate::boc::BocRepr;
-use crate::models::{ShardIdent, ShardStateUnsplit};
+use crate::models::ShardStateUnsplit;
 use crate::prelude::Boc;
 
 #[cfg(not(feature = "tycho"))]
@@ -283,7 +283,11 @@ fn prod_config() {
         config.get_msg_forward_prices(true).unwrap();
         config.get_msg_forward_prices(false).unwrap();
 
+        #[cfg(not(feature = "tycho"))]
         config.get_catchain_config().unwrap();
+        #[cfg(feature = "tycho")]
+        config.get_collation_config().unwrap();
+
         config.get_consensus_config().unwrap();
 
         let fundamental_addresses = config.get_fundamental_addresses().unwrap();
@@ -329,8 +333,11 @@ fn create_config() {
     );
 }
 
+#[cfg(not(feature = "tycho"))]
 #[test]
 fn validator_subset() {
+    use crate::models::ShardIdent;
+
     let master_state =
         BocRepr::decode::<ShardStateUnsplit, _>(&include_bytes!("test_state_2_master.boc"))
             .unwrap();
@@ -338,7 +345,9 @@ fn validator_subset() {
     let mc_state_extra = master_state.load_custom().unwrap().unwrap();
 
     let new_session_seqno = mc_state_extra.validator_info.catchain_seqno;
+
     let cc_config = mc_state_extra.config.get_catchain_config().unwrap();
+
     let validator_set = mc_state_extra.config.get_current_validator_set().unwrap();
 
     let subset = validator_set
