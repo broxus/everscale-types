@@ -998,6 +998,26 @@ impl FromAbi for HashBytes {
     }
 }
 
+impl FromPlainAbi for HashBytes {
+    fn from_plain_abi(value: PlainAbiValue) -> Result<Self> {
+        match &value {
+            PlainAbiValue::Uint(256, v) => {
+                let mut result = HashBytes::ZERO;
+
+                let bytes = v.to_bytes_be();
+                let bytes_len = bytes.len();
+                match 32usize.checked_sub(bytes_len) {
+                    None => result.0.copy_from_slice(&bytes[bytes_len - 32..]),
+                    Some(pad) => result.0[pad..].copy_from_slice(&bytes),
+                };
+
+                Ok(result)
+            }
+            value => Err(expected_plain_type("uint256", value)),
+        }
+    }
+}
+
 impl FromAbi for Cell {
     fn from_abi(value: AbiValue) -> Result<Self> {
         match value {

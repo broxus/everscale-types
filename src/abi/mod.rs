@@ -12,7 +12,9 @@ pub use self::traits::{
     FromAbi, FromAbiIter, FromPlainAbi, IgnoreName, IntoAbi, IntoPlainAbi, WithAbiType,
     WithPlainAbiType,
 };
-pub use self::ty::{AbiHeaderType, AbiType, NamedAbiType, PlainAbiType};
+pub use self::ty::{
+    AbiHeaderType, AbiType, AbiTypeFlatten, NamedAbiType, NamedAbiTypeFlatten, PlainAbiType,
+};
 pub use self::value::{AbiHeader, AbiValue, NamedAbiValue, PlainAbiValue};
 
 pub mod error;
