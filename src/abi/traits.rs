@@ -29,7 +29,10 @@ pub trait IgnoreName {
 }
 
 impl<T: IgnoreName> IgnoreName for &'_ T {
-    type Unnamed<'a> = T::Unnamed<'a> where Self: 'a;
+    type Unnamed<'a>
+        = T::Unnamed<'a>
+    where
+        Self: 'a;
 
     #[inline]
     fn ignore_name(&self) -> Self::Unnamed<'_> {
@@ -41,7 +44,10 @@ impl<T> IgnoreName for Vec<T>
 where
     [T]: IgnoreName,
 {
-    type Unnamed<'a> = <[T] as IgnoreName>::Unnamed<'a> where Self: 'a;
+    type Unnamed<'a>
+        = <[T] as IgnoreName>::Unnamed<'a>
+    where
+        Self: 'a;
 
     #[inline]
     fn ignore_name(&self) -> Self::Unnamed<'_> {
@@ -50,7 +56,10 @@ where
 }
 
 impl<T: IgnoreName> IgnoreName for Box<T> {
-    type Unnamed<'a> = T::Unnamed<'a> where Self: 'a;
+    type Unnamed<'a>
+        = T::Unnamed<'a>
+    where
+        Self: 'a;
 
     #[inline]
     fn ignore_name(&self) -> Self::Unnamed<'_> {
@@ -59,7 +68,10 @@ impl<T: IgnoreName> IgnoreName for Box<T> {
 }
 
 impl<T: IgnoreName> IgnoreName for Arc<T> {
-    type Unnamed<'a> = T::Unnamed<'a> where Self: 'a;
+    type Unnamed<'a>
+        = T::Unnamed<'a>
+    where
+        Self: 'a;
 
     #[inline]
     fn ignore_name(&self) -> Self::Unnamed<'_> {
@@ -68,7 +80,10 @@ impl<T: IgnoreName> IgnoreName for Arc<T> {
 }
 
 impl<T: IgnoreName> IgnoreName for Rc<T> {
-    type Unnamed<'a> = T::Unnamed<'a> where Self: 'a;
+    type Unnamed<'a>
+        = T::Unnamed<'a>
+    where
+        Self: 'a;
 
     #[inline]
     fn ignore_name(&self) -> Self::Unnamed<'_> {
@@ -77,7 +92,10 @@ impl<T: IgnoreName> IgnoreName for Rc<T> {
 }
 
 impl<T: IgnoreName> IgnoreName for Option<T> {
-    type Unnamed<'a> = Option<T::Unnamed<'a>> where Self: 'a;
+    type Unnamed<'a>
+        = Option<T::Unnamed<'a>>
+    where
+        Self: 'a;
 
     #[inline]
     fn ignore_name(&self) -> Self::Unnamed<'_> {
@@ -924,6 +942,26 @@ impl FromAbi for HashBytes {
                 Ok(result)
             }
             value => Err(expected_type("uint256", value)),
+        }
+    }
+}
+
+impl FromPlainAbi for HashBytes {
+    fn from_plain_abi(value: PlainAbiValue) -> Result<Self> {
+        match &value {
+            PlainAbiValue::Uint(256, v) => {
+                let mut result = HashBytes::ZERO;
+
+                let bytes = v.to_bytes_be();
+                let bytes_len = bytes.len();
+                match 32usize.checked_sub(bytes_len) {
+                    None => result.0.copy_from_slice(&bytes[bytes_len - 32..]),
+                    Some(pad) => result.0[pad..].copy_from_slice(&bytes),
+                };
+
+                Ok(result)
+            }
+            value => Err(expected_plain_type("uint256", value)),
         }
     }
 }

@@ -38,6 +38,27 @@ impl NamedAbiType {
     pub fn from_index(index: usize, ty: AbiType) -> Self {
         Self::new(format!("value{index}"), ty)
     }
+
+    /// Returns an iterator with the first-level tuple flattened.
+    ///
+    /// Can be used to pass an ABI struct as arguments to the
+    /// [`FunctionBuilder::with_inputs`] or [`FunctionBuilder::with_outputs`].
+    ///
+    /// [`FunctionBuilder::with_inputs`]: fn@crate::abi::FunctionBuilder::with_inputs
+    /// [`FunctionBuilder::with_outputs`]: fn@crate::abi::FunctionBuilder::with_outputs
+    pub fn flatten(self) -> NamedAbiTypeFlatten {
+        match self.ty {
+            AbiType::Tuple(tuple) => {
+                let mut items = tuple.to_vec();
+                items.reverse();
+                NamedAbiTypeFlatten::Tuple(items)
+            }
+            ty => NamedAbiTypeFlatten::Single(Some(NamedAbiType {
+                name: self.name,
+                ty,
+            })),
+        }
+    }
 }
 
 impl AsRef<AbiType> for NamedAbiType {
@@ -175,6 +196,32 @@ impl Hash for WithoutName<NamedAbiType> {
 impl std::borrow::Borrow<WithoutName<AbiType>> for WithoutName<NamedAbiType> {
     fn borrow(&self) -> &WithoutName<AbiType> {
         WithoutName::wrap(&self.0.ty)
+    }
+}
+
+/// An iterator that flattens the first-level tuple.
+#[derive(Clone)]
+pub enum NamedAbiTypeFlatten {
+    Single(Option<NamedAbiType>),
+    Tuple(Vec<NamedAbiType>),
+}
+
+impl Iterator for NamedAbiTypeFlatten {
+    type Item = NamedAbiType;
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let size = match self {
+            Self::Single(item) => item.is_some() as usize,
+            Self::Tuple(items) => items.len(),
+        };
+        (size, Some(size))
+    }
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Single(item) => item.take(),
+            Self::Tuple(items) => items.pop(),
+        }
     }
 }
 
@@ -393,6 +440,24 @@ impl AbiType {
             Self::Optional(ty) => Arc::make_mut(ty).components_mut(),
             Self::Ref(ty) => Arc::make_mut(ty).components_mut(),
             _ => None,
+        }
+    }
+
+    /// Returns an iterator with the first-level tuple flattened.
+    ///
+    /// Can be used to pass an ABI struct as arguments to the
+    /// [`FunctionBuilder::with_unnamed_inputs`] or [`FunctionBuilder::with_unnamed_outputs`]
+    ///
+    /// [`FunctionBuilder::with_unnamed_inputs`]: fn@crate::abi::FunctionBuilder::with_unnamed_inputs
+    /// [`FunctionBuilder::with_unnamed_outputs`]: fn@crate::abi::FunctionBuilder::with_unnamed_outputs
+    pub fn flatten(self) -> AbiTypeFlatten {
+        match self {
+            AbiType::Tuple(tuple) => {
+                let mut items = tuple.to_vec();
+                items.reverse();
+                AbiTypeFlatten::Tuple(items)
+            }
+            ty => AbiTypeFlatten::Single(Some(ty)),
         }
     }
 
@@ -693,6 +758,32 @@ impl Hash for WithoutName<AbiType> {
             }
             AbiType::Optional(x) => WithoutName::wrap(x.as_ref()).hash(state),
             AbiType::Ref(x) => WithoutName::wrap(x.as_ref()).hash(state),
+        }
+    }
+}
+
+/// An iterator that flattens the first-level tuple.
+#[derive(Clone)]
+pub enum AbiTypeFlatten {
+    Single(Option<AbiType>),
+    Tuple(Vec<NamedAbiType>),
+}
+
+impl Iterator for AbiTypeFlatten {
+    type Item = AbiType;
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let size = match self {
+            Self::Single(item) => item.is_some() as usize,
+            Self::Tuple(items) => items.len(),
+        };
+        (size, Some(size))
+    }
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Single(item) => item.take(),
+            Self::Tuple(items) => items.pop().map(|item| item.ty),
         }
     }
 }
