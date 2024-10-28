@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::num::{NonZeroU16, NonZeroU32};
 
 use everscale_crypto::ed25519;
@@ -444,6 +443,7 @@ pub struct MsgForwardPrices {
 }
 
 /// Catchain configuration params.
+#[cfg(not(feature = "tycho"))]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CatchainConfig {
@@ -461,11 +461,13 @@ pub struct CatchainConfig {
     pub shard_validators_num: u32,
 }
 
+#[cfg(not(feature = "tycho"))]
 impl CatchainConfig {
     const TAG_V1: u8 = 0xc1;
     const TAG_V2: u8 = 0xc2;
 }
 
+#[cfg(not(feature = "tycho"))]
 impl Store for CatchainConfig {
     fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         let flags = ((self.isolate_mc_validators as u8) << 1) | (self.shuffle_mc_validators as u8);
@@ -478,6 +480,7 @@ impl Store for CatchainConfig {
     }
 }
 
+#[cfg(not(feature = "tycho"))]
 impl<'a> Load<'a> for CatchainConfig {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let flags = match slice.load_u8() {
@@ -498,6 +501,191 @@ impl<'a> Load<'a> for CatchainConfig {
             shard_validators_num: ok!(slice.load_u32()),
         })
     }
+}
+
+/// Collation configuration params.
+///
+/// ```text
+/// collation_config_tycho#a6
+///     shuffle_mc_validators:Bool
+///     mc_block_min_interval_ms:uint32
+///     max_uncommitted_chain_length:uint8
+///     wu_used_to_import_next_anchor:uint64
+///     msgs_exec_params:MsgsExecutionParams
+///     work_units_params:WorkUnitsParams
+///     = CollationConfig;
+/// ```
+#[cfg(feature = "tycho")]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load, Default)]
+#[tlb(tag = "#a6")]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct CollationConfig {
+    /// Change the order of validators in the masterchain validators list.
+    pub shuffle_mc_validators: bool,
+
+    /// Minimum interval between master blocks.
+    pub mc_block_min_interval_ms: u32,
+    /// Maximum length on shard blocks chain after previous master block.
+    pub max_uncommitted_chain_length: u8,
+    /// Force import next anchor when wu used exceed limit.
+    pub wu_used_to_import_next_anchor: u64,
+
+    /// Messages execution params.
+    pub msgs_exec_params: MsgsExecutionParams,
+
+    /// Params to calculate the collation work in wu.
+    pub work_units_params: WorkUnitsParams,
+}
+
+/// Messages execution params.
+///
+/// ```text
+/// msgs_execution_params_tycho#00
+///     buffer_limit:uint32
+///     group_limit:uint16
+///     group_vert_size:uint16
+///     = MsgsExecutionParams;
+/// ```
+#[cfg(feature = "tycho")]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load, Default)]
+#[tlb(tag = "#00")]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct MsgsExecutionParams {
+    /// Maximum limit of messages buffer.
+    pub buffer_limit: u32,
+    /// The horizontal limit of one message group.
+    /// Shows how many unique destination accounts can be.
+    pub group_limit: u16,
+    /// The vertical limit of one message group.
+    /// Shows how many messages can be per one account in the group.
+    pub group_vert_size: u16,
+}
+
+/// Params to calculate the collation work in wu.
+///
+/// ```text
+/// work_units_params_tycho#00
+///     prepare:WorkUnitParamsPrepare
+///     execute:WorkUnitParamsExecute
+///     finalize:WorkUnitParamsFinalize
+///     = WorkUnitsParams;
+/// ```
+#[cfg(feature = "tycho")]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load, Default)]
+#[tlb(tag = "#00")]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct WorkUnitsParams {
+    /// Params to calculate messages groups prepare work in wu.
+    pub prepare: WorkUnitsParamsPrepare,
+    /// Params to calculate messages execution work in wu.
+    pub execute: WorkUnitsParamsExecute,
+    /// Params to calculate block finalization work in wu.
+    pub finalize: WorkUnitsParamsFinalize,
+}
+
+/// Params to calculate messages groups prepare work in wu.
+///
+/// ```text
+/// work_units_params_prepare_tycho#00
+///     fixed:uint32
+///     read_ext_msgs:uint16
+///     read_int_msgs:uint16
+///     read_new_msgs:uint32
+///     = WorkUnitsParamsPrepare;
+/// ```
+#[cfg(feature = "tycho")]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load, Default)]
+#[tlb(tag = "#00")]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct WorkUnitsParamsPrepare {
+    /// TODO: Add docs.
+    pub fixed_part: u32,
+    /// TODO: Add docs.
+    pub read_ext_msgs: u16,
+    /// TODO: Add docs.
+    pub read_int_msgs: u16,
+    /// TODO: Add docs.
+    pub read_new_msgs: u32,
+}
+
+/// Params to calculate messages execution work in wu.
+///
+/// ```text
+/// work_units_params_execute_tycho#00
+///     prepare:uint32
+///     execute:uint16
+///     execute_err:uint16
+///     execute_delimiter:uint32
+///     serialize_enqueue:uint16
+///     serialize_dequeue:uint16
+///     insert_new_msgs_to_iterator:uint16
+///     subgroup_size:uint16
+///     = WorkUnitsParamsExecute;
+/// ```
+#[cfg(feature = "tycho")]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load, Default)]
+#[tlb(tag = "#00")]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct WorkUnitsParamsExecute {
+    /// TODO: Add docs.
+    pub prepare: u32,
+    /// TODO: Add docs.
+    pub execute: u16,
+    /// TODO: Add docs.
+    pub execute_err: u16,
+    /// TODO: Add docs.
+    pub execute_delimiter: u32,
+    /// TODO: Add docs.
+    pub serialize_enqueue: u16,
+    /// TODO: Add docs.
+    pub serialize_dequeue: u16,
+    /// TODO: Add docs.
+    pub insert_new_msgs_to_iterator: u16,
+    /// TODO: Add docs.
+    pub subgroup_size: u16,
+}
+
+/// Params to calculate block finalization work in wu.
+///
+/// ```text
+/// work_units_params_finalize_tycho#00
+///     build_transactions:uint16
+///     build_accounts:uint16
+///     build_in_msg:uint16
+///     build_out_msg:uint16
+///     serialize_min:uint32
+///     serialize_accounts:uint16
+///     serialize_msg:uint16
+///     state_update_min:uint32
+///     state_update_accounts:uint32
+///     state_update_msg:uint16
+///     = WorkUnitsParamsFinalize;
+/// ```
+#[cfg(feature = "tycho")]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load, Default)]
+#[tlb(tag = "#00")]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct WorkUnitsParamsFinalize {
+    /// TODO: Add docs.
+    pub build_transactions: u16,
+    /// TODO: Add docs.
+    pub build_accounts: u16,
+    /// TODO: Add docs.
+    pub build_in_msg: u16,
+    /// TODO: Add docs.
+    pub build_out_msg: u16,
+    /// TODO: Add docs.
+    pub serialize_min: u32,
+    /// TODO: Add docs.
+    pub serialize_accounts: u16,
+    /// TODO: Add docs.
+    pub serialize_msg: u16,
+    /// TODO: Add docs.
+    pub state_update_min: u32,
+    /// TODO: Add docs.
+    pub state_update_accounts: u32,
+    /// TODO: Add docs.
+    pub state_update_msg: u16,
 }
 
 /// DAG Consensus configuration params
@@ -667,6 +855,7 @@ impl ValidatorSet {
     const TAG_V2: u8 = 0x12;
 
     /// Computes a validator subset using a zero seed.
+    #[cfg(not(feature = "tycho"))]
     pub fn compute_subset(
         &self,
         shard_ident: ShardIdent,
@@ -695,7 +884,7 @@ impl ValidatorSet {
                 total_weight += descr.weight;
             }
 
-            Cow::Owned(Self {
+            std::borrow::Cow::Owned(Self {
                 utime_since: self.utime_since,
                 utime_until: self.utime_until,
                 main: self.main,
@@ -703,7 +892,7 @@ impl ValidatorSet {
                 list,
             })
         } else {
-            Cow::Borrowed(self)
+            std::borrow::Cow::Borrowed(self)
         };
 
         let count = std::cmp::min(vset.list.len(), cc_config.shard_validators_num as usize);
@@ -808,6 +997,7 @@ impl ValidatorSet {
         hash
     }
 
+    #[cfg(not(feature = "tycho"))]
     fn at_weight(&self, weight_pos: u64) -> &ValidatorDescription {
         debug_assert!(weight_pos < self.total_weight);
         debug_assert!(!self.list.is_empty());
