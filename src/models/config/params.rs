@@ -1,5 +1,4 @@
-use std::borrow::Cow;
-use std::num::{NonZeroU16, NonZeroU32, NonZeroU8};
+use std::num::{NonZeroU16, NonZeroU32};
 
 use everscale_crypto::ed25519;
 
@@ -444,6 +443,7 @@ pub struct MsgForwardPrices {
 }
 
 /// Catchain configuration params.
+#[cfg(not(feature = "tycho"))]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CatchainConfig {
@@ -461,11 +461,13 @@ pub struct CatchainConfig {
     pub shard_validators_num: u32,
 }
 
+#[cfg(not(feature = "tycho"))]
 impl CatchainConfig {
     const TAG_V1: u8 = 0xc1;
     const TAG_V2: u8 = 0xc2;
 }
 
+#[cfg(not(feature = "tycho"))]
 impl Store for CatchainConfig {
     fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         let flags = ((self.isolate_mc_validators as u8) << 1) | (self.shuffle_mc_validators as u8);
@@ -478,6 +480,7 @@ impl Store for CatchainConfig {
     }
 }
 
+#[cfg(not(feature = "tycho"))]
 impl<'a> Load<'a> for CatchainConfig {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let flags = match slice.load_u8() {
@@ -500,7 +503,259 @@ impl<'a> Load<'a> for CatchainConfig {
     }
 }
 
+/// Collation configuration params.
+///
+/// ```text
+/// collation_config_tycho#a6
+///     shuffle_mc_validators:Bool
+///     mc_block_min_interval_ms:uint32
+///     max_uncommitted_chain_length:uint8
+///     wu_used_to_import_next_anchor:uint64
+///     msgs_exec_params:MsgsExecutionParams
+///     work_units_params:WorkUnitsParams
+///     = CollationConfig;
+/// ```
+#[cfg(feature = "tycho")]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load, Default)]
+#[tlb(tag = "#a6")]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct CollationConfig {
+    /// Change the order of validators in the masterchain validators list.
+    pub shuffle_mc_validators: bool,
+
+    /// Minimum interval between master blocks.
+    pub mc_block_min_interval_ms: u32,
+    /// Maximum length on shard blocks chain after previous master block.
+    pub max_uncommitted_chain_length: u8,
+    /// Force import next anchor when wu used exceed limit.
+    pub wu_used_to_import_next_anchor: u64,
+
+    /// Messages execution params.
+    pub msgs_exec_params: MsgsExecutionParams,
+
+    /// Params to calculate the collation work in wu.
+    pub work_units_params: WorkUnitsParams,
+}
+
+/// Messages execution params.
+///
+/// ```text
+/// msgs_execution_params_tycho#00
+///     buffer_limit:uint32
+///     group_limit:uint16
+///     group_vert_size:uint16
+///     = MsgsExecutionParams;
+/// ```
+#[cfg(feature = "tycho")]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load, Default)]
+#[tlb(tag = "#00")]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct MsgsExecutionParams {
+    /// Maximum limit of messages buffer.
+    pub buffer_limit: u32,
+    /// The horizontal limit of one message group.
+    /// Shows how many unique destination accounts can be.
+    pub group_limit: u16,
+    /// The vertical limit of one message group.
+    /// Shows how many messages can be per one account in the group.
+    pub group_vert_size: u16,
+}
+
+/// Params to calculate the collation work in wu.
+///
+/// ```text
+/// work_units_params_tycho#00
+///     prepare:WorkUnitParamsPrepare
+///     execute:WorkUnitParamsExecute
+///     finalize:WorkUnitParamsFinalize
+///     = WorkUnitsParams;
+/// ```
+#[cfg(feature = "tycho")]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load, Default)]
+#[tlb(tag = "#00")]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct WorkUnitsParams {
+    /// Params to calculate messages groups prepare work in wu.
+    pub prepare: WorkUnitsParamsPrepare,
+    /// Params to calculate messages execution work in wu.
+    pub execute: WorkUnitsParamsExecute,
+    /// Params to calculate block finalization work in wu.
+    pub finalize: WorkUnitsParamsFinalize,
+}
+
+/// Params to calculate messages groups prepare work in wu.
+///
+/// ```text
+/// work_units_params_prepare_tycho#00
+///     fixed:uint32
+///     read_ext_msgs:uint16
+///     read_int_msgs:uint16
+///     read_new_msgs:uint32
+///     = WorkUnitsParamsPrepare;
+/// ```
+#[cfg(feature = "tycho")]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load, Default)]
+#[tlb(tag = "#00")]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct WorkUnitsParamsPrepare {
+    /// TODO: Add docs.
+    pub fixed_part: u32,
+    /// TODO: Add docs.
+    pub read_ext_msgs: u16,
+    /// TODO: Add docs.
+    pub read_int_msgs: u16,
+    /// TODO: Add docs.
+    pub read_new_msgs: u32,
+}
+
+/// Params to calculate messages execution work in wu.
+///
+/// ```text
+/// work_units_params_execute_tycho#00
+///     prepare:uint32
+///     execute:uint16
+///     execute_err:uint16
+///     execute_delimiter:uint32
+///     serialize_enqueue:uint16
+///     serialize_dequeue:uint16
+///     insert_new_msgs_to_iterator:uint16
+///     subgroup_size:uint16
+///     = WorkUnitsParamsExecute;
+/// ```
+#[cfg(feature = "tycho")]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load, Default)]
+#[tlb(tag = "#00")]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct WorkUnitsParamsExecute {
+    /// TODO: Add docs.
+    pub prepare: u32,
+    /// TODO: Add docs.
+    pub execute: u16,
+    /// TODO: Add docs.
+    pub execute_err: u16,
+    /// TODO: Add docs.
+    pub execute_delimiter: u32,
+    /// TODO: Add docs.
+    pub serialize_enqueue: u16,
+    /// TODO: Add docs.
+    pub serialize_dequeue: u16,
+    /// TODO: Add docs.
+    pub insert_new_msgs_to_iterator: u16,
+    /// TODO: Add docs.
+    pub subgroup_size: u16,
+}
+
+/// Params to calculate block finalization work in wu.
+///
+/// ```text
+/// work_units_params_finalize_tycho#00
+///     build_transactions:uint16
+///     build_accounts:uint16
+///     build_in_msg:uint16
+///     build_out_msg:uint16
+///     serialize_min:uint32
+///     serialize_accounts:uint16
+///     serialize_msg:uint16
+///     state_update_min:uint32
+///     state_update_accounts:uint32
+///     state_update_msg:uint16
+///     = WorkUnitsParamsFinalize;
+/// ```
+#[cfg(feature = "tycho")]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load, Default)]
+#[tlb(tag = "#00")]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct WorkUnitsParamsFinalize {
+    /// TODO: Add docs.
+    pub build_transactions: u16,
+    /// TODO: Add docs.
+    pub build_accounts: u16,
+    /// TODO: Add docs.
+    pub build_in_msg: u16,
+    /// TODO: Add docs.
+    pub build_out_msg: u16,
+    /// TODO: Add docs.
+    pub serialize_min: u32,
+    /// TODO: Add docs.
+    pub serialize_accounts: u16,
+    /// TODO: Add docs.
+    pub serialize_msg: u16,
+    /// TODO: Add docs.
+    pub state_update_min: u32,
+    /// TODO: Add docs.
+    pub state_update_accounts: u32,
+    /// TODO: Add docs.
+    pub state_update_msg: u16,
+}
+
+/// DAG Consensus configuration params
+///
+/// ```text
+/// consensus_config_tycho#d8
+///     clock_skew_millis:uint16
+///     payload_batch_bytes:uint32
+///     commit_history_rounds:uint8
+///     deduplicate_rounds:uint16
+///     max_consensus_lag_rounds:uint16
+///     payload_buffer_bytes:uint32
+///     broadcast_retry_millis:uint8
+///     download_retry_millis:uint8
+///     download_peers:uint8
+///     download_tasks:uint16
+///     sync_support_rounds:uint16
+///     = ConsensusConfig;
+/// ```
+#[cfg(feature = "tycho")]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[tlb(tag = "#d8")]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ConsensusConfig {
+    /// TODO: Add docs.
+    ///
+    /// **NOTE: Affects overlay id.**
+    pub clock_skew_millis: u16,
+
+    /// TODO: Add docs.
+    ///
+    /// **NOTE: Affects overlay id.**
+    pub payload_batch_bytes: u32,
+
+    /// TODO: Add docs.
+    ///
+    /// **NOTE: Affects overlay id.**
+    pub commit_history_rounds: u16,
+
+    /// TODO: Add docs.
+    ///
+    /// **NOTE: Affects overlay id.**
+    pub deduplicate_rounds: u16,
+
+    /// TODO: Add docs.
+    ///
+    /// **NOTE: Affects overlay id.**
+    pub max_consensus_lag_rounds: u16,
+
+    /// TODO: Add docs.
+    pub payload_buffer_bytes: u32,
+
+    /// TODO: Add docs.
+    pub broadcast_retry_millis: u16,
+
+    /// TODO: Add docs.
+    pub download_retry_millis: u16,
+
+    /// TODO: Add docs.
+    pub download_peers: u8,
+
+    /// TODO: Add docs.
+    pub download_tasks: u16,
+
+    /// TODO: Add docs.
+    pub sync_support_rounds: u16,
+}
+
 /// Consensus configuration params.
+#[cfg(not(feature = "tycho"))]
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ConsensusConfig {
@@ -524,11 +779,13 @@ pub struct ConsensusConfig {
     pub max_collated_bytes: u32,
 }
 
+#[cfg(not(feature = "tycho"))]
 impl ConsensusConfig {
     const TAG_V1: u8 = 0xd6;
     const TAG_V2: u8 = 0xd7;
 }
 
+#[cfg(not(feature = "tycho"))]
 impl Store for ConsensusConfig {
     fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         let flags = self.new_catchain_ids as u8;
@@ -546,8 +803,11 @@ impl Store for ConsensusConfig {
     }
 }
 
+#[cfg(not(feature = "tycho"))]
 impl<'a> Load<'a> for ConsensusConfig {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
+        use std::num::NonZeroU8;
+
         let (flags, round_candidates) = match slice.load_u8() {
             Ok(Self::TAG_V1) => (0, ok!(NonZeroU32::load_from(slice))),
             Ok(Self::TAG_V2) => {
@@ -594,107 +854,123 @@ impl ValidatorSet {
     const TAG_V1: u8 = 0x11;
     const TAG_V2: u8 = 0x12;
 
-    /// Compoutes a validator subset using a zero seed.
+    /// Computes a validator subset using a zero seed.
+    #[cfg(not(feature = "tycho"))]
     pub fn compute_subset(
         &self,
         shard_ident: ShardIdent,
         cc_config: &CatchainConfig,
         cc_seqno: u32,
     ) -> Option<(Vec<ValidatorDescription>, u32)> {
+        if shard_ident.is_masterchain() {
+            return self.compute_mc_subset(cc_seqno, cc_config.shuffle_mc_validators);
+        }
+
         let total = self.list.len();
         let main = self.main.get() as usize;
 
-        let subset = if shard_ident.is_masterchain() {
-            let count = std::cmp::min(total, main);
-            if !cc_config.shuffle_mc_validators {
-                self.list[0..count].to_vec()
-            } else {
-                let mut prng = ValidatorSetPRNG::new(shard_ident, cc_seqno);
+        let mut prng = ValidatorSetPRNG::new(shard_ident, cc_seqno);
 
-                let mut indices = vec![0; count];
-                for i in 0..count {
-                    let j = prng.next_ranged(i as u64 + 1) as usize; // number 0 .. i
-                    debug_assert!(j <= i);
-                    indices[i] = indices[j];
-                    indices[j] = i;
-                }
-
-                let mut subset = Vec::with_capacity(count);
-                for index in indices.into_iter().take(count) {
-                    subset.push(self.list[index].clone());
-                }
-                subset
+        let vset = if cc_config.isolate_mc_validators {
+            if total <= main {
+                return None;
             }
+
+            let mut list = self.list[main..].to_vec();
+
+            let mut total_weight = 0u64;
+            for descr in &mut list {
+                descr.prev_total_weight = total_weight;
+                total_weight += descr.weight;
+            }
+
+            std::borrow::Cow::Owned(Self {
+                utime_since: self.utime_since,
+                utime_until: self.utime_until,
+                main: self.main,
+                total_weight,
+                list,
+            })
         } else {
-            let mut prng = ValidatorSetPRNG::new(shard_ident, cc_seqno);
-
-            let vset = if cc_config.isolate_mc_validators {
-                if total <= main {
-                    return None;
-                }
-
-                let mut list = self.list[main..].to_vec();
-
-                let mut total_weight = 0u64;
-                for descr in &mut list {
-                    descr.prev_total_weight = total_weight;
-                    total_weight += descr.weight;
-                }
-
-                Cow::Owned(Self {
-                    utime_since: self.utime_since,
-                    utime_until: self.utime_until,
-                    main: self.main,
-                    total_weight,
-                    list,
-                })
-            } else {
-                Cow::Borrowed(self)
-            };
-
-            let count = std::cmp::min(vset.list.len(), cc_config.shard_validators_num as usize);
-
-            let mut nodes = Vec::with_capacity(count);
-            let mut holes = Vec::<(u64, u64)>::with_capacity(count);
-            let mut total_wt = vset.total_weight;
-
-            for _ in 0..count {
-                debug_assert!(total_wt > 0);
-
-                // Generate a pseudo-random number 0..total_wt-1
-                let mut p = prng.next_ranged(total_wt);
-
-                for (prev_total_weight, weight) in &holes {
-                    if p < *prev_total_weight {
-                        break;
-                    }
-                    p += weight;
-                }
-
-                let entry = vset.at_weight(p);
-
-                nodes.push(ValidatorDescription {
-                    public_key: entry.public_key,
-                    weight: 1,
-                    adnl_addr: entry.adnl_addr,
-                    mc_seqno_since: 0,
-                    prev_total_weight: 0,
-                });
-                debug_assert!(total_wt >= entry.weight);
-                total_wt -= entry.weight;
-
-                let new_hole = (entry.prev_total_weight, entry.weight);
-                let i = holes.partition_point(|item| item <= &new_hole);
-                debug_assert!(i == 0 || holes[i - 1] < new_hole);
-
-                holes.insert(i, new_hole);
-            }
-
-            nodes
+            std::borrow::Cow::Borrowed(self)
         };
 
-        let hash_short = Self::compute_subset_hash_short(subset.as_slice(), cc_seqno);
+        let count = std::cmp::min(vset.list.len(), cc_config.shard_validators_num as usize);
 
+        let mut nodes = Vec::with_capacity(count);
+        let mut holes = Vec::<(u64, u64)>::with_capacity(count);
+        let mut total_wt = vset.total_weight;
+
+        for _ in 0..count {
+            debug_assert!(total_wt > 0);
+
+            // Generate a pseudo-random number 0..total_wt-1
+            let mut p = prng.next_ranged(total_wt);
+
+            for (prev_total_weight, weight) in &holes {
+                if p < *prev_total_weight {
+                    break;
+                }
+                p += weight;
+            }
+
+            let entry = vset.at_weight(p);
+
+            nodes.push(ValidatorDescription {
+                public_key: entry.public_key,
+                weight: 1,
+                adnl_addr: entry.adnl_addr,
+                mc_seqno_since: 0,
+                prev_total_weight: 0,
+            });
+            debug_assert!(total_wt >= entry.weight);
+            total_wt -= entry.weight;
+
+            let new_hole = (entry.prev_total_weight, entry.weight);
+            let i = holes.partition_point(|item| item <= &new_hole);
+            debug_assert!(i == 0 || holes[i - 1] < new_hole);
+
+            holes.insert(i, new_hole);
+        }
+
+        let hash_short = Self::compute_subset_hash_short(&nodes, cc_seqno);
+
+        Some((nodes, hash_short))
+    }
+
+    /// Computes a masterchain validator subset using a zero seed.
+    ///
+    /// NOTE: In most cases you should use the more generic [`ValidatorSet::compute_subset`].
+    pub fn compute_mc_subset(
+        &self,
+        cc_seqno: u32,
+        shuffle: bool,
+    ) -> Option<(Vec<ValidatorDescription>, u32)> {
+        let total = self.list.len();
+        let main = self.main.get() as usize;
+
+        let count = std::cmp::min(total, main);
+        let subset = if !shuffle {
+            self.list[0..count].to_vec()
+        } else {
+            let mut prng = ValidatorSetPRNG::new(ShardIdent::MASTERCHAIN, cc_seqno);
+
+            let mut indices = vec![0; count];
+            for i in 0..count {
+                let j = prng.next_ranged(i as u64 + 1) as usize; // number 0 .. i
+                debug_assert!(j <= i);
+                indices[i] = indices[j];
+                indices[j] = i;
+            }
+
+            let mut subset = Vec::with_capacity(count);
+            for index in indices.into_iter().take(count) {
+                subset.push(self.list[index].clone());
+            }
+            subset
+        };
+
+        let hash_short = Self::compute_subset_hash_short(&subset, cc_seqno);
         Some((subset, hash_short))
     }
 
@@ -721,6 +997,7 @@ impl ValidatorSet {
         hash
     }
 
+    #[cfg(not(feature = "tycho"))]
     fn at_weight(&self, weight_pos: u64) -> &ValidatorDescription {
         debug_assert!(weight_pos < self.total_weight);
         debug_assert!(!self.list.is_empty());

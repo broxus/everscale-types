@@ -137,10 +137,14 @@ impl<'a> BocHeader<'a> {
                 return Err(Error::TooFewRootCells);
             }
         }
-        if unlikely(root_count > options.max_roots.unwrap_or(MAX_ROOTS)) {
-            return Err(Error::TooManyRootCells);
+
+        {
+            let max_roots = options.max_roots.unwrap_or(MAX_ROOTS);
+            if unlikely(root_count > max_roots) {
+                return Err(Error::TooManyRootCells);
+            }
+            debug_assert!(absent_count == 0 && (1..=max_roots).contains(&root_count))
         }
-        debug_assert!(absent_count == 0 && (1..=MAX_ROOTS).contains(&root_count));
 
         // SAFETY: we have already requested at least {ref_size}*3+{offset_size}
         // and {ref_size} is in range 1..=8

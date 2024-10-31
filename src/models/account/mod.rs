@@ -307,6 +307,7 @@ pub struct Account {
 /// State of an existing account.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "status"))]
 pub enum AccountState {
     /// Account exists but has not yet been deployed.
     Uninit,
@@ -374,10 +375,10 @@ pub struct StateInit {
     /// Optional special contract flags.
     pub special: Option<SpecialFlags>,
     /// Optional contract code.
-    #[cfg_attr(feature = "serde", serde(with = "crate::boc::OptionBoc"))]
+    #[cfg_attr(feature = "serde", serde(with = "crate::boc::Boc"))]
     pub code: Option<Cell>,
     /// Optional contract data.
-    #[cfg_attr(feature = "serde", serde(with = "crate::boc::OptionBoc"))]
+    #[cfg_attr(feature = "serde", serde(with = "crate::boc::Boc"))]
     pub data: Option<Cell>,
     /// Libraries used in smart-contract.
     pub libraries: Dict<HashBytes, SimpleLib>,

@@ -99,7 +99,7 @@ mod serde_in_msg {
                 None => serializer.serialize_none(),
             }
         } else {
-            crate::boc::OptionBoc::serialize(in_msg, serializer)
+            crate::boc::Boc::serialize(in_msg, serializer)
         }
     }
 
@@ -119,7 +119,7 @@ mod serde_in_msg {
                 None => Ok(None),
             }
         } else {
-            crate::boc::OptionBoc::deserialize(deserializer)
+            crate::boc::Boc::deserialize(deserializer)
         }
     }
 }

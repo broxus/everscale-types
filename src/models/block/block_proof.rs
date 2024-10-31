@@ -3,6 +3,8 @@ use crate::dict::Dict;
 use crate::error::Error;
 
 use super::{BlockId, BlockSignature};
+#[cfg(feature = "tycho")]
+use crate::models::shard::ConsensusInfo;
 use crate::models::shard::ValidatorBaseInfo;
 
 /// Typed block proof.
@@ -73,10 +75,14 @@ impl<'a> Load<'a> for BlockProof {
 
 /// Masterchain block signatures.
 #[derive(Debug, Clone, Store, Load)]
-#[tlb(tag = "#11")]
+#[cfg_attr(not(feature = "tycho"), tlb(tag = "#11"))]
+#[cfg_attr(feature = "tycho", tlb(tag = "#12"))]
 pub struct BlockSignatures {
     /// Brief validator basic info.
     pub validator_info: ValidatorBaseInfo,
+    /// Mempool bounds info.
+    #[cfg(feature = "tycho")]
+    pub consensus_info: ConsensusInfo,
     /// Total number of signatures.
     pub signature_count: u32,
     /// Total validators weight.

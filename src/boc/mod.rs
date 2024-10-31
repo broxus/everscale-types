@@ -2,10 +2,16 @@
 
 use crate::cell::{Cell, CellBuilder, CellContext, CellFamily, DynCell, HashBytes, Load, Store};
 
+#[cfg(feature = "serde")]
+pub use self::serde::SerdeBoc;
+
 /// BOC decoder implementation.
 pub mod de;
 /// BOC encoder implementation.
 pub mod ser;
+
+#[cfg(feature = "serde")]
+mod serde;
 
 #[cfg(test)]
 mod tests;
@@ -44,41 +50,6 @@ impl BocTag {
             Self::IndexedCrc32 => Self::INDEXED_CRC32,
             Self::Generic => Self::GENERIC,
         }
-    }
-}
-
-/// A serde helper to use [`Boc`] inside [`Option`].
-#[cfg(feature = "serde")]
-pub struct OptionBoc;
-
-#[cfg(feature = "serde")]
-impl OptionBoc {
-    /// Serializes an optional cell into an encoded BOC
-    /// (as base64 for human readable serializers).
-    pub fn serialize<S, T>(cell: &Option<T>, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-        T: AsRef<DynCell>,
-    {
-        match cell {
-            Some(cell) => serializer.serialize_some(cell.as_ref()),
-            None => serializer.serialize_none(),
-        }
-    }
-
-    /// Deserializes an optional cell from an encoded BOC
-    /// (from base64 for human readable deserializers).
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Cell>, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use serde::Deserialize;
-
-        #[derive(Deserialize)]
-        #[repr(transparent)]
-        struct Wrapper(#[serde(with = "Boc")] Cell);
-
-        Ok(ok!(Option::<Wrapper>::deserialize(deserializer)).map(|Wrapper(cell)| cell))
     }
 }
 
@@ -306,40 +277,26 @@ impl Boc {
 
     /// Serializes cell into an encoded BOC (as base64 for human readable serializers).
     #[cfg(feature = "serde")]
-    pub fn serialize<S, T>(cell: &T, serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<T, S>(value: T, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: serde::Serializer,
-        T: AsRef<DynCell> + ?Sized,
+        SerdeBoc<T>: ::serde::Serialize,
+        S: ::serde::Serializer,
     {
-        use serde::Serialize;
+        use ::serde::Serialize;
 
-        cell.as_ref().serialize(serializer)
+        SerdeBoc::from(value).serialize(serializer)
     }
 
     /// Deserializes cell from an encoded BOC (from base64 for human readable deserializers).
     #[cfg(feature = "serde")]
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Cell, D::Error>
+    pub fn deserialize<'de, T, D>(deserializer: D) -> Result<T, D::Error>
     where
-        D: serde::Deserializer<'de>,
+        SerdeBoc<T>: ::serde::Deserialize<'de>,
+        D: ::serde::Deserializer<'de>,
     {
-        use serde::de::Error;
+        use ::serde::Deserialize;
 
-        let is_human_readable = deserializer.is_human_readable();
-        let mut boc = ok!(borrow_cow_bytes(deserializer));
-
-        if is_human_readable {
-            match crate::util::decode_base64(boc) {
-                Ok(bytes) => {
-                    boc = std::borrow::Cow::Owned(bytes);
-                }
-                Err(_) => return Err(Error::custom("invalid base64 string")),
-            }
-        }
-
-        match Boc::decode(boc) {
-            Ok(cell) => Ok(cell),
-            Err(e) => Err(Error::custom(e)),
-        }
+        SerdeBoc::<T>::deserialize(deserializer).map(SerdeBoc::into_inner)
     }
 }
 
@@ -534,10 +491,10 @@ impl BocRepr {
     #[cfg(feature = "serde")]
     pub fn serialize<S, T>(data: &T, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: serde::Serializer,
+        S: ::serde::Serializer,
         T: Store,
     {
-        use serde::ser::{Error, Serialize};
+        use ::serde::ser::{Error, Serialize};
 
         let context = &mut Cell::empty_context();
 
@@ -559,12 +516,12 @@ impl BocRepr {
     #[cfg(feature = "serde")]
     pub fn deserialize<'de, D, T>(deserializer: D) -> Result<T, D::Error>
     where
-        D: serde::Deserializer<'de>,
+        D: ::serde::Deserializer<'de>,
         for<'a> T: Load<'a>,
     {
-        use serde::de::Error;
+        use ::serde::de::Error;
 
-        let cell = ok!(Boc::deserialize(deserializer));
+        let cell = ok!(Boc::deserialize::<Cell, _>(deserializer));
         match cell.as_ref().parse::<T>() {
             Ok(data) => Ok(data),
             Err(_) => Err(Error::custom("failed to decode object from cells")),
@@ -581,68 +538,4 @@ pub enum BocReprError {
     /// Failed to decode data from cells.
     #[error("failed to decode object from cells")]
     InvalidData(#[source] crate::error::Error),
-}
-
-#[cfg(feature = "serde")]
-fn borrow_cow_bytes<'de: 'a, 'a, D>(deserializer: D) -> Result<std::borrow::Cow<'a, [u8]>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use std::borrow::Cow;
-
-    use serde::de::{Error, Visitor};
-
-    struct CowBytesVisitor;
-
-    impl<'a> Visitor<'a> for CowBytesVisitor {
-        type Value = Cow<'a, [u8]>;
-
-        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-            formatter.write_str("a byte array")
-        }
-
-        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-        where
-            E: Error,
-        {
-            Ok(Cow::Owned(v.as_bytes().to_vec()))
-        }
-
-        fn visit_borrowed_str<E>(self, v: &'a str) -> Result<Self::Value, E>
-        where
-            E: Error,
-        {
-            Ok(Cow::Borrowed(v.as_bytes()))
-        }
-
-        fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
-        where
-            E: Error,
-        {
-            Ok(Cow::Owned(v.into_bytes()))
-        }
-
-        fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
-        where
-            E: Error,
-        {
-            Ok(Cow::Owned(v.to_vec()))
-        }
-
-        fn visit_borrowed_bytes<E>(self, v: &'a [u8]) -> Result<Self::Value, E>
-        where
-            E: Error,
-        {
-            Ok(Cow::Borrowed(v))
-        }
-
-        fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
-        where
-            E: Error,
-        {
-            Ok(Cow::Owned(v))
-        }
-    }
-
-    deserializer.deserialize_bytes(CowBytesVisitor)
 }

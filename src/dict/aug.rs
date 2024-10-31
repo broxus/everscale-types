@@ -2,7 +2,10 @@ use std::borrow::Borrow;
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
-use super::{aug_dict_insert, aug_dict_remove_owned, build_aug_dict_from_sorted_iter, SetMode};
+use super::{
+    aug_dict_find_by_extra, aug_dict_insert, aug_dict_remove_owned,
+    build_aug_dict_from_sorted_iter, SearchByExtra, SetMode,
+};
 use crate::cell::*;
 use crate::error::*;
 use crate::util::*;
@@ -274,6 +277,35 @@ where
         (A, V): Load<'a>,
     {
         self.dict.get(key)
+    }
+}
+
+impl<K, A, V> AugDict<K, A, V>
+where
+    K: DictKey,
+{
+    /// Searches for an item using a predicate on extra values.
+    ///
+    /// Used as a secondary index.
+    pub fn find_by_extra<'a, S>(&'a self, flow: S) -> Result<Option<(K, A, V)>, Error>
+    where
+        S: SearchByExtra<A>,
+        A: Load<'a>,
+        V: Load<'a>,
+    {
+        let Some((key, extra, mut value)) = ok!(aug_dict_find_by_extra::<A, S>(
+            self.dict.root.as_ref(),
+            K::BITS,
+            flow
+        )) else {
+            return Ok(None);
+        };
+
+        let Some(key) = K::from_raw_data(key.raw_data()) else {
+            return Err(Error::CellUnderflow);
+        };
+        let value = ok!(V::load_from(&mut value));
+        Ok(Some((key, extra, value)))
     }
 }
 
@@ -1061,5 +1093,36 @@ mod tests {
 
             assert_eq!(built_from_dict, dict);
         }
+    }
+
+    #[test]
+    fn search_by_lt() {
+        #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Store, Load)]
+        struct MaxValue(u64);
+
+        impl AugDictExtra for MaxValue {
+            fn comp_add(
+                left: &mut CellSlice,
+                right: &mut CellSlice,
+                b: &mut CellBuilder,
+                _: &mut dyn CellContext,
+            ) -> Result<(), Error> {
+                let left = left.load_u64()?;
+                let right = right.load_u64()?;
+                b.store_u64(left.max(right))
+            }
+        }
+
+        let mut items = AugDict::<u32, MaxValue, u32>::new();
+        items.set(0, MaxValue(100), 123).unwrap();
+        items.set(2, MaxValue(150), 234).unwrap();
+        items.set(4, MaxValue(200), 345).unwrap();
+        items.set(6, MaxValue(350), 456).unwrap();
+        items.set(7, MaxValue(300), 567).unwrap();
+        items.set(8, MaxValue(250), 678).unwrap();
+
+        // Search by ordering
+        let highest = items.find_by_extra(std::cmp::Ordering::Greater).unwrap();
+        assert_eq!(highest, Some((6, MaxValue(350), 456)));
     }
 }

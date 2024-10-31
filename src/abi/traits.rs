@@ -29,7 +29,10 @@ pub trait IgnoreName {
 }
 
 impl<T: IgnoreName> IgnoreName for &'_ T {
-    type Unnamed<'a> = T::Unnamed<'a> where Self: 'a;
+    type Unnamed<'a>
+        = T::Unnamed<'a>
+    where
+        Self: 'a;
 
     #[inline]
     fn ignore_name(&self) -> Self::Unnamed<'_> {
@@ -41,7 +44,10 @@ impl<T> IgnoreName for Vec<T>
 where
     [T]: IgnoreName,
 {
-    type Unnamed<'a> = <[T] as IgnoreName>::Unnamed<'a> where Self: 'a;
+    type Unnamed<'a>
+        = <[T] as IgnoreName>::Unnamed<'a>
+    where
+        Self: 'a;
 
     #[inline]
     fn ignore_name(&self) -> Self::Unnamed<'_> {
@@ -50,7 +56,10 @@ where
 }
 
 impl<T: IgnoreName> IgnoreName for Box<T> {
-    type Unnamed<'a> = T::Unnamed<'a> where Self: 'a;
+    type Unnamed<'a>
+        = T::Unnamed<'a>
+    where
+        Self: 'a;
 
     #[inline]
     fn ignore_name(&self) -> Self::Unnamed<'_> {
@@ -59,7 +68,10 @@ impl<T: IgnoreName> IgnoreName for Box<T> {
 }
 
 impl<T: IgnoreName> IgnoreName for Arc<T> {
-    type Unnamed<'a> = T::Unnamed<'a> where Self: 'a;
+    type Unnamed<'a>
+        = T::Unnamed<'a>
+    where
+        Self: 'a;
 
     #[inline]
     fn ignore_name(&self) -> Self::Unnamed<'_> {
@@ -68,7 +80,10 @@ impl<T: IgnoreName> IgnoreName for Arc<T> {
 }
 
 impl<T: IgnoreName> IgnoreName for Rc<T> {
-    type Unnamed<'a> = T::Unnamed<'a> where Self: 'a;
+    type Unnamed<'a>
+        = T::Unnamed<'a>
+    where
+        Self: 'a;
 
     #[inline]
     fn ignore_name(&self) -> Self::Unnamed<'_> {
@@ -77,7 +92,10 @@ impl<T: IgnoreName> IgnoreName for Rc<T> {
 }
 
 impl<T: IgnoreName> IgnoreName for Option<T> {
-    type Unnamed<'a> = Option<T::Unnamed<'a>> where Self: 'a;
+    type Unnamed<'a>
+        = Option<T::Unnamed<'a>>
+    where
+        Self: 'a;
 
     #[inline]
     fn ignore_name(&self) -> Self::Unnamed<'_> {
@@ -248,19 +266,31 @@ impl<T: WithAbiType> WithAbiType for Option<T> {
 
 impl<T: WithAbiType> WithAbiType for Vec<T> {
     fn abi_type() -> AbiType {
-        AbiType::Array(Arc::new(T::abi_type()))
+        if typeid::of::<T>() == typeid::of::<u8>() {
+            AbiType::Bytes
+        } else {
+            AbiType::Array(Arc::new(T::abi_type()))
+        }
     }
 }
 
 impl<T: WithAbiType> WithAbiType for [T] {
     fn abi_type() -> AbiType {
-        AbiType::Array(Arc::new(T::abi_type()))
+        if typeid::of::<T>() == typeid::of::<u8>() {
+            AbiType::Bytes
+        } else {
+            AbiType::Array(Arc::new(T::abi_type()))
+        }
     }
 }
 
 impl<T: WithAbiType, const N: usize> WithAbiType for [T; N] {
     fn abi_type() -> AbiType {
-        AbiType::FixedArray(Arc::new(T::abi_type()), N)
+        if typeid::of::<T>() == typeid::of::<u8>() {
+            AbiType::FixedBytes(N)
+        } else {
+            AbiType::FixedArray(Arc::new(T::abi_type()), N)
+        }
     }
 }
 
@@ -632,10 +662,16 @@ impl IntoAbi for str {
 
 impl<T: WithAbiType + IntoAbi> IntoAbi for [T] {
     fn as_abi(&self) -> AbiValue {
-        AbiValue::Array(
-            Arc::new(T::abi_type()),
-            self.iter().map(T::as_abi).collect(),
-        )
+        if typeid::of::<T>() == typeid::of::<u8>() {
+            // SAFETY: T is definitely u8
+            let bytes = unsafe { std::slice::from_raw_parts(self.as_ptr().cast(), self.len()) };
+            AbiValue::Bytes(Bytes::copy_from_slice(bytes))
+        } else {
+            AbiValue::Array(
+                Arc::new(T::abi_type()),
+                self.iter().map(T::as_abi).collect(),
+            )
+        }
     }
 
     #[inline]
@@ -647,22 +683,56 @@ impl<T: WithAbiType + IntoAbi> IntoAbi for [T] {
     }
 }
 
-impl<T: WithAbiType + IntoAbi> IntoAbi for Vec<T> {
+impl<T: WithAbiType + IntoAbi, const N: usize> IntoAbi for [T; N] {
     fn as_abi(&self) -> AbiValue {
-        AbiValue::Array(
-            Arc::new(T::abi_type()),
-            self.iter().map(T::as_abi).collect(),
-        )
+        if typeid::of::<T>() == typeid::of::<u8>() {
+            // SAFETY: T is definitely u8
+            let bytes = unsafe { std::slice::from_raw_parts(self.as_ptr().cast(), self.len()) };
+            AbiValue::FixedBytes(Bytes::copy_from_slice(bytes))
+        } else {
+            AbiValue::FixedArray(
+                Arc::new(T::abi_type()),
+                self.iter().map(T::as_abi).collect(),
+            )
+        }
     }
 
     fn into_abi(self) -> AbiValue
     where
         Self: Sized,
     {
-        AbiValue::Array(
-            Arc::new(T::abi_type()),
-            self.into_iter().map(T::into_abi).collect(),
-        )
+        if typeid::of::<T>() == typeid::of::<u8>() {
+            // SAFETY: T is definitely u8
+            let bytes = unsafe { std::slice::from_raw_parts(self.as_ptr().cast(), self.len()) };
+            AbiValue::FixedBytes(Bytes::copy_from_slice(bytes))
+        } else {
+            AbiValue::FixedArray(
+                Arc::new(T::abi_type()),
+                self.into_iter().map(T::into_abi).collect(),
+            )
+        }
+    }
+}
+
+impl<T: WithAbiType + IntoAbi> IntoAbi for Vec<T> {
+    #[inline]
+    fn as_abi(&self) -> AbiValue {
+        <[T]>::as_abi(self.as_slice())
+    }
+
+    fn into_abi(self) -> AbiValue
+    where
+        Self: Sized,
+    {
+        if typeid::of::<T>() == typeid::of::<u8>() {
+            // SAFETY: `T` is the same type as `u8`.
+            AbiValue::Bytes(Bytes::from(unsafe { cast_vec::<T, u8>(self) }))
+        } else {
+            AbiValue::Array(
+                Arc::new(T::abi_type()),
+                self.into_iter().map(T::into_abi).collect(),
+            )
+        }
     }
 }
 
@@ -928,6 +998,26 @@ impl FromAbi for HashBytes {
     }
 }
 
+impl FromPlainAbi for HashBytes {
+    fn from_plain_abi(value: PlainAbiValue) -> Result<Self> {
+        match &value {
+            PlainAbiValue::Uint(256, v) => {
+                let mut result = HashBytes::ZERO;
+
+                let bytes = v.to_bytes_be();
+                let bytes_len = bytes.len();
+                match 32usize.checked_sub(bytes_len) {
+                    None => result.0.copy_from_slice(&bytes[bytes_len - 32..]),
+                    Some(pad) => result.0[pad..].copy_from_slice(&bytes),
+                };
+
+                Ok(result)
+            }
+            value => Err(expected_plain_type("uint256", value)),
+        }
+    }
+}
+
 impl FromAbi for Cell {
     fn from_abi(value: AbiValue) -> Result<Self> {
         match value {
@@ -1019,15 +1109,26 @@ impl FromPlainAbi for VarAddr {
 
 impl<T: FromAbi> FromAbi for Vec<T> {
     fn from_abi(value: AbiValue) -> Result<Self> {
-        let items = match value {
-            AbiValue::Array(_, items) | AbiValue::FixedArray(_, items) => items,
-            value => return Err(expected_type("array", &value)),
-        };
-        let mut result = Vec::with_capacity(items.len());
-        for item in items {
-            result.push(ok!(T::from_abi(item)));
+        if typeid::of::<T>() == typeid::of::<u8>() {
+            match value {
+                AbiValue::Bytes(bytes) | AbiValue::FixedBytes(bytes) => {
+                    let bytes = Vec::<u8>::from(bytes);
+                    // SAFETY: `T` is the same type as `u8`.
+                    Ok(unsafe { cast_vec::<u8, T>(bytes) })
+                }
+                value => Err(expected_type("bytes or fixedbytes", &value)),
+            }
+        } else {
+            let items = match value {
+                AbiValue::Array(_, items) | AbiValue::FixedArray(_, items) => items,
+                value => return Err(expected_type("array", &value)),
+            };
+            let mut result = Vec::with_capacity(items.len());
+            for item in items {
+                result.push(ok!(T::from_abi(item)));
+            }
+            Ok(result)
         }
-        Ok(result)
     }
 }
 
@@ -1157,6 +1258,26 @@ where
             )),
         }
     }
+}
+
+/// # Safety
+///
+/// The following must be true:
+/// - `T1` must have the same memory layout as `T2`.
+unsafe fn cast_vec<T1, T2>(v: Vec<T1>) -> Vec<T2> {
+    // The code is the same as in the offical example:
+    // https://doc.rust-lang.org/stable/std/vec/struct.Vec.html#method.from_raw_parts
+
+    // Prevent running `self`'s destructor so we are in complete control
+    // of the allocation.
+    let mut v = std::mem::ManuallyDrop::new(v);
+
+    // Pull out the various important pieces of information about `v`
+    let p = v.as_mut_ptr().cast::<T2>();
+    let len = v.len();
+    let cap = v.capacity();
+
+    Vec::<T2>::from_raw_parts(p, len, cap)
 }
 
 #[cfg(test)]

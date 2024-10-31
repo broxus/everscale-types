@@ -365,6 +365,7 @@ impl BlockchainConfigParams {
     /// Returns a catchain config.
     ///
     /// Uses [`ConfigParam28`].
+    #[cfg(not(feature = "tycho"))]
     pub fn get_catchain_config(&self) -> Result<CatchainConfig, Error> {
         ok!(self.get::<ConfigParam28>()).ok_or(Error::CellUnderflow)
     }
@@ -372,7 +373,24 @@ impl BlockchainConfigParams {
     /// Updates a catchain config.
     ///
     /// Uses [`ConfigParam28`].
+    #[cfg(not(feature = "tycho"))]
     pub fn set_catchain_config(&mut self, config: &CatchainConfig) -> Result<bool, Error> {
+        self.set_raw(ConfigParam28::ID, ok!(CellBuilder::build_from(config)))
+    }
+
+    /// Returns a collation config.
+    ///
+    /// Uses [`ConfigParam28`].
+    #[cfg(feature = "tycho")]
+    pub fn get_collation_config(&self) -> Result<CollationConfig, Error> {
+        ok!(self.get::<ConfigParam28>()).ok_or(Error::CellUnderflow)
+    }
+
+    /// Updates a collation config.
+    ///
+    /// Uses [`ConfigParam28`].
+    #[cfg(feature = "tycho")]
+    pub fn set_collation_config(&mut self, config: &CollationConfig) -> Result<bool, Error> {
         self.set_raw(ConfigParam28::ID, ok!(CellBuilder::build_from(config)))
     }
 
@@ -422,6 +440,16 @@ impl BlockchainConfigParams {
         Ok(ok!(self.contains::<ConfigParam36>()) || ok!(self.contains::<ConfigParam37>()))
     }
 
+    /// Returns the previous validator set.
+    ///
+    /// Uses [`ConfigParam33`] (temp prev validators) or [`ConfigParam32`] (prev validators).
+    pub fn get_previous_validator_set(&self) -> Result<Option<ValidatorSet>, Error> {
+        match ok!(self.get::<ConfigParam33>()) {
+            None => self.get::<ConfigParam32>(),
+            set => Ok(set),
+        }
+    }
+
     /// Returns the current validator set.
     ///
     /// Uses [`ConfigParam35`] (temp validators) or [`ConfigParam34`] (current validators).
@@ -429,6 +457,16 @@ impl BlockchainConfigParams {
         match ok!(self.get::<ConfigParam35>()) {
             Some(set) => Ok(set),
             None => ok!(self.get::<ConfigParam34>()).ok_or(Error::CellUnderflow),
+        }
+    }
+
+    /// Returns the next validator set.
+    ///
+    /// Uses [`ConfigParam37`] (temp next validators) or [`ConfigParam36`] (next validators).
+    pub fn get_next_validator_set(&self) -> Result<Option<ValidatorSet>, Error> {
+        match ok!(self.get::<ConfigParam37>()) {
+            None => self.get::<ConfigParam36>(),
+            set => Ok(set),
         }
     }
 
@@ -680,17 +718,22 @@ impl<'de> serde::Deserialize<'de> for NonEmptyDict<Dict<u32, StoragePrices>> {
 macro_rules! define_config_params {
     ($(
         $(#[doc = $doc:expr])*
+        $(#[cfg($($cfg_attrs:tt)*)])?
         $(#[serde($($serde_attrs:tt)*)])?
         $id:literal => $ident:ident($($ty:tt)*)
     ),*$(,)?) => {
-        $($(#[doc = $doc])*
-        pub struct $ident;
+        $(
+            $(#[cfg($($cfg_attrs)*)])?
+            $(#[doc = $doc])*
+            pub struct $ident;
 
-        impl<'a> KnownConfigParam<'a> for $ident {
-            const ID: u32 = $id;
+            $(#[cfg($($cfg_attrs)*)])?
+            impl<'a> KnownConfigParam<'a> for $ident {
+                const ID: u32 = $id;
 
-            define_config_params!(@wrapper $($ty)*);
-        })*
+                define_config_params!(@wrapper $($ty)*);
+            }
+        )*
 
         #[cfg(feature = "serde")]
         impl serde::Serialize for BlockchainConfigParams {
@@ -715,15 +758,18 @@ macro_rules! define_config_params {
 
                     {
                         match key {
-                            $($($id => {
-                                let value = define_config_params!(
-                                    @ser
-                                    $ident,
-                                    value,
-                                    $($serde_attrs)*
-                                );
-                                ok!(map.serialize_entry(&key, &value));
-                            },)?)*
+                            $(
+                                $(#[cfg($($cfg_attrs)*)])?
+                                $($id => {
+                                    let value = define_config_params!(
+                                        @ser
+                                        $ident,
+                                        value,
+                                        $($serde_attrs)*
+                                    );
+                                    ok!(map.serialize_entry(&key, &value));
+                                },)?
+                            )*
                             _ => ok!(map.serialize_entry(&key, value.as_ref())),
                         }
                     }
@@ -761,12 +807,15 @@ macro_rules! define_config_params {
 
                         while let Some(key) = access.next_key::<u32>()? {
                             let value = match key {
-                                $($($id => define_config_params!(
+                                $(
+                                    $(#[cfg($($cfg_attrs)*)])?
+                                    $($id => define_config_params!(
                                         @de
                                         $ident,
                                         access,
                                         $($serde_attrs)*
-                                ),)?)*
+                                    ),)?
+                                )*
                                 _ => {
                                     let RawValue(cell) = ok!(access.next_value());
                                     cell
@@ -941,8 +990,16 @@ define_config_params! {
     /// Catchain configuration params.
     ///
     /// Contains a [`CatchainConfig`].
+    #[cfg(not(feature = "tycho"))]
     #[serde(transparent)]
     28 => ConfigParam28(CatchainConfig),
+
+    /// Collation configuration params.
+    ///
+    /// Contains a [`CollationConfig`].
+    #[cfg(feature = "tycho")]
+    #[serde(transparent)]
+    28 => ConfigParam28(CollationConfig),
 
     /// Consensus configuration params.
     ///
