@@ -190,34 +190,39 @@ pub struct ValidatorBaseInfo {
 ///
 /// ```text
 /// consensus_info#_
-///     config_update_round:uint32
-///     prev_config_round:uint32
+///     vset_switch_round:uint32
+///     prev_vset_switch_round:uint32
 ///     genesis_round:uint32
 ///     genesis_millis:uint64
+///     prev_shuffle_mc_validators:Bool
 ///     = ConsensusInfo;
 /// ```
 #[derive(Default, Debug, Copy, Clone, Eq, PartialEq, Store, Load)]
 pub struct ConsensusInfo {
     /// The most recent round from which the mempool session starts.
-    pub config_update_round: u32,
+    pub vset_switch_round: u32,
 
     /// The round from which the previous mempool session was started.
-    pub prev_config_round: u32,
+    pub prev_vset_switch_round: u32,
 
     /// Mempool genesis round (affects the overlay id).
     pub genesis_round: u32,
 
     /// Mempool genesis generation timestamp in milliseconds (affects the overlay id).
     pub genesis_millis: u64,
+
+    /// Previous state of the `shuffle_mc_validators` flags.
+    pub prev_shuffle_mc_validators: bool,
 }
 
 impl ConsensusInfo {
     /// Initial consensus info state.
     pub const ZEROSTATE: Self = Self {
-        config_update_round: 0,
-        prev_config_round: 0,
+        vset_switch_round: 0,
+        prev_vset_switch_round: 0,
         genesis_round: 0,
         genesis_millis: 0,
+        prev_shuffle_mc_validators: false,
     };
 
     /// Returns whether this info corresponds to the zerostate info.
