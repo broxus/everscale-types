@@ -510,12 +510,12 @@ fn write_label_parts(
     let hml_long_len = 2 + bits_for_len + remaining_bits;
     let hml_same_len = 3 + bits_for_len;
 
-    if hml_same_len < hml_long_len && hml_same_len < hml_short_len {
-        if pfx.is_data_empty() || matches!(pfx.test_uniform(), Some(p) if p == bit) {
-            if rem.is_data_empty() || matches!(rem.test_uniform(), Some(r) if r == bit) {
-                return write_hml_same(bit, remaining_bits, bits_for_len, label);
-            }
-        }
+    if hml_same_len < hml_long_len
+        && hml_same_len < hml_short_len
+        && (pfx.is_data_empty() || matches!(pfx.test_uniform(), Some(p) if p == bit))
+        && (rem.is_data_empty() || matches!(rem.test_uniform(), Some(r) if r == bit))
+    {
+        return write_hml_same(bit, remaining_bits, bits_for_len, label);
     }
 
     if hml_short_len <= MAX_BIT_LEN && hml_short_len <= hml_long_len {

@@ -202,7 +202,9 @@ impl std::borrow::Borrow<WithoutName<AbiType>> for WithoutName<NamedAbiType> {
 /// An iterator that flattens the first-level tuple.
 #[derive(Clone)]
 pub enum NamedAbiTypeFlatten {
+    #[doc(hidden)]
     Single(Option<NamedAbiType>),
+    #[doc(hidden)]
     Tuple(Vec<NamedAbiType>),
 }
 
@@ -765,7 +767,9 @@ impl Hash for WithoutName<AbiType> {
 /// An iterator that flattens the first-level tuple.
 #[derive(Clone)]
 pub enum AbiTypeFlatten {
+    #[doc(hidden)]
     Single(Option<AbiType>),
+    #[doc(hidden)]
     Tuple(Vec<NamedAbiType>),
 }
 
