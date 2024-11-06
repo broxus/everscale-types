@@ -1577,6 +1577,22 @@ mod tests {
     }
 
     #[test]
+    fn dict_same_after_remove() -> anyhow::Result<()> {
+        let mut dict = Dict::<i32, i32>::new();
+        dict.set(-1, 1)?;
+        dict.set(-2, 2)?;
+
+        let removed = dict.remove(-2).unwrap();
+        assert_eq!(removed, Some(2));
+
+        let mut dict2 = Dict::<i32, i32>::new();
+        dict2.set(-1, 1)?;
+
+        assert_eq!(dict, dict2);
+        Ok(())
+    }
+
+    #[test]
     fn get_signed_next() {
         let cell = Boc::decode_base64("te6ccgEBCwEAaAACAskDAQIBIAQCAgHOCAgCASAEBAIBIAUFAgEgBgYCASAHBwIBIAgIAgEgCQkBAwDgCgBoQgBAJTazb04k/ooV5DE4d+ixdwixajACdzkuZVb6ymgnqyHc1lAAAAAAAAAAAAAAAAAAAA==").unwrap();
         let dict = Dict::<i16, Cell>::from_raw(Some(cell));

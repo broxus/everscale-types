@@ -511,13 +511,9 @@ fn write_label_parts(
     let hml_same_len = 3 + bits_for_len;
 
     if hml_same_len < hml_long_len && hml_same_len < hml_short_len {
-        if let Some(pfx_bit) = pfx.test_uniform() {
-            if pfx_bit == bit {
-                if let Some(rem_bit) = rem.test_uniform() {
-                    if rem_bit == bit {
-                        return write_hml_same(bit, remaining_bits, bits_for_len, label);
-                    }
-                }
+        if pfx.is_data_empty() || matches!(pfx.test_uniform(), Some(p) if p == bit) {
+            if rem.is_data_empty() || matches!(rem.test_uniform(), Some(r) if r == bit) {
+                return write_hml_same(bit, remaining_bits, bits_for_len, label);
             }
         }
     }
