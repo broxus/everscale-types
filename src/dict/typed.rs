@@ -8,8 +8,8 @@ use crate::error::Error;
 use crate::util::*;
 
 use super::{
-    build_dict_from_sorted_iter, dict_find_bound, dict_find_owned, dict_get, dict_insert,
-    dict_load_from_root, dict_split_by_prefix, DictBound, DictKey, SetMode,
+    build_dict_from_sorted_iter, dict_find_bound, dict_find_owned, dict_get, dict_get_owned,
+    dict_insert, dict_load_from_root, dict_split_by_prefix, DictBound, DictKey, SetMode,
 };
 use super::{dict_remove_bound_owned, raw::*};
 
@@ -158,6 +158,7 @@ impl<K, V> Dict<K, V> {
 
 impl<K: DictKey, V> Dict<K, V> {
     /// Loads a non-empty dictionary from a root cell.
+    #[inline]
     pub fn load_from_root_ext(
         slice: &mut CellSlice<'_>,
         context: &mut dyn CellContext,
@@ -178,6 +179,7 @@ where
     K: Store + DictKey,
 {
     /// Returns `true` if the dictionary contains a value for the specified key.
+    #[inline]
     pub fn contains_key<Q>(&self, key: Q) -> Result<bool, Error>
     where
         Q: Borrow<K>,
@@ -205,6 +207,7 @@ where
     K: Store + DictKey,
 {
     /// Returns the value corresponding to the key.
+    #[inline]
     pub fn get<'a: 'b, 'b, Q>(&'a self, key: Q) -> Result<Option<V>, Error>
     where
         Q: Borrow<K> + 'b,
@@ -241,6 +244,7 @@ where
     }
 
     /// Returns the raw value corresponding to the key.
+    #[inline]
     pub fn get_raw<'a: 'b, 'b, Q>(&'a self, key: Q) -> Result<Option<CellSlice<'a>>, Error>
     where
         Q: Borrow<K> + 'b,
@@ -255,6 +259,34 @@ where
             let mut builder = CellBuilder::new();
             ok!(key.store_into(&mut builder, &mut Cell::empty_context()));
             dict_get(
+                root.as_ref(),
+                K::BITS,
+                builder.as_data_slice(),
+                &mut Cell::empty_context(),
+            )
+        }
+
+        get_raw_impl(&self.root, key.borrow())
+    }
+
+    /// Returns cell slice parts of the value corresponding to the key.
+    ///
+    /// NOTE: Uses the default cell context.
+    #[inline]
+    pub fn get_raw_owned<Q>(&self, key: Q) -> Result<Option<CellSliceParts>, Error>
+    where
+        Q: Borrow<K>,
+    {
+        pub fn get_raw_impl<K>(
+            root: &Option<Cell>,
+            key: &K,
+        ) -> Result<Option<CellSliceParts>, Error>
+        where
+            K: Store + DictKey,
+        {
+            let mut builder = CellBuilder::new();
+            ok!(key.store_into(&mut builder, &mut Cell::empty_context()));
+            dict_get_owned(
                 root.as_ref(),
                 K::BITS,
                 builder.as_data_slice(),
@@ -691,6 +723,7 @@ where
     /// Returns an optional removed value as cell slice parts.
     ///
     /// Dict is rebuild using the provided cell context.
+    #[inline]
     pub fn remove_raw_ext<Q>(
         &mut self,
         key: Q,
