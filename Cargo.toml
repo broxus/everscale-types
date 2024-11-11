@@ -59,7 +59,7 @@ thiserror = "1.0"
 tl-proto = { version = "0.4", optional = true }
 typeid = { version = "1.0", optional = true }
 
-everscale-types-proc = { version = "=0.1.4", path = "proc" }
+everscale-types-proc = { version = "=0.1.5", path = "proc" }
 
 [dev-dependencies]
 anyhow = "1.0"

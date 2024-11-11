@@ -517,7 +517,7 @@ impl<'a> Load<'a> for CatchainConfig {
 /// ```
 #[cfg(feature = "tycho")]
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load, Default)]
-#[tlb(tag = "#a6")]
+#[tlb(tag = ["#a6", "#a7"])]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CollationConfig {
     /// Change the order of validators in the masterchain validators list.
@@ -525,6 +525,11 @@ pub struct CollationConfig {
 
     /// Minimum interval between master blocks.
     pub mc_block_min_interval_ms: u32,
+
+    /// Time to wait before collating an empty shard block.
+    #[tlb(since_tag = 1)]
+    pub empty_sc_block_interval_ms: u32,
+
     /// Maximum length on shard blocks chain after previous master block.
     pub max_uncommitted_chain_length: u8,
     /// Force import next anchor when wu used exceed limit.
@@ -535,10 +540,6 @@ pub struct CollationConfig {
 
     /// Params to calculate the collation work in wu.
     pub work_units_params: WorkUnitsParams,
-
-    /// Collate empty shard block
-    /// when there are no messages during this timeout
-    pub empty_sc_block_timeout_s: u16,
 }
 
 /// Messages execution params.

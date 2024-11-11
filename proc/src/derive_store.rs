@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use proc_macro2::TokenStream;
 use quote::quote;
 
@@ -51,17 +53,40 @@ fn build_struct(
     style: ast::Style,
     fields: &[ast::Field<'_>],
 ) -> TokenStream {
-    let store_tag = container.attrs.tlb_tag.and_then(store_tag_op);
+    let mut tag_version = None;
+    let (compute_tag_version, store_tag) = match &container.attrs.tlb_tag {
+        attr::ContainerTag::None => (None, None),
+        attr::ContainerTag::Single(tag) => (None, store_tag(*tag)),
+        attr::ContainerTag::Multiple(tags) => store_tags_versioned(tags, fields, &mut tag_version),
+    };
 
     let fields_len = fields.len();
     let members = fields.iter().enumerate().map(|(i, field)| {
         let ident = &field.member;
         let field_ident = quote!(self.#ident);
         let op = store_op(&field_ident, field.ty);
-        if i + 1 == fields_len {
-            op
-        } else {
-            into_ok(op)
+
+        let is_last = i + 1 == fields_len;
+        match (field.attrs.since_tag, &tag_version) {
+            (Some(since), Some(tag_version)) if is_last => {
+                quote! {
+                    if #tag_version >= #since {
+                        #op
+                    } else {
+                        Ok(())
+                    }
+                }
+            }
+            (Some(since), Some(tag_version)) => {
+                let op = into_ok(op);
+                quote! {
+                    if #tag_version >= #since {
+                        #op
+                    }
+                }
+            }
+            _ if is_last => op,
+            _ => into_ok(op),
         }
     });
 
@@ -79,6 +104,7 @@ fn build_struct(
             let store_tag = store_tag.map(into_ok);
             quote! {
                 #validate_with
+                #compute_tag_version
                 #store_tag
                 #(#members)*
             }
@@ -86,7 +112,7 @@ fn build_struct(
     }
 }
 
-fn store_tag_op(tag: attr::TlbTag) -> Option<TokenStream> {
+fn store_tag(tag: attr::TlbTag) -> Option<TokenStream> {
     let bits = tag.bits as u16;
 
     let op = match bits {
@@ -115,6 +141,64 @@ fn store_tag_op(tag: attr::TlbTag) -> Option<TokenStream> {
         }
     };
     Some(quote!(__builder.#op))
+}
+
+// Returns (tag_version, stop_tag)
+fn store_tags_versioned(
+    tags: &[attr::TlbTag],
+    fields: &[ast::Field<'_>],
+    tag_version: &mut Option<syn::Ident>,
+) -> (Option<TokenStream>, Option<TokenStream>) {
+    let Some(first_tag) = tags.first() else {
+        return (None, None);
+    };
+
+    let mut used_tags = BTreeSet::new();
+    let mut version_guards = Vec::new();
+    for field in fields {
+        if let Some(since) = field.attrs.since_tag {
+            used_tags.insert(since);
+
+            let tag_version =
+                tag_version.get_or_insert_with(|| quote::format_ident!("__tag_version"));
+
+            let ident = &field.member;
+            let ty = field.ty;
+
+            // TODO: Optimize codegen
+            version_guards.push(quote! {
+                if self.#ident != <#ty as Default>::default() {
+                    #tag_version = std::cmp::max(#tag_version, #since);
+                }
+            });
+        }
+    }
+
+    let Some(tag_version) = &tag_version else {
+        return (None, store_tag(*first_tag));
+    };
+
+    used_tags.remove(&0);
+    let match_arms = used_tags.into_iter().filter_map(|tag_index| {
+        let store_op = store_tag(tags[tag_index])?;
+        Some(quote! { #tag_index => #store_op })
+    });
+    let Some(store_first) = store_tag(*first_tag) else {
+        return (None, None);
+    };
+
+    let store_tag = quote! {
+        match #tag_version {
+            #(#match_arms),*,
+            _ => #store_first,
+        }
+    };
+
+    let compute_tag_version = quote! {
+        let mut #tag_version = 0usize;
+        #(#version_guards)*
+    };
+    (Some(compute_tag_version), Some(store_tag))
 }
 
 fn store_op(field_ident: &TokenStream, ty: &syn::Type) -> TokenStream {
