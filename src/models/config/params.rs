@@ -535,6 +535,10 @@ pub struct CollationConfig {
 
     /// Params to calculate the collation work in wu.
     pub work_units_params: WorkUnitsParams,
+
+    /// Collate empty shard block
+    /// when there are no messages during this timeout
+    pub empty_sc_block_timeout_s: u16,
 }
 
 /// Messages execution params.

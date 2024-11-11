@@ -1,5 +1,4 @@
 use super::*;
-use crate::boc::BocRepr;
 use crate::prelude::Boc;
 
 #[cfg(not(feature = "tycho"))]
@@ -335,6 +334,7 @@ fn create_config() {
 #[cfg(not(feature = "tycho"))]
 #[test]
 fn validator_subset() {
+    use crate::boc::BocRepr;
     use crate::models::{ShardIdent, ShardStateUnsplit};
 
     let master_state =
