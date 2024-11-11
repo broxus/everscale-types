@@ -6,7 +6,7 @@ use super::ctxt::*;
 use super::symbol::*;
 
 pub struct Container {
-    pub tlb_tag: Option<TlbTag>,
+    pub tlb_tag: ContainerTag,
     pub tlb_validate_with: Option<syn::Expr>,
 }
 
@@ -28,7 +28,7 @@ impl Container {
 
             if let Err(e) = attr.parse_nested_meta(|meta| {
                 if meta.path == TAG {
-                    // Parse `#[tlb(tag = "#ab"]`
+                    // Parse `#[tlb(tag = "#ab"]` or `#[tlb(tag = ["#1", "#2"])]`
                     if let Some(value) = parse_lit_into_tlb_tag(cx, TAG, &meta)? {
                         tlb_tag.set(&meta.path, value);
                     }
@@ -50,7 +50,7 @@ impl Container {
         }
 
         Self {
-            tlb_tag: tlb_tag.get(),
+            tlb_tag: tlb_tag.get().unwrap_or_default(),
             tlb_validate_with: tlb_validate_with.get(),
         }
     }
@@ -83,10 +83,14 @@ impl Variant {
     }
 }
 
-pub struct Field;
+pub struct Field {
+    pub since_tag: Option<usize>,
+}
 
 impl Field {
     pub fn from_ast(cx: &Ctxt, field: &syn::Field) -> Self {
+        let mut since_tag = Attr::none(cx, SINCE_TAG);
+
         for attr in &field.attrs {
             if attr.path() != TLB {
                 continue;
@@ -99,15 +103,33 @@ impl Field {
             }
 
             if let Err(e) = attr.parse_nested_meta(|meta| {
-                let path = meta.path.to_token_stream().to_string().replace(' ', "");
-                Err(meta.error(format_args!("unknown tl field attribute `{}`", path)))
+                if meta.path == SINCE_TAG {
+                    // Parse `#[tlb(since_tag = 0)]`
+                    if let Some(value) = parse_number(cx, SINCE_TAG, &meta)? {
+                        since_tag.set(&meta.path, value);
+                    }
+                } else {
+                    let path = meta.path.to_token_stream().to_string().replace(' ', "");
+                    return Err(meta.error(format_args!("unknown tl field attribute `{}`", path)));
+                }
+                Ok(())
             }) {
                 cx.syn_error(e);
             }
         }
 
-        Self
+        Self {
+            since_tag: since_tag.get(),
+        }
     }
+}
+
+#[derive(Default, Debug, Clone, Eq, PartialEq)]
+pub enum ContainerTag {
+    #[default]
+    None,
+    Single(TlbTag),
+    Multiple(Vec<TlbTag>),
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -120,35 +142,57 @@ fn parse_lit_into_tlb_tag(
     cx: &Ctxt,
     attr_name: Symbol,
     meta: &ParseNestedMeta,
-) -> syn::Result<Option<TlbTag>> {
-    let Some(lit) = get_lit_str(cx, attr_name, meta)? else {
-        return Ok(None);
-    };
-    let string = lit.value();
-    let string = string.trim();
-    if let Some(hex_tag) = string.strip_prefix('#') {
-        if let Ok(value) = u32::from_str_radix(hex_tag, 16) {
-            return Ok(Some(TlbTag {
-                value,
-                bits: (hex_tag.len() * 4) as u8,
-            }));
+) -> syn::Result<Option<ContainerTag>> {
+    fn parse_tag(cx: &Ctxt, lit: syn::LitStr) -> Option<TlbTag> {
+        let string = lit.value();
+        let string = string.trim();
+        if let Some(hex_tag) = string.strip_prefix('#') {
+            if let Ok(value) = u32::from_str_radix(hex_tag, 16) {
+                return Some(TlbTag {
+                    value,
+                    bits: (hex_tag.len() * 4) as u8,
+                });
+            }
+
+            cx.error_spanned_by(lit, format!("failed to parse hex TLB tag: {string}"));
+        } else if let Some(binary_tag) = string.strip_prefix('$') {
+            if let Ok(value) = u32::from_str_radix(binary_tag, 2) {
+                return Some(TlbTag {
+                    value,
+                    bits: binary_tag.len() as u8,
+                });
+            }
+
+            cx.error_spanned_by(lit, format!("failed to parse binary TLB tag: {string}"));
+        } else {
+            cx.error_spanned_by(lit, format!("failed to parse TLB tag: {string}"));
         }
 
-        cx.error_spanned_by(lit, format!("failed to parse hex TLB tag: {string}"));
-    } else if let Some(binary_tag) = string.strip_prefix('$') {
-        if let Ok(value) = u32::from_str_radix(binary_tag, 2) {
-            return Ok(Some(TlbTag {
-                value,
-                bits: binary_tag.len() as u8,
-            }));
-        }
-
-        cx.error_spanned_by(lit, format!("failed to parse binary TLB tag: {string}"));
-    } else {
-        cx.error_spanned_by(lit, format!("failed to parse TLB tag: {string}"));
+        None
     }
 
-    Ok(None)
+    Ok(match ungroup_meta(meta)? {
+        syn::Expr::Array(array) => {
+            if array.elems.is_empty() {
+                cx.error_spanned_by(array, "tag list is empty");
+                return Ok(None);
+            }
+
+            let mut tags = Vec::with_capacity(array.elems.len());
+            let mut is_ok = true;
+            for value in array.elems {
+                let res = get_lit_str2(cx, attr_name, attr_name, &value)
+                    .and_then(|lit| parse_tag(cx, lit));
+                is_ok &= res.is_some();
+                tags.extend(res);
+            }
+
+            is_ok.then_some(ContainerTag::Multiple(tags))
+        }
+        value => get_lit_str2(cx, attr_name, attr_name, &value)
+            .and_then(|lit| parse_tag(cx, lit))
+            .map(ContainerTag::Single),
+    })
 }
 
 fn parse_lit_into_expr(
@@ -163,6 +207,31 @@ fn parse_lit_into_expr(
     let tokens = spanned_tokens(&s)?;
     let expr: syn::Expr = syn::parse2(tokens)?;
     Ok(Some(expr))
+}
+
+fn parse_number(
+    cx: &Ctxt,
+    attr_name: Symbol,
+    meta: &ParseNestedMeta,
+) -> syn::Result<Option<usize>> {
+    let value = ungroup_meta(meta)?;
+
+    if let syn::Expr::Lit(syn::ExprLit {
+        lit: syn::Lit::Int(lit),
+        ..
+    }) = value
+    {
+        lit.base10_parse::<usize>().map(Some)
+    } else {
+        cx.error_spanned_by(
+            value,
+            format!(
+                "expected {} attribute to be a number: `{} = \"...\"`",
+                attr_name, attr_name
+            ),
+        );
+        Ok(None)
+    }
 }
 
 fn spanned_tokens(s: &syn::LitStr) -> syn::parse::Result<TokenStream> {
@@ -190,20 +259,16 @@ fn get_lit_str(
     attr_name: Symbol,
     meta: &ParseNestedMeta,
 ) -> syn::Result<Option<syn::LitStr>> {
-    get_lit_str2(cx, attr_name, attr_name, meta)
+    let value = ungroup_meta(meta)?;
+    Ok(get_lit_str2(cx, attr_name, attr_name, &value))
 }
 
 fn get_lit_str2(
     cx: &Ctxt,
     attr_name: Symbol,
     meta_item_name: Symbol,
-    meta: &ParseNestedMeta,
-) -> syn::Result<Option<syn::LitStr>> {
-    let expr: syn::Expr = meta.value()?.parse()?;
-    let mut value = &expr;
-    while let syn::Expr::Group(e) = value {
-        value = &e.expr;
-    }
+    value: &syn::Expr,
+) -> Option<syn::LitStr> {
     if let syn::Expr::Lit(syn::ExprLit {
         lit: syn::Lit::Str(lit),
         ..
@@ -216,16 +281,26 @@ fn get_lit_str2(
                 format!("unexpected suffix `{}` on string literal", suffix),
             );
         }
-        Ok(Some(lit.clone()))
+        Some(lit.clone())
     } else {
         cx.error_spanned_by(
-            expr,
+            value,
             format!(
                 "expected {} attribute to be a string: `{} = \"...\"`",
                 attr_name, meta_item_name
             ),
         );
-        Ok(None)
+        None
+    }
+}
+
+fn ungroup_meta(meta: &ParseNestedMeta) -> syn::Result<syn::Expr> {
+    let mut value = meta.value()?.parse()?;
+    loop {
+        match value {
+            syn::Expr::Group(e) => value = *e.expr,
+            value => return Ok(value),
+        }
     }
 }
 

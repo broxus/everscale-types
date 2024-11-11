@@ -70,11 +70,33 @@ fn build_struct(
     style: ast::Style,
     fields: &[ast::Field<'_>],
 ) -> TokenStream {
-    let condition = container.attrs.tlb_tag.and_then(load_tag_op);
+    let mut tag_version = None;
+    let tags = match &container.attrs.tlb_tag {
+        attr::ContainerTag::None => None,
+        attr::ContainerTag::Single(tag) => load_tag(*tag),
+        attr::ContainerTag::Multiple(tags) => load_tags_versioned(tags).map(|load_tags| {
+            let ident = quote::format_ident!("__tag_version");
+            let res = quote! { let #ident = #load_tags; };
+            tag_version = Some(ident);
+            res
+        }),
+    };
 
     let members = fields.iter().map(|field| {
         let ident = &field.member;
-        let op = load_op(lifetime_def, field.ty);
+        let ty = field.ty;
+        let mut op = load_op(lifetime_def, ty);
+
+        if let (Some(since), Some(tag_version)) = (field.attrs.since_tag, &tag_version) {
+            op = quote! {
+                if #tag_version >= #since {
+                    #op
+                } else {
+                    <#ty as Default>::default()
+                }
+            };
+        }
+
         quote! {
             #ident: #op
         }
@@ -102,15 +124,75 @@ fn build_struct(
     };
 
     quote! {
-        #condition
+        #tags
         #result
     }
 }
 
-fn load_tag_op(tag: attr::TlbTag) -> Option<TokenStream> {
+fn load_tag(tag: attr::TlbTag) -> Option<TokenStream> {
+    let (op, value) = load_tag_op_value(tag)?;
+
+    Some(quote! {
+        match #op {
+            ::core::result::Result::Ok(#value) => {},
+            ::core::result::Result::Ok(_) => return ::core::result::Result::Err(::everscale_types::error::Error::InvalidTag),
+            ::core::result::Result::Err(e) => return ::core::result::Result::Err(e),
+        }
+    })
+}
+
+fn load_tags_versioned(tags: &[attr::TlbTag]) -> Option<TokenStream> {
+    let mut iter = tags.iter();
+
+    let first_tag = iter.next()?;
+    let (op, first_value) = load_tag_op_value(*first_tag)?;
+
+    let mut values = Vec::with_capacity(tags.len());
+    values.push(first_value);
+
+    for tag in iter {
+        values.push(match tag.bits {
+            0 => continue,
+            1 => {
+                let value = tag.value != 0;
+                quote!(#value)
+            }
+            2..=8 => {
+                let value = tag.value as u8;
+                quote!(#value)
+            }
+            16 => {
+                let value = tag.value as u16;
+                quote!(#value)
+            }
+            32 => {
+                let value = tag.value;
+                quote!(#value)
+            }
+            _ => {
+                let value = tag.value as u64;
+                quote!(#value)
+            }
+        });
+    }
+
+    let values = values.into_iter().enumerate().map(|(i, value)| {
+        quote! { ::core::result::Result::Ok(#value) => #i }
+    });
+
+    Some(quote! {
+        match #op {
+            #(#values),*,
+            ::core::result::Result::Ok(_) => return ::core::result::Result::Err(::everscale_types::error::Error::InvalidTag),
+            ::core::result::Result::Err(e) => return ::core::result::Result::Err(e),
+        }
+    })
+}
+
+fn load_tag_op_value(tag: attr::TlbTag) -> Option<(TokenStream, TokenStream)> {
     let bits = tag.bits as u16;
 
-    let (op, value) = match bits {
+    Some(match bits {
         0 => return None,
         1 => {
             let value = tag.value != 0;
@@ -135,14 +217,6 @@ fn load_tag_op(tag: attr::TlbTag) -> Option<TokenStream> {
         _ => {
             let value = tag.value as u64;
             (quote!(__slice.load_uint(#bits)), quote!(#value))
-        }
-    };
-
-    Some(quote! {
-        match #op {
-            ::core::result::Result::Ok(#value) => {},
-            ::core::result::Result::Ok(_) => return ::core::result::Result::Err(::everscale_types::error::Error::InvalidTag),
-            ::core::result::Result::Err(e) => return ::core::result::Result::Err(e),
         }
     })
 }
