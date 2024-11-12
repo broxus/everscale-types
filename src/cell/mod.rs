@@ -1708,4 +1708,84 @@ mod tests {
         assert_eq!(pruned3.repr_hash(), cell.repr_hash());
         assert_eq!(pruned3.repr_depth(), cell.repr_depth());
     }
+
+    #[test]
+    fn versioned_store_load() {
+        #[derive(Debug, Clone, Copy, Eq, PartialEq, Store, Load)]
+        #[tlb(tag = ["#12", "#34", "#56"])]
+        struct Versioned {
+            old_field1: u32,
+            #[tlb(since_tag = 1)]
+            new_field1: u32,
+            old_field2: bool,
+            #[tlb(since_tag = 2)]
+            new_field2: bool,
+        }
+
+        let old = Versioned {
+            old_field1: 123,
+            new_field1: 0,
+            old_field2: true,
+            new_field2: false,
+        };
+        let cell = CellBuilder::build_from(old).unwrap();
+
+        {
+            let mut slice = cell.as_slice().unwrap();
+            assert_eq!(slice.size_bits(), 8 + 32 + 1);
+            assert_eq!(slice.load_u8().unwrap(), 0x12);
+            assert_eq!(slice.load_u32().unwrap(), 123);
+            assert_eq!(slice.load_bit().unwrap(), true);
+            assert!(slice.is_empty());
+        }
+        assert_eq!(
+            Versioned::load_from(&mut cell.as_slice().unwrap()).unwrap(),
+            old,
+        );
+
+        let new = Versioned {
+            old_field1: 123,
+            new_field1: 456,
+            old_field2: true,
+            new_field2: false,
+        };
+        let cell = CellBuilder::build_from(new).unwrap();
+
+        {
+            let mut slice = cell.as_slice().unwrap();
+            assert_eq!(slice.size_bits(), 8 + 32 + 32 + 1);
+            assert_eq!(slice.load_u8().unwrap(), 0x34);
+            assert_eq!(slice.load_u32().unwrap(), 123);
+            assert_eq!(slice.load_u32().unwrap(), 456);
+            assert_eq!(slice.load_bit().unwrap(), true);
+            assert!(slice.is_empty());
+        }
+        assert_eq!(
+            Versioned::load_from(&mut cell.as_slice().unwrap()).unwrap(),
+            new
+        );
+
+        let too_new = Versioned {
+            old_field1: 123,
+            new_field1: 0,
+            old_field2: true,
+            new_field2: true,
+        };
+        let cell = CellBuilder::build_from(too_new).unwrap();
+
+        {
+            let mut slice = cell.as_slice().unwrap();
+            assert_eq!(slice.size_bits(), 8 + 32 + 32 + 1 + 1);
+            assert_eq!(slice.load_u8().unwrap(), 0x56);
+            assert_eq!(slice.load_u32().unwrap(), 123);
+            assert_eq!(slice.load_u32().unwrap(), 0);
+            assert_eq!(slice.load_bit().unwrap(), true);
+            assert_eq!(slice.load_bit().unwrap(), true);
+            assert!(slice.is_empty());
+        }
+        assert_eq!(
+            Versioned::load_from(&mut cell.as_slice().unwrap()).unwrap(),
+            too_new
+        );
+    }
 }

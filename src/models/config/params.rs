@@ -514,6 +514,16 @@ impl<'a> Load<'a> for CatchainConfig {
 ///     msgs_exec_params:MsgsExecutionParams
 ///     work_units_params:WorkUnitsParams
 ///     = CollationConfig;
+///
+/// collation_config_tycho#a7
+///     shuffle_mc_validators:Bool
+///     mc_block_min_interval_ms:uint32
+///     empty_sc_block_interval_ms:uint32
+///     max_uncommitted_chain_length:uint8
+///     wu_used_to_import_next_anchor:uint64
+///     msgs_exec_params:MsgsExecutionParams
+///     work_units_params:WorkUnitsParams
+///     = CollationConfig;
 /// ```
 #[cfg(feature = "tycho")]
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load, Default)]
