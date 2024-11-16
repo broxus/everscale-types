@@ -192,8 +192,7 @@ pub struct ValidatorBaseInfo {
 /// consensus_info#_
 ///     vset_switch_round:uint32
 ///     prev_vset_switch_round:uint32
-///     genesis_round:uint32
-///     genesis_millis:uint64
+///     genesis_info:GenesisInfo
 ///     prev_shuffle_mc_validators:Bool
 ///     = ConsensusInfo;
 /// ```
@@ -205,14 +204,33 @@ pub struct ConsensusInfo {
     /// The round from which the previous mempool session was started.
     pub prev_vset_switch_round: u32,
 
-    /// Mempool genesis round (affects the overlay id).
-    pub genesis_round: u32,
-
-    /// Mempool genesis generation timestamp in milliseconds (affects the overlay id).
-    pub genesis_millis: u64,
+    /// The last applied genesis params
+    /// Can be changed in node configs to start new session
+    pub genesis_info: GenesisInfo,
 
     /// Previous state of the `shuffle_mc_validators` flags.
     pub prev_shuffle_mc_validators: bool,
+}
+
+/// Brief genesis info.
+///
+/// ```text
+/// genesis_info#_
+///     start_round:uint32
+///     millis:uint64
+///     = GenesisInfo;
+/// ```
+#[derive(Default, Debug, Copy, Clone, Eq, PartialEq, Store, Load)]
+pub struct GenesisInfo {
+    /// Unaligned genesis round that corresponds to the last (maybe partially) processed anchor
+    /// from the last master chain block signed by majority.
+    /// Aligned (a bit increased or left unchanged) genesis round affects the overlay id.
+    pub start_round: u32,
+
+    /// Timestamp in milliseconds to include into mempool genesis point.
+    /// Newly produced points are required to have greater value.
+    /// Unchanged value affects the overlay id.
+    pub millis: u64,
 }
 
 impl ConsensusInfo {
@@ -220,8 +238,10 @@ impl ConsensusInfo {
     pub const ZEROSTATE: Self = Self {
         vset_switch_round: 0,
         prev_vset_switch_round: 0,
-        genesis_round: 0,
-        genesis_millis: 0,
+        genesis_info: GenesisInfo {
+            start_round: 0,
+            millis: 0,
+        },
         prev_shuffle_mc_validators: false,
     };
 
