@@ -1004,6 +1004,14 @@ impl CellDescriptor {
         }
     }
 
+    /// Creates a new descriptor with a new mask, shifted by the offset.
+    #[must_use]
+    pub const fn virtualize(mut self, offset: u8) -> Self {
+        let virtualized_mask = (self.d1 >> offset) & Self::LEVEL_MASK;
+        self.d1 = virtualized_mask | (self.d1 & !Self::LEVEL_MASK);
+        self
+    }
+
     /// Computes cell type.
     pub fn cell_type(self) -> CellType {
         if self.d1 & Self::IS_EXOTIC_MASK == 0 {
@@ -1158,6 +1166,7 @@ impl LevelMask {
 
     /// Creates a new mask, shifted by the offset.
     #[inline(always)]
+    #[must_use]
     pub const fn virtualize(self, offset: u8) -> Self {
         Self(self.0 >> offset)
     }
@@ -1640,6 +1649,30 @@ mod tests {
 
         for mask in 0b000..=0b111 {
             assert_eq!(LevelMask(mask).level(), LEVEL[mask as usize]);
+        }
+    }
+
+    #[test]
+    fn virtualize_descriptor() {
+        let level_mask = LevelMask(0b111);
+        let desc = CellDescriptor::new([
+            CellDescriptor::compute_d1(level_mask, false, 3),
+            CellDescriptor::compute_d2(123),
+        ]);
+
+        assert_eq!(desc.level_mask(), level_mask);
+
+        for i in 0..3 {
+            let v_desc = desc.virtualize(i);
+
+            assert_eq!(v_desc.cell_type(), desc.cell_type());
+            assert_eq!(v_desc.reference_count(), desc.reference_count());
+            assert_eq!(v_desc.is_exotic(), desc.is_exotic());
+            assert_eq!(v_desc.store_hashes(), desc.store_hashes());
+            assert_eq!(v_desc.is_aligned(), desc.is_aligned());
+            assert_eq!(v_desc.byte_len(), desc.byte_len());
+
+            assert_eq!(v_desc.level_mask(), level_mask.virtualize(i));
         }
     }
 
