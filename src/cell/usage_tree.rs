@@ -315,23 +315,36 @@ mod sync {
 
     type VisitedCells = scc::HashSet<HashBytes, ahash::RandomState>;
 
+    const CELL_SHARDS: usize = 256;
+
     pub struct UsageTreeState {
         pub mode: UsageTreeMode,
-        pub visited: VisitedCells,
+        pub visited: [VisitedCells; CELL_SHARDS],
     }
 
     impl UsageTreeState {
         pub fn new(mode: UsageTreeMode) -> SharedState {
             Arc::new(Self {
                 mode,
-                visited: Default::default(),
+                visited: [(); CELL_SHARDS].map(|_| Default::default()),
             })
         }
 
         pub fn with_mode_and_capacity(mode: UsageTreeMode, capacity: usize) -> SharedState {
+            const CAPACITY_K: usize = CELL_SHARDS >> 2;
+
             Arc::new(Self {
                 mode,
-                visited: VisitedCells::with_capacity_and_hasher(capacity, Default::default()),
+                visited: [(); CELL_SHARDS].map(|_| {
+                    VisitedCells::with_capacity_and_hasher(
+                        if CAPACITY_K > 0 {
+                            capacity / CAPACITY_K
+                        } else {
+                            1
+                        },
+                        Default::default(),
+                    )
+                }),
             })
         }
 
@@ -343,22 +356,28 @@ mod sync {
 
         #[inline]
         pub fn insert(&self, cell: &Cell) {
-            _ = self.visited.insert(*cell.repr_hash());
+            let key = cell.repr_hash();
+            _ = self.shard(key).insert(*key);
         }
 
         #[inline]
         pub fn contains(&self, repr_hash: &HashBytes) -> bool {
-            self.visited.contains(repr_hash)
+            self.shard(repr_hash).contains(repr_hash)
         }
 
         #[inline]
         pub fn is_empty(&self) -> bool {
-            self.visited.is_empty()
+            self.visited.iter().all(VisitedCells::is_empty)
         }
 
         #[inline]
         pub fn len(&self) -> usize {
-            self.visited.len()
+            self.visited.iter().map(VisitedCells::len).sum()
+        }
+
+        #[inline(always)]
+        fn shard(&self, key: &HashBytes) -> &VisitedCells {
+            &self.visited[key[0] as usize]
         }
     }
 
