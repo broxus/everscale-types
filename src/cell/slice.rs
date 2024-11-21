@@ -421,8 +421,7 @@ pub struct CellSlice<'a> {
 impl Default for CellSlice<'_> {
     #[inline]
     fn default() -> Self {
-        // SAFETY: empty cell is an ordinary cell
-        unsafe { Cell::empty_cell_ref().as_slice_unchecked() }
+        Cell::empty_cell_ref().as_slice_allow_pruned()
     }
 }
 
@@ -456,12 +455,7 @@ impl<'a> CellSlice<'a> {
     }
 
     /// Constructs a new cell slice from the specified cell.
-    ///
-    /// # Safety
-    ///
-    /// The following must be true:
-    /// - cell is not pruned
-    pub unsafe fn new_unchecked(cell: &'a DynCell) -> Self {
+    pub fn new_allow_pruned(cell: &'a DynCell) -> Self {
         Self {
             range: CellSliceRange::full(cell),
             cell,

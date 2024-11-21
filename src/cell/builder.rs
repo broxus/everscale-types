@@ -340,16 +340,14 @@ impl CellBuilder {
     ///
     /// NOTE: intermediate cell hash is undefined.
     pub fn as_data_slice(&self) -> CellSlice<'_> {
-        // SAFETY: we interpret cell builder data as ordinary cell
-        unsafe { CellSlice::new_unchecked(IntermediateDataCell::wrap(self)) }
+        CellSlice::new_allow_pruned(IntermediateDataCell::wrap(self))
     }
 
     /// Returns a slice which contains builder data and references.
     ///
     /// NOTE: intermediate cell hash is undefined.
     pub fn as_full_slice(&self) -> CellSlice<'_> {
-        // SAFETY: we interpret cell builder data as ordinary cell
-        unsafe { CellSlice::new_unchecked(IntermediateFullCell::wrap(self)) }
+        CellSlice::new_allow_pruned(IntermediateFullCell::wrap(self))
     }
 
     /// Returns an underlying cell data.

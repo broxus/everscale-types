@@ -427,11 +427,10 @@ impl Segment<'_> {
         let value = ok!(context.load_cell(value, LoadMode::Resolve));
 
         // Load parent label
-        let pfx = {
-            // SAFETY: `self.data` was already checked for pruned branch access.
-            let mut parent = unsafe { self.data.as_slice_unchecked() };
-            ok!(read_label(&mut parent, prev_key_bit_len))
-        };
+        let pfx = ok!(read_label(
+            &mut self.data.as_slice_allow_pruned(),
+            prev_key_bit_len
+        ));
 
         // Load the opposite branch
         let mut opposite = match self.data.reference(1 - index) {
@@ -602,9 +601,7 @@ fn read_hml_same<'a>(label: &mut CellSlice<'a>, bits_for_len: u16) -> Result<Cel
     };
     let len = ok!(label.load_uint(bits_for_len)) as u16;
 
-    // SAFETY: cell is a static ordinary cell
-    let slice = unsafe { cell.as_slice_unchecked() };
-    Ok(slice.get_prefix(len, 0))
+    Ok(cell.as_slice_allow_pruned().get_prefix(len, 0))
 }
 
 /// Which branch to take when traversing the tree.

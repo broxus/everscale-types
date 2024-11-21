@@ -243,13 +243,22 @@ impl DynCell {
 
     /// Returns this cell as a cell slice.
     ///
+    /// Loads cell as is.
+    #[inline]
+    pub fn as_slice_allow_pruned(&'_ self) -> CellSlice<'_> {
+        CellSlice::new_allow_pruned(self)
+    }
+
+    /// Returns this cell as a cell slice.
+    ///
     /// # Safety
     ///
     /// The following must be true:
     /// - cell is not pruned
     #[inline]
+    #[deprecated = "use `{Self}::as_slice_allow_pruned` instead"]
     pub unsafe fn as_slice_unchecked(&'_ self) -> CellSlice<'_> {
-        CellSlice::new_unchecked(self)
+        CellSlice::new_allow_pruned(self)
     }
 
     /// Recursively computes the count of distinct cells returning
@@ -1768,7 +1777,7 @@ mod tests {
             assert_eq!(slice.size_bits(), 8 + 32 + 1);
             assert_eq!(slice.load_u8().unwrap(), 0x12);
             assert_eq!(slice.load_u32().unwrap(), 123);
-            assert_eq!(slice.load_bit().unwrap(), true);
+            assert!(slice.load_bit().unwrap());
             assert!(slice.is_empty());
         }
         assert_eq!(
@@ -1790,7 +1799,7 @@ mod tests {
             assert_eq!(slice.load_u8().unwrap(), 0x34);
             assert_eq!(slice.load_u32().unwrap(), 123);
             assert_eq!(slice.load_u32().unwrap(), 456);
-            assert_eq!(slice.load_bit().unwrap(), true);
+            assert!(slice.load_bit().unwrap());
             assert!(slice.is_empty());
         }
         assert_eq!(
@@ -1812,8 +1821,8 @@ mod tests {
             assert_eq!(slice.load_u8().unwrap(), 0x56);
             assert_eq!(slice.load_u32().unwrap(), 123);
             assert_eq!(slice.load_u32().unwrap(), 0);
-            assert_eq!(slice.load_bit().unwrap(), true);
-            assert_eq!(slice.load_bit().unwrap(), true);
+            assert!(slice.load_bit().unwrap());
+            assert!(slice.load_bit().unwrap());
             assert!(slice.is_empty());
         }
         assert_eq!(

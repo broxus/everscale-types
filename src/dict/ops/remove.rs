@@ -219,11 +219,10 @@ pub fn dict_remove_bound_owned(
         };
 
         // Load parent label
-        let pfx = {
-            // SAFETY: `last.data` was already checked for pruned branch access.
-            let mut parent = unsafe { last.data.as_slice_unchecked() };
-            ok!(read_label(&mut parent, prev_key_bit_len))
-        };
+        let pfx = ok!(read_label(
+            &mut last.data.as_slice_allow_pruned(),
+            prev_key_bit_len
+        ));
 
         // Load the opposite branch
         let mut opposite = match last.data.reference(1 - index) {
