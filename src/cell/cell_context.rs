@@ -78,7 +78,7 @@ pub struct CellParts<'a> {
 
 impl<'a> CellParts<'a> {
     /// Validates cell and computes all hashes.
-    pub fn compute_hashes(&self) -> Result<Vec<(HashBytes, u16)>, Error> {
+    pub fn compute_hashes(&self) -> Result<ArrayVec<(HashBytes, u16), 4>, Error> {
         const HASH_BITS: usize = 256;
         const DEPTH_BITS: usize = 16;
 
@@ -88,9 +88,6 @@ impl<'a> CellParts<'a> {
         let level = level_mask.level() as usize;
 
         let references = self.references.as_ref();
-
-        // `hashes_len` is guaranteed to be in range 1..4
-        let mut hashes_len = level + 1;
 
         let (cell_type, computed_level_mask) = if unlikely(descriptor.is_exotic()) {
             let Some(&first_byte) = self.data.first() else {
@@ -114,7 +111,6 @@ impl<'a> CellParts<'a> {
                         return Err(Error::InvalidCell);
                     }
 
-                    hashes_len = 1;
                     (CellType::PrunedBranch, level_mask)
                 }
                 // 8 bits type, hash, depth
@@ -157,7 +153,7 @@ impl<'a> CellParts<'a> {
         let level_offset = cell_type.is_merkle() as u8;
         let is_pruned = cell_type.is_pruned_branch();
 
-        let mut hashes = Vec::<(HashBytes, u16)>::with_capacity(hashes_len);
+        let mut hashes = ArrayVec::<(HashBytes, u16), 4>::new();
         for level in 0..4 {
             // Skip non-zero levels for pruned branches and insignificant hashes for other cells
             if level != 0 && (is_pruned || !level_mask.contains(level)) {
@@ -181,7 +177,7 @@ impl<'a> CellParts<'a> {
             } else {
                 // SAFETY: new hash is added on each iteration, so there will
                 // definitely be a hash, when level>0
-                let prev_hash = unsafe { hashes.last().unwrap_unchecked() };
+                let prev_hash = unsafe { hashes.last_unchecked() };
                 hasher.update(prev_hash.0.as_slice());
             }
 
@@ -203,7 +199,9 @@ impl<'a> CellParts<'a> {
             }
 
             let hash = hasher.finalize().into();
-            hashes.push((hash, depth));
+
+            // SAFETY: iteration count is in range 0..4
+            unsafe { hashes.push((hash, depth)) };
         }
 
         Ok(hashes)

@@ -179,12 +179,29 @@ impl<T, const N: usize> ArrayVec<T, N> {
     /// Returns a reference to an element.
     pub const fn get(&self, n: u8) -> Option<&T> {
         if n < self.len {
-            let references = self.inner.as_ptr() as *const T;
             // SAFETY: {len} elements were initialized, n < len
-            Some(unsafe { &*references.add(n as usize) })
+            Some(unsafe { self.get_unchecked(n) })
         } else {
             None
         }
+    }
+
+    /// Returns a reference to an element.
+    ///
+    /// # Safety
+    /// - Index `n` must be in array bounds.
+    pub const unsafe fn get_unchecked(&self, n: u8) -> &T {
+        let references = self.inner.as_ptr() as *const T;
+        &*references.add(n as usize)
+    }
+
+    /// Returns a reference to the last element.
+    ///
+    /// # Safety
+    /// - At least one item must be initialized
+    pub const unsafe fn last_unchecked(&self) -> &T {
+        let references = self.inner.as_ptr() as *const T;
+        &*references.add((self.len - 1) as usize)
     }
 
     /// Returns the inner data without dropping its elements.
@@ -197,6 +214,19 @@ impl<T, const N: usize> ArrayVec<T, N> {
     pub unsafe fn into_inner(self) -> [MaybeUninit<T>; N] {
         let this = std::mem::ManuallyDrop::new(self);
         std::ptr::read(&this.inner)
+    }
+
+    /// Returns the initialized part of the data.
+    ///
+    /// # Safety
+    ///
+    /// Const `M` parameter must be the same as the runtime length.
+    #[inline]
+    pub unsafe fn into_plain<const M: usize>(self) -> [T; M] {
+        debug_assert!((self.len as usize) == M);
+
+        let this = std::mem::ManuallyDrop::new(self);
+        std::ptr::read(this.inner.as_ptr().cast::<[T; M]>())
     }
 }
 

@@ -7,7 +7,7 @@ use super::{
     Cell, CellDescriptor, CellFamily, CellImpl, CellInner, DynCell, HashBytes, EMPTY_CELL_HASH,
     MAX_REF_COUNT,
 };
-use crate::util::TryAsMut;
+use crate::util::{ArrayVec, TryAsMut};
 
 macro_rules! define_gen_vtable_ptr {
     (($($param:tt)*) => $($type:tt)*) => {
@@ -223,25 +223,25 @@ const ALL_ONES_CELL_HASH: [u8; 32] = [
     0x66, 0x12, 0x81, 0x70, 0x30, 0x1a, 0x7b, 0xec, 0xc2, 0x7a, 0xf1, 0xad, 0xbe, 0x6a, 0x31, 0xc9,
 ];
 
-type OrdinaryCell<const N: usize> = HeaderWithData<OrdinaryCellHeader, N>;
-
 struct OrdinaryCellHeader {
     bit_len: u16,
     #[cfg(feature = "stats")]
     stats: CellTreeStats,
-    hashes: Vec<(HashBytes, u16)>,
     descriptor: CellDescriptor,
     references: [MaybeUninit<Cell>; MAX_REF_COUNT],
     without_first: bool,
 }
 
 impl OrdinaryCellHeader {
-    fn level_descr(&self, level: u8) -> &(HashBytes, u16) {
-        let hash_index = hash_index(self.descriptor, level);
-        debug_assert!((hash_index as usize) < self.hashes.len());
-
-        // SAFETY: hash index is in range 0..=3
-        unsafe { self.hashes.get_unchecked(hash_index as usize) }
+    #[inline(always)]
+    unsafe fn into_full<const H: usize>(
+        self,
+        hashes: ArrayVec<(HashBytes, u16), 4>,
+    ) -> FullOrdinaryCellHeader<H> {
+        FullOrdinaryCellHeader {
+            base: self,
+            hashes: hashes.into_plain::<H>(),
+        }
     }
 
     fn reference(&self, i: u8) -> Option<&Cell> {
@@ -387,39 +387,56 @@ impl Drop for OrdinaryCellHeader {
     }
 }
 
+struct FullOrdinaryCellHeader<const H: usize> {
+    base: OrdinaryCellHeader,
+    hashes: [(HashBytes, u16); H],
+}
+
+impl<const H: usize> FullOrdinaryCellHeader<H> {
+    fn level_descr(&self, level: u8) -> &(HashBytes, u16) {
+        let hash_index = hash_index(self.base.descriptor, level);
+        debug_assert!((hash_index as usize) < H);
+
+        // SAFETY: hash index is in range 0..=3
+        unsafe { self.hashes.get_unchecked(hash_index as usize) }
+    }
+}
+
+type OrdinaryCell<const H: usize, const N: usize> = HeaderWithData<FullOrdinaryCellHeader<H>, N>;
+
 // TODO: merge VTables for different data array sizes
 
-impl<const N: usize> CellImpl for OrdinaryCell<N> {
+impl<const H: usize, const N: usize> CellImpl for OrdinaryCell<H, N> {
     #[inline]
     fn untrack(self: CellInner<Self>) -> Cell {
         Cell(self)
     }
 
     fn descriptor(&self) -> CellDescriptor {
-        self.header.descriptor
+        self.header.base.descriptor
     }
 
     fn data(&self) -> &[u8] {
         let data_ptr = std::ptr::addr_of!(self.data) as *const u8;
-        let data_len = self.header.descriptor.byte_len() as usize;
+        let data_len = self.header.base.descriptor.byte_len() as usize;
         // SAFETY: header is initialized
         unsafe { std::slice::from_raw_parts(data_ptr, data_len) }
     }
 
     fn bit_len(&self) -> u16 {
-        self.header.bit_len
+        self.header.base.bit_len
     }
 
     fn reference(&self, index: u8) -> Option<&DynCell> {
-        Some(self.header.reference(index)?.as_ref())
+        Some(self.header.base.reference(index)?.as_ref())
     }
 
     fn reference_cloned(&self, index: u8) -> Option<Cell> {
-        Some(self.header.reference(index)?.clone())
+        Some(self.header.base.reference(index)?.clone())
     }
 
     fn virtualize(&self) -> &DynCell {
-        if self.header.descriptor.level_mask().is_empty() {
+        if self.header.base.descriptor.level_mask().is_empty() {
             self
         } else {
             VirtualCellWrapper::wrap(self)
@@ -435,21 +452,76 @@ impl<const N: usize> CellImpl for OrdinaryCell<N> {
     }
 
     fn take_first_child(&mut self) -> Option<Cell> {
-        self.header.take_first_child()
+        self.header.base.take_first_child()
     }
 
     fn replace_first_child(&mut self, parent: Cell) -> ReplacedChild {
-        self.header.replace_first_child_with_parent(parent)
+        self.header.base.replace_first_child_with_parent(parent)
     }
 
     fn take_next_child(&mut self) -> Option<Cell> {
-        self.header.take_next_child()
+        self.header.base.take_next_child()
     }
 
     #[cfg(feature = "stats")]
     fn stats(&self) -> CellTreeStats {
-        self.header.stats
+        self.header.base.stats
     }
+}
+
+mod ordinary {
+    use super::*;
+
+    define_gen_vtable_ptr!((const H: usize, const N: usize) => OrdinaryCell<H, N>);
+
+    pub const VTABLES_GROUP_LEN: usize = 9;
+
+    pub const VTABLES: [[*const (); VTABLES_GROUP_LEN]; 4] = [
+        [
+            gen_vtable_ptr::<1, 0>(),
+            gen_vtable_ptr::<1, 8>(), // 1, aligned to 8
+            gen_vtable_ptr::<1, 8>(), // 2, aligned to 8
+            gen_vtable_ptr::<1, 8>(), // 4, aligned to 8
+            gen_vtable_ptr::<1, 8>(),
+            gen_vtable_ptr::<1, 16>(),
+            gen_vtable_ptr::<1, 32>(),
+            gen_vtable_ptr::<1, 64>(),
+            gen_vtable_ptr::<1, 128>(),
+        ],
+        [
+            gen_vtable_ptr::<2, 0>(),
+            gen_vtable_ptr::<2, 8>(), // 1, aligned to 8
+            gen_vtable_ptr::<2, 8>(), // 2, aligned to 8
+            gen_vtable_ptr::<2, 8>(), // 4, aligned to 8
+            gen_vtable_ptr::<2, 8>(),
+            gen_vtable_ptr::<2, 16>(),
+            gen_vtable_ptr::<2, 32>(),
+            gen_vtable_ptr::<2, 64>(),
+            gen_vtable_ptr::<2, 128>(),
+        ],
+        [
+            gen_vtable_ptr::<3, 0>(),
+            gen_vtable_ptr::<3, 8>(), // 1, aligned to 8
+            gen_vtable_ptr::<3, 8>(), // 2, aligned to 8
+            gen_vtable_ptr::<3, 8>(), // 4, aligned to 8
+            gen_vtable_ptr::<3, 8>(),
+            gen_vtable_ptr::<3, 16>(),
+            gen_vtable_ptr::<3, 32>(),
+            gen_vtable_ptr::<3, 64>(),
+            gen_vtable_ptr::<3, 128>(),
+        ],
+        [
+            gen_vtable_ptr::<4, 0>(),
+            gen_vtable_ptr::<4, 8>(), // 1, aligned to 8
+            gen_vtable_ptr::<4, 8>(), // 2, aligned to 8
+            gen_vtable_ptr::<4, 8>(), // 4, aligned to 8
+            gen_vtable_ptr::<4, 8>(),
+            gen_vtable_ptr::<4, 16>(),
+            gen_vtable_ptr::<4, 32>(),
+            gen_vtable_ptr::<4, 64>(),
+            gen_vtable_ptr::<4, 128>(),
+        ],
+    ];
 }
 
 struct LibraryReference {
@@ -615,6 +687,24 @@ impl<const N: usize> CellImpl for PrunedBranch<N> {
     fn stats(&self) -> CellTreeStats {
         aligned_leaf_stats(self.header.descriptor)
     }
+}
+
+mod pruned {
+    use super::*;
+
+    define_gen_vtable_ptr!((const N: usize) => PrunedBranch<N>);
+
+    pub const LENGTHS: [usize; 3] = [
+        PrunedBranchHeader::cell_data_len(1),
+        PrunedBranchHeader::cell_data_len(2),
+        PrunedBranchHeader::cell_data_len(3),
+    ];
+
+    pub const VTABLES: [*const (); 3] = [
+        gen_vtable_ptr::<{ LENGTHS[0] }>(),
+        gen_vtable_ptr::<{ LENGTHS[1] }>(),
+        gen_vtable_ptr::<{ LENGTHS[2] }>(),
+    ];
 }
 
 #[repr(transparent)]

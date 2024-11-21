@@ -4,13 +4,14 @@ use std::mem::offset_of;
 use std::rc::{Rc, Weak};
 
 use super::{
-    EmptyOrdinaryCell, HeaderWithData, LibraryReference, OrdinaryCell, OrdinaryCellHeader,
-    PrunedBranch, PrunedBranchHeader, VirtualCell, ALL_ONES_CELL, ALL_ZEROS_CELL,
+    ordinary, pruned, EmptyOrdinaryCell, FullOrdinaryCellHeader, HeaderWithData, LibraryReference,
+    OrdinaryCell, OrdinaryCellHeader, PrunedBranch, PrunedBranchHeader, VirtualCell, ALL_ONES_CELL,
+    ALL_ZEROS_CELL,
 };
 use crate::cell::cell_context::{CellContext, CellParts, LoadMode};
 use crate::cell::{CellFamily, CellImpl, CellType, DynCell, HashBytes};
 use crate::error::Error;
-use crate::util::TryAsMut;
+use crate::util::{ArrayVec, TryAsMut};
 
 /// Single-threaded cell.
 #[derive(Clone, Eq)]
@@ -189,7 +190,7 @@ impl CellContext for EmptyCellContext {
     }
 }
 
-unsafe fn make_cell(ctx: CellParts, hashes: Vec<(HashBytes, u16)>) -> Cell {
+unsafe fn make_cell(ctx: CellParts, hashes: ArrayVec<(HashBytes, u16), 4>) -> Cell {
     match ctx.descriptor.cell_type() {
         CellType::PrunedBranch => {
             debug_assert!(hashes.len() == 1);
@@ -220,18 +221,26 @@ unsafe fn make_cell(ctx: CellParts, hashes: Vec<(HashBytes, u16)>) -> Cell {
         CellType::Ordinary if ctx.descriptor.d1 == 0 && ctx.descriptor.d2 == 0 => {
             Cell(Rc::new(EmptyOrdinaryCell))
         }
-        _ => make_ordinary_cell(
-            OrdinaryCellHeader {
+        _ => {
+            let len = hashes.len();
+
+            let base = OrdinaryCellHeader {
                 bit_len: ctx.bit_len,
                 #[cfg(feature = "stats")]
                 stats: ctx.stats,
-                hashes,
                 descriptor: ctx.descriptor,
                 references: ctx.references.into_inner(),
                 without_first: false,
-            },
-            ctx.data,
-        ),
+            };
+
+            match len {
+                1 => make_ordinary_cell::<1>(base.into_full(hashes), ctx.data),
+                2 => make_ordinary_cell::<2>(base.into_full(hashes), ctx.data),
+                3 => make_ordinary_cell::<3>(base.into_full(hashes), ctx.data),
+                4 => make_ordinary_cell::<4>(base.into_full(hashes), ctx.data),
+                _ => unreachable!(),
+            }
+        }
     }
 }
 
@@ -242,75 +251,57 @@ unsafe fn make_cell(ctx: CellParts, hashes: Vec<(HashBytes, u16)>) -> Cell {
 /// The following must be true:
 /// - Header references array must be consistent with the descriptor.
 /// - Data length in bytes must be in range 0..=128.
-unsafe fn make_ordinary_cell(header: OrdinaryCellHeader, data: &[u8]) -> Cell {
-    define_gen_vtable_ptr!((const N: usize) => OrdinaryCell<N>);
-
-    const VTABLES: [*const (); 9] = [
-        gen_vtable_ptr::<0>(),
-        gen_vtable_ptr::<8>(), // 1, aligned to 8
-        gen_vtable_ptr::<8>(), // 2, aligned to 8
-        gen_vtable_ptr::<8>(), // 4, aligned to 8
-        gen_vtable_ptr::<8>(),
-        gen_vtable_ptr::<16>(),
-        gen_vtable_ptr::<32>(),
-        gen_vtable_ptr::<64>(),
-        gen_vtable_ptr::<128>(),
-    ];
-
-    type EmptyCell = OrdinaryCell<0>;
-
+unsafe fn make_ordinary_cell<const H: usize>(
+    header: FullOrdinaryCellHeader<H>,
+    data: &[u8],
+) -> Cell {
     // Clamp data to 0..=128 bytes range
     let raw_data_len = data.len();
     debug_assert!(raw_data_len <= 128);
 
     // Compute nearest target data length and vtable
     let (target_data_len, vtable) = if raw_data_len == 0 {
-        (0, VTABLES[0])
+        (0, const { ordinary::VTABLES[H - 1][0] })
     } else {
         let len = std::cmp::max(raw_data_len, 8).next_power_of_two();
-        let vtable = *VTABLES.get_unchecked(1 + len.trailing_zeros() as usize);
+        let vtable =
+            *const { ordinary::VTABLES[H - 1] }.get_unchecked(1 + len.trailing_zeros() as usize);
         (len, vtable)
     };
     debug_assert!(raw_data_len <= target_data_len);
 
     // Compute object layout
-    type InnerOrdinaryCell<const N: usize> = RcBox<std::cell::Cell<usize>, OrdinaryCell<N>>;
+    let rc_data_offset = const {
+        type EmptyCell<const H: usize> = OrdinaryCell<H, 0>;
 
-    const ALIGN: usize = std::mem::align_of::<InnerOrdinaryCell<0>>();
-    const _: () = assert!(
-        ALIGN == std::mem::align_of::<InnerOrdinaryCell<8>>()
-            && ALIGN == std::mem::align_of::<InnerOrdinaryCell<16>>()
-            && ALIGN == std::mem::align_of::<InnerOrdinaryCell<32>>()
-            && ALIGN == std::mem::align_of::<InnerOrdinaryCell<64>>()
-            && ALIGN == std::mem::align_of::<InnerOrdinaryCell<128>>()
-    );
+        offset_of!(RcBox<usize, EmptyCell<H>>, obj) + offset_of!(EmptyCell<H>, data)
+    };
 
-    const RC_DATA_OFFSET: usize =
-        offset_of!(RcBox<usize, EmptyCell>, obj) + offset_of!(EmptyCell, data);
+    let align = const {
+        type InnerOrdinaryCell<const H: usize, const N: usize> =
+            RcBox<std::cell::Cell<usize>, OrdinaryCell<H, N>>;
 
-    let size = (RC_DATA_OFFSET + target_data_len + ALIGN - 1) & !(ALIGN - 1);
-    let layout = Layout::from_size_align_unchecked(size, ALIGN).pad_to_align();
+        let align = std::mem::align_of::<InnerOrdinaryCell<H, 0>>();
+        assert!(
+            align == std::mem::align_of::<InnerOrdinaryCell<H, 8>>()
+                && align == std::mem::align_of::<InnerOrdinaryCell<H, 16>>()
+                && align == std::mem::align_of::<InnerOrdinaryCell<H, 32>>()
+                && align == std::mem::align_of::<InnerOrdinaryCell<H, 64>>()
+                && align == std::mem::align_of::<InnerOrdinaryCell<H, 128>>()
+        );
+
+        align
+    };
+
+    let size = (rc_data_offset + target_data_len + align - 1) & !(align - 1);
+    let layout = Layout::from_size_align_unchecked(size, align).pad_to_align();
 
     // Make RcCell
-    make_rc_cell::<OrdinaryCellHeader, 0>(layout, header, data.as_ptr(), raw_data_len, vtable)
+    make_rc_cell::<_, 0>(layout, header, data.as_ptr(), raw_data_len, vtable)
 }
 
 unsafe fn make_pruned_branch(header: PrunedBranchHeader, data: &[u8]) -> Cell {
-    define_gen_vtable_ptr!((const N: usize) => PrunedBranch<N>);
-
-    const LENGTHS: [usize; 3] = [
-        PrunedBranchHeader::cell_data_len(1),
-        PrunedBranchHeader::cell_data_len(2),
-        PrunedBranchHeader::cell_data_len(3),
-    ];
-
-    const VTABLES: [*const (); 3] = [
-        gen_vtable_ptr::<{ LENGTHS[0] }>(),
-        gen_vtable_ptr::<{ LENGTHS[1] }>(),
-        gen_vtable_ptr::<{ LENGTHS[2] }>(),
-    ];
-
-    type EmptyCell = PrunedBranch<{ LENGTHS[0] }>;
+    type EmptyCell = PrunedBranch<{ pruned::LENGTHS[0] }>;
 
     // Compute nearest target data length and vtable
     let data_len = PrunedBranchHeader::cell_data_len(header.level as usize);
@@ -318,15 +309,15 @@ unsafe fn make_pruned_branch(header: PrunedBranchHeader, data: &[u8]) -> Cell {
     debug_assert_eq!(data_len, data.len());
     debug_assert_eq!(data_len, header.descriptor.byte_len() as usize);
 
-    let vtable = *VTABLES.get_unchecked((header.level - 1) as usize);
+    let vtable = *pruned::VTABLES.get_unchecked((header.level - 1) as usize);
 
     // Compute object layout
     type InnerPrunedBranch<const N: usize> = RcBox<std::cell::Cell<usize>, PrunedBranch<N>>;
 
-    const ALIGN: usize = std::mem::align_of::<InnerPrunedBranch<{ LENGTHS[0] }>>();
+    const ALIGN: usize = std::mem::align_of::<InnerPrunedBranch<{ pruned::LENGTHS[0] }>>();
     const _: () = assert!(
-        ALIGN == std::mem::align_of::<InnerPrunedBranch<{ LENGTHS[1] }>>()
-            && ALIGN == std::mem::align_of::<InnerPrunedBranch<{ LENGTHS[2] }>>()
+        ALIGN == std::mem::align_of::<InnerPrunedBranch<{ pruned::LENGTHS[1] }>>()
+            && ALIGN == std::mem::align_of::<InnerPrunedBranch<{ pruned::LENGTHS[2] }>>()
     );
 
     const RC_DATA_OFFSET: usize =
@@ -336,7 +327,7 @@ unsafe fn make_pruned_branch(header: PrunedBranchHeader, data: &[u8]) -> Cell {
     let layout = Layout::from_size_align_unchecked(size, ALIGN).pad_to_align();
 
     // Make RcCell
-    make_rc_cell::<PrunedBranchHeader, { LENGTHS[0] }>(
+    make_rc_cell::<PrunedBranchHeader, { pruned::LENGTHS[0] }>(
         layout,
         header,
         data.as_ptr(),

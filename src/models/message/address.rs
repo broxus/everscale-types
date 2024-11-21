@@ -239,7 +239,7 @@ impl StdAddr {
     }
 
     /// Parses a base64-encoded address.
-    #[cfg(feature = "base64")]
+    #[cfg(any(feature = "base64", test))]
     pub fn from_str_ext(
         s: &str,
         format: StdAddrFormat,
@@ -309,7 +309,7 @@ impl StdAddr {
     }
 
     /// Returns a pretty-printer for base64-encoded address.
-    #[cfg(feature = "base64")]
+    #[cfg(any(feature = "base64", test))]
     pub const fn display_base64(&self, bounceable: bool) -> DisplayBase64StdAddr<'_> {
         DisplayBase64StdAddr {
             addr: self,
@@ -322,7 +322,7 @@ impl StdAddr {
     }
 
     /// Returns a pretty-printer for URL-safe base64-encoded address.
-    #[cfg(feature = "base64")]
+    #[cfg(any(feature = "base64", test))]
     pub const fn display_base64_url(&self, bounceable: bool) -> DisplayBase64StdAddr<'_> {
         DisplayBase64StdAddr {
             addr: self,
@@ -539,10 +539,10 @@ impl<'de> serde::Deserialize<'de> for StdAddr {
 }
 
 /// A helper struct to work with base64-encoded addresses.
-#[cfg(feature = "base64")]
+#[cfg(any(feature = "base64", test))]
 pub struct StdAddrBase64Repr<const URL_SAFE: bool = true>;
 
-#[cfg(all(feature = "base64", feature = "serde"))]
+#[cfg(all(any(feature = "base64", test), feature = "serde"))]
 impl<const URL_SAFE: bool> StdAddrBase64Repr<URL_SAFE> {
     /// Serializes address into a base64-encoded string.
     pub fn serialize<S>(addr: &StdAddr, serializer: S) -> Result<S::Ok, S::Error>
@@ -590,7 +590,7 @@ impl<const URL_SAFE: bool> StdAddrBase64Repr<URL_SAFE> {
 }
 
 /// Parsing options for [`StdAddr::from_str_ext`]
-#[cfg(feature = "base64")]
+#[cfg(any(feature = "base64", test))]
 #[derive(Debug, Clone, Copy)]
 pub struct StdAddrFormat {
     /// Allow raw address (0:000...000).
@@ -601,7 +601,7 @@ pub struct StdAddrFormat {
     pub allow_base64_url: bool,
 }
 
-#[cfg(feature = "base64")]
+#[cfg(any(feature = "base64", test))]
 impl StdAddrFormat {
     /// Allows any address format.
     pub const fn any() -> Self {
@@ -614,7 +614,7 @@ impl StdAddrFormat {
 }
 
 /// Base64-encoded address flags.
-#[cfg(feature = "base64")]
+#[cfg(any(feature = "base64", test))]
 #[derive(Default, Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Base64StdAddrFlags {
     /// Address belongs to testnet.
@@ -626,7 +626,7 @@ pub struct Base64StdAddrFlags {
 }
 
 /// Pretty-printer for [`StdAddr`] in base64 format.
-#[cfg(feature = "base64")]
+#[cfg(any(feature = "base64", test))]
 pub struct DisplayBase64StdAddr<'a> {
     /// Address to display.
     pub addr: &'a StdAddr,
@@ -634,7 +634,7 @@ pub struct DisplayBase64StdAddr<'a> {
     pub flags: Base64StdAddrFlags,
 }
 
-#[cfg(feature = "base64")]
+#[cfg(any(feature = "base64", test))]
 impl std::fmt::Display for DisplayBase64StdAddr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use base64::prelude::{Engine as _, BASE64_STANDARD, BASE64_URL_SAFE};
