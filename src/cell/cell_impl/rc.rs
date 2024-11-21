@@ -1,5 +1,6 @@
 use std::alloc::Layout;
 use std::borrow::Borrow;
+use std::mem::offset_of;
 use std::rc::{Rc, Weak};
 
 use super::{

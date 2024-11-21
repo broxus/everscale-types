@@ -23,19 +23,6 @@ macro_rules! define_gen_vtable_ptr {
     };
 }
 
-macro_rules! offset_of {
-    ($ty: path, $field: tt) => {{
-        let $ty { $field: _, .. };
-
-        let uninit = ::std::mem::MaybeUninit::<$ty>::uninit();
-        let base_ptr = uninit.as_ptr() as *const $ty;
-        unsafe {
-            let field_ptr = std::ptr::addr_of!((*base_ptr).$field);
-            (field_ptr as *const u8).offset_from(base_ptr as *const u8) as usize
-        }
-    }};
-}
-
 /// Single-threaded cell implementation.
 #[cfg(not(feature = "sync"))]
 pub mod rc;
