@@ -725,47 +725,71 @@ pub struct WorkUnitsParamsFinalize {
 #[tlb(tag = "#d8")]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ConsensusConfig {
-    /// TODO: Add docs.
+    /// How far a ready-to-be-signed point (with time in its body)
+    /// may be in the future compared with signer's local (wall) time.
+    /// Lower bound is defined by genesis, and then advanced by leaders with every anchor.
+    /// Anchor time is strictly increasing as it is inherited from anchor candidate in every point.
     ///
     /// **NOTE: Affects overlay id.**
     pub clock_skew_millis: u16,
 
-    /// TODO: Add docs.
+    /// Hard limit on point payload. Excessive messages will be postponed.
     ///
     /// **NOTE: Affects overlay id.**
     pub payload_batch_bytes: u32,
 
-    /// TODO: Add docs.
+    /// Limits amount of rounds included in anchor history (points that appears in commit).
     ///
     /// **NOTE: Affects overlay id.**
     pub commit_history_rounds: u16,
 
-    /// TODO: Add docs.
+    /// Size (amount of rounds) of a sliding window to deduplicate external messages across anchors.
     ///
     /// **NOTE: Affects overlay id.**
     pub deduplicate_rounds: u16,
 
-    /// TODO: Add docs.
+    /// The max expected distance (amount of rounds) between two sequential top known anchors (TKA),
+    /// i.e. anchors from two sequential top known blocks (TKB, signed master chain blocks,
+    /// available to local node, and which state is not necessarily applied by local node). For
+    /// example, the last TKA=`7` and the config value is `210`, so a newer TKA is expected in
+    /// range `(8..=217).len() == 210`, i.e. some leader successfully completes its 3 rounds
+    /// in a row (collects 2F+1 signatures for its anchor trigger), and there are one or
+    /// two additional mempool rounds for the anchor trigger to be delivered to all nodes,
+    /// and every collator is expected to create and sign a block containing that new TKA and time.
+    /// Until a new TKA in range `11..=211'('7+4..<217-3-2`) is received by the local mempool,
+    /// it will not repeat its per-round routine at round `216` and keeps waiting in a "pause mode".
+    /// DAG will contain `217` round as it always does for the next round after current.
+    /// Switch of validator set may be scheduled for `218` round, as its round is not created.
+    ///
+    /// Effectively defines feedback from block validation consensus to mempool consensus.
     ///
     /// **NOTE: Affects overlay id.**
     pub max_consensus_lag_rounds: u16,
 
-    /// TODO: Add docs.
+    /// Hard limit on ring buffer size to cache external messages before they are taken into
+    /// point payload. Newer messages may push older ones out of the buffer when limit is reached.
     pub payload_buffer_bytes: u32,
 
-    /// TODO: Add docs.
+    /// Every round an instance tries to gather as many points and signatures as it can
+    /// within some time frame. It is a tradeoff between breaking current round
+    /// on exactly 2F+1 items (points and/or signatures) and waiting for slow nodes.
     pub broadcast_retry_millis: u16,
 
-    /// TODO: Add docs.
+    /// Every missed dependency (point) is downloaded with a group of simultaneous requests to
+    /// neighbour peers. Every new group of requests is spawned after previous group completed
+    /// or this interval elapsed (in order not to wait for some slow responding peer).
     pub download_retry_millis: u16,
 
-    /// TODO: Add docs.
+    /// Amount of peers to request at first download attempt. Amount will increase
+    /// respectively at each attempt, until 2F peers successfully responded `None`
+    /// or a verifiable point is found (incorrectly signed points do not count).
     pub download_peers: u8,
 
-    /// TODO: Add docs.
+    /// Limits amount of unique points being simultaneously downloaded (except the first one).
     pub download_tasks: u16,
 
-    /// TODO: Add docs.
+    /// Max duration (amount of rounds) at which local mempool is supposed to keep its history
+    /// for neighbours to sync. Also limits DAG growth when it syncs, as sync takes time.
     pub sync_support_rounds: u16,
 }
 
