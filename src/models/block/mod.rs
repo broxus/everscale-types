@@ -699,11 +699,12 @@ impl<'a> Load<'a> for ValueFlow {
 #[cfg(feature = "tycho")]
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
-#[tlb(tag = "#1")]
+#[tlb(tag = ["#1", "#2"])]
 pub struct OutMsgQueueUpdates {
     /// Hash of the serialized queue diff.
     pub diff_hash: HashBytes,
     /// The number of additional queue diffs, excluding the current one,
     /// that may still be required by other shards.
+    #[tlb(since_tag = 1)]
     pub tail_len: u32,
 }
