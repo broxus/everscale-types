@@ -1,6 +1,8 @@
 use everscale_types::cell::RefsIter;
 use everscale_types::prelude::*;
-use iai_callgrind::{library_benchmark, library_benchmark_group, main};
+use iai_callgrind::{
+    library_benchmark, library_benchmark_group, main, FlamegraphConfig, LibraryBenchmarkConfig,
+};
 use std::collections::HashSet;
 use std::hint::black_box;
 
@@ -91,4 +93,6 @@ library_benchmark_group!(
     benchmarks = traverse_cell_ordinary, traverse_cell_storage_cell, traverse_cell_storage_cell_with_capacity
 );
 
-main!(library_benchmark_groups = traverse_cell);
+main!(config =LibraryBenchmarkConfig::default()
+                .flamegraph(FlamegraphConfig::default());
+    library_benchmark_groups = traverse_cell);
