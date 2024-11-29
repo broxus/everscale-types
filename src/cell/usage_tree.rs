@@ -102,6 +102,10 @@ impl UsageTreeWithSubtrees {
     pub fn add_subtree(&mut self, root: &DynCell) -> bool {
         self.subtrees.insert(*root.repr_hash())
     }
+
+    pub(crate) fn len(&self) -> usize {
+        self.state.len()
+    }
 }
 
 #[cfg(not(feature = "sync"))]
