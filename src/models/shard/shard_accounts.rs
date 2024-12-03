@@ -11,19 +11,17 @@ pub type ShardAccounts = AugDict<HashBytes, DepthBalanceInfo, ShardAccount>;
 /// Intermediate balance info.
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct DepthBalanceInfo {
-    /// Depth for which the balance was calculated.
-    pub split_depth: u8,
+    /// Total number of accounts in a subtree.
+    pub count: u32,
     /// Total balance for a subtree.
     pub balance: CurrencyCollection,
 }
 
 impl DepthBalanceInfo {
-    const SPLIT_DEPTH_BITS: u16 = 5;
-
-    /// Returns `true` if the split depth is valid.
+    /// Returns `true`.
     #[inline]
     pub const fn is_valid(&self) -> bool {
-        self.split_depth <= 30
+        true
     }
 }
 
@@ -37,7 +35,10 @@ impl AugDictExtra for DepthBalanceInfo {
         let left = ok!(Self::load_from(left));
         let right = ok!(Self::load_from(right));
         Self {
-            split_depth: std::cmp::max(left.split_depth, right.split_depth),
+            count: left
+                .count
+                .checked_add(right.count)
+                .ok_or(Error::IntOverflow)?,
             balance: ok!(left.balance.checked_add(&right.balance)),
         }
         .store_into(b, cx)
@@ -53,7 +54,7 @@ impl Store for DepthBalanceInfo {
         if !self.is_valid() {
             return Err(Error::IntOverflow);
         }
-        ok!(builder.store_small_uint(self.split_depth, Self::SPLIT_DEPTH_BITS));
+        ok!(builder.store_u32(self.count));
         self.balance.store_into(builder, context)
     }
 }
@@ -61,7 +62,7 @@ impl Store for DepthBalanceInfo {
 impl<'a> Load<'a> for DepthBalanceInfo {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let result = Self {
-            split_depth: ok!(slice.load_small_uint(Self::SPLIT_DEPTH_BITS)),
+            count: ok!(slice.load_u32()),
             balance: ok!(CurrencyCollection::load_from(slice)),
         };
         if result.is_valid() {
