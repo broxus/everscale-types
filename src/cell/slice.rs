@@ -1777,10 +1777,10 @@ impl_exact_size_for_tuples! {
 /// - (offset + bit_count + 7) / 8 <= data.len()
 unsafe fn bits_memscan(data: &[u8], mut offset: u16, bit_count: u16, cmp_to: bool) -> u16 {
     #[inline]
-    const fn is_aligned_to_u64(ptr: *const u8) -> bool {
+    fn is_aligned_to_u64(ptr: *const u8) -> bool {
         // SAFETY: Pointer-to-integer transmutes are valid (if you are okay with losing the
         // provenance).
-        let addr: usize = unsafe { std::mem::transmute(ptr.cast::<()>()) };
+        let addr = ptr.cast::<()>() as usize;
         addr & (std::mem::align_of::<u64>() - 1) == 0
     }
 

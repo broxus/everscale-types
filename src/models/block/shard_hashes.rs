@@ -1061,7 +1061,7 @@ impl<'a> WorkchainShardsTreeKeysIter<'a> {
     }
 }
 
-impl<'a> Iterator for WorkchainShardsTreeKeysIter<'a> {
+impl Iterator for WorkchainShardsTreeKeysIter<'_> {
     type Item = Result<ShardIdent, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {

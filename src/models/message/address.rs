@@ -514,7 +514,7 @@ impl<'de> serde::Deserialize<'de> for StdAddr {
 
         struct StdAddrVisitor;
 
-        impl<'de> Visitor<'de> for StdAddrVisitor {
+        impl Visitor<'_> for StdAddrVisitor {
             type Value = StdAddr;
 
             fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -568,7 +568,7 @@ impl<const URL_SAFE: bool> StdAddrBase64Repr<URL_SAFE> {
 
         struct StdAddrBase64Visitor;
 
-        impl<'de> Visitor<'de> for StdAddrBase64Visitor {
+        impl Visitor<'_> for StdAddrBase64Visitor {
             type Value = StdAddr;
 
             fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -835,7 +835,7 @@ impl<'de> serde::Deserialize<'de> for ExtAddr {
 
         struct ExtAddrVisitor;
 
-        impl<'de> Visitor<'de> for ExtAddrVisitor {
+        impl Visitor<'_> for ExtAddrVisitor {
             type Value = ExtAddr;
 
             fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {

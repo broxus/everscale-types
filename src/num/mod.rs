@@ -490,7 +490,7 @@ impl<'de> serde::Deserialize<'de> for Tokens {
 
         struct TokensVisitor;
 
-        impl<'de> Visitor<'de> for TokensVisitor {
+        impl Visitor<'_> for TokensVisitor {
             type Value = u128;
 
             fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {

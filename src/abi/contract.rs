@@ -456,7 +456,10 @@ impl Function {
     }
 
     /// Encodes an unsigned body with invocation of this method as an external message.
-    pub fn encode_external<'f, 'a: 'f>(&'f self, tokens: &'a [NamedAbiValue]) -> ExternalInput {
+    pub fn encode_external<'f, 'a: 'f>(
+        &'f self,
+        tokens: &'a [NamedAbiValue],
+    ) -> ExternalInput<'f, 'a> {
         ExternalInput {
             function: self,
             tokens,
@@ -646,7 +649,7 @@ pub struct ExternalInput<'f, 'a> {
     address: Option<&'a StdAddr>,
 }
 
-impl<'f, 'a> ExternalInput<'f, 'a> {
+impl<'a> ExternalInput<'_, 'a> {
     /// Builds an external message to the specified address.
     pub fn build_message(&self, address: &StdAddr) -> Result<UnsignedExternalMessage> {
         Ok(ok!(self.build_input_ext(Some(address))).with_dst(address.clone()))

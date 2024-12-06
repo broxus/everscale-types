@@ -1105,7 +1105,7 @@ pub struct Keys<'a, K> {
     _key: PhantomData<K>,
 }
 
-impl<'a, K> Clone for Keys<'a, K> {
+impl<K> Clone for Keys<'_, K> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -1141,7 +1141,7 @@ where
     }
 }
 
-impl<'a, K> Iterator for Keys<'a, K>
+impl<K> Iterator for Keys<'_, K>
 where
     K: DictKey,
 {

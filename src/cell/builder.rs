@@ -128,7 +128,7 @@ impl<T: Store> Store for Option<T> {
     }
 }
 
-impl<'a> Store for CellSlice<'a> {
+impl Store for CellSlice<'_> {
     #[inline]
     fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         builder.store_slice(self)

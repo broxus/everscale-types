@@ -467,7 +467,7 @@ where
     }
 }
 
-impl<'a, F> MerkleUpdateBuilder<'a, F>
+impl<F> MerkleUpdateBuilder<'_, F>
 where
     F: MerkleFilter,
 {

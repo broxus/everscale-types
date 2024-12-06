@@ -305,7 +305,7 @@ impl<'de> serde::Deserialize<'de> for VarUint248 {
 
         struct VarUint248Visitor;
 
-        impl<'de> Visitor<'de> for VarUint248Visitor {
+        impl Visitor<'_> for VarUint248Visitor {
             type Value = VarUint248;
 
             fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {

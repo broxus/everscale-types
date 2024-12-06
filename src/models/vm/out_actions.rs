@@ -18,7 +18,7 @@ impl<'a> OutActionsRevIter<'a> {
     }
 }
 
-impl<'a> Iterator for OutActionsRevIter<'a> {
+impl Iterator for OutActionsRevIter<'_> {
     type Item = Result<OutAction, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {

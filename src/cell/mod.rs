@@ -468,7 +468,7 @@ impl<'a> Iterator for RefsIter<'a> {
     }
 }
 
-impl<'a> DoubleEndedIterator for RefsIter<'a> {
+impl DoubleEndedIterator for RefsIter<'_> {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.max > self.index {
@@ -522,7 +522,7 @@ impl Clone for ClonedRefsIter<'_> {
     }
 }
 
-impl<'a> Iterator for ClonedRefsIter<'a> {
+impl Iterator for ClonedRefsIter<'_> {
     type Item = Cell;
 
     #[inline]
@@ -542,7 +542,7 @@ impl<'a> Iterator for ClonedRefsIter<'a> {
     }
 }
 
-impl<'a> DoubleEndedIterator for ClonedRefsIter<'a> {
+impl DoubleEndedIterator for ClonedRefsIter<'_> {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.inner.max > self.inner.index {
@@ -841,7 +841,7 @@ impl<'de> serde::Deserialize<'de> for HashBytes {
 
         struct HashBytesHexVisitor;
 
-        impl<'de> Visitor<'de> for HashBytesHexVisitor {
+        impl Visitor<'_> for HashBytesHexVisitor {
             type Value = HashBytes;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -862,7 +862,7 @@ impl<'de> serde::Deserialize<'de> for HashBytes {
 
         pub struct HashBytesRawVisitor;
 
-        impl<'de> Visitor<'de> for HashBytesRawVisitor {
+        impl Visitor<'_> for HashBytesRawVisitor {
             type Value = HashBytes;
 
             fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

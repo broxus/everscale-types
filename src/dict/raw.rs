@@ -695,7 +695,7 @@ impl<'a> RawOwnedIter<'a> {
     }
 }
 
-impl<'a> Iterator for RawOwnedIter<'a> {
+impl Iterator for RawOwnedIter<'_> {
     type Item = Result<(CellBuilder, CellSliceParts), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -1206,7 +1206,7 @@ impl<'a> RawKeys<'a> {
     }
 }
 
-impl<'a> Iterator for RawKeys<'a> {
+impl Iterator for RawKeys<'_> {
     type Item = Result<CellBuilder, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -1274,7 +1274,7 @@ impl<'a> RawOwnedValues<'a> {
     }
 }
 
-impl<'a> Iterator for RawOwnedValues<'a> {
+impl Iterator for RawOwnedValues<'_> {
     type Item = Result<CellSliceParts, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {

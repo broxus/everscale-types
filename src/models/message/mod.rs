@@ -236,7 +236,7 @@ trait StoreBody {
     ) -> Result<(), Error>;
 }
 
-impl<'a> StoreBody for CellSlice<'a> {
+impl StoreBody for CellSlice<'_> {
     fn store_body(
         &self,
         to_cell: bool,

@@ -274,7 +274,7 @@ where
     }
 }
 
-impl<'a, F> MerkleProofBuilder<'a, F>
+impl<F> MerkleProofBuilder<'_, F>
 where
     F: MerkleFilter,
 {
@@ -291,7 +291,7 @@ pub struct MerkleProofExtBuilder<'a, F> {
     allow_different_root: bool,
 }
 
-impl<'a, F> MerkleProofExtBuilder<'a, F> {
+impl<F> MerkleProofExtBuilder<'_, F> {
     /// Mark whether the different root is ok for this proof.
     pub fn allow_different_root(mut self, allow: bool) -> Self {
         self.allow_different_root = allow;
@@ -331,7 +331,7 @@ struct BuilderImpl<'a, 'b, S = ahash::RandomState> {
     allow_different_root: bool,
 }
 
-impl<'a, 'b, S> BuilderImpl<'a, 'b, S>
+impl<S> BuilderImpl<'_, '_, S>
 where
     S: BuildHasher + Default,
 {

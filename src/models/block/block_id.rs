@@ -546,7 +546,7 @@ impl<'de> serde::Deserialize<'de> for ShardIdent {
 
         struct ShardIdentVisitor;
 
-        impl<'de> Visitor<'de> for ShardIdentVisitor {
+        impl Visitor<'_> for ShardIdentVisitor {
             type Value = ShardIdent;
 
             fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {

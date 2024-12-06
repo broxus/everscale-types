@@ -76,7 +76,7 @@ pub struct CellParts<'a> {
     pub data: &'a [u8],
 }
 
-impl<'a> CellParts<'a> {
+impl CellParts<'_> {
     /// Validates cell and computes all hashes.
     pub fn compute_hashes(&self) -> Result<Vec<(HashBytes, u16)>, Error> {
         const HASH_BITS: usize = 256;
