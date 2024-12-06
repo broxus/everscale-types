@@ -673,7 +673,6 @@ pub struct WorkUnitsParamsExecute {
 ///     serialize_msg:uint16
 ///     state_update_min:uint32
 ///     state_update_accounts:uint32
-///     state_update_msg:uint16
 ///     = WorkUnitsParamsFinalize;
 /// ```
 #[cfg(feature = "tycho")]
@@ -699,8 +698,6 @@ pub struct WorkUnitsParamsFinalize {
     pub state_update_min: u32,
     /// TODO: Add docs.
     pub state_update_accounts: u32,
-    /// TODO: Add docs.
-    pub state_update_msg: u16,
 }
 
 /// DAG Consensus configuration params
