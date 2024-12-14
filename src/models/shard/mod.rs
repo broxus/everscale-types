@@ -370,67 +370,101 @@ impl<'a> Load<'a> for LibDescr {
     }
 }
 
-/// Processed up to info for externals and internals.
+/// Processed upto info for externals and internals.
 #[cfg(feature = "tycho")]
 #[derive(Debug, Default, Clone, Store, Load)]
+#[tlb(tag = "#c1")]
 pub struct ProcessedUptoInfo {
-    /// Externals processed up to point and range
-    /// to reproduce last messages buffer
-    /// (if it was not fully processed in prev block collation).
-    pub externals: Option<ExternalsProcessedUpto>,
-    /// Internals processed up to points and ranges by shards
-    /// to reproduce last messages buffer
-    /// (if it was not fully processed in prev block collation).
-    pub internals: Dict<ShardIdentFull, InternalsProcessedUpto>,
-    /// Offset of processed messages from buffer.
-    /// Will be `!=0` if the buffer was not fully processed in prev block collation.
-    pub processed_offset: u32,
+    /// Externals read range and processed to info.
+    pub externals: ExternalsProcessedUpto,
+
+    /// We split internals storage by partitions.
+    /// There are at least 2: normal and low-priority.
+    /// And inside partitions we split messages by source shard.
+    pub internals: InternalsProcessedUpto,
 }
 
-/// Describes the processed up to point and range of externals
+/// Describes the processed to point and ranges of externals
 /// that we should read to reproduce the same messages buffer
-/// on which the previous block collation stopped:
-/// from message in FROM achor up to message in TO anchor: (FROM..TO].
-///
-/// If last buffer was fully processed then
-/// will be `processed_to == read_to`.
-/// So we do not need to reproduce the last buffer
-/// and we can continue to read externals from `read_to`.
+/// on which the previous block collation stopped.
 #[cfg(feature = "tycho")]
-#[derive(Debug, Clone, Store, Load)]
+#[derive(Debug, Default, Clone, Store, Load)]
+#[tlb(tag = "#c2")]
 pub struct ExternalsProcessedUpto {
-    /// Externals processed to (anchor, len).
-    /// All externals to this point
+    /// Externals processed to (anchor id, msgs offset).
+    /// All externals up to this point
     /// already processed during previous blocks collations.
-    ///
-    /// Needs to read next externals after this point to reproduce messages buffer for collation.
     pub processed_to: (u32, u64),
-    /// Needs to read externals up to this point to reproduce messages buffer for collation.
-    pub read_to: (u32, u64),
+
+    /// Externals read ranges map by block seqno.
+    pub ranges: Dict<u32, ExternalsRange>,
 }
 
-/// Describes the processed up to point and range of internals
-/// that we should read from shard to reproduce the same messages buffer
-/// on which the previous block collation stopped:
-/// from message LT_HASH to message LT_HASH.
-///
-/// If last read messages set was fully processed then
-/// will be
-/// ```
-/// processed_to_msg == read_to_msg
-/// ```
-///
-/// So we do not need to reproduce the last messages buffer
-/// and we can continue to read internals after `read_to_msg`.
+/// Describes externals read range.
 #[cfg(feature = "tycho")]
-#[derive(Debug, Clone, Store, Load)]
+#[derive(Debug, Default, Clone, Store, Load)]
+#[tlb(tag = "#c3")]
+pub struct ExternalsRange {
+    /// From mempool anchor id and msgs offset.
+    pub from: (u32, u64),
+    /// To mempool anchor id and msgs offset.
+    pub to: (u32, u64),
+
+    /// Chain time of the block when range was read.
+    pub ct: u64,
+
+    /// How many times external messages were collected from the ranges buffers.
+    /// Every range contains offset that was reached when range was the last.
+    /// So the current last range contains the actual offset.
+    pub processed_offset: u16,
+}
+
+/// Contains internals processed upto info.
+#[cfg(feature = "tycho")]
+#[derive(Debug, Default, Clone, Store, Load)]
+#[tlb(tag = "#c4")]
 pub struct InternalsProcessedUpto {
-    /// Internals processed up to message (LT, Hash).
-    /// All internals upto this point already processed
-    /// during previous blocks collations.
-    ///
-    /// Needs to read next internals after this point to reproduce messages buffer for collation.
-    pub processed_to_msg: (u64, HashBytes),
-    /// Needs to read internals up to this point to reproduce messages buffer for collation.
-    pub read_to_msg: (u64, HashBytes),
+    /// Internals processed upto info by partitions.
+    pub partitions: Dict<u8, PartitionProcessedUpto>,
+}
+
+/// Describes the processed to point and ranges of internals
+/// that we should read to reproduce the same messages buffer
+/// on which the previous block collation stopped.
+#[cfg(feature = "tycho")]
+#[derive(Debug, Default, Clone, Store, Load)]
+#[tlb(tag = "#c5")]
+pub struct PartitionProcessedUpto {
+    /// Internals processed to (LT, HASH) by source shards.
+    /// All internals up to this point
+    /// already processed during previous blocks collations.
+    pub processed_to: Dict<ShardIdentFull, (u64, HashBytes)>,
+
+    /// Internals read ranges map by block seqno.
+    pub ranges: Dict<u32, InternalsRange>,
+}
+
+/// Describes internals read range.
+#[cfg(feature = "tycho")]
+#[derive(Debug, Default, Clone, Store, Load)]
+#[tlb(tag = "#c6")]
+pub struct InternalsRange {
+    /// How many times internal messages were collected from the ranges buffers.
+    /// Every range contains offset that was reached when range was the last.
+    /// So the current last range contains the actual offset.
+    pub processed_offset: u16,
+
+    /// Internals read ranges by source shards.
+    pub shards: Dict<ShardIdentFull, ShardRange>,
+}
+
+/// Describes internals read range from one shard.
+#[cfg(feature = "tycho")]
+#[derive(Debug, Default, Clone, Store, Load)]
+#[tlb(tag = "#c7")]
+pub struct ShardRange {
+    /// From LT.
+    pub from: u64,
+    /// To LT.
+    pub to: u64,
 }
