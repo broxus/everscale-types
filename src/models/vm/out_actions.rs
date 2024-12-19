@@ -54,6 +54,8 @@ bitflags! {
         /// Any errors arising while processing this message during
         /// the action phase should be ignored.
         const IGNORE_ERROR = 2;
+        /// Causes bounce if action fails.
+        const BOUNCE_ON_ERROR = 16;
         /// The current account must be destroyed if its resulting balance is zero.
         const DELETE_IF_EMPTY = 32;
         /// Message will carry all the remaining value of the inbound message
@@ -93,6 +95,8 @@ bitflags! {
         const WITH_ORIGINAL_BALANCE = 4;
         /// `x = −x` before performing any further action.
         const REVERSE = 8;
+        /// Causes bounce if action fails.
+        const BOUNCE_ON_ERROR = 16;
     }
 }
 
@@ -109,28 +113,29 @@ impl<'a> Load<'a> for ReserveCurrencyFlags {
     }
 }
 
-/// Mode flags for `ChangeLibrary` output action.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[repr(u8)]
-pub enum ChangeLibraryMode {
-    /// Remove library.
-    Remove = 0,
-    /// Add private library.
-    AddPrivate = 1,
-    /// Add public library.
-    AddPublic = 2,
-}
-
-impl TryFrom<u8> for ChangeLibraryMode {
-    type Error = Error;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        Ok(match value {
-            0 => Self::Remove,
-            1 => Self::AddPrivate,
-            2 => Self::AddPublic,
-            _ => return Err(Error::InvalidData),
-        })
+bitflags! {
+    /// Mode flags for `ChangeLibrary` output action.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct ChangeLibraryMode: u8 {
+        /// Remove library.
+        ///
+        /// NOTE: Exclusive with [`ADD_PUBLIC`] or [`ADD_PRIVATE`].
+        /// [`ADD_PUBLIC`]: ChangeLibraryMode::ADD_PUBLIC
+        /// [`ADD_PRIVATE`]: ChangeLibraryMode::ADD_PRIVATE
+        const REMOVE = 0;
+        /// Add private library.
+        ///
+        /// NOTE: Exclusive with [`ADD_PUBLIC`].
+        /// [`ADD_PUBLIC`]: ChangeLibraryMode::ADD_PUBLIC
+        const ADD_PRIVATE = 1;
+        /// Add public library.
+        ///
+        /// NOTE: Exclusive with [`ADD_PRIVATE`].
+        ///
+        /// [`ADD_PRIVATE`]: ChangeLibraryMode::ADD_PRIVATE
+        const ADD_PUBLIC = 2;
+        /// Causes bounce if action fails.
+        const BOUNCE_ON_ERROR = 16;
     }
 }
 
@@ -214,11 +219,11 @@ impl Store for OutAction {
                 ok!(builder.store_u32(Self::TAG_CHANGE_LIB));
                 match lib {
                     LibRef::Hash(hash) => {
-                        ok!(builder.store_u8((*mode as u8) << 1));
+                        ok!(builder.store_u8(mode.bits() << 1));
                         builder.store_u256(hash)
                     }
                     LibRef::Cell(cell) => {
-                        ok!(builder.store_u8(((*mode as u8) << 1) | 1));
+                        ok!(builder.store_u8((mode.bits() << 1) | 1));
                         builder.store_reference(cell.clone())
                     }
                 }
@@ -249,7 +254,7 @@ impl<'a> Load<'a> for OutAction {
             },
             Self::TAG_CHANGE_LIB => {
                 let flags = ok!(slice.load_u8());
-                let mode = ok!(ChangeLibraryMode::try_from(flags >> 1));
+                let mode = ChangeLibraryMode::from_bits_retain(flags >> 1);
                 Self::ChangeLibrary {
                     mode,
                     lib: if flags & 1 == 0 {
