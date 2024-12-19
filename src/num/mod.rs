@@ -422,6 +422,50 @@ macro_rules! impl_var_uints {
                     _ => None,
                 }
             }
+
+            /// Tries to add an other value to the current one.
+            pub fn try_add_assign(&mut self, other: Self) -> Result<(), Error> {
+                match self.checked_add(other) {
+                    Some(new_value) => {
+                        *self = new_value;
+                        Ok(())
+                    },
+                    None => Err(Error::IntOverflow),
+                }
+            }
+
+            /// Tries to subtract an other value from the current one.
+            pub fn try_sub_assign(&mut self, other: Self) -> Result<(), Error> {
+                match self.checked_sub(other) {
+                    Some(new_value) => {
+                        *self = new_value;
+                        Ok(())
+                    },
+                    None => Err(Error::IntOverflow),
+                }
+            }
+
+            /// Tries to multiply the current value by the other value.
+            pub fn try_mul_assign(&mut self, other: Self) -> Result<(), Error> {
+                match self.checked_mul(other) {
+                    Some(new_value) => {
+                        *self = new_value;
+                        Ok(())
+                    },
+                    None => Err(Error::IntOverflow),
+                }
+            }
+
+            /// Tries to divice the current value by the other value.
+            pub fn try_div_assign(&mut self, other: Self) -> Result<(), Error> {
+                match self.checked_div(other) {
+                    Some(new_value) => {
+                        *self = new_value;
+                        Ok(())
+                    },
+                    None => Err(Error::IntOverflow),
+                }
+            }
         }
 
         impl ExactSize for $ident {

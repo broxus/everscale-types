@@ -1372,6 +1372,42 @@ impl ValidatorSetPRNG {
     }
 }
 
+/// size_limits_config_v2#02
+///     max_msg_bits:uint32
+///     max_msg_cells:uint32
+///     max_library_cells:uint32
+///     max_vm_data_depth:uint16
+///     max_ext_msg_size:uint32
+///     max_ext_msg_depth:uint16
+///     max_acc_state_cells:uint32
+///     max_acc_state_bits:uint32
+///     max_acc_public_libraries:uint32
+///     defer_out_queue_size_limit:uint32 = SizeLimitsConfig;
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[tlb(tag = "#02")]
+pub struct SizeLimitsConfig {
+    /// Max number of bits in message.
+    pub max_msg_bits: u32,
+    /// Max number of cells in message.
+    pub max_msg_cells: u32,
+    /// Max number of cells in library.
+    pub max_library_cells: u32,
+    /// Max cell tree depth for VM data.
+    pub max_vm_data_depth: u16,
+    /// Max number of bytes of a BOC-encoded external message.
+    pub max_ext_msg_size: u32,
+    /// Max cell tree depth of an external message.
+    pub max_ext_msg_depth: u16,
+    /// Max number of cells per account.
+    pub max_acc_state_cells: u32,
+    /// Max number of bits per account.
+    pub max_acc_state_bits: u32,
+    /// Max number of public libraries per account.
+    pub max_acc_public_libraries: u32,
+    /// Size limit of a deferred out messages queue.
+    pub defer_out_queue_size_limit: u32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
