@@ -59,6 +59,13 @@ impl std::ops::DerefMut for BlockchainConfig {
 pub struct BlockchainConfigParams(Dict<u32, Cell>);
 
 impl BlockchainConfigParams {
+    /// Creates a dictionary from a raw cell.
+    ///
+    /// NOTE: Root is mandatory since the configs dictionary can't be empty.
+    pub fn from_raw(dict_root: Cell) -> Self {
+        Self(Dict::from_raw(Some(dict_root)))
+    }
+
     /// Returns the elector account address (in masterchain).
     ///
     /// Uses [`ConfigParam1`].
