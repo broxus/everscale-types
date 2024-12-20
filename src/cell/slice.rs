@@ -390,6 +390,41 @@ impl CellSliceRange {
         Ok(())
     }
 
+    /// Returns the first `bits` and `refs` of the slice and advances the start
+    /// of data and refs windows.
+    #[must_use = "use `skip_first` if you don't need the result"]
+    pub fn split_prefix(&mut self, bits: u16, refs: u8) -> Result<Self, Error> {
+        if unlikely(
+            self.bits_start + bits > self.bits_end || self.refs_start + refs > self.refs_end,
+        ) {
+            return Err(Error::CellUnderflow);
+        }
+
+        let mut res = *self;
+        self.bits_start += bits;
+        self.refs_start += refs;
+        res.bits_end = self.bits_start;
+        res.refs_end = self.refs_start;
+        Ok(res)
+    }
+
+    /// Returns the last `bits` and `refs` of the slice and shrinks the data and refs windows.
+    #[must_use = "use `skip_last` if you don't need the result"]
+    pub fn split_suffix(&mut self, bits: u16, refs: u8) -> Result<Self, Error> {
+        if unlikely(
+            self.bits_start + bits > self.bits_end || self.refs_start + refs > self.refs_end,
+        ) {
+            return Err(Error::CellUnderflow);
+        }
+
+        let mut res = *self;
+        self.bits_end -= bits;
+        self.refs_end -= refs;
+        res.bits_start = self.bits_end;
+        res.refs_end = self.refs_end;
+        Ok(res)
+    }
+
     /// Returns a slice range starting at the same bits and refs offsets,
     /// and containing no more than `bits` of data and `refs` of children.
     pub fn get_prefix(&self, bits: u16, refs: u8) -> Self {
@@ -1554,6 +1589,27 @@ impl<'a> CellSlice<'a> {
         result
     }
 
+    /// Returns the first `bits` and `refs` of the slice and advances the start
+    /// of data and refs windows.
+    #[must_use = "use `skip_first` if you don't need the result"]
+    pub fn load_prefix(&mut self, bits: u16, refs: u8) -> Result<Self, Error> {
+        let prefix_range = ok!(self.range.split_prefix(bits, refs));
+        Ok(Self {
+            cell: self.cell,
+            range: prefix_range,
+        })
+    }
+
+    /// Returns the last `bits` and `refs` of the slice and shrinks the data and refs windows.
+    #[must_use = "use `skip_last` if you don't need the result"]
+    pub fn load_suffix(&mut self, bits: u16, refs: u8) -> Result<Self, Error> {
+        let suffix_range = ok!(self.range.split_suffix(bits, refs));
+        Ok(Self {
+            cell: self.cell,
+            range: suffix_range,
+        })
+    }
+
     /// Returns a reference to the Nth child cell (relative to this slice's refs window).
     pub fn get_reference(&self, index: u8) -> Result<&'a DynCell, Error> {
         if self.range.refs_start + index < self.range.refs_end {
@@ -2361,6 +2417,63 @@ mod tests {
                     assert_eq!(slice.count_trailing(true)?, (i == 0) as u16);
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn split_slice() -> anyhow::Result<()> {
+        let cell = CellBuilder::build_from((0xdeafbeafu32, 0xabbacafeu32))?;
+
+        // Prefix
+        {
+            let mut cs = cell.as_slice()?;
+            assert!(cs.load_prefix(0, 1).is_err());
+
+            let mut prefix = cs.load_prefix(16, 0)?;
+            assert_eq!(prefix.size_bits(), 16);
+            assert_eq!(cs.size_bits(), 64 - 16);
+            assert_eq!(prefix.load_u16()?, 0xdeaf);
+            assert_eq!(cs.get_u16(0)?, 0xbeaf);
+
+            let mut prefix = cs.load_prefix(32, 0)?;
+            assert_eq!(prefix.size_bits(), 32);
+            assert_eq!(cs.size_bits(), 64 - 16 - 32);
+            assert_eq!(prefix.load_u32()?, 0xbeafabba);
+            assert_eq!(cs.get_u16(0)?, 0xcafe);
+
+            let mut prefix = cs.load_prefix(16, 0)?;
+            assert_eq!(prefix.size_bits(), 16);
+            assert_eq!(cs.size_bits(), 0);
+            assert_eq!(prefix.load_u16()?, 0xcafe);
+
+            assert!(cs.load_prefix(10, 0).is_err());
+        }
+
+        // Suffix
+        {
+            let mut cs = cell.as_slice()?;
+            assert!(cs.load_suffix(0, 1).is_err());
+
+            let mut suffix = cs.load_suffix(16, 0)?;
+            assert_eq!(suffix.size_bits(), 16);
+            assert_eq!(cs.size_bits(), 64 - 16);
+            assert_eq!(suffix.load_u16()?, 0xcafe);
+            assert_eq!(cs.get_u16(32)?, 0xabba);
+
+            let mut suffix = cs.load_suffix(32, 0)?;
+            assert_eq!(suffix.size_bits(), 32);
+            assert_eq!(cs.size_bits(), 64 - 16 - 32);
+            assert_eq!(suffix.load_u32()?, 0xbeafabba);
+            assert_eq!(cs.get_u16(0)?, 0xdeaf);
+
+            let mut suffix = cs.load_suffix(16, 0)?;
+            assert_eq!(suffix.size_bits(), 16);
+            assert_eq!(cs.size_bits(), 0);
+            assert_eq!(suffix.load_u16()?, 0xdeaf);
+
+            assert!(cs.load_suffix(10, 0).is_err());
         }
 
         Ok(())
