@@ -11,9 +11,9 @@ use crate::cell::{
 use crate::error::Error;
 use crate::util::{ArrayVec, Bitstring};
 
-use super::CellFamily;
 #[cfg(feature = "stats")]
 use super::CellTreeStats;
+use super::{CellFamily, OwnedCellSlice};
 
 /// A data structure that can be serialized into cells.
 pub trait Store {
@@ -132,6 +132,13 @@ impl Store for CellSlice<'_> {
     #[inline]
     fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
         builder.store_slice(self)
+    }
+}
+
+impl Store for OwnedCellSlice {
+    #[inline]
+    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+        builder.store_slice(self.as_ref())
     }
 }
 
