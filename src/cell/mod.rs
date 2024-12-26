@@ -9,7 +9,9 @@ use crate::util::Bitstring;
 pub use self::builder::{CellBuilder, CellRefsBuilder, Store};
 pub use self::cell_context::{CellContext, CellParts, LoadMode};
 pub use self::cell_impl::{StaticCell, VirtualCellWrapper};
-pub use self::slice::{CellSlice, CellSliceParts, CellSliceRange, ExactSize, Load};
+pub use self::slice::{
+    CellSlice, CellSliceParts, CellSlicePartsExt, CellSliceRange, ExactSize, Load, OwnedCellSlice,
+};
 pub use self::usage_tree::{UsageTree, UsageTreeMode, UsageTreeWithSubtrees};
 
 #[cfg(not(feature = "sync"))]

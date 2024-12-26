@@ -188,6 +188,28 @@ impl ExactSize for Cell {
 /// Owned cell slice parts alias.
 pub type CellSliceParts = (Cell, CellSliceRange);
 
+/// Methods of [`CellSliceParts`].
+pub trait CellSlicePartsExt {
+    /// Creates a cell slice.
+    fn apply(&self) -> Result<CellSlice<'_>, Error>;
+
+    /// Creates an owned cell slice.
+    fn apply_owned(self) -> Result<OwnedCellSlice, Error>;
+}
+
+impl CellSlicePartsExt for CellSliceParts {
+    #[inline]
+    fn apply(&self) -> Result<CellSlice<'_>, Error> {
+        let (cell, range) = self;
+        range.apply(cell)
+    }
+
+    #[inline]
+    fn apply_owned(self) -> Result<OwnedCellSlice, Error> {
+        OwnedCellSlice::apply(self)
+    }
+}
+
 impl ExactSize for CellSliceParts {
     #[inline]
     fn exact_size(&self) -> Size {
@@ -1752,6 +1774,118 @@ impl ExactSize for CellSlice<'_> {
     #[inline]
     fn exact_size(&self) -> Size {
         self.size()
+    }
+}
+
+/// An owned version of [`CellSlice`].
+#[derive(Default, Debug, Clone)]
+pub struct OwnedCellSlice {
+    slice: CellSlice<'static>,
+    cell: Cell,
+}
+
+impl OwnedCellSlice {
+    /// Constructs a new cell slice from the specified cell.
+    /// Returns an error if the cell is pruned.
+    pub fn new(cell: Cell) -> Result<Self, Error> {
+        // Handle pruned branch access
+        if unlikely(cell.descriptor().is_pruned_branch()) {
+            Err(Error::PrunedBranchAccess)
+        } else {
+            let range = CellSliceRange::full(cell.as_ref());
+
+            // SAFETY: Range was created for this cell.
+            Ok(unsafe { Self::from_parts_unchecked(cell, range) })
+        }
+    }
+
+    /// Constructs a new cell slice from the specified cell.
+    pub fn new_allow_pruned(cell: Cell) -> Self {
+        let range = CellSliceRange::full(cell.as_ref());
+
+        // SAFETY: Range was created for this cell.
+        unsafe { Self::from_parts_unchecked(cell, range) }
+    }
+
+    /// Applies range to the cell and returns an owned slice.
+    pub fn apply((cell, range): CellSliceParts) -> Result<Self, Error> {
+        let slice = ok!(range.apply(&cell));
+
+        // SAFETY: The `inner` will not outlive the `cell` because
+        // lifetime is bound to the reference counted value of `cell`
+        // and we store it along with the slice.
+        let slice = unsafe { std::mem::transmute::<CellSlice<'_>, CellSlice<'static>>(slice) };
+
+        Ok(Self { slice, cell })
+    }
+
+    /// Creates a new slice from parts.
+    ///
+    /// # Safety
+    /// The following must be true:
+    /// - `range` data and refs windows must be in range for the `cell`.
+    #[inline]
+    pub unsafe fn from_parts_unchecked(cell: Cell, range: CellSliceRange) -> Self {
+        let slice = CellSlice {
+            cell: cell.as_ref(),
+            range,
+        };
+
+        // SAFETY: The `inner` will not outlive the `cell` because
+        // lifetime is bound to the reference counted value of `cell`
+        // and we store it along with the slice.
+        let slice = std::mem::transmute::<CellSlice<'_>, CellSlice<'static>>(slice);
+
+        Self { slice, cell }
+    }
+
+    /// Returns a reference to the underlying cell.
+    pub fn cell(&self) -> &Cell {
+        &self.cell
+    }
+
+    /// Returns the underlying cell slice range.
+    pub fn range(&self) -> CellSliceRange {
+        self.slice.range
+    }
+
+    /// Returns inner parts.
+    pub fn parts(&self) -> (&Cell, CellSliceRange) {
+        (&self.cell, self.slice.range)
+    }
+
+    /// Deconstructs this slice into original parts.
+    pub fn into_parts(self) -> CellSliceParts {
+        let range = self.slice.range;
+        let cell = self.cell;
+        (cell, range)
+    }
+
+    /// Returns a reference to the underlying cell slice.
+    #[allow(clippy::should_implement_trait)]
+    pub fn as_ref<'a>(&'a self) -> &'a CellSlice<'a> {
+        // SAFETY: Slice lifetime is bound to a reference-counted value,
+        // owned by `self`.
+        unsafe { std::mem::transmute::<&'a CellSlice<'static>, &'a CellSlice<'a>>(&self.slice) }
+    }
+
+    /// Returns a mutable reference to the underlying cell slice.
+    #[allow(clippy::should_implement_trait)]
+    pub fn as_mut<'a>(&'a mut self) -> &'a mut CellSlice<'a> {
+        // SAFETY: Slice lifetime is bound to a reference-counted value,
+        // owned by `self`.
+        unsafe {
+            std::mem::transmute::<&'a mut CellSlice<'static>, &'a mut CellSlice<'a>>(
+                &mut self.slice,
+            )
+        }
+    }
+}
+
+impl ExactSize for OwnedCellSlice {
+    #[inline]
+    fn exact_size(&self) -> Size {
+        self.slice.size()
     }
 }
 
