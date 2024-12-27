@@ -221,6 +221,7 @@ pub struct ConsensusInfo {
 ///     = GenesisInfo;
 /// ```
 #[derive(Default, Debug, Copy, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GenesisInfo {
     /// Unaligned genesis round that corresponds to the last (maybe partially) processed anchor
     /// from the last master chain block signed by majority.
