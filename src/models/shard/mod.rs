@@ -17,6 +17,8 @@ use crate::models::ShardIdentFull;
 pub use self::shard_accounts::*;
 pub use self::shard_extra::*;
 
+#[cfg(feature = "tycho")]
+use super::MsgsExecutionParams;
 #[cfg(feature = "venom")]
 use super::ShardBlockRefs;
 
@@ -370,7 +372,8 @@ impl<'a> Load<'a> for LibDescr {
     }
 }
 
-/// Processed upto info for externals and internals.
+/// Processed upto info for externals/internals
+/// and messages execution params.
 #[cfg(feature = "tycho")]
 #[derive(Debug, Default, Clone, Store, Load)]
 #[tlb(tag = "#c1")]
@@ -378,6 +381,12 @@ pub struct ProcessedUptoInfo {
     /// We split messages by partitions.
     /// Main partition 0 and others.
     pub partitions: Dict<u8, ProcessedUptoPartition>,
+
+    /// Actual messages execution params used for collated block.
+    /// They help to refill messages buffers on sync/restart and
+    /// process remaning messages in queues with previous params
+    /// before switching to a new params version.
+    pub msgs_exec_params: Option<Lazy<MsgsExecutionParams>>,
 }
 
 /// Processed up to info for externals and internals in one partition.
