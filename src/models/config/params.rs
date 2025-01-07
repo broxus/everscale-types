@@ -527,7 +527,7 @@ impl<'a> Load<'a> for CatchainConfig {
 /// ```
 #[cfg(feature = "tycho")]
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load, Default)]
-#[tlb(tag = ["#a6", "#a7"])]
+#[tlb(tag = "#a6")]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CollationConfig {
     /// Change the order of validators in the masterchain validators list.
@@ -537,7 +537,6 @@ pub struct CollationConfig {
     pub mc_block_min_interval_ms: u32,
 
     /// Time to wait before collating an empty shard block.
-    #[tlb(since_tag = 1)]
     pub empty_sc_block_interval_ms: u32,
 
     /// Maximum length on shard blocks chain after previous master block.
