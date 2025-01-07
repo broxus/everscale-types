@@ -217,7 +217,7 @@ pub struct ConsensusInfo {
 /// ```text
 /// genesis_info#_
 ///     start_round:uint32
-///     millis:uint64
+///     genesis_millis:uint64
 ///     = GenesisInfo;
 /// ```
 #[derive(Default, Debug, Copy, Clone, Eq, PartialEq, Store, Load)]
@@ -231,7 +231,14 @@ pub struct GenesisInfo {
     /// Timestamp in milliseconds to include into mempool genesis point.
     /// Newly produced points are required to have greater value.
     /// Unchanged value affects the overlay id.
-    pub millis: u64,
+    pub genesis_millis: u64,
+}
+
+impl GenesisInfo {
+    /// If genesis overrides the other, then it will be used to start a blank new mempool session
+    pub fn overrides(&self, other: &Self) -> bool {
+        self.start_round >= other.start_round && self.genesis_millis > other.genesis_millis
+    }
 }
 
 impl ConsensusInfo {
@@ -241,7 +248,7 @@ impl ConsensusInfo {
         prev_vset_switch_round: 0,
         genesis_info: GenesisInfo {
             start_round: 0,
-            millis: 0,
+            genesis_millis: 0,
         },
         prev_shuffle_mc_validators: false,
     };
