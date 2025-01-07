@@ -559,6 +559,11 @@ pub struct CollationConfig {
 ///     buffer_limit:uint32
 ///     group_limit:uint16
 ///     group_vert_size:uint16
+///     externals_expire_timeout:uint16
+///     open_ranges_limit:uint16
+///     par_0_int_msgs_count_limit:uint32
+///     par_0_ext_msgs_count_limit:uint32
+///     group_slots_fractions:(HashmapE 8 uint8)
 ///     = MsgsExecutionParams;
 /// ```
 #[cfg(feature = "tycho")]
@@ -568,12 +573,36 @@ pub struct CollationConfig {
 pub struct MsgsExecutionParams {
     /// Maximum limit of messages buffer.
     pub buffer_limit: u32,
+
     /// The horizontal limit of one message group.
-    /// Shows how many unique destination accounts can be.
+    /// Shows how many slots can be.
+    /// One slot may contain messages for some accounts.
+    /// One account can exist only in one slot.
     pub group_limit: u16,
     /// The vertical limit of one message group.
-    /// Shows how many messages can be per one account in the group.
+    /// Shows how many messages can be per one slot in the group.
     pub group_vert_size: u16,
+
+    /// The timeout for externals in seconds.
+    pub externals_expire_timeout: u16,
+
+    /// The maximum number of ranges
+    /// that we should store in ProcessedUptoInfo maps
+    pub open_ranges_limit: u16,
+
+    /// The maximum number of incoming internal messages on account.
+    /// When the internal messages queue on the account exceeds the limit
+    /// then all messages on this account  will be processed in other partition.
+    pub par_0_int_msgs_count_limit: u32,
+
+    /// The maximum number of incoming externals messages on account.
+    /// When the external messages queue on the account exceeds the limit
+    /// then all messages on this account  will be processed in other partition.
+    pub par_0_ext_msgs_count_limit: u32,
+
+    /// The fractions of message group slots
+    /// for messages subgroups
+    pub group_slots_fractions: Dict<u8, u8>,
 }
 
 /// Params to calculate the collation work in wu.
