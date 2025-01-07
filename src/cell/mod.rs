@@ -268,6 +268,14 @@ impl DynCell {
         StorageStat::compute_for_cell(self, limit)
     }
 
+    /// Recursively traverses the cells tree without tracking a uniqueness
+    /// of cells. Usefull for adding small subtrees to merkle proofs.
+    pub fn touch_recursive(&self) {
+        for child in self.references() {
+            child.touch_recursive();
+        }
+    }
+
     /// Returns an object that implements [`Debug`] for printing only
     /// the root cell of the cell tree.
     ///
@@ -921,10 +929,16 @@ impl CellType {
         !matches!(self, Self::Ordinary)
     }
 
-    /// Returns whether the cell is a pruned branch
+    /// Returns whether the cell is a pruned branch.
     #[inline]
     pub const fn is_pruned_branch(self) -> bool {
         matches!(self, Self::PrunedBranch)
+    }
+
+    /// Returns whether this cell is a library cell.
+    #[inline(always)]
+    pub const fn is_library(self) -> bool {
+        matches!(self, Self::LibraryReference)
     }
 
     /// Encodes cell type as byte.
@@ -1068,10 +1082,16 @@ impl CellDescriptor {
         self.d1 & Self::IS_EXOTIC_MASK != 0
     }
 
-    /// Returns whether this cell is a pruned branch cell
+    /// Returns whether this cell is a pruned branch cell.
     #[inline(always)]
     pub const fn is_pruned_branch(self) -> bool {
         self.is_exotic() && self.reference_count() == 0 && !self.level_mask().is_empty()
+    }
+
+    /// Returns whether this cell is a library cell.
+    #[inline(always)]
+    pub const fn is_library(self) -> bool {
+        self.is_exotic() && self.reference_count() == 0 && self.level_mask().is_empty()
     }
 
     /// Returns whether this cell type is Merkle proof or Merkle update.
