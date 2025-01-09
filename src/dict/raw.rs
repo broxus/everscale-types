@@ -883,7 +883,7 @@ impl<'a> Iterator for RawIter<'a> {
                             remaining_bit_len,
                         });
                         // SAFETY: we have just added a new element
-                        break (unsafe { segments.last_mut().unwrap_unchecked() });
+                        break unsafe { segments.last_mut().unwrap_unchecked() };
                     } else {
                         // Rewind prefix
                         to_rewind += prefix.size_bits();
@@ -1432,7 +1432,7 @@ impl<'a> Iterator for RawValues<'a> {
                             remaining_bit_len,
                         });
                         // SAFETY: we have just added a new element
-                        break (unsafe { segments.last_mut().unwrap_unchecked() });
+                        break unsafe { segments.last_mut().unwrap_unchecked() };
                     } else {
                         segments.pop();
                     }

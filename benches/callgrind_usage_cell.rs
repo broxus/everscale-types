@@ -46,9 +46,7 @@ impl<'a> Visitor<'a> {
             stack: Vec::new(),
         }
     }
-}
 
-impl<'a> Visitor<'a> {
     fn add_cell(&mut self, cell: &'a DynCell) -> bool {
         if !self.visited.insert(cell.repr_hash()) {
             return true;

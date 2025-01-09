@@ -160,7 +160,7 @@ where
         self.0.iter().all(|(key, value)| {
             other
                 .get(key)
-                .map_or(false, |v| WithoutName::wrap(value) == WithoutName::wrap(v))
+                .is_some_and(|v| WithoutName::wrap(value) == WithoutName::wrap(v))
         })
     }
 }
