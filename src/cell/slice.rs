@@ -421,7 +421,7 @@ impl CellSliceRange {
         self.bits_end -= bits;
         self.refs_end -= refs;
         res.bits_start = self.bits_end;
-        res.refs_end = self.refs_end;
+        res.refs_start = self.refs_end;
         Ok(res)
     }
 
