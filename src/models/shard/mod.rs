@@ -375,12 +375,20 @@ impl<'a> Load<'a> for LibDescr {
 #[derive(Debug, Default, Clone, Store, Load)]
 #[tlb(tag = "#c1")]
 pub struct ProcessedUptoInfo {
+    /// We split messages by partitions.
+    /// Main partition 0 and others.
+    pub partitions: Dict<u8, ProcessedUptoPartition>,
+}
+
+/// Processed up to info for externals and internals in one partition.
+#[cfg(feature = "tycho")]
+#[derive(Debug, Default, Clone, Store, Load)]
+#[tlb(tag = "#c2")]
+pub struct ProcessedUptoPartition {
     /// Externals read range and processed to info.
     pub externals: ExternalsProcessedUpto,
 
-    /// We split internals storage by partitions.
-    /// There are at least 2: normal and low-priority.
-    /// And inside partitions we split messages by source shard.
+    /// Internals read ranges and processed to info.
     pub internals: InternalsProcessedUpto,
 }
 
@@ -389,7 +397,7 @@ pub struct ProcessedUptoInfo {
 /// on which the previous block collation stopped.
 #[cfg(feature = "tycho")]
 #[derive(Debug, Default, Clone, Store, Load)]
-#[tlb(tag = "#c2")]
+#[tlb(tag = "#c3")]
 pub struct ExternalsProcessedUpto {
     /// Externals processed to (anchor id, msgs offset).
     /// All externals up to this point
@@ -403,7 +411,7 @@ pub struct ExternalsProcessedUpto {
 /// Describes externals read range.
 #[cfg(feature = "tycho")]
 #[derive(Debug, Default, Clone, Store, Load)]
-#[tlb(tag = "#c3")]
+#[tlb(tag = "#c4")]
 pub struct ExternalsRange {
     /// From mempool anchor id and msgs offset.
     pub from: (u32, u64),
@@ -411,21 +419,15 @@ pub struct ExternalsRange {
     pub to: (u32, u64),
 
     /// Chain time of the block when range was read.
-    pub ct: u64,
+    pub chain_time: u64,
 
-    /// How many times external messages were collected from the ranges buffers.
+    /// Skip offset before collecting messages from this range.
+    /// Because we should collect from others.
+    pub skip_offset: u32,
+    /// How many times externals messages were collected from all ranges.
     /// Every range contains offset that was reached when range was the last.
     /// So the current last range contains the actual offset.
     pub processed_offset: u32,
-}
-
-/// Contains internals processed upto info.
-#[cfg(feature = "tycho")]
-#[derive(Debug, Default, Clone, Store, Load)]
-#[tlb(tag = "#c4")]
-pub struct InternalsProcessedUpto {
-    /// Internals processed upto info by partitions.
-    pub partitions: Dict<u8, PartitionProcessedUpto>,
 }
 
 /// Describes the processed to point and ranges of internals
@@ -434,7 +436,7 @@ pub struct InternalsProcessedUpto {
 #[cfg(feature = "tycho")]
 #[derive(Debug, Default, Clone, Store, Load)]
 #[tlb(tag = "#c5")]
-pub struct PartitionProcessedUpto {
+pub struct InternalsProcessedUpto {
     /// Internals processed to (LT, HASH) by source shards.
     /// All internals up to this point
     /// already processed during previous blocks collations.
@@ -449,7 +451,10 @@ pub struct PartitionProcessedUpto {
 #[derive(Debug, Default, Clone, Store, Load)]
 #[tlb(tag = "#c6")]
 pub struct InternalsRange {
-    /// How many times internal messages were collected from the ranges buffers.
+    /// Skip offset before collecting messages from this range.
+    /// Because we should collect from others.
+    pub skip_offset: u32,
+    /// How many times internal messages were collected from all ranges.
     /// Every range contains offset that was reached when range was the last.
     /// So the current last range contains the actual offset.
     pub processed_offset: u32,
