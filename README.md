@@ -1,9 +1,3 @@
-<p align="center">
-  <a href="https://github.com/venom-blockchain/developer-program">
-    <img src="https://raw.githubusercontent.com/venom-blockchain/developer-program/main/vf-dev-program.png" alt="Logo" width="366.8" height="146.4">
-  </a>
-</p>
-
 # Everscale types &emsp; [![crates-io-batch]][crates-io-link] [![docs-badge]][docs-url] [![rust-version-badge]][rust-version-link] [![workflow-badge]][workflow-link]
 
 [crates-io-batch]: https://img.shields.io/crates/v/everscale-types.svg

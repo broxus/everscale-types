@@ -428,9 +428,6 @@ pub struct ShardDescription {
     /// Proofs from other workchains.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub proof_chain: Option<ProofChain>,
-    /// Collator ranges for all possible validator sets.
-    #[cfg(feature = "venom")]
-    pub collators: Option<ShardCollators>,
 }
 
 impl ShardDescription {
@@ -440,8 +437,6 @@ impl ShardDescription {
     const TAG_V2: u8 = 0xb;
     const TAG_V3: u8 = 0xc;
     const TAG_V4: u8 = 0xd;
-    #[cfg(feature = "venom")]
-    const TAG_V5: u8 = 0xe;
 
     /// Converts a `ShardDescription` to a `BlockId` given a shard identifier.
     pub fn as_block_id(&self, shard: ShardIdent) -> BlockId {
@@ -468,14 +463,6 @@ impl Store for ShardDescription {
         } else {
             Self::TAG_V1
         };
-        #[cfg(feature = "venom")]
-        if self.collators.is_some() {
-            // Copyleft rewards are not supported in fast finality mode.
-            if !self.copyleft_rewards.is_empty() {
-                return Err(Error::InvalidData);
-            }
-            tag = Self::TAG_V5;
-        }
 
         let flags = ((self.before_split as u8) << 7)
             | ((self.before_merge as u8) << 6)
@@ -507,26 +494,16 @@ impl Store for ShardDescription {
             ok!(self.fees_collected.store_into(&mut builder, context));
             ok!(self.funds_created.store_into(&mut builder, context));
 
-            #[allow(unused_labels)]
-            'cell: {
-                #[cfg(feature = "venom")]
-                if self.collators.is_some() {
-                    ok!(self.proof_chain.store_into(&mut builder, context));
-                    ok!(self.collators.store_into(&mut builder, context));
-                    break 'cell;
-                }
-
-                if let Some(proof_chain) = &self.proof_chain {
-                    ok!(if self.copyleft_rewards.is_empty() {
-                        builder.store_bit_zero()
-                    } else {
-                        ok!(builder.store_bit_one());
-                        self.copyleft_rewards.store_into(&mut builder, context)
-                    });
-                    ok!(proof_chain.store_into(&mut builder, context));
-                } else if !self.copyleft_rewards.is_empty() {
-                    ok!(self.copyleft_rewards.store_into(&mut builder, context));
-                }
+            if let Some(proof_chain) = &self.proof_chain {
+                ok!(if self.copyleft_rewards.is_empty() {
+                    builder.store_bit_zero()
+                } else {
+                    ok!(builder.store_bit_one());
+                    self.copyleft_rewards.store_into(&mut builder, context)
+                });
+                ok!(proof_chain.store_into(&mut builder, context));
+            } else if !self.copyleft_rewards.is_empty() {
+                ok!(self.copyleft_rewards.store_into(&mut builder, context));
             }
 
             ok!(builder.build_ext(context))
@@ -539,20 +516,15 @@ impl Store for ShardDescription {
 impl<'a> Load<'a> for ShardDescription {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         #[allow(unused_mut)]
-        let (cont_in_cell, with_copyleft, mut with_proof_chain, with_collators) =
+        let (cont_in_cell, with_copyleft, mut with_proof_chain) =
             match slice.load_small_uint(Self::TAG_LEN) {
-                Ok(Self::TAG_V1) => (true, false, false, false),
-                Ok(Self::TAG_V2) => (false, false, false, false),
-                Ok(Self::TAG_V3) => (true, true, false, false),
-                Ok(Self::TAG_V4) => (true, true, true, false),
-                #[cfg(feature = "venom")]
-                Ok(Self::TAG_V5) => (true, false, true, true),
+                Ok(Self::TAG_V1) => (true, false, false),
+                Ok(Self::TAG_V2) => (false, false, false),
+                Ok(Self::TAG_V3) => (true, true, false),
+                Ok(Self::TAG_V4) => (true, true, true),
                 Ok(_) => return Err(Error::InvalidTag),
                 Err(e) => return Err(e),
             };
-
-        #[cfg(not(feature = "venom"))]
-        let _ = with_collators;
 
         let seqno = ok!(slice.load_u32());
         let reg_mc_seqno = ok!(slice.load_u32());
@@ -594,20 +566,11 @@ impl<'a> Load<'a> for ShardDescription {
             Dict::new()
         };
 
-        #[cfg(feature = "venom")]
-        if with_collators && !ok!(slice.load_bit()) {
-            // Emulate optional bit
-            with_proof_chain = false;
-        }
-
         let proof_chain = if with_proof_chain {
             Some(ok!(ProofChain::load_from(slice)))
         } else {
             None
         };
-
-        #[cfg(feature = "venom")]
-        let collators = ok!(Option::<ShardCollators>::load_from(slice));
 
         Ok(Self {
             seqno,
@@ -635,8 +598,6 @@ impl<'a> Load<'a> for ShardDescription {
             funds_created,
             copyleft_rewards,
             proof_chain,
-            #[cfg(feature = "venom")]
-            collators,
         })
     }
 }
@@ -738,240 +699,12 @@ impl Store for ProofChain {
 impl<'a> Load<'a> for ProofChain {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let len = ok!(slice.load_u8());
-        #[cfg(not(feature = "venom"))]
         if !(1..=8).contains(&len) {
             return Err(Error::InvalidData);
         }
         Ok(Self {
             len,
             child: ok!(slice.load_reference_cloned()),
-        })
-    }
-}
-
-/// Collator range description.
-#[cfg(feature = "venom")]
-#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
-pub struct CollatorRange {
-    /// Collator index in validator set.
-    pub collator: u16,
-    /// A seqno of the first block in range.
-    pub start: u32,
-    /// A seqno of the last block in range.
-    pub finish: u32,
-}
-
-/// Collator ranges for all possible validator sets.
-#[cfg(feature = "venom")]
-#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
-#[tlb(tag = "#1")]
-pub struct ShardCollators {
-    /// Range for the previous collator.
-    pub prev: CollatorRange,
-    /// Range for the previous collator in the right shard after merge.
-    pub prev2: Option<CollatorRange>,
-    /// Range for the current collator.
-    pub current: CollatorRange,
-    /// Range for the next collator.
-    pub next: CollatorRange,
-    /// Range for the next collator in the right shard before split.
-    pub next2: Option<CollatorRange>,
-    /// Unix timestamp when collator ranges were updated.
-    pub updated_at: u32,
-}
-
-/// Shard block reference.
-#[cfg(feature = "venom")]
-#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
-pub struct ShardBlockRef {
-    /// Sequence number of the referenced block.
-    pub seqno: u32,
-    /// Representation hash of the root cell of the referenced block.
-    pub root_hash: HashBytes,
-    /// Hash of the BOC encoded root cell of the referenced block.
-    pub file_hash: HashBytes,
-    /// The end of the logical time of the referenced block.
-    pub end_lt: u64,
-}
-
-/// A tree of the most recent shard block references for all currently existing shards
-/// for all workchains except the masterchain.
-#[cfg(feature = "venom")]
-#[derive(Debug, Default, Clone, Eq, PartialEq, Store, Load)]
-pub struct ShardBlockRefs(Dict<i32, Cell>);
-
-#[cfg(feature = "venom")]
-impl ShardBlockRefs {
-    /// Gets an iterator over the entries of the shard block references trees, sorted by
-    /// shard ident. The iterator element is `Result<(ShardIdent, ShardBlockRef)>`.
-    ///
-    /// If the dict or tree is invalid, finishes after the first invalid element.
-    /// returning an error.
-    pub fn iter(&self) -> ShardBlockRefsIter<'_> {
-        ShardBlockRefsIter::new(self.0.root())
-    }
-
-    /// Gets an iterator over the raw entries of the shard block references trees, sorted by
-    /// shard ident. The iterator element is `Result<(ShardIdent, CellSlice)>`.
-    ///
-    /// If the dict or tree is invalid, finishes after the first invalid element,
-    /// returning an error.
-    pub fn raw_iter(&self) -> ShardsTreeRawIter<'_> {
-        ShardsTreeRawIter::new(self.0.root())
-    }
-
-    /// Returns a references tree root for the specified workchain.
-    pub fn get_workchain_shards(
-        &self,
-        workchain: i32,
-    ) -> Result<Option<WorkchainShardBlockRefs>, Error> {
-        match self.0.get(workchain) {
-            Ok(Some(root)) => Ok(Some(WorkchainShardBlockRefs { workchain, root })),
-            Ok(None) => Ok(None),
-            Err(e) => Err(e),
-        }
-    }
-
-    /// Returns `true` if the dictionary contains a workchain for the specified id.
-    pub fn contains_workchain<Q>(&self, workchain: i32) -> Result<bool, Error> {
-        self.0.contains_key(workchain)
-    }
-}
-
-#[cfg(all(feature = "venom", feature = "serde"))]
-impl serde::Serialize for ShardBlockRefs {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::{Error, SerializeMap};
-
-        let mut map = serializer.serialize_map(None)?;
-        for entry in self.iter() {
-            let (shard, descr) = entry.map_err(Error::custom)?;
-            map.serialize_entry(&shard, &descr)?;
-        }
-        map.end()
-    }
-}
-
-/// An iterator over the entries of a [`ShardBlockRefs`].
-///
-/// This struct is created by the [`iter`] method on [`ShardBlockRefs`].
-/// See its documentation for more.
-///
-/// [`iter`]: ShardBlockRefs::iter
-#[derive(Clone)]
-#[cfg(feature = "venom")]
-pub struct ShardBlockRefsIter<'a> {
-    inner: ShardsTreeRawIter<'a>,
-}
-
-#[cfg(feature = "venom")]
-impl<'a> ShardBlockRefsIter<'a> {
-    fn new(dict: &'a Option<Cell>) -> Self {
-        Self {
-            inner: ShardsTreeRawIter::new(dict),
-        }
-    }
-}
-
-#[cfg(feature = "venom")]
-impl Iterator for ShardBlockRefsIter<'_> {
-    type Item = Result<(ShardIdent, ShardBlockRef), Error>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        Some(match self.inner.next()? {
-            Ok((shard_ident, mut value)) => match ShardBlockRef::load_from(&mut value) {
-                Ok(value) => Ok((shard_ident, value)),
-                Err(e) => Err(self.inner.finish(e)),
-            },
-            Err(e) => Err(e),
-        })
-    }
-}
-
-/// A tree of the most recent shard block references for all currently existing shards
-/// for a single workchain.
-#[cfg(feature = "venom")]
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct WorkchainShardBlockRefs {
-    workchain: i32,
-    root: Cell,
-}
-
-#[cfg(feature = "venom")]
-impl WorkchainShardBlockRefs {
-    /// Gets an iterator over the keys of the shard block references tree, sorted by key.
-    /// The iterator element type is `Result<ShardIdent>`.
-    ///
-    /// If the tree is invalid, finishes after the first invalid element,
-    /// returning an error.
-    pub fn keys(&self) -> WorkchainShardsTreeKeysIter<'_> {
-        WorkchainShardsTreeKeysIter::new(self.workchain, self.root.as_ref())
-    }
-
-    /// Gets an iterator over the entries of the shard block references tree, sorted by key.
-    /// The iterator element type is `Result<(ShardIdent, ShardBlockRef)>`.
-    ///
-    /// If the tree is invalid, finishes after the first invalid element,
-    /// returning an error.
-    pub fn iter(&self) -> WorkchainShardBlockRefsIter<'_> {
-        WorkchainShardBlockRefsIter::new(self.workchain, self.root.as_ref())
-    }
-
-    /// Gets an iterator over the raw entries of the shard block references tree, sorted by key.
-    /// The iterator element type is `Result<(ShardIdent, CellSlice)>`.
-    ///
-    /// If the tree is invalid, finishes after the first invalid element,
-    /// returning an error.
-    pub fn raw_iter(&self) -> WorkchainShardsTreeRawIter<'_> {
-        WorkchainShardsTreeRawIter::new(self.workchain, self.root.as_ref())
-    }
-
-    /// Gets an iterator over the raw values of the shard block references tree, sorted by key.
-    /// The iterator element type is `Result<CellSlice>`.
-    ///
-    /// If the tree is invalid, finishes after the first invalid element,
-    /// returning an error.
-    pub fn raw_values(&self) -> WorkchainShardsTreeRawValuesIter<'_> {
-        WorkchainShardsTreeRawValuesIter::new(self.workchain, self.root.as_ref())
-    }
-}
-
-/// An iterator over the entries of a [`WorkchainShardBlockRefs`].
-///
-/// This struct is created by the [`iter`] method on [`WorkchainShardBlockRefs`].
-/// See its documentation for more.
-///
-/// [`iter`]: WorkchainShardBlockRefs::iter
-#[derive(Clone)]
-#[cfg(feature = "venom")]
-pub struct WorkchainShardBlockRefsIter<'a> {
-    inner: WorkchainShardsTreeRawIter<'a>,
-}
-
-#[cfg(feature = "venom")]
-impl<'a> WorkchainShardBlockRefsIter<'a> {
-    /// Creates an iterator over the entries of a [`WorkchainShardBlockRefs`].
-    pub fn new(workchain: i32, root: &'a DynCell) -> Self {
-        Self {
-            inner: WorkchainShardsTreeRawIter::new(workchain, root),
-        }
-    }
-}
-
-#[cfg(feature = "venom")]
-impl Iterator for WorkchainShardBlockRefsIter<'_> {
-    type Item = Result<(ShardIdent, ShardBlockRef), Error>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        Some(match self.inner.next()? {
-            Ok((shard_ident, mut value)) => match ShardBlockRef::load_from(&mut value) {
-                Ok(value) => Ok((shard_ident, value)),
-                Err(e) => Err(self.inner.finish(e)),
-            },
-            Err(e) => Err(e),
         })
     }
 }
@@ -1266,8 +999,6 @@ mod test {
             funds_created: Default::default(),
             copyleft_rewards: Default::default(),
             proof_chain: None,
-            #[cfg(feature = "venom")]
-            collators: None,
         };
         // arbitrary order
         let input = HashMap::from([
