@@ -179,13 +179,6 @@ pub enum OutAction {
         /// Library reference.
         lib: LibRef,
     },
-    /// Copyleft action.
-    CopyLeft {
-        /// License number.
-        license: u8,
-        /// Owner address.
-        address: HashBytes,
-    },
 }
 
 impl OutAction {
@@ -197,8 +190,6 @@ impl OutAction {
     pub const TAG_RESERVE: u32 = 0x36e6b809;
     /// Tag for [`OutAction::ChangeLibrary`].
     pub const TAG_CHANGE_LIB: u32 = 0x26fa1dd4;
-    /// Tag for [`OutAction::CopyLeft`].
-    pub const TAG_COPYLEFT: u32 = 0x24486f7a;
 }
 
 impl Store for OutAction {
@@ -235,11 +226,6 @@ impl Store for OutAction {
                     }
                 }
             }
-            Self::CopyLeft { license, address } => {
-                ok!(builder.store_u32(Self::TAG_COPYLEFT));
-                ok!(builder.store_u8(*license));
-                builder.store_u256(address)
-            }
         }
     }
 }
@@ -271,10 +257,6 @@ impl<'a> Load<'a> for OutAction {
                     },
                 }
             }
-            Self::TAG_COPYLEFT => Self::CopyLeft {
-                license: ok!(slice.load_u8()),
-                address: ok!(slice.load_u256()),
-            },
             _ => return Err(Error::InvalidTag),
         })
     }

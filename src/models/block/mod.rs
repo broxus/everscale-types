@@ -4,10 +4,10 @@
 use std::sync::OnceLock;
 
 use crate::cell::*;
+#[allow(unused)]
 use crate::dict::Dict;
 use crate::error::Error;
 use crate::merkle::MerkleUpdate;
-use crate::num::*;
 use crate::util::*;
 
 use crate::models::currency::CurrencyCollection;
@@ -609,14 +609,10 @@ pub struct ValueFlow {
     pub created: CurrencyCollection,
     /// Minted extra currencies.
     pub minted: CurrencyCollection,
-
-    /// Optional copyleft rewards.
-    pub copyleft_rewards: Dict<HashBytes, Tokens>,
 }
 
 impl ValueFlow {
     const TAG_V1: u32 = 0xb8e48dfb;
-    const TAG_V2: u32 = 0xe0864f6d;
 }
 
 impl Store for ValueFlow {
@@ -625,12 +621,6 @@ impl Store for ValueFlow {
         builder: &mut CellBuilder,
         context: &dyn CellContext,
     ) -> Result<(), Error> {
-        let tag = if self.copyleft_rewards.is_empty() {
-            Self::TAG_V1
-        } else {
-            Self::TAG_V2
-        };
-
         let cell1 = {
             let mut builder = CellBuilder::new();
             ok!(self.from_prev_block.store_into(&mut builder, context));
@@ -640,7 +630,7 @@ impl Store for ValueFlow {
             ok!(builder.build_ext(context))
         };
 
-        ok!(builder.store_u32(tag));
+        ok!(builder.store_u32(Self::TAG_V1));
         ok!(builder.store_reference(cell1));
 
         ok!(self.fees_collected.store_into(builder, context));
@@ -653,32 +643,20 @@ impl Store for ValueFlow {
             ok!(self.minted.store_into(&mut builder, context));
             ok!(builder.build_ext(context))
         };
-        ok!(builder.store_reference(cell2));
-
-        if !self.copyleft_rewards.is_empty() {
-            self.copyleft_rewards.store_into(builder, context)
-        } else {
-            Ok(())
-        }
+        builder.store_reference(cell2)
     }
 }
 
 impl<'a> Load<'a> for ValueFlow {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        let with_copyleft_rewards = match ok!(slice.load_u32()) {
-            Self::TAG_V1 => false,
-            Self::TAG_V2 => true,
+        match ok!(slice.load_u32()) {
+            Self::TAG_V1 => {}
             _ => return Err(Error::InvalidTag),
         };
 
         let fees_collected = ok!(CurrencyCollection::load_from(slice));
         let slice1 = &mut ok!(slice.load_reference_as_slice());
         let slice2 = &mut ok!(slice.load_reference_as_slice());
-        let copyleft_rewards = if with_copyleft_rewards {
-            ok!(Dict::load_from(slice))
-        } else {
-            Dict::new()
-        };
 
         Ok(Self {
             from_prev_block: ok!(CurrencyCollection::load_from(slice1)),
@@ -690,7 +668,6 @@ impl<'a> Load<'a> for ValueFlow {
             recovered: ok!(CurrencyCollection::load_from(slice2)),
             created: ok!(CurrencyCollection::load_from(slice2)),
             minted: ok!(CurrencyCollection::load_from(slice2)),
-            copyleft_rewards,
         })
     }
 }

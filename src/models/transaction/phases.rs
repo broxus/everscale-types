@@ -223,7 +223,7 @@ pub struct ActionPhase {
     pub result_arg: Option<i32>,
     /// The total number of processed actions.
     pub total_actions: u16,
-    /// The number of special actions (`ReserveCurrency`, `SetCode`, `ChangeLibrary`, copyleft).
+    /// The number of special actions (`ReserveCurrency`, `SetCode`, `ChangeLibrary`).
     pub special_actions: u16,
     /// The number of skipped actions.
     pub skipped_actions: u16,
