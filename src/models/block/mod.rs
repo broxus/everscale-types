@@ -207,7 +207,7 @@ pub struct BlockInfo {
     /// Unix timestamp when the block was created.
     pub gen_utime: u32,
     /// Milliseconds part of the timestamp when the block was created.
-    #[cfg(any(feature = "venom", feature = "tycho"))]
+    #[cfg(feature = "tycho")]
     pub gen_utime_ms: u16,
     /// Logical time range start.
     pub start_lt: u64,
@@ -249,7 +249,7 @@ impl Default for BlockInfo {
             vert_seqno: 0,
             shard: ShardIdent::MASTERCHAIN,
             gen_utime: 0,
-            #[cfg(any(feature = "venom", feature = "tycho"))]
+            #[cfg(feature = "tycho")]
             gen_utime_ms: 0,
             start_lt: 0,
             end_lt: 0,
@@ -267,7 +267,7 @@ impl Default for BlockInfo {
 
 impl BlockInfo {
     const TAG_V1: u32 = 0x9bc7a987;
-    #[cfg(any(feature = "venom", feature = "tycho"))]
+    #[cfg(feature = "tycho")]
     const TAG_V2: u32 = 0x9bc7a988;
     const FLAG_WITH_GEN_SOFTWARE: u8 = 0x1;
 
@@ -339,9 +339,9 @@ impl Store for BlockInfo {
             | ((self.key_block as u8) << 1)
             | (self.prev_vert_ref.is_some() as u8);
 
-        #[cfg(not(any(feature = "venom", feature = "tycho")))]
+        #[cfg(not(feature = "tycho"))]
         ok!(builder.store_u32(Self::TAG_V1));
-        #[cfg(any(feature = "venom", feature = "tycho"))]
+        #[cfg(feature = "tycho")]
         ok!(builder.store_u32(Self::TAG_V2));
 
         ok!(builder.store_u32(self.version));
@@ -350,7 +350,7 @@ impl Store for BlockInfo {
         ok!(builder.store_u32(self.vert_seqno));
         ok!(self.shard.store_into(builder, context));
         ok!(builder.store_u32(self.gen_utime));
-        #[cfg(any(feature = "venom", feature = "tycho"))]
+        #[cfg(feature = "tycho")]
         ok!(builder.store_u16(self.gen_utime_ms));
         ok!(builder.store_u64(self.start_lt));
         ok!(builder.store_u64(self.end_lt));
@@ -381,13 +381,13 @@ impl<'a> Load<'a> for BlockInfo {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let with_ms = match slice.load_u32() {
             Ok(Self::TAG_V1) => false,
-            #[cfg(any(feature = "venom", feature = "tycho"))]
+            #[cfg(feature = "tycho")]
             Ok(Self::TAG_V2) => true,
             Ok(_) => return Err(Error::InvalidTag),
             Err(e) => return Err(e),
         };
 
-        #[cfg(not(any(feature = "venom", feature = "tycho")))]
+        #[cfg(not(feature = "tycho"))]
         let _ = with_ms;
 
         let version = ok!(slice.load_u32());
@@ -399,7 +399,7 @@ impl<'a> Load<'a> for BlockInfo {
         let vert_seqno = ok!(slice.load_u32());
         let shard = ok!(ShardIdent::load_from(slice));
         let gen_utime = ok!(slice.load_u32());
-        #[cfg(any(feature = "venom", feature = "tycho"))]
+        #[cfg(feature = "tycho")]
         let gen_utime_ms = if with_ms { ok!(slice.load_u16()) } else { 0 };
         let start_lt = ok!(slice.load_u64());
         let end_lt = ok!(slice.load_u64());
@@ -445,7 +445,7 @@ impl<'a> Load<'a> for BlockInfo {
             vert_seqno,
             shard,
             gen_utime,
-            #[cfg(any(feature = "venom", feature = "tycho"))]
+            #[cfg(feature = "tycho")]
             gen_utime_ms,
             start_lt,
             end_lt,

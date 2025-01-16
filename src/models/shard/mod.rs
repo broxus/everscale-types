@@ -19,8 +19,6 @@ pub use self::shard_extra::*;
 
 #[cfg(feature = "tycho")]
 use super::MsgsExecutionParams;
-#[cfg(feature = "venom")]
-use super::ShardBlockRefs;
 
 mod shard_accounts;
 mod shard_extra;
@@ -131,7 +129,7 @@ pub struct ShardStateUnsplit {
     /// Unix timestamp when the block was created.
     pub gen_utime: u32,
     /// Milliseconds part of the timestamp when the block was created.
-    #[cfg(any(feature = "venom", feature = "tycho"))]
+    #[cfg(feature = "tycho")]
     pub gen_utime_ms: u16,
     /// Logical time when the state was created.
     pub gen_lt: u64,
@@ -164,9 +162,6 @@ pub struct ShardStateUnsplit {
     pub master_ref: Option<BlockRef>,
     /// Shard state additional info.
     pub custom: Option<Lazy<McStateExtra>>,
-    /// References to the latest known blocks from all shards.
-    #[cfg(feature = "venom")]
-    pub shard_block_refs: Option<ShardBlockRefs>,
 }
 
 #[cfg(feature = "sync")]
@@ -178,7 +173,7 @@ impl Default for ShardStateUnsplit {
             seqno: 0,
             vert_seqno: 0,
             gen_utime: 0,
-            #[cfg(any(feature = "venom", feature = "tycho"))]
+            #[cfg(feature = "tycho")]
             gen_utime_ms: 0,
             gen_lt: 0,
             min_ref_mc_seqno: 0,
@@ -195,15 +190,13 @@ impl Default for ShardStateUnsplit {
             libraries: Dict::new(),
             master_ref: None,
             custom: None,
-            #[cfg(feature = "venom")]
-            shard_block_refs: None,
         }
     }
 }
 
 impl ShardStateUnsplit {
     const TAG_V1: u32 = 0x9023afe2;
-    #[cfg(any(feature = "venom", feature = "tycho"))]
+    #[cfg(feature = "tycho")]
     const TAG_V2: u32 = 0x9023aeee;
 
     /// Returns a static reference to the empty processed up to info.
@@ -270,9 +263,9 @@ impl Store for ShardStateUnsplit {
             ok!(builder.build_ext(context))
         };
 
-        #[cfg(not(any(feature = "venom", feature = "tycho")))]
+        #[cfg(not(feature = "tycho"))]
         ok!(builder.store_u32(Self::TAG_V1));
-        #[cfg(any(feature = "venom", feature = "tycho"))]
+        #[cfg(feature = "tycho")]
         ok!(builder.store_u32(Self::TAG_V2));
 
         ok!(builder.store_u32(self.global_id as u32));
@@ -281,7 +274,7 @@ impl Store for ShardStateUnsplit {
         ok!(builder.store_u32(self.vert_seqno));
         ok!(builder.store_u32(self.gen_utime));
 
-        #[cfg(any(feature = "venom", feature = "tycho"))]
+        #[cfg(feature = "tycho")]
         ok!(builder.store_u16(self.gen_utime_ms));
 
         ok!(builder.store_u64(self.gen_lt));
@@ -294,17 +287,7 @@ impl Store for ShardStateUnsplit {
         ok!(builder.store_reference(self.accounts.cell.clone()));
         ok!(builder.store_reference(child_cell));
 
-        #[cfg(not(feature = "venom"))]
         ok!(self.custom.store_into(builder, context));
-
-        #[cfg(feature = "venom")]
-        if self.custom.is_some() && self.shard_block_refs.is_some() {
-            return Err(Error::InvalidData);
-        } else if let Some(refs) = &self.shard_block_refs {
-            ok!(refs.store_into(builder, context));
-        } else {
-            ok!(self.custom.store_into(builder, context));
-        }
 
         Ok(())
     }
@@ -314,13 +297,13 @@ impl<'a> Load<'a> for ShardStateUnsplit {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let fast_finality = match slice.load_u32() {
             Ok(Self::TAG_V1) => false,
-            #[cfg(any(feature = "venom", feature = "tycho"))]
+            #[cfg(feature = "tycho")]
             Ok(Self::TAG_V2) => true,
             Ok(_) => return Err(Error::InvalidTag),
             Err(e) => return Err(e),
         };
 
-        #[cfg(not(any(feature = "venom", feature = "tycho")))]
+        #[cfg(not(feature = "tycho"))]
         let _ = fast_finality;
 
         #[cfg(not(feature = "tycho"))]
@@ -342,7 +325,7 @@ impl<'a> Load<'a> for ShardStateUnsplit {
             seqno: ok!(slice.load_u32()),
             vert_seqno: ok!(slice.load_u32()),
             gen_utime: ok!(slice.load_u32()),
-            #[cfg(any(feature = "venom", feature = "tycho"))]
+            #[cfg(feature = "tycho")]
             gen_utime_ms: if fast_finality {
                 ok!(slice.load_u16())
             } else {
@@ -363,19 +346,7 @@ impl<'a> Load<'a> for ShardStateUnsplit {
             #[cfg(feature = "tycho")]
             processed_upto,
             #[allow(unused_labels)]
-            custom: 'custom: {
-                #[cfg(feature = "venom")]
-                if !shard_ident.is_masterchain() {
-                    break 'custom None;
-                }
-                ok!(Option::<Lazy<McStateExtra>>::load_from(slice))
-            },
-            #[cfg(feature = "venom")]
-            shard_block_refs: if shard_ident.is_masterchain() {
-                None
-            } else {
-                Some(ok!(ShardBlockRefs::load_from(slice)))
-            },
+            custom: ok!(Option::<Lazy<McStateExtra>>::load_from(slice)),
         })
     }
 }

@@ -113,7 +113,6 @@ abi = [
     "dep:typeid",
     "models",
 ]
-venom = []
 tycho = []
 
 [profile.release]
