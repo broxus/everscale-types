@@ -12,9 +12,6 @@ use crate::models::message::{ImportFees, InMsg, OutMsg};
 use crate::models::transaction::{HashUpdate, Transaction};
 use crate::models::{Lazy, ShardHashes, ShardIdent};
 
-#[cfg(feature = "venom")]
-use super::ShardBlockRefs;
-
 /// Block content.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
@@ -31,9 +28,6 @@ pub struct BlockExtra {
     pub created_by: HashBytes,
     /// Additional block content.
     pub custom: Option<Lazy<McBlockExtra>>,
-    /// References to the latest known blocks from all shards.
-    #[cfg(feature = "venom")]
-    pub shard_block_refs: ShardBlockRefs,
 }
 
 #[cfg(feature = "sync")]
@@ -46,15 +40,13 @@ impl Default for BlockExtra {
             rand_seed: HashBytes::default(),
             created_by: HashBytes::default(),
             custom: None,
-            #[cfg(feature = "venom")]
-            shard_block_refs: ShardBlockRefs::default(),
         }
     }
 }
 
 impl BlockExtra {
     const TAG_V1: u32 = 0x4a33f6fd;
-    #[cfg(any(feature = "venom", feature = "tycho"))]
+    #[cfg(feature = "tycho")]
     const TAG_V2: u32 = 0x4a33f6fc;
 
     /// Returns a static reference to an empty inbound message description.
@@ -85,9 +77,9 @@ impl Store for BlockExtra {
         builder: &mut CellBuilder,
         context: &dyn CellContext,
     ) -> Result<(), Error> {
-        #[cfg(not(any(feature = "venom", feature = "tycho")))]
+        #[cfg(not(feature = "tycho"))]
         ok!(builder.store_u32(Self::TAG_V1));
-        #[cfg(any(feature = "venom", feature = "tycho"))]
+        #[cfg(feature = "tycho")]
         ok!(builder.store_u32(Self::TAG_V2));
 
         ok!(builder.store_reference(self.in_msg_description.cell.clone()));
@@ -96,31 +88,18 @@ impl Store for BlockExtra {
         ok!(builder.store_u256(&self.rand_seed));
         ok!(builder.store_u256(&self.created_by));
 
-        #[cfg(not(feature = "venom"))]
-        ok!(self.custom.store_into(builder, context));
-
-        #[cfg(feature = "venom")]
-        ok!(builder.store_reference({
-            let mut builder = CellBuilder::new();
-
-            ok!(self.custom.store_into(&mut builder, context));
-            ok!(self.shard_block_refs.store_into(&mut builder, context));
-
-            ok!(builder.build_ext(context))
-        }));
-
-        Ok(())
+        self.custom.store_into(builder, context)
     }
 }
 
 impl<'a> Load<'a> for BlockExtra {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
         let tag = ok!(slice.load_u32());
-        #[cfg(not(any(feature = "venom", feature = "tycho")))]
+        #[cfg(not(feature = "tycho"))]
         if tag != Self::TAG_V1 {
             return Err(Error::InvalidTag);
         }
-        #[cfg(any(feature = "venom", feature = "tycho"))]
+        #[cfg(feature = "tycho")]
         if tag != Self::TAG_V1 && tag != Self::TAG_V2 {
             return Err(Error::InvalidTag);
         }
@@ -131,16 +110,7 @@ impl<'a> Load<'a> for BlockExtra {
         let rand_seed = ok!(slice.load_u256());
         let created_by = ok!(slice.load_u256());
 
-        #[cfg(not(feature = "venom"))]
         let custom = ok!(Option::<Lazy<_>>::load_from(slice));
-
-        #[cfg(feature = "venom")]
-        let (custom, shard_block_refs) = {
-            let slice = &mut ok!(slice.load_reference_as_slice());
-            let custom = ok!(Option::<Lazy<_>>::load_from(slice));
-            let shard_block_refs = ok!(ShardBlockRefs::load_from(slice));
-            (custom, shard_block_refs)
-        };
 
         Ok(Self {
             in_msg_description,
@@ -149,8 +119,6 @@ impl<'a> Load<'a> for BlockExtra {
             rand_seed,
             created_by,
             custom,
-            #[cfg(feature = "venom")]
-            shard_block_refs,
         })
     }
 }
