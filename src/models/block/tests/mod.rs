@@ -356,6 +356,7 @@ fn proof_for_shardchain_block() {
 #[cfg(feature = "tycho")]
 fn block_with_tycho_updates_store_load() {
     use crate::models::{ExtraCurrencyCollection, GlobalCapabilities};
+    use crate::num::Tokens;
 
     let block = Block {
         global_id: 42,
@@ -425,7 +426,6 @@ fn block_with_tycho_updates_store_load() {
                 tokens: Tokens::new(0),
                 other: ExtraCurrencyCollection::new(),
             },
-            copyleft_rewards: Dict::new(),
         })
         .unwrap(),
         state_update: Lazy::new(&MerkleUpdate {

@@ -1,7 +1,6 @@
 use crate::cell::*;
 use crate::dict::{AugDict, AugDictExtra, Dict};
 use crate::error::Error;
-use crate::num::*;
 
 use crate::models::block::{BlockRef, ShardHashes};
 use crate::models::config::BlockchainConfig;
@@ -12,8 +11,6 @@ use crate::models::currency::CurrencyCollection;
 /// # TLB scheme
 ///
 /// ```text
-/// copyleft_rewards#_ counters:(HashmapE 256 Grams) = CopyleftRewards;
-///
 /// masterchain_state_extra#cc26
 ///     shard_hashes:ShardHashes
 ///     config:ConfigParams
@@ -24,7 +21,6 @@ use crate::models::currency::CurrencyCollection;
 ///         after_key_block:Bool
 ///         last_key_block:(Maybe ExtBlkRef)
 ///         block_create_stats:(flags . 0)?BlockCreateStats
-///         copyleft_rewards:(flags . 1)?CopyleftRewards
 ///         consensus_info:(flags . 2)?ConsensusInfo
 ///     ]
 ///     global_balance:CurrencyCollection
@@ -52,8 +48,6 @@ pub struct McStateExtra {
     pub block_create_stats: Option<Dict<HashBytes, CreatorStats>>,
     /// Total balance of all accounts.
     pub global_balance: CurrencyCollection,
-    /// Optional copyleft rewards.
-    pub copyleft_rewards: Dict<HashBytes, Tokens>,
 }
 
 impl McStateExtra {
@@ -68,8 +62,7 @@ impl Store for McStateExtra {
         context: &dyn CellContext,
     ) -> Result<(), Error> {
         #[allow(unused_mut)]
-        let mut flags = ((!self.copyleft_rewards.is_empty() as u16) << 1)
-            | (self.block_create_stats.is_some() as u16);
+        let mut flags = self.block_create_stats.is_some() as u16;
 
         #[cfg(feature = "tycho")]
         let has_consensus_info = {
@@ -89,10 +82,6 @@ impl Store for McStateExtra {
             if let Some(stats) = &self.block_create_stats {
                 ok!(builder.store_u8(Self::BLOCK_STATS_TAG));
                 ok!(stats.store_into(&mut builder, context));
-            }
-
-            if !self.copyleft_rewards.is_empty() {
-                ok!(self.copyleft_rewards.store_into(&mut builder, context));
             }
 
             #[cfg(feature = "tycho")]
@@ -150,11 +139,6 @@ impl<'a> Load<'a> for McStateExtra {
                 None
             },
             global_balance: ok!(CurrencyCollection::load_from(slice)),
-            copyleft_rewards: if flags & 0b010 != 0 {
-                ok!(Dict::load_from(child_slice))
-            } else {
-                Dict::new()
-            },
             #[cfg(feature = "tycho")]
             consensus_info: if flags & 0b100 != 0 {
                 ok!(ConsensusInfo::load_from(child_slice))

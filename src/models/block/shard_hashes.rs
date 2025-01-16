@@ -3,7 +3,6 @@ use crate::dict::{self, Dict, DictKey};
 use crate::error::Error;
 use crate::models::block::block_id::{BlockId, ShardIdent};
 use crate::models::currency::CurrencyCollection;
-use crate::num::Tokens;
 use crate::util::*;
 
 /// A tree of the most recent descriptions for all currently existing shards
@@ -423,11 +422,6 @@ pub struct ShardDescription {
     pub fees_collected: CurrencyCollection,
     /// Amount of funds created in this shard since the last masterchain block.
     pub funds_created: CurrencyCollection,
-    /// Copyleft rewards if present.
-    pub copyleft_rewards: Dict<HashBytes, Tokens>,
-    /// Proofs from other workchains.
-    #[cfg_attr(feature = "serde", serde(skip))]
-    pub proof_chain: Option<ProofChain>,
 }
 
 impl ShardDescription {
@@ -435,8 +429,6 @@ impl ShardDescription {
 
     const TAG_V1: u8 = 0xa;
     const TAG_V2: u8 = 0xb;
-    const TAG_V3: u8 = 0xc;
-    const TAG_V4: u8 = 0xd;
 
     /// Converts a `ShardDescription` to a `BlockId` given a shard identifier.
     pub fn as_block_id(&self, shard: ShardIdent) -> BlockId {
@@ -455,15 +447,6 @@ impl Store for ShardDescription {
         builder: &mut CellBuilder,
         context: &dyn CellContext,
     ) -> Result<(), Error> {
-        #[allow(unused_mut)]
-        let mut tag = if self.proof_chain.is_some() {
-            Self::TAG_V4
-        } else if !self.copyleft_rewards.is_empty() {
-            Self::TAG_V3
-        } else {
-            Self::TAG_V1
-        };
-
         let flags = ((self.before_split as u8) << 7)
             | ((self.before_merge as u8) << 6)
             | ((self.want_split as u8) << 5)
@@ -472,7 +455,7 @@ impl Store for ShardDescription {
         #[cfg(feature = "tycho")]
         let flags = flags | ((self.top_sc_block_updated as u8) << 2);
 
-        ok!(builder.store_small_uint(tag, Self::TAG_LEN));
+        ok!(builder.store_small_uint(Self::TAG_V1, Self::TAG_LEN));
         ok!(builder.store_u32(self.seqno));
         ok!(builder.store_u32(self.reg_mc_seqno));
         ok!(builder.store_u64(self.start_lt));
@@ -493,19 +476,6 @@ impl Store for ShardDescription {
             let mut builder = CellBuilder::new();
             ok!(self.fees_collected.store_into(&mut builder, context));
             ok!(self.funds_created.store_into(&mut builder, context));
-
-            if let Some(proof_chain) = &self.proof_chain {
-                ok!(if self.copyleft_rewards.is_empty() {
-                    builder.store_bit_zero()
-                } else {
-                    ok!(builder.store_bit_one());
-                    self.copyleft_rewards.store_into(&mut builder, context)
-                });
-                ok!(proof_chain.store_into(&mut builder, context));
-            } else if !self.copyleft_rewards.is_empty() {
-                ok!(self.copyleft_rewards.store_into(&mut builder, context));
-            }
-
             ok!(builder.build_ext(context))
         };
 
@@ -515,16 +485,12 @@ impl Store for ShardDescription {
 
 impl<'a> Load<'a> for ShardDescription {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        #[allow(unused_mut)]
-        let (cont_in_cell, with_copyleft, mut with_proof_chain) =
-            match slice.load_small_uint(Self::TAG_LEN) {
-                Ok(Self::TAG_V1) => (true, false, false),
-                Ok(Self::TAG_V2) => (false, false, false),
-                Ok(Self::TAG_V3) => (true, true, false),
-                Ok(Self::TAG_V4) => (true, true, true),
-                Ok(_) => return Err(Error::InvalidTag),
-                Err(e) => return Err(e),
-            };
+        let cont_in_cell = match slice.load_small_uint(Self::TAG_LEN) {
+            Ok(Self::TAG_V1) => true,
+            Ok(Self::TAG_V2) => false,
+            Ok(_) => return Err(Error::InvalidTag),
+            Err(e) => return Err(e),
+        };
 
         let seqno = ok!(slice.load_u32());
         let reg_mc_seqno = ok!(slice.load_u32());
@@ -560,17 +526,6 @@ impl<'a> Load<'a> for ShardDescription {
 
         let fees_collected = ok!(CurrencyCollection::load_from(slice));
         let funds_created = ok!(CurrencyCollection::load_from(slice));
-        let copyleft_rewards = if with_copyleft && (!with_proof_chain || ok!(slice.load_bit())) {
-            ok!(Dict::load_from(slice))
-        } else {
-            Dict::new()
-        };
-
-        let proof_chain = if with_proof_chain {
-            Some(ok!(ProofChain::load_from(slice)))
-        } else {
-            None
-        };
 
         Ok(Self {
             seqno,
@@ -596,8 +551,6 @@ impl<'a> Load<'a> for ShardDescription {
             split_merge_at,
             fees_collected,
             funds_created,
-            copyleft_rewards,
-            proof_chain,
         })
     }
 }
@@ -676,35 +629,6 @@ impl<'a> Load<'a> for FutureSplitMerge {
                 split_utime: utime,
                 interval,
             }
-        })
-    }
-}
-
-/// Proofs from other workchains.
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct ProofChain {
-    /// Amount of proofs (`1..=8`)
-    len: u8,
-    /// Start cell for proofs.
-    child: Cell,
-}
-
-impl Store for ProofChain {
-    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
-        ok!(builder.store_u8(self.len));
-        builder.store_reference(self.child.clone())
-    }
-}
-
-impl<'a> Load<'a> for ProofChain {
-    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        let len = ok!(slice.load_u8());
-        if !(1..=8).contains(&len) {
-            return Err(Error::InvalidData);
-        }
-        Ok(Self {
-            len,
-            child: ok!(slice.load_reference_cloned()),
         })
     }
 }
@@ -997,8 +921,6 @@ mod test {
             split_merge_at: None,
             fees_collected: Default::default(),
             funds_created: Default::default(),
-            copyleft_rewards: Default::default(),
-            proof_chain: None,
         };
         // arbitrary order
         let input = HashMap::from([

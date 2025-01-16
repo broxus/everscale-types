@@ -4,7 +4,6 @@ use std::sync::OnceLock;
 use crate::cell::*;
 use crate::dict::{AugDict, AugDictExtra, Dict, DictKey};
 use crate::error::Error;
-use crate::num::Uint15;
 
 use crate::models::config::{BlockchainConfig, ValidatorDescription};
 use crate::models::currency::CurrencyCollection;
@@ -220,9 +219,6 @@ pub struct McBlockExtra {
     pub recover_create_msg: Option<Lazy<InMsg>>,
     /// An optional message with minting.
     pub mint_msg: Option<Lazy<InMsg>>,
-    /// Copyleft messages if present.
-    #[cfg_attr(feature = "serde", serde(skip))]
-    pub copyleft_msgs: Dict<Uint15, Cell>,
     /// Blockchain config (if the block is a key block).
     pub config: Option<BlockchainConfig>,
 }
@@ -235,7 +231,6 @@ impl Default for McBlockExtra {
             prev_block_signatures: Dict::new(),
             recover_create_msg: None,
             mint_msg: None,
-            copyleft_msgs: Dict::new(),
             config: None,
         }
     }
@@ -243,7 +238,6 @@ impl Default for McBlockExtra {
 
 impl McBlockExtra {
     const TAG_V1: u16 = 0xcca5;
-    const TAG_V2: u16 = 0xdc75;
 
     /// Tries to load recover/create message.
     pub fn load_recover_create_msg(&self) -> Result<Option<InMsg>, Error> {
@@ -268,26 +262,15 @@ impl Store for McBlockExtra {
         builder: &mut CellBuilder,
         context: &dyn CellContext,
     ) -> Result<(), Error> {
-        let tag = if self.copyleft_msgs.is_empty() {
-            Self::TAG_V1
-        } else {
-            Self::TAG_V2
-        };
-
         let cell = {
             let mut builder = CellBuilder::new();
             ok!(self.prev_block_signatures.store_into(&mut builder, context));
             ok!(self.recover_create_msg.store_into(&mut builder, context));
             ok!(self.mint_msg.store_into(&mut builder, context));
-
-            if !self.copyleft_msgs.is_empty() {
-                ok!(self.copyleft_msgs.store_into(&mut builder, context));
-            }
-
             ok!(builder.build_ext(context))
         };
 
-        ok!(builder.store_u16(tag));
+        ok!(builder.store_u16(Self::TAG_V1));
         ok!(builder.store_bit(self.config.is_some()));
         ok!(self.shards.store_into(builder, context));
         ok!(self.fees.store_into(builder, context));
@@ -303,12 +286,11 @@ impl Store for McBlockExtra {
 
 impl<'a> Load<'a> for McBlockExtra {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        let with_copyleft = match slice.load_u16() {
-            Ok(Self::TAG_V1) => false,
-            Ok(Self::TAG_V2) => true,
+        match slice.load_u16() {
+            Ok(Self::TAG_V1) => {}
             Ok(_) => return Err(Error::InvalidTag),
             Err(e) => return Err(e),
-        };
+        }
 
         let with_config = ok!(slice.load_bit());
         let shards = ok!(ShardHashes::load_from(slice));
@@ -330,11 +312,6 @@ impl<'a> Load<'a> for McBlockExtra {
             prev_block_signatures: ok!(Dict::load_from(slice)),
             recover_create_msg: ok!(Option::<Lazy<_>>::load_from(slice)),
             mint_msg: ok!(Option::<Lazy<_>>::load_from(slice)),
-            copyleft_msgs: if with_copyleft {
-                ok!(Dict::load_from(slice))
-            } else {
-                Dict::new()
-            },
             config,
         })
     }
