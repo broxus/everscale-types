@@ -68,6 +68,56 @@ impl<'a> Load<'a> for ShardState {
 }
 
 /// State of the single shard.
+///
+/// # TLB scheme
+///
+/// Old:
+/// ```text
+/// shard_state#9023afe2
+///     global_id:int32
+///     shard_id:ShardIdent
+///     seq_no:uint32 vert_seq_no:#
+///     gen_utime:uint32 gen_lt:uint64
+///     min_ref_mc_seqno:uint32
+///     out_msg_queue_info:^OutMsgQueueInfo
+///     before_split:(## 1)
+///     accounts:^ShardAccounts
+///     ^[
+///         overload_history:uint64
+///         underload_history:uint64
+///         total_balance:CurrencyCollection
+///         total_validator_fees:CurrencyCollection
+///         libraries:(HashmapE 256 LibDescr)
+///         master_ref:(Maybe BlkMasterInfo)
+///     ]
+///     custom:(Maybe ^McStateExtra)
+///     = ShardStateUnsplit;
+/// ```
+///
+/// New:
+/// ```text
+/// shard_state#9023aeee
+///     global_id:int32
+///     shard_id:ShardIdent
+///     seq_no:uint32 vert_seq_no:#
+///     gen_utime:uint32
+///     gen_utime_ms:uint16
+///     gen_lt:uint64
+///     min_ref_mc_seqno:uint32
+///     processed_upto:^ProcessedUptoInfo
+///     before_split:(## 1)
+///     accounts:^ShardAccounts
+///     ^[
+///         overload_history:uint64
+///         underload_history:uint64
+///         total_balance:CurrencyCollection
+///         total_validator_fees:CurrencyCollection
+///         libraries:(HashmapE 256 LibDescr)
+///         master_ref:(Maybe BlkMasterInfo)
+///     ]
+///     custom:(Maybe ^McStateExtra)
+///     = ShardStateUnsplit;
+/// ```
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ShardStateUnsplit {
     /// Global network id.
@@ -374,9 +424,18 @@ impl<'a> Load<'a> for LibDescr {
 
 /// Processed upto info for externals/internals
 /// and messages execution params.
+///
+/// # TLB scheme
+///
+/// ```text
+/// processedUptoInfo#00
+///     partitions:(HashmapE 8 ProcessedUptoPartition)
+///     msgs_exec_params:(Maybe ^MsgsExecutionParams)
+///     = ProcessedUptoInfo;
+/// ```
 #[cfg(feature = "tycho")]
 #[derive(Debug, Default, Clone, Store, Load)]
-#[tlb(tag = "#c1")]
+#[tlb(tag = "#00")]
 pub struct ProcessedUptoInfo {
     /// We split messages by partitions.
     /// Main partition 0 and others.
@@ -390,9 +449,18 @@ pub struct ProcessedUptoInfo {
 }
 
 /// Processed up to info for externals and internals in one partition.
+///
+/// # TLB scheme
+///
+/// ```text
+/// processedUptoPartition#00
+///     externals:ExternalsProcessedUpto
+///     internals:InternalsProcessedUpto
+///     = ProcessedUptoPartition
+/// ```
 #[cfg(feature = "tycho")]
 #[derive(Debug, Default, Clone, Store, Load)]
-#[tlb(tag = "#c2")]
+#[tlb(tag = "#00")]
 pub struct ProcessedUptoPartition {
     /// Externals read range and processed to info.
     pub externals: ExternalsProcessedUpto,
@@ -404,9 +472,19 @@ pub struct ProcessedUptoPartition {
 /// Describes the processed to point and ranges of externals
 /// that we should read to reproduce the same messages buffer
 /// on which the previous block collation stopped.
+///
+/// # TLB scheme
+///
+/// ```text
+/// externalsProcessedUpto#00
+///     processed_to_anchor_id:uint32
+///     processed_to_msgs_offset:uint64
+///     ranges:(HashmapE 32 ExternalsRange)
+///     = ExternalsProcessedUpto;
+/// ```
 #[cfg(feature = "tycho")]
 #[derive(Debug, Default, Clone, Store, Load)]
-#[tlb(tag = "#c3")]
+#[tlb(tag = "#00")]
 pub struct ExternalsProcessedUpto {
     /// Externals processed to (anchor id, msgs offset).
     /// All externals up to this point
@@ -418,9 +496,23 @@ pub struct ExternalsProcessedUpto {
 }
 
 /// Describes externals read range.
+///
+/// # TLB scheme
+///
+/// ```text
+/// externalsRange#00
+///     from_anchor_id:uint32
+///     from_msgs_offset:uint64
+///     to_anchor_id:uint32
+///     to_msgs_offset:uint64
+///     chain_time:uint64
+///     skip_offset:uint32
+///     processed_offset:uint32
+///     = ExternalsRange;
+/// ```
 #[cfg(feature = "tycho")]
 #[derive(Debug, Default, Clone, Store, Load)]
-#[tlb(tag = "#c4")]
+#[tlb(tag = "#00")]
 pub struct ExternalsRange {
     /// From mempool anchor id and msgs offset.
     pub from: (u32, u64),
@@ -442,9 +534,18 @@ pub struct ExternalsRange {
 /// Describes the processed to point and ranges of internals
 /// that we should read to reproduce the same messages buffer
 /// on which the previous block collation stopped.
+///
+/// # TLB scheme
+///
+/// ```text
+/// internalsProcessedUpto#00
+///     processed_to:(HashmapE 96 ProcessedUpto)
+///     ranges:(HashmapE 32 InternalsRange)
+///     = InternalsProcessedUpto;
+/// ```
 #[cfg(feature = "tycho")]
 #[derive(Debug, Default, Clone, Store, Load)]
-#[tlb(tag = "#c5")]
+#[tlb(tag = "#00")]
 pub struct InternalsProcessedUpto {
     /// Internals processed to (LT, HASH) by source shards.
     /// All internals up to this point
@@ -456,9 +557,19 @@ pub struct InternalsProcessedUpto {
 }
 
 /// Describes internals read range.
+///
+/// # TLB scheme
+///
+/// ```text
+/// internalsRange#00
+///     skip_offset:uint32
+///     processed_offset:uint32
+///     shards:(HashmapE 96 ShardRange)
+///     = InternalsRange;
+/// ```
 #[cfg(feature = "tycho")]
 #[derive(Debug, Default, Clone, Store, Load)]
-#[tlb(tag = "#c6")]
+#[tlb(tag = "#00")]
 pub struct InternalsRange {
     /// Skip offset before collecting messages from this range.
     /// Because we should collect from others.
@@ -473,9 +584,18 @@ pub struct InternalsRange {
 }
 
 /// Describes internals read range from one shard.
+///
+/// # TLB scheme
+///
+/// ```text
+/// shardRange#00
+///     from:uint64
+///     to:uint64
+///     = ShardRange;
+/// ```
 #[cfg(feature = "tycho")]
 #[derive(Debug, Default, Clone, Store, Load)]
-#[tlb(tag = "#c7")]
+#[tlb(tag = "#00")]
 pub struct ShardRange {
     /// From LT.
     pub from: u64,
