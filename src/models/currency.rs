@@ -128,7 +128,7 @@ impl AugDictExtra for CurrencyCollection {
         left: &mut CellSlice,
         right: &mut CellSlice,
         b: &mut CellBuilder,
-        cx: &mut dyn CellContext,
+        cx: &dyn CellContext,
     ) -> Result<(), Error> {
         let left = ok!(Self::load_from(left));
         let right = ok!(Self::load_from(right));

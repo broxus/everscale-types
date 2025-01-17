@@ -35,7 +35,7 @@ impl StorageUsed {
     /// If the limit is reached, the function will return [`Error::Cancelled`].
     pub fn compute(account: &Account, cell_limit: usize) -> Result<Self, Error> {
         let cell = {
-            let cx = &mut Cell::empty_context();
+            let cx = Cell::empty_context();
             let mut storage = CellBuilder::new();
             storage.store_u64(account.last_trans_lt)?;
             account.balance.store_into(&mut storage, cx)?;
@@ -115,7 +115,7 @@ impl AccountStatus {
 
 impl Store for AccountStatus {
     #[inline]
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         builder.store_small_uint(*self as u8, 2)
     }
 }
@@ -221,7 +221,7 @@ impl Store for OptionalAccount {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         match &self.0 {
             None => builder.store_bit_zero(),
@@ -332,7 +332,7 @@ impl Store for AccountState {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         match self {
             Self::Uninit => builder.store_small_uint(0b00, 2),
@@ -441,7 +441,7 @@ impl SpecialFlags {
 }
 
 impl Store for SpecialFlags {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         builder.store_small_uint(((self.tick as u8) << 1) | self.tock as u8, 2)
     }
 }

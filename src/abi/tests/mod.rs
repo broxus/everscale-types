@@ -106,7 +106,7 @@ fn encode_external_input() {
             .store_reference({
                 let mut builder = CellBuilder::new();
                 StdAddr::default()
-                    .store_into(&mut builder, &mut Cell::empty_context())
+                    .store_into(&mut builder, Cell::empty_context())
                     .unwrap();
                 builder.store_u8(1).unwrap();
                 builder.build().unwrap()
@@ -152,7 +152,7 @@ fn decode_external_input() {
             .store_reference({
                 let mut builder = CellBuilder::new();
                 StdAddr::default()
-                    .store_into(&mut builder, &mut Cell::empty_context())
+                    .store_into(&mut builder, Cell::empty_context())
                     .unwrap();
                 builder.store_u8(1).unwrap();
                 builder.build().unwrap()
@@ -183,7 +183,7 @@ fn encode_unsigned_external_input() {
         builder.store_u64(321).unwrap();
         builder.store_reference(Cell::default()).unwrap();
         StdAddr::default()
-            .store_into(&mut builder, &mut Cell::empty_context())
+            .store_into(&mut builder, Cell::empty_context())
             .unwrap();
         builder.store_u8(1).unwrap();
         builder.build().unwrap()
@@ -223,7 +223,7 @@ fn decode_unsigned_external_input() {
         builder.store_u64(321).unwrap();
         builder.store_reference(Cell::default()).unwrap();
         StdAddr::default()
-            .store_into(&mut builder, &mut Cell::empty_context())
+            .store_into(&mut builder, Cell::empty_context())
             .unwrap();
         builder.store_u8(1).unwrap();
         builder.build().unwrap()

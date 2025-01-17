@@ -77,7 +77,7 @@ impl Contract {
             return Ok(data.clone());
         }
 
-        let context = &mut Cell::empty_context();
+        let context = Cell::empty_context();
         let mut key_builder = CellBuilder::new();
 
         for token in tokens {
@@ -128,7 +128,7 @@ impl Contract {
             .map(|(name, value)| (name.as_ref(), value))
             .collect::<HashMap<_, _>>();
 
-        let context = &mut Cell::empty_context();
+        let context = Cell::empty_context();
         let mut key_builder = CellBuilder::new();
 
         // Write explicitly provided values
@@ -443,7 +443,7 @@ impl Function {
             serializer.reserve_value(&token.value);
         }
 
-        let context = &mut Cell::empty_context();
+        let context = Cell::empty_context();
         serializer.write_value(&output_id, context)?;
         serializer.write_tuple(tokens, context)?;
         serializer.finalize(context).map_err(From::from)
@@ -686,7 +686,7 @@ impl<'a> ExternalInput<'_, 'a> {
     fn build_input_ext(&self, address: Option<&StdAddr>) -> Result<UnsignedBody> {
         let (expire_at, payload) = self.build_payload(true)?;
 
-        let context = &mut Cell::empty_context();
+        let context = Cell::empty_context();
         let hash = if self.function.abi_version >= AbiVersion::V2_3 {
             let mut to_sign = CellBuilder::new();
             match address {
@@ -755,7 +755,7 @@ impl<'a> ExternalInput<'_, 'a> {
             serializer.reserve_value(&token.value);
         }
 
-        let context = &mut Cell::empty_context();
+        let context = Cell::empty_context();
 
         if !reserve_signature {
             let value = if abi_version.major == 1 {

@@ -3,11 +3,11 @@ use crate::dict::{make_leaf, read_label, split_edge, Branch};
 use crate::error::Error;
 
 /// Returns a `CellSlice` of the value corresponding to the key.
-pub fn dict_get<'a: 'b, 'b>(
+pub fn dict_get<'a: 'b, 'b, 'c: 'a>(
     dict: Option<&'a Cell>,
     key_bit_len: u16,
     mut key: CellSlice<'b>,
-    context: &mut dyn CellContext,
+    context: &'c dyn CellContext,
 ) -> Result<Option<CellSlice<'a>>, Error> {
     if key.size_bits() != key_bit_len {
         return Err(Error::CellUnderflow);
@@ -60,7 +60,7 @@ pub fn dict_get_owned(
     dict: Option<&Cell>,
     key_bit_len: u16,
     mut key: CellSlice<'_>,
-    context: &mut dyn CellContext,
+    context: &dyn CellContext,
 ) -> Result<Option<CellSliceParts>, Error> {
     if key.size_bits() != key_bit_len {
         return Err(Error::CellUnderflow);
@@ -127,11 +127,11 @@ pub fn dict_get_owned(
 
 /// Gets subdictionary by specified prefiex
 /// Returns optional dictionary as Cell representation if specified prefix is present in dictionary
-pub fn dict_get_subdict<'a: 'b, 'b>(
+pub fn dict_get_subdict<'a: 'b, 'b, 'c: 'a>(
     dict: Option<&'a Cell>,
     key_bit_len: u16,
     prefix: &mut CellSlice<'b>,
-    context: &mut dyn CellContext,
+    context: &'c dyn CellContext,
 ) -> Result<Option<Cell>, Error> {
     match dict {
         None => Ok(None),

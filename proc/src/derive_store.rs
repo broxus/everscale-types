@@ -34,7 +34,7 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Erro
             fn store_into(
                 &self,
                 __builder: &mut ::everscale_types::cell::CellBuilder,
-                __context: &mut dyn ::everscale_types::cell::CellContext,
+                __context: &dyn ::everscale_types::cell::CellContext,
             ) -> ::core::result::Result<(), ::everscale_types::error::Error> {
                 #body
             }

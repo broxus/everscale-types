@@ -32,7 +32,7 @@ impl AugDictExtra for DepthBalanceInfo {
         left: &mut CellSlice,
         right: &mut CellSlice,
         b: &mut CellBuilder,
-        cx: &mut dyn CellContext,
+        cx: &dyn CellContext,
     ) -> Result<(), Error> {
         let left = ok!(Self::load_from(left));
         let right = ok!(Self::load_from(right));
@@ -48,7 +48,7 @@ impl Store for DepthBalanceInfo {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         if !self.is_valid() {
             return Err(Error::IntOverflow);

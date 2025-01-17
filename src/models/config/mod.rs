@@ -540,7 +540,7 @@ impl BlockchainConfigParams {
 }
 
 impl Store for BlockchainConfigParams {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         match self.0.root() {
             Some(root) => builder.store_reference(root.clone()),
             None => Err(Error::InvalidData),
@@ -605,7 +605,7 @@ impl<'a, T: Load<'a>> Load<'a> for ParamIdentity<T> {
 
 impl<T: Store> Store for ParamIdentity<T> {
     #[inline]
-    fn store_into(&self, builder: &mut CellBuilder, cx: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, cx: &dyn CellContext) -> Result<(), Error> {
         self.0.store_into(builder, cx)
     }
 }
@@ -650,7 +650,7 @@ where
 {
     #[inline]
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        match Dict::load_from_root_ext(slice, &mut Cell::empty_context()) {
+        match Dict::load_from_root_ext(slice, Cell::empty_context()) {
             Ok(value) => Ok(Self(value)),
             Err(e) => Err(e),
         }
@@ -658,7 +658,7 @@ where
 }
 
 impl<K, V> Store for NonEmptyDict<Dict<K, V>> {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         match self.0.root() {
             Some(root) => builder.store_slice(ok!(root.as_slice())),
             None => Err(Error::InvalidData),

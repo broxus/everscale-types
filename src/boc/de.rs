@@ -252,7 +252,7 @@ impl<'a> BocHeader<'a> {
     }
 
     /// Assembles cell tree from slices using the specified cell context.
-    pub fn finalize(&self, context: &mut dyn CellContext) -> Result<ProcessedCells, Error> {
+    pub fn finalize(&self, context: &dyn CellContext) -> Result<ProcessedCells, Error> {
         let ref_size = self.ref_size;
         let cell_count = self.cells.len() as u32;
 

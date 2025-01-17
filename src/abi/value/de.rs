@@ -1091,7 +1091,7 @@ mod tests {
         ]);
 
         //
-        let context = &mut Cell::empty_context();
+        let context = Cell::empty_context();
         let mut builder = CellBuilder::new();
         builder.store_u32(0)?;
         builder.store_reference(Cell::empty_cell())?;
@@ -1153,7 +1153,7 @@ mod tests {
             let mut builder = CellBuilder::new();
             builder.store_u32(0)?;
             builder.store_reference(Cell::empty_cell())?;
-            addr_map.store_into(&mut builder, &mut Cell::empty_context())?;
+            addr_map.store_into(&mut builder, Cell::empty_context())?;
             builder.build()?
         };
 
@@ -1221,7 +1221,7 @@ mod tests {
 
         //
         let cell = {
-            let context = &mut Cell::empty_context();
+            let context = Cell::empty_context();
             let mut builder = CellBuilder::new();
             builder.store_u32(0)?;
             builder.store_reference(Cell::empty_cell())?;

@@ -153,14 +153,14 @@ impl SetMode {
 /// - `builder` - a builder to write the result.
 /// - `context` - a cell context.
 pub type AugDictFn =
-    fn(&mut CellSlice, &mut CellSlice, &mut CellBuilder, &mut dyn CellContext) -> Result<(), Error>;
+    fn(&mut CellSlice, &mut CellSlice, &mut CellBuilder, &dyn CellContext) -> Result<(), Error>;
 
 /// Creates a leaf node
 fn make_leaf(
-    key: &CellSlice,
+    key: &CellSlice<'_>,
     key_bit_len: u16,
     value: &dyn Store,
-    context: &mut dyn CellContext,
+    context: &dyn CellContext,
 ) -> Result<Cell, Error> {
     let mut builder = CellBuilder::new();
     ok!(write_label(key, key_bit_len, &mut builder));
@@ -170,11 +170,11 @@ fn make_leaf(
 
 /// Creates a leaf node with extra value
 fn make_leaf_with_extra(
-    key: &CellSlice,
+    key: &CellSlice<'_>,
     key_bit_len: u16,
     extra: &dyn Store,
     value: &dyn Store,
-    context: &mut dyn CellContext,
+    context: &dyn CellContext,
 ) -> Result<Cell, Error> {
     let mut builder = CellBuilder::new();
     ok!(write_label(key, key_bit_len, &mut builder));
@@ -190,7 +190,7 @@ fn split_edge(
     lcp: &CellSlice,
     key: &mut CellSlice,
     value: &dyn Store,
-    context: &mut dyn CellContext,
+    context: &dyn CellContext,
 ) -> Result<Cell, Error> {
     // Advance the key
     let prev_key_bit_len = key.size_bits();
@@ -227,7 +227,7 @@ fn split_aug_edge(
     extra: &dyn Store,
     value: &dyn Store,
     comparator: AugDictFn,
-    context: &mut dyn CellContext,
+    context: &dyn CellContext,
 ) -> Result<Cell, Error> {
     // Advance the key
     let prev_key_bit_len = key.size_bits();
@@ -312,7 +312,7 @@ impl DictBound {
 pub fn dict_load_from_root(
     slice: &mut CellSlice<'_>,
     key_bit_len: u16,
-    context: &mut dyn CellContext,
+    context: &dyn CellContext,
 ) -> Result<Cell, Error> {
     let mut root = *slice;
 
@@ -334,7 +334,7 @@ pub fn dict_load_from_root(
 fn rebuild_dict_from_stack(
     mut segments: Vec<Segment<'_>>,
     mut leaf: Cell,
-    context: &mut dyn CellContext,
+    context: &dyn CellContext,
 ) -> Result<Cell, Error> {
     // Rebuild the tree starting from leaves
     while let Some(last) = segments.pop() {
@@ -364,7 +364,7 @@ fn rebuild_aug_dict_from_stack(
     mut segments: Vec<Segment<'_>>,
     mut leaf: Cell,
     comparator: AugDictFn,
-    context: &mut dyn CellContext,
+    context: &dyn CellContext,
 ) -> Result<Cell, Error> {
     // Rebuild the tree starting from leaves
     while let Some(last) = segments.pop() {
@@ -414,7 +414,7 @@ impl Segment<'_> {
         self,
         key: &CellSlice<'_>,
         prev_key_bit_len: u16,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(Cell, Cell), Error> {
         let index = self.next_branch as u8;
 
@@ -705,7 +705,7 @@ mod tests {
             let result = build_dict_from_sorted_iter(
                 entries.iter().copied(),
                 32,
-                &mut Cell::empty_context(),
+                Cell::empty_context(),
             )
             .unwrap();
 
@@ -736,7 +736,7 @@ mod tests {
             let built_from_dict = build_dict_from_sorted_iter(
                 entries.iter().copied(),
                 32,
-                &mut Cell::empty_context(),
+                Cell::empty_context(),
             )
             .unwrap();
 

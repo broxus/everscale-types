@@ -10,14 +10,14 @@ use crate::cell::CellTreeStats;
 /// Gas accounting and resolcing exotic cells.
 pub trait CellContext {
     /// Builds a new cell from cell parts.
-    fn finalize_cell(&mut self, cell: CellParts<'_>) -> Result<Cell, Error>;
+    fn finalize_cell(&self, cell: CellParts<'_>) -> Result<Cell, Error>;
 
     /// Resolve an owned cell.
-    fn load_cell(&mut self, cell: Cell, mode: LoadMode) -> Result<Cell, Error>;
+    fn load_cell(&self, cell: Cell, mode: LoadMode) -> Result<Cell, Error>;
 
     /// Resolve a cell reference.
-    fn load_dyn_cell<'a>(
-        &mut self,
+    fn load_dyn_cell<'s: 'a, 'a>(
+        &'s self,
         cell: &'a DynCell,
         mode: LoadMode,
     ) -> Result<&'a DynCell, Error>;

@@ -9,7 +9,7 @@ use crate::error::Error;
 pub fn build_dict_from_sorted_iter<K, V, I>(
     entries: I,
     key_bit_len: u16,
-    context: &mut dyn CellContext,
+    context: &dyn CellContext,
 ) -> Result<Option<Cell>, Error>
 where
     I: IntoIterator<Item = (K, V)>,
@@ -44,7 +44,7 @@ where
             }
         }
 
-        fn build(self, key_bit_len: u16, context: &mut dyn CellContext) -> Result<Cell, Error> {
+        fn build(self, key_bit_len: u16, context: &dyn CellContext) -> Result<Cell, Error> {
             match self {
                 Self::Leaf { prefix, value, .. } => {
                     make_leaf(&prefix.as_data_slice(), key_bit_len, &value, context)
@@ -58,7 +58,7 @@ where
             right: Self,
             key_offset: u16,
             key_bit_len: u16,
-            context: &mut dyn CellContext,
+            context: &dyn CellContext,
         ) -> Result<Self, Error> {
             let left_offset = self.prev_lcp_len();
             let split_at = right.prev_lcp_len();
@@ -213,7 +213,7 @@ pub fn build_aug_dict_from_sorted_iter<K, A, V, I>(
     entries: I,
     key_bit_len: u16,
     comparator: AugDictFn,
-    context: &mut dyn CellContext,
+    context: &dyn CellContext,
 ) -> Result<Option<Cell>, Error>
 where
     I: IntoIterator<Item = (K, A, V)>,
@@ -251,7 +251,7 @@ where
             }
         }
 
-        fn build(self, key_bit_len: u16, context: &mut dyn CellContext) -> Result<Cell, Error> {
+        fn build(self, key_bit_len: u16, context: &dyn CellContext) -> Result<Cell, Error> {
             match self {
                 Self::Leaf {
                     prefix,
@@ -275,7 +275,7 @@ where
             key_offset: u16,
             key_bit_len: u16,
             comparator: AugDictFn,
-            context: &mut dyn CellContext,
+            context: &dyn CellContext,
         ) -> Result<Self, Error> {
             let left_offset = self.prev_lcp_len();
             let split_at = right.prev_lcp_len();

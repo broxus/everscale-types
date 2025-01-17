@@ -173,7 +173,7 @@ impl OutMsg {
 }
 
 impl Store for OutMsg {
-    fn store_into(&self, builder: &mut CellBuilder, cx: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, cx: &dyn CellContext) -> Result<(), Error> {
         match self {
             OutMsg::External(msg) => {
                 ok!(builder.store_small_uint(Self::OUT_MSG_EXT, 3));

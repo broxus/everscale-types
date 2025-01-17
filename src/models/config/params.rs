@@ -85,7 +85,7 @@ impl Store for WorkchainDescription {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         if !self.is_valid() {
             return Err(Error::InvalidData);
@@ -179,7 +179,7 @@ impl Store for WorkchainFormat {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         match self {
             Self::Basic(value) => {
@@ -340,7 +340,7 @@ impl GasLimitsPrices {
 }
 
 impl Store for GasLimitsPrices {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         ok!(builder.store_u8(Self::TAG_FLAT_PFX));
         ok!(builder.store_u64(self.flat_gas_limit));
         ok!(builder.store_u64(self.flat_gas_price));
@@ -469,7 +469,7 @@ impl CatchainConfig {
 
 #[cfg(not(feature = "tycho"))]
 impl Store for CatchainConfig {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         let flags = ((self.isolate_mc_validators as u8) << 1) | (self.shuffle_mc_validators as u8);
         ok!(builder.store_u8(Self::TAG_V2));
         ok!(builder.store_u8(flags));
@@ -875,7 +875,7 @@ impl ConsensusConfig {
 
 #[cfg(not(feature = "tycho"))]
 impl Store for ConsensusConfig {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         let flags = self.new_catchain_ids as u8;
 
         ok!(builder.store_u8(Self::TAG_V2));
@@ -1101,7 +1101,7 @@ impl Store for ValidatorSet {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         let Ok(total) = u16::try_from(self.list.len()) else {
             return Err(Error::IntOverflow);
@@ -1140,7 +1140,7 @@ impl<'a> Load<'a> for ValidatorSet {
             return Err(Error::InvalidData);
         }
 
-        let context = &mut Cell::empty_context();
+        let context = Cell::empty_context();
 
         let (mut total_weight, validators) = if with_total_weight {
             let total_weight = ok!(slice.load_u64());
@@ -1275,7 +1275,7 @@ impl ValidatorDescription {
 }
 
 impl Store for ValidatorDescription {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         let with_mc_seqno = self.mc_seqno_since != 0;
 
         let tag = if with_mc_seqno {

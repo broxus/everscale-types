@@ -243,7 +243,7 @@ impl PartialOrd<u128> for VarUint248 {
 }
 
 impl Store for VarUint248 {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         let bytes = (32 - self.leading_zeros() / 8) as u8;
         let mut bits = bytes as u16 * 8;
 

@@ -139,14 +139,14 @@ impl WorkchainShardHashes {
     }
 
     fn try_build_raw(shards: &[(&ShardIdent, &ShardDescription)]) -> Result<Cell, Error> {
-        fn make_leaf(descr: &ShardDescription, cx: &mut dyn CellContext) -> Result<Cell, Error> {
+        fn make_leaf(descr: &ShardDescription, cx: &dyn CellContext) -> Result<Cell, Error> {
             let mut builder = CellBuilder::new();
             ok!(builder.store_bit_zero());
             ok!(descr.store_into(&mut builder, cx));
             builder.build_ext(cx)
         }
 
-        fn make_edge(left: Cell, right: Cell, cx: &mut dyn CellContext) -> Result<Cell, Error> {
+        fn make_edge(left: Cell, right: Cell, cx: &dyn CellContext) -> Result<Cell, Error> {
             let mut builder = CellBuilder::new();
             ok!(builder.store_bit_one());
             ok!(builder.store_reference(left));
@@ -157,7 +157,7 @@ impl WorkchainShardHashes {
         #[inline]
         fn read_shard(
             iter: &mut std::slice::Iter<(&ShardIdent, &ShardDescription)>,
-            cx: &mut dyn CellContext,
+            cx: &dyn CellContext,
         ) -> Result<(ShardIdent, Cell), Error> {
             match iter.next() {
                 Some((&ident, descr)) => {
@@ -169,7 +169,7 @@ impl WorkchainShardHashes {
         }
 
         let shards = &mut shards.iter();
-        let cx = &mut Cell::empty_context();
+        let cx = Cell::empty_context();
 
         let first = ok!(read_shard(shards, cx));
         if first.0.is_full() {
@@ -458,7 +458,7 @@ impl Store for ShardDescription {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         #[allow(unused_mut)]
         let mut tag = if self.proof_chain.is_some() {
@@ -678,7 +678,7 @@ pub enum FutureSplitMerge {
 }
 
 impl Store for FutureSplitMerge {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         match *self {
             Self::Split {
                 split_utime,
@@ -729,7 +729,7 @@ pub struct ProofChain {
 }
 
 impl Store for ProofChain {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         ok!(builder.store_u8(self.len));
         builder.store_reference(self.child.clone())
     }

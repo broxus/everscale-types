@@ -18,11 +18,8 @@ use super::CellTreeStats;
 /// A data structure that can be serialized into cells.
 pub trait Store {
     /// Tries to store itself into the cell builder.
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
-    ) -> Result<(), Error>;
+    fn store_into(&self, builder: &mut CellBuilder, context: &dyn CellContext)
+        -> Result<(), Error>;
 }
 
 impl<T: Store + ?Sized> Store for &T {
@@ -30,7 +27,7 @@ impl<T: Store + ?Sized> Store for &T {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         <T as Store>::store_into(self, builder, context)
     }
@@ -41,7 +38,7 @@ impl<T: Store + ?Sized> Store for &mut T {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         <T as Store>::store_into(self, builder, context)
     }
@@ -52,7 +49,7 @@ impl<T: Store + ?Sized> Store for Box<T> {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         <T as Store>::store_into(self.as_ref(), builder, context)
     }
@@ -63,7 +60,7 @@ impl<T: Store + ?Sized> Store for Arc<T> {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         <T as Store>::store_into(self.as_ref(), builder, context)
     }
@@ -74,7 +71,7 @@ impl<T: Store + ?Sized> Store for Rc<T> {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         <T as Store>::store_into(self.as_ref(), builder, context)
     }
@@ -82,7 +79,7 @@ impl<T: Store + ?Sized> Store for Rc<T> {
 
 impl Store for () {
     #[inline]
-    fn store_into(&self, _: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, _: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         Ok(())
     }
 }
@@ -93,7 +90,7 @@ macro_rules! impl_store_for_tuples {
             fn store_into(
                 &self,
                 builder: &mut CellBuilder,
-                context: &mut dyn CellContext
+                context: &dyn CellContext
             ) -> Result<(), Error> {
                 let ($($field),+) = self;
                 $(ok!($field.store_into(builder, context)));*;
@@ -116,7 +113,7 @@ impl<T: Store> Store for Option<T> {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         match self {
             Some(data) => {
@@ -130,14 +127,14 @@ impl<T: Store> Store for Option<T> {
 
 impl Store for CellSlice<'_> {
     #[inline]
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         builder.store_slice(self)
     }
 }
 
 impl Store for Cell {
     #[inline]
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         builder.store_reference(self.clone())
     }
 }
@@ -148,7 +145,7 @@ macro_rules! impl_primitive_store {
             #[inline]
             fn store_into(&self,
                 $b: &mut CellBuilder,
-                _: &mut dyn CellContext
+                _: &dyn CellContext
             ) -> Result<(), Error> {
                 let $v = self;
                 $expr
@@ -297,19 +294,16 @@ impl CellBuilder {
     where
         T: Store,
     {
-        Self::build_from_ext(data, &mut Cell::empty_context())
+        Self::build_from_ext(data, Cell::empty_context())
     }
 
     /// Builds a new cell from the specified data using the provided cell context.
     #[inline]
-    pub fn build_from_ext<T>(data: T, context: &mut dyn CellContext) -> Result<Cell, Error>
+    pub fn build_from_ext<T>(data: T, context: &dyn CellContext) -> Result<Cell, Error>
     where
         T: Store,
     {
-        fn build_from_ext_impl(
-            data: &dyn Store,
-            context: &mut dyn CellContext,
-        ) -> Result<Cell, Error> {
+        fn build_from_ext_impl(data: &dyn Store, context: &dyn CellContext) -> Result<Cell, Error> {
             let mut builder = CellBuilder::new();
             ok!(data.store_into(&mut builder, context));
             builder.build_ext(context)
@@ -935,7 +929,7 @@ impl CellBuilder {
     }
 
     /// Tries to build a new cell using the specified cell context.
-    pub fn build_ext(mut self, context: &mut dyn CellContext) -> Result<Cell, Error> {
+    pub fn build_ext(mut self, context: &dyn CellContext) -> Result<Cell, Error> {
         debug_assert!(self.bit_len <= MAX_BIT_LEN);
         debug_assert!(self.references.len() <= MAX_REF_COUNT);
 
@@ -1020,7 +1014,7 @@ impl CellBuilder {
     ///
     /// [`empty_context`]: fn@CellFamily::empty_context
     pub fn build(self) -> Result<Cell, Error> {
-        self.build_ext(&mut Cell::empty_context())
+        self.build_ext(Cell::empty_context())
     }
 
     /// Returns an object which will display data as a bitstring

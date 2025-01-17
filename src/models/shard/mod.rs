@@ -42,7 +42,7 @@ impl Store for ShardState {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         match self {
             Self::Unsplit(state) => state.store_into(builder, context),
@@ -257,7 +257,7 @@ impl Store for ShardStateUnsplit {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         let child_cell = {
             let mut builder = CellBuilder::new();
@@ -400,7 +400,7 @@ pub struct LibDescr {
 }
 
 impl Store for LibDescr {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         ok!(builder.store_small_uint(0, 2));
         ok!(builder.store_reference(self.lib.clone()));
         match self.publishers.root() {
@@ -417,7 +417,7 @@ impl<'a> Load<'a> for LibDescr {
         }
         Ok(Self {
             lib: ok!(slice.load_reference_cloned()),
-            publishers: ok!(Dict::load_from_root_ext(slice, &mut Cell::empty_context())),
+            publishers: ok!(Dict::load_from_root_ext(slice, Cell::empty_context())),
         })
     }
 }

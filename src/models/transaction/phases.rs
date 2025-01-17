@@ -50,7 +50,7 @@ impl Store for ComputePhase {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         match self {
             Self::Skipped(phase) => {
@@ -167,7 +167,7 @@ pub enum ComputePhaseSkipReason {
 }
 
 impl Store for ComputePhaseSkipReason {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         let (tag, bits) = match self {
             Self::NoState => (0b00, 2),
             Self::BadState => (0b01, 2),
@@ -239,7 +239,7 @@ impl Store for ActionPhase {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         let flags = ((self.success as u8) << 2) | ((self.valid as u8) << 1) | self.no_funds as u8;
         let counts = ((self.total_actions as u64) << 48)
@@ -311,7 +311,7 @@ impl Store for BouncePhase {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         match self {
             Self::NegativeFunds => builder.store_small_uint(0b00, 2),
@@ -380,7 +380,7 @@ pub enum AccountStatusChange {
 }
 
 impl Store for AccountStatusChange {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         if *self == Self::Unchanged {
             builder.store_bit_zero()
         } else {

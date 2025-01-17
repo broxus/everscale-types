@@ -139,7 +139,7 @@ impl Load<'_> for MerkleProof {
 }
 
 impl Store for MerkleProof {
-    fn store_into(&self, b: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, b: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         if !b.has_capacity(Self::BITS, Self::REFS) {
             return Err(Error::CellOverflow);
         }
@@ -250,7 +250,7 @@ where
     }
 
     /// Builds a Merkle proof using the specified cell context.
-    pub fn build_ext(self, context: &mut dyn CellContext) -> Result<MerkleProof, Error> {
+    pub fn build_ext(self, context: &dyn CellContext) -> Result<MerkleProof, Error> {
         let root = self.root;
         let cell = ok!(self.build_raw_ext(context));
         Ok(MerkleProof {
@@ -261,7 +261,7 @@ where
     }
 
     /// Builds a Merkle proof child cell using the specified cell context.
-    pub fn build_raw_ext(self, context: &mut dyn CellContext) -> Result<Cell, Error> {
+    pub fn build_raw_ext(self, context: &dyn CellContext) -> Result<Cell, Error> {
         BuilderImpl::<ahash::RandomState> {
             root: self.root,
             filter: &self.filter,
@@ -280,7 +280,7 @@ where
 {
     /// Builds a Merkle proof using an empty cell context.
     pub fn build(self) -> Result<MerkleProof, Error> {
-        self.build_ext(&mut Cell::empty_context())
+        self.build_ext(Cell::empty_context())
     }
 }
 
@@ -304,9 +304,9 @@ where
     F: MerkleFilter,
 {
     /// Builds a Merkle proof child cell using the specified cell context.
-    pub fn build_raw_ext(
+    pub fn build_raw_ext<'c: 'a>(
         self,
-        context: &mut dyn CellContext,
+        context: &'c dyn CellContext,
     ) -> Result<(Cell, ahash::HashMap<&'a HashBytes, bool>), Error> {
         let mut pruned_branches = Default::default();
         let mut builder = BuilderImpl {
@@ -322,16 +322,16 @@ where
     }
 }
 
-struct BuilderImpl<'a, 'b, S = ahash::RandomState> {
+struct BuilderImpl<'a, 'b, 'c: 'a, S = ahash::RandomState> {
     root: &'a DynCell,
     filter: &'b dyn MerkleFilter,
     cells: HashMap<&'a HashBytes, Cell, S>,
     pruned_branches: Option<&'b mut HashMap<&'a HashBytes, bool, S>>,
-    context: &'b mut dyn CellContext,
+    context: &'c dyn CellContext,
     allow_different_root: bool,
 }
 
-impl<S> BuilderImpl<'_, '_, S>
+impl<S> BuilderImpl<'_, '_, '_, S>
 where
     S: BuildHasher + Default,
 {
@@ -449,7 +449,7 @@ where
 fn make_pruned_branch_cold(
     cell: &DynCell,
     merkle_depth: u8,
-    context: &mut dyn CellContext,
+    context: &dyn CellContext,
 ) -> Result<Cell, Error> {
     make_pruned_branch(cell, merkle_depth, context)
 }

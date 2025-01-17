@@ -12,7 +12,7 @@ pub fn dict_remove_owned(
     key: &mut CellSlice,
     key_bit_len: u16,
     allow_subtree: bool,
-    context: &mut dyn CellContext,
+    context: &dyn CellContext,
 ) -> Result<Option<CellSliceParts>, Error> {
     if !allow_subtree && key.size_bits() != key_bit_len {
         return Err(Error::CellUnderflow);
@@ -50,7 +50,7 @@ pub fn aug_dict_remove_owned(
     key_bit_len: u16,
     allow_subtree: bool,
     comparator: AugDictFn,
-    context: &mut dyn CellContext,
+    context: &dyn CellContext,
 ) -> Result<Option<CellSliceParts>, Error> {
     if !allow_subtree && key.size_bits() != key_bit_len {
         return Err(Error::CellUnderflow);
@@ -82,10 +82,10 @@ pub fn aug_dict_remove_owned(
     Ok(Some((value, removed)))
 }
 
-fn dict_find_value_to_remove<'a>(
+fn dict_find_value_to_remove<'a, 'c: 'a>(
     root: &'a Cell,
     key: &mut CellSlice,
-    context: &mut dyn CellContext,
+    context: &'c dyn CellContext,
 ) -> Result<Option<(Vec<Segment<'a>>, CellSliceRange, u16)>, Error> {
     // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok
     let mut data = ok!(context.load_dyn_cell(root.as_ref(), LoadMode::Full));
@@ -152,7 +152,7 @@ pub fn dict_remove_bound_owned(
     mut key_bit_len: u16,
     bound: DictBound,
     signed: bool,
-    context: &mut dyn CellContext,
+    context: &dyn CellContext,
 ) -> Result<Option<DictOwnedEntry>, Error> {
     let root = match &dict {
         // TODO: change mode to `LoadMode::UseGas` if copy-on-write for libraries is not ok

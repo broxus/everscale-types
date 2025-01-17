@@ -88,7 +88,7 @@ impl Load<'_> for MerkleUpdate {
 }
 
 impl Store for MerkleUpdate {
-    fn store_into(&self, b: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, b: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         if !b.has_capacity(Self::BITS, Self::REFS) {
             return Err(Error::CellOverflow);
         }
@@ -121,12 +121,12 @@ impl MerkleUpdate {
     /// Tries to apply this Merkle update to the specified cell,
     /// producing a new cell and using an empty cell context.
     pub fn apply(&self, old: &Cell) -> Result<Cell, Error> {
-        self.apply_ext(old, &mut Cell::empty_context())
+        self.apply_ext(old, Cell::empty_context())
     }
 
     /// Tries to apply this Merkle update to the specified cell,
     /// producing a new cell and using an empty cell context.
-    pub fn apply_ext(&self, old: &Cell, context: &mut dyn CellContext) -> Result<Cell, Error> {
+    pub fn apply_ext(&self, old: &Cell, context: &dyn CellContext) -> Result<Cell, Error> {
         if old.as_ref().repr_hash() != &self.old_hash {
             return Err(Error::InvalidData);
         }
@@ -138,7 +138,7 @@ impl MerkleUpdate {
         struct Applier<'a> {
             old_cells: ahash::HashMap<HashBytes, Cell>,
             new_cells: ahash::HashMap<HashBytes, Cell>,
-            context: &'a mut dyn CellContext,
+            context: &'a dyn CellContext,
         }
 
         impl Applier<'_> {
@@ -456,7 +456,7 @@ where
     }
 
     /// Builds a Merkle update using the specified cell context.
-    pub fn build_ext(self, context: &mut dyn CellContext) -> Result<MerkleUpdate, Error> {
+    pub fn build_ext(self, context: &dyn CellContext) -> Result<MerkleUpdate, Error> {
         BuilderImpl {
             old: self.old,
             new: self.new,
@@ -473,18 +473,18 @@ where
 {
     /// Builds a Merkle update using an empty cell context.
     pub fn build(self) -> Result<MerkleUpdate, Error> {
-        self.build_ext(&mut Cell::empty_context())
+        self.build_ext(Cell::empty_context())
     }
 }
 
-struct BuilderImpl<'a, 'b> {
+struct BuilderImpl<'a, 'b, 'c: 'a> {
     old: &'a DynCell,
     new: &'a DynCell,
     filter: &'b dyn MerkleFilter,
-    context: &'b mut dyn CellContext,
+    context: &'c dyn CellContext,
 }
 
-impl<'a: 'b, 'b> BuilderImpl<'a, 'b> {
+impl<'a: 'b, 'b, 'c: 'a> BuilderImpl<'a, 'b, 'c> {
     fn build(self) -> Result<MerkleUpdate, Error> {
         struct Resolver<'a, S> {
             pruned_branches: HashMap<&'a HashBytes, bool, S>,
@@ -648,7 +648,7 @@ mod tests {
 
         let mut builder = CellBuilder::new();
         default
-            .store_into(&mut builder, &mut Cell::empty_context())
+            .store_into(&mut builder, Cell::empty_context())
             .unwrap();
         let cell = builder.build().unwrap();
 
@@ -687,7 +687,7 @@ mod tests {
             // Test serialization
             let mut builder = CellBuilder::new();
             merkle_update
-                .store_into(&mut builder, &mut Cell::empty_context())
+                .store_into(&mut builder, Cell::empty_context())
                 .unwrap();
             builder.build().unwrap();
         }

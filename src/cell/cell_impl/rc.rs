@@ -113,8 +113,9 @@ impl CellFamily for Cell {
     }
 
     #[inline]
-    fn empty_context() -> Self::EmptyCellContext {
-        EmptyCellContext
+    fn empty_context() -> &'static Self::EmptyCellContext {
+        static EMPTY_CELL_CONTEXT: EmptyCellContext = EmptyCellContext;
+        &EMPTY_CELL_CONTEXT
     }
 
     #[inline]
@@ -172,19 +173,23 @@ impl WeakCell {
 pub struct EmptyCellContext;
 
 impl CellContext for EmptyCellContext {
-    fn finalize_cell(&mut self, ctx: CellParts) -> Result<Cell, Error> {
+    fn finalize_cell(&self, ctx: CellParts) -> Result<Cell, Error> {
         let hashes = ok!(ctx.compute_hashes());
         // SAFETY: ctx now represents a well-formed cell
         Ok(unsafe { make_cell(ctx, hashes) })
     }
 
     #[inline]
-    fn load_cell(&mut self, cell: Cell, _: LoadMode) -> Result<Cell, Error> {
+    fn load_cell(&self, cell: Cell, _: LoadMode) -> Result<Cell, Error> {
         Ok(cell)
     }
 
     #[inline]
-    fn load_dyn_cell<'a>(&mut self, cell: &'a DynCell, _: LoadMode) -> Result<&'a DynCell, Error> {
+    fn load_dyn_cell<'s: 'a, 'a>(
+        &'s self,
+        cell: &'a DynCell,
+        _: LoadMode,
+    ) -> Result<&'a DynCell, Error> {
         Ok(cell)
     }
 }

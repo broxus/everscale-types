@@ -47,7 +47,7 @@ impl<K, V> Store for Dict<K, V> {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         self.root.store_into(builder, context)
     }
@@ -161,7 +161,7 @@ impl<K: DictKey, V> Dict<K, V> {
     #[inline]
     pub fn load_from_root_ext(
         slice: &mut CellSlice<'_>,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<Self, Error> {
         match dict_load_from_root(slice, K::BITS, context) {
             Ok(root) => Ok(Self {
@@ -189,12 +189,12 @@ where
             K: Store + DictKey,
         {
             let mut builder = CellBuilder::new();
-            ok!(key.store_into(&mut builder, &mut Cell::empty_context()));
+            ok!(key.store_into(&mut builder, Cell::empty_context()));
             Ok(ok!(dict_get(
                 root.as_ref(),
                 K::BITS,
                 builder.as_data_slice(),
-                &mut Cell::empty_context()
+                Cell::empty_context()
             ))
             .is_some())
         }
@@ -223,12 +223,12 @@ where
         {
             let Some(mut value) = ({
                 let mut builder = CellBuilder::new();
-                ok!(key.store_into(&mut builder, &mut Cell::empty_context()));
+                ok!(key.store_into(&mut builder, Cell::empty_context()));
                 ok!(dict_get(
                     root.as_ref(),
                     K::BITS,
                     builder.as_data_slice(),
-                    &mut Cell::empty_context()
+                    Cell::empty_context()
                 ))
             }) else {
                 return Ok(None);
@@ -257,12 +257,12 @@ where
             K: Store + DictKey,
         {
             let mut builder = CellBuilder::new();
-            ok!(key.store_into(&mut builder, &mut Cell::empty_context()));
+            ok!(key.store_into(&mut builder, Cell::empty_context()));
             dict_get(
                 root.as_ref(),
                 K::BITS,
                 builder.as_data_slice(),
-                &mut Cell::empty_context(),
+                Cell::empty_context(),
             )
         }
 
@@ -285,12 +285,12 @@ where
             K: Store + DictKey,
         {
             let mut builder = CellBuilder::new();
-            ok!(key.store_into(&mut builder, &mut Cell::empty_context()));
+            ok!(key.store_into(&mut builder, Cell::empty_context()));
             dict_get_owned(
                 root.as_ref(),
                 K::BITS,
                 builder.as_data_slice(),
-                &mut Cell::empty_context(),
+                Cell::empty_context(),
             )
         }
 
@@ -306,7 +306,7 @@ where
         Q: Borrow<K>,
         for<'a> V: Load<'a> + 'static,
     {
-        match ok!(self.remove_raw_ext(key, &mut Cell::empty_context())) {
+        match ok!(self.remove_raw_ext(key, Cell::empty_context())) {
             Some((cell, range)) => {
                 let mut slice = ok!(range.apply(&cell));
                 Ok(Some(ok!(V::load_from(&mut slice))))
@@ -323,7 +323,7 @@ where
     where
         Q: Borrow<K>,
     {
-        self.remove_raw_ext(key, &mut Cell::empty_context())
+        self.remove_raw_ext(key, Cell::empty_context())
     }
 
     /// Removes the lowest key from the dict.
@@ -333,7 +333,7 @@ where
     ///
     /// [`remove_bound_ext`]: RawDict::remove_bound_ext
     pub fn remove_min_raw(&mut self, signed: bool) -> Result<Option<(K, CellSliceParts)>, Error> {
-        self.remove_bound_raw_ext(DictBound::Min, signed, &mut Cell::empty_context())
+        self.remove_bound_raw_ext(DictBound::Min, signed, Cell::empty_context())
     }
 
     /// Removes the largest key from the dict.
@@ -343,7 +343,7 @@ where
     ///
     /// [`remove_bound_ext`]: RawDict::remove_bound_ext
     pub fn remove_max_raw(&mut self, signed: bool) -> Result<Option<(K, CellSliceParts)>, Error> {
-        self.remove_bound_raw_ext(DictBound::Max, signed, &mut Cell::empty_context())
+        self.remove_bound_raw_ext(DictBound::Max, signed, Cell::empty_context())
     }
 
     /// Removes the specified dict bound.
@@ -357,29 +357,29 @@ where
         bound: DictBound,
         signed: bool,
     ) -> Result<Option<(K, CellSliceParts)>, Error> {
-        self.remove_bound_raw_ext(bound, signed, &mut Cell::empty_context())
+        self.remove_bound_raw_ext(bound, signed, Cell::empty_context())
     }
 
     /// Split dictionary into 2 dictionaries by the first key bit.
     pub fn split(&self) -> Result<(Self, Self), Error> {
-        self.split_by_prefix_ext(&Default::default(), &mut Cell::empty_context())
+        self.split_by_prefix_ext(&Default::default(), Cell::empty_context())
     }
 
     /// Split dictionary into 2 dictionaries by the first key bit.
-    pub fn split_ext(&self, context: &mut dyn CellContext) -> Result<(Self, Self), Error> {
+    pub fn split_ext(&self, context: &dyn CellContext) -> Result<(Self, Self), Error> {
         self.split_by_prefix_ext(&Default::default(), context)
     }
 
     /// Split dictionary into 2 dictionaries at the prefix.
     pub fn split_by_prefix(&self, key_prefix: &CellSlice<'_>) -> Result<(Self, Self), Error> {
-        self.split_by_prefix_ext(key_prefix, &mut Cell::empty_context())
+        self.split_by_prefix_ext(key_prefix, Cell::empty_context())
     }
 
     /// Split dictionary into 2 dictionaries at the prefix.
     pub fn split_by_prefix_ext(
         &self,
         key_prefix: &CellSlice<'_>,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(Self, Self), Error> {
         let (left, right) = ok!(dict_split_by_prefix(
             self.root.as_ref(),
@@ -406,7 +406,7 @@ where
         let root = ok!(build_dict_from_sorted_iter(
             sorted.iter().map(|(k, v)| (k.borrow(), v.borrow())),
             K::BITS,
-            &mut Cell::empty_context()
+            Cell::empty_context()
         ));
         Ok(Self {
             root,
@@ -425,7 +425,7 @@ where
         let root = ok!(build_dict_from_sorted_iter(
             sorted.iter().map(|(k, v)| (k.borrow(), v.borrow())),
             K::BITS,
-            &mut Cell::empty_context()
+            Cell::empty_context()
         ));
         Ok(Self {
             root,
@@ -444,7 +444,7 @@ where
         Q: Borrow<K>,
         T: Borrow<V>,
     {
-        self.set_ext(key, value, &mut Cell::empty_context())
+        self.set_ext(key, value, Cell::empty_context())
     }
 
     /// Sets the value associated with the key in the dictionary
@@ -458,7 +458,7 @@ where
         Q: Borrow<K>,
         T: Borrow<V>,
     {
-        self.replace_ext(key, value, &mut Cell::empty_context())
+        self.replace_ext(key, value, Cell::empty_context())
     }
 
     /// Sets the value associated with key in dictionary,
@@ -472,7 +472,7 @@ where
         Q: Borrow<K>,
         T: Borrow<V>,
     {
-        self.add_ext(key, value, &mut Cell::empty_context())
+        self.add_ext(key, value, Cell::empty_context())
     }
 }
 
@@ -600,7 +600,7 @@ where
             K: DictKey + Store,
             for<'a> V: Load<'a>,
         {
-            let context = &mut Cell::empty_context();
+            let context = Cell::empty_context();
             let Some((key, (cell, range))) = ({
                 let mut builder = CellBuilder::new();
                 ok!(key.store_into(&mut builder, context));
@@ -678,7 +678,7 @@ where
             K::BITS,
             bound,
             signed,
-            &mut Cell::empty_context()
+            Cell::empty_context()
         )) else {
             return Ok(None);
         };
@@ -696,7 +696,7 @@ where
         &mut self,
         bound: DictBound,
         signed: bool,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<Option<(K, CellSliceParts)>, Error> {
         let removed = ok!(dict_remove_bound_owned(
             &mut self.root,
@@ -727,7 +727,7 @@ where
     pub fn remove_raw_ext<Q>(
         &mut self,
         key: Q,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<Option<CellSliceParts>, Error>
     where
         Q: Borrow<K>,
@@ -735,13 +735,13 @@ where
         fn remove_raw_ext_impl<K>(
             root: &mut Option<Cell>,
             key: &K,
-            context: &mut dyn CellContext,
+            context: &dyn CellContext,
         ) -> Result<Option<CellSliceParts>, Error>
         where
             K: Store + DictKey,
         {
             let mut builder = CellBuilder::new();
-            ok!(key.store_into(&mut builder, &mut Cell::empty_context()));
+            ok!(key.store_into(&mut builder, Cell::empty_context()));
             dict_remove_owned(root, &mut builder.as_data_slice(), K::BITS, false, context)
         }
 
@@ -821,7 +821,7 @@ where
         &mut self,
         key: Q,
         value: T,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<bool, Error>
     where
         Q: Borrow<K>,
@@ -836,7 +836,7 @@ where
         &mut self,
         key: Q,
         value: T,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<bool, Error>
     where
         Q: Borrow<K>,
@@ -851,7 +851,7 @@ where
         &mut self,
         key: Q,
         value: T,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<bool, Error>
     where
         Q: Borrow<K>,
@@ -865,14 +865,14 @@ where
         key: &K,
         value: &V,
         mode: SetMode,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<bool, Error>
     where
         K: Store + DictKey,
         V: Store,
     {
         let mut key_builder = CellBuilder::new();
-        ok!(key.store_into(&mut key_builder, &mut Cell::empty_context()));
+        ok!(key.store_into(&mut key_builder, Cell::empty_context()));
         dict_insert(
             &mut self.root,
             &mut key_builder.as_data_slice(),
@@ -926,7 +926,7 @@ where
             let map = ok!(ahash::HashMap::<K, V>::deserialize(deserializer));
 
             // TODO: Build from sorted collection
-            let cx = &mut Cell::empty_context();
+            let cx = Cell::empty_context();
             let mut dict = Dict::new();
             for (key, value) in map {
                 if let Err(e) = dict.set_ext(key, value, cx) {

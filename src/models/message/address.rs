@@ -136,7 +136,7 @@ impl Store for IntAddr {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         match self {
             Self::Std(addr) => addr.store_into(builder, context),
@@ -417,7 +417,7 @@ impl Store for StdAddr {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         if !builder.has_capacity(self.bit_len(), 0) {
             return Err(Error::CellOverflow);
@@ -725,7 +725,7 @@ impl Store for VarAddr {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         if !builder.has_capacity(self.bit_len(), 0) {
             return Err(Error::CellOverflow);
@@ -913,7 +913,7 @@ impl Store for Anycast {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         if !builder.has_capacity(self.bit_len(), 0) {
             return Err(Error::CellOverflow);

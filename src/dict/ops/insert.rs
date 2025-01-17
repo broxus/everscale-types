@@ -13,7 +13,7 @@ pub fn dict_insert(
     key_bit_len: u16,
     value: &dyn Store,
     mode: SetMode,
-    context: &mut dyn CellContext,
+    context: &dyn CellContext,
 ) -> Result<bool, Error> {
     if key.size_bits() != key_bit_len {
         return Err(Error::CellUnderflow);
@@ -119,7 +119,7 @@ pub fn aug_dict_insert(
     value: &dyn Store,
     mode: SetMode,
     comparator: AugDictFn,
-    context: &mut dyn CellContext,
+    context: &dyn CellContext,
 ) -> Result<bool, Error> {
     if key.size_bits() != key_bit_len {
         return Err(Error::CellUnderflow);
@@ -240,11 +240,11 @@ pub fn dict_insert_owned(
     key_bit_len: u16,
     value: &dyn Store,
     mode: SetMode,
-    context: &mut dyn CellContext,
+    context: &dyn CellContext,
 ) -> Result<(bool, Option<CellSliceParts>), Error> {
     fn last(
         stack: &[Segment],
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
         mode: LoadMode,
     ) -> Result<Option<Cell>, Error> {
         match stack.last() {

@@ -7,7 +7,7 @@ pub fn dict_split_by_prefix(
     dict: Option<&'_ Cell>,
     key_bit_len: u16,
     key_prefix: &CellSlice,
-    context: &mut dyn CellContext,
+    context: &dyn CellContext,
 ) -> Result<(Option<Cell>, Option<Cell>), Error> {
     if key_bit_len == 0 {
         return Ok((None, None));
@@ -73,7 +73,7 @@ pub fn dict_merge(
     left: &mut Option<Cell>,
     right: &Option<Cell>,
     key_bit_length: u16,
-    context: &mut dyn CellContext,
+    context: &dyn CellContext,
 ) -> Result<(), Error> {
     match (&left, right) {
         (None, None) | (Some(_), None) => return Ok(()),

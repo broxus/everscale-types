@@ -12,7 +12,7 @@ pub fn dict_find_owned(
     towards: DictBound,
     inclusive: bool,
     signed: bool,
-    context: &mut dyn CellContext,
+    context: &dyn CellContext,
 ) -> Result<Option<DictOwnedEntry>, Error> {
     if key.size_bits() != key_bit_len {
         return Err(Error::CellUnderflow);
@@ -213,12 +213,12 @@ pub fn dict_find_owned(
 }
 
 /// Finds the specified dict bound and returns a key and a value corresponding to the key.
-pub fn dict_find_bound<'a: 'b, 'b>(
+pub fn dict_find_bound<'a: 'b, 'b, 'c: 'a>(
     dict: Option<&'a Cell>,
     mut key_bit_len: u16,
     bound: DictBound,
     signed: bool,
-    context: &mut dyn CellContext,
+    context: &'c dyn CellContext,
 ) -> Result<Option<(CellBuilder, CellSlice<'b>)>, Error> {
     let mut data = match dict {
         Some(data) => ok!(context
@@ -271,7 +271,7 @@ pub fn dict_find_bound_owned(
     mut key_bit_len: u16,
     bound: DictBound,
     signed: bool,
-    context: &mut dyn CellContext,
+    context: &dyn CellContext,
 ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
     let root = match dict {
         Some(data) => ok!(context.load_cell(data.clone(), LoadMode::Full)),

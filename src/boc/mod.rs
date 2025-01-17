@@ -182,7 +182,7 @@ impl Boc {
     pub fn decode_hex<T: AsRef<[u8]>>(data: T) -> Result<Cell, de::Error> {
         fn decode_hex_impl(data: &[u8]) -> Result<Cell, de::Error> {
             match hex::decode(data) {
-                Ok(data) => Boc::decode_ext(data.as_slice(), &mut Cell::empty_context()),
+                Ok(data) => Boc::decode_ext(data.as_slice(), Cell::empty_context()),
                 Err(_) => Err(de::Error::UnknownBocTag),
             }
         }
@@ -196,7 +196,7 @@ impl Boc {
     pub fn decode_base64<T: AsRef<[u8]>>(data: T) -> Result<Cell, de::Error> {
         fn decode_base64_impl(data: &[u8]) -> Result<Cell, de::Error> {
             match crate::util::decode_base64(data) {
-                Ok(data) => Boc::decode_ext(data.as_slice(), &mut Cell::empty_context()),
+                Ok(data) => Boc::decode_ext(data.as_slice(), Cell::empty_context()),
                 Err(_) => Err(de::Error::UnknownBocTag),
             }
         }
@@ -210,7 +210,7 @@ impl Boc {
         T: AsRef<[u8]>,
     {
         fn decode_impl(data: &[u8]) -> Result<Cell, de::Error> {
-            Boc::decode_ext(data, &mut Cell::empty_context())
+            Boc::decode_ext(data, Cell::empty_context())
         }
         decode_impl(data.as_ref())
     }
@@ -222,13 +222,13 @@ impl Boc {
         T: AsRef<[u8]>,
     {
         fn decode_pair_impl(data: &[u8]) -> Result<(Cell, Cell), de::Error> {
-            Boc::decode_pair_ext(data, &mut Cell::empty_context())
+            Boc::decode_pair_ext(data, Cell::empty_context())
         }
         decode_pair_impl(data.as_ref())
     }
 
     /// Decodes a cell tree using the specified cell context.
-    pub fn decode_ext(data: &[u8], context: &mut dyn CellContext) -> Result<Cell, de::Error> {
+    pub fn decode_ext(data: &[u8], context: &dyn CellContext) -> Result<Cell, de::Error> {
         use self::de::*;
 
         let header = ok!(de::BocHeader::decode(
@@ -252,7 +252,7 @@ impl Boc {
     /// Decodes a pair of cell trees using the specified cell context.
     pub fn decode_pair_ext(
         data: &[u8],
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(Cell, Cell), de::Error> {
         use self::de::*;
 
@@ -310,7 +310,7 @@ impl BocRepr {
     where
         T: Store,
     {
-        let boc = ok!(Self::encode_ext(data, &mut Cell::empty_context()));
+        let boc = ok!(Self::encode_ext(data, Cell::empty_context()));
         Ok(hex::encode(boc))
     }
 
@@ -321,7 +321,7 @@ impl BocRepr {
     where
         T: Store,
     {
-        let boc = ok!(Self::encode_ext(data, &mut Cell::empty_context()));
+        let boc = ok!(Self::encode_ext(data, Cell::empty_context()));
         Ok(crate::util::encode_base64(boc))
     }
 
@@ -334,7 +334,7 @@ impl BocRepr {
     where
         T: Store,
     {
-        let boc = ok!(Self::encode_rayon_ext(data, &mut Cell::empty_context()));
+        let boc = ok!(Self::encode_rayon_ext(data, Cell::empty_context()));
         Ok(hex::encode(boc))
     }
 
@@ -347,7 +347,7 @@ impl BocRepr {
     where
         T: Store,
     {
-        let boc = ok!(Self::encode_rayon_ext(data, &mut Cell::empty_context()));
+        let boc = ok!(Self::encode_rayon_ext(data, Cell::empty_context()));
         Ok(crate::util::encode_base64(boc))
     }
 
@@ -356,7 +356,7 @@ impl BocRepr {
     where
         T: Store,
     {
-        Self::encode_ext(data, &mut Cell::empty_context())
+        Self::encode_ext(data, Cell::empty_context())
     }
 
     /// Encodes the specified cell tree as BOC using an empty cell context.
@@ -367,7 +367,7 @@ impl BocRepr {
     where
         T: Store,
     {
-        Self::encode_rayon_ext(data, &mut Cell::empty_context())
+        Self::encode_rayon_ext(data, Cell::empty_context())
     }
 
     /// Decodes a `hex` encoded BOC into an object
@@ -383,7 +383,7 @@ impl BocRepr {
             for<'a> T: Load<'a>,
         {
             match hex::decode(data) {
-                Ok(data) => BocRepr::decode_ext(data.as_slice(), &mut Cell::empty_context()),
+                Ok(data) => BocRepr::decode_ext(data.as_slice(), Cell::empty_context()),
                 Err(_) => Err(BocReprError::InvalidBoc(de::Error::UnknownBocTag)),
             }
         }
@@ -404,7 +404,7 @@ impl BocRepr {
             for<'a> T: Load<'a>,
         {
             match crate::util::decode_base64(data) {
-                Ok(data) => BocRepr::decode_ext(data.as_slice(), &mut Cell::empty_context()),
+                Ok(data) => BocRepr::decode_ext(data.as_slice(), Cell::empty_context()),
                 Err(_) => Err(BocReprError::InvalidBoc(de::Error::UnknownBocTag)),
             }
         }
@@ -422,22 +422,19 @@ impl BocRepr {
         where
             for<'a> T: Load<'a>,
         {
-            BocRepr::decode_ext(data, &mut Cell::empty_context())
+            BocRepr::decode_ext(data, Cell::empty_context())
         }
         decode_impl::<T>(data.as_ref())
     }
 
     /// Encodes the specified object as BOC.
-    pub fn encode_ext<T>(
-        data: T,
-        context: &mut dyn CellContext,
-    ) -> Result<Vec<u8>, crate::error::Error>
+    pub fn encode_ext<T>(data: T, context: &dyn CellContext) -> Result<Vec<u8>, crate::error::Error>
     where
         T: Store,
     {
         fn encode_ext_impl(
             data: &dyn Store,
-            context: &mut dyn CellContext,
+            context: &dyn CellContext,
         ) -> Result<Vec<u8>, crate::error::Error> {
             let mut builder = CellBuilder::new();
             ok!(data.store_into(&mut builder, context));
@@ -453,14 +450,14 @@ impl BocRepr {
     #[cfg(feature = "rayon")]
     pub fn encode_rayon_ext<T>(
         data: T,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<Vec<u8>, crate::error::Error>
     where
         T: Store,
     {
         fn encode_ext_impl(
             data: &dyn Store,
-            context: &mut dyn CellContext,
+            context: &dyn CellContext,
         ) -> Result<Vec<u8>, crate::error::Error> {
             let mut builder = CellBuilder::new();
             ok!(data.store_into(&mut builder, context));
@@ -471,7 +468,7 @@ impl BocRepr {
     }
 
     /// Decodes object from BOC using the specified cell context.
-    pub fn decode_ext<T>(data: &[u8], context: &mut dyn CellContext) -> Result<T, BocReprError>
+    pub fn decode_ext<T>(data: &[u8], context: &dyn CellContext) -> Result<T, BocReprError>
     where
         for<'a> T: Load<'a>,
     {
@@ -496,7 +493,7 @@ impl BocRepr {
     {
         use ::serde::ser::{Error, Serialize};
 
-        let context = &mut Cell::empty_context();
+        let context = Cell::empty_context();
 
         let mut builder = CellBuilder::new();
         if data.store_into(&mut builder, context).is_err() {

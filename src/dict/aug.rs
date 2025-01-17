@@ -27,7 +27,7 @@ pub trait AugDictExtra: Default {
         left: &mut CellSlice,
         right: &mut CellSlice,
         b: &mut CellBuilder,
-        cx: &mut dyn CellContext,
+        cx: &dyn CellContext,
     ) -> Result<(), Error>;
 }
 
@@ -78,7 +78,7 @@ impl<K, A: Store, V> Store for AugDict<K, A, V> {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         ok!(self.dict.store_into(builder, context));
         self.extra.store_into(builder, context)
@@ -163,7 +163,7 @@ impl<K: DictKey, A, V> AugDict<K, A, V> {
     #[allow(unused)]
     pub(crate) fn load_from_root<'a>(
         slice: &mut CellSlice<'a>,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<Self, Error>
     where
         A: Load<'a>,
@@ -205,7 +205,7 @@ where
 fn load_from_root<'a, A, V>(
     slice: &mut CellSlice<'a>,
     key_bit_len: u16,
-    context: &mut dyn CellContext,
+    context: &dyn CellContext,
 ) -> Result<(A, Cell), Error>
 where
     A: Load<'a>,
@@ -329,7 +329,7 @@ where
                 .map(|(k, (a, v))| (k.borrow(), a.borrow(), v.borrow())),
             K::BITS,
             A::comp_add,
-            &mut Cell::empty_context()
+            Cell::empty_context()
         ));
 
         let mut result = Self {
@@ -356,7 +356,7 @@ where
                 .map(|(k, a, v)| (k.borrow(), a.borrow(), v.borrow())),
             K::BITS,
             A::comp_add,
-            &mut Cell::empty_context()
+            Cell::empty_context()
         ));
 
         let mut result = Self {
@@ -380,7 +380,7 @@ where
         E: Borrow<A>,
         T: Borrow<V>,
     {
-        self.set_ext(key, aug, value, &mut Cell::empty_context())
+        self.set_ext(key, aug, value, Cell::empty_context())
     }
 
     /// Sets the value associated with the key in the dictionary.
@@ -389,7 +389,7 @@ where
         key: Q,
         aug: E,
         value: T,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<bool, Error>
     where
         Q: Borrow<K>,
@@ -417,7 +417,7 @@ where
         E: Borrow<A>,
         T: Borrow<V>,
     {
-        self.replace_ext(key, aug, value, &mut Cell::empty_context())
+        self.replace_ext(key, aug, value, Cell::empty_context())
     }
 
     /// Sets the value associated with the key in the dictionary
@@ -427,7 +427,7 @@ where
         key: Q,
         aug: E,
         value: T,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<bool, Error>
     where
         Q: Borrow<K>,
@@ -455,7 +455,7 @@ where
         E: Borrow<A>,
         T: Borrow<V>,
     {
-        self.add_ext(key, aug, value, &mut Cell::empty_context())
+        self.add_ext(key, aug, value, Cell::empty_context())
     }
 
     /// Sets the value associated with key in dictionary,
@@ -465,7 +465,7 @@ where
         key: Q,
         aug: E,
         value: T,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<bool, Error>
     where
         Q: Borrow<K>,
@@ -489,7 +489,7 @@ where
         for<'a> A: Load<'a> + 'static,
         for<'a> V: Load<'a> + 'static,
     {
-        match ok!(self.remove_raw_ext(key, &mut Cell::empty_context())) {
+        match ok!(self.remove_raw_ext(key, Cell::empty_context())) {
             Some((cell, range)) => {
                 let mut slice = ok!(range.apply(&cell));
                 let extra = ok!(A::load_from(&mut slice));
@@ -505,7 +505,7 @@ where
     pub fn remove_raw_ext<Q>(
         &mut self,
         key: Q,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<Option<CellSliceParts>, Error>
     where
         Q: Borrow<K>,
@@ -519,10 +519,10 @@ where
         extra: &A,
         value: &V,
         mode: SetMode,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<bool, Error> {
         let mut key_builder = CellBuilder::new();
-        ok!(key.store_into(&mut key_builder, &mut Cell::empty_context()));
+        ok!(key.store_into(&mut key_builder, Cell::empty_context()));
         let inserted = ok!(aug_dict_insert(
             &mut self.dict.root,
             &mut key_builder.as_data_slice(),
@@ -544,10 +544,10 @@ where
     fn remove_impl(
         &mut self,
         key: &K,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<Option<(Cell, CellSliceRange)>, Error> {
         let mut key_builder = CellBuilder::new();
-        ok!(key.store_into(&mut key_builder, &mut Cell::empty_context()));
+        ok!(key.store_into(&mut key_builder, Cell::empty_context()));
         let res = ok!(aug_dict_remove_owned(
             &mut self.dict.root,
             &mut key_builder.as_data_slice(),
@@ -566,24 +566,24 @@ where
 
     /// Split dictionary into 2 dictionaries by the first key bit.
     pub fn split(&self) -> Result<(Self, Self), Error> {
-        self.split_by_prefix_ext(&Default::default(), &mut Cell::empty_context())
+        self.split_by_prefix_ext(&Default::default(), Cell::empty_context())
     }
 
     /// Split dictionary into 2 dictionaries by the first key bit.
-    pub fn split_ext(&self, context: &mut dyn CellContext) -> Result<(Self, Self), Error> {
+    pub fn split_ext(&self, context: &dyn CellContext) -> Result<(Self, Self), Error> {
         self.split_by_prefix_ext(&Default::default(), context)
     }
 
     /// Split dictionary into 2 dictionaries at the prefix.
     pub fn split_by_prefix(&self, key_prefix: &CellSlice<'_>) -> Result<(Self, Self), Error> {
-        self.split_by_prefix_ext(key_prefix, &mut Cell::empty_context())
+        self.split_by_prefix_ext(key_prefix, Cell::empty_context())
     }
 
     /// Split dictionary into 2 dictionaries at the prefix.
     pub fn split_by_prefix_ext(
         &self,
         key_prefix: &CellSlice<'_>,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(Self, Self), Error> {
         let (left, right) = ok!(self.dict.split_by_prefix_ext(key_prefix, context));
 
@@ -848,7 +848,7 @@ mod tests {
             left: &mut CellSlice,
             right: &mut CellSlice,
             b: &mut CellBuilder,
-            _: &mut dyn CellContext,
+            _: &dyn CellContext,
         ) -> Result<(), Error> {
             let left = left.load_bit()?;
             let right = right.load_bit()?;
@@ -864,7 +864,7 @@ mod tests {
             left: &mut CellSlice,
             right: &mut CellSlice,
             b: &mut CellBuilder,
-            _: &mut dyn CellContext,
+            _: &dyn CellContext,
         ) -> Result<(), Error> {
             let left = left.load_u32()?;
             let right = right.load_u32()?;
@@ -1105,7 +1105,7 @@ mod tests {
                 left: &mut CellSlice,
                 right: &mut CellSlice,
                 b: &mut CellBuilder,
-                _: &mut dyn CellContext,
+                _: &dyn CellContext,
             ) -> Result<(), Error> {
                 let left = left.load_u64()?;
                 let right = right.load_u64()?;

@@ -65,7 +65,7 @@ impl Store for McStateExtra {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         #[allow(unused_mut)]
         let mut flags = ((!self.copyleft_rewards.is_empty() as u16) << 1)
@@ -282,7 +282,7 @@ impl AugDictExtra for KeyMaxLt {
         left: &mut CellSlice,
         right: &mut CellSlice,
         b: &mut CellBuilder,
-        cx: &mut dyn CellContext,
+        cx: &dyn CellContext,
     ) -> Result<(), Error> {
         let left = ok!(Self::load_from(left));
         let right = ok!(Self::load_from(right));

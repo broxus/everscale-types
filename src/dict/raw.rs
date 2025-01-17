@@ -63,7 +63,7 @@ impl<const N: u16> Store for RawDict<N> {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         self.0.store_into(builder, context)
     }
@@ -126,7 +126,7 @@ impl<const N: u16> RawDict<N> {
         let root = ok!(build_dict_from_sorted_iter(
             sorted,
             N,
-            &mut Cell::empty_context()
+            Cell::empty_context()
         ));
         Ok(Self(root))
     }
@@ -140,7 +140,7 @@ impl<const N: u16> RawDict<N> {
         let root = ok!(build_dict_from_sorted_iter(
             sorted.iter().map(|(k, v)| (k, v)),
             N,
-            &mut Cell::empty_context()
+            Cell::empty_context()
         ));
         Ok(Self(root))
     }
@@ -166,7 +166,7 @@ impl<const N: u16> RawDict<N> {
     #[inline]
     pub fn load_from_root_ext(
         slice: &mut CellSlice<'_>,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<Self, Error> {
         match dict_load_from_root(slice, N, context) {
             Ok(root) => Ok(Self(Some(root))),
@@ -178,14 +178,14 @@ impl<const N: u16> RawDict<N> {
     ///
     /// NOTE: Uses the default cell context.
     pub fn get<'a>(&'a self, key: CellSlice<'_>) -> Result<Option<CellSlice<'a>>, Error> {
-        dict_get(self.0.as_ref(), N, key, &mut Cell::empty_context())
+        dict_get(self.0.as_ref(), N, key, Cell::empty_context())
     }
 
     /// Returns a `CellSlice` of the value corresponding to the key.
-    pub fn get_ext<'a>(
+    pub fn get_ext<'a, 'c: 'a>(
         &'a self,
         key: CellSlice<'_>,
-        context: &mut dyn CellContext,
+        context: &'c dyn CellContext,
     ) -> Result<Option<CellSlice<'a>>, Error> {
         dict_get(self.0.as_ref(), N, key, context)
     }
@@ -204,15 +204,15 @@ impl<const N: u16> RawDict<N> {
             DictBound::Max,
             false,
             signed,
-            &mut Cell::empty_context(),
+            Cell::empty_context(),
         )
     }
 
     /// Get subdict of dictionary by specified key prefix
-    pub fn get_subdict<'a>(
+    pub fn get_subdict<'a, 'c: 'a>(
         &'a self,
         mut prefix: CellSlice<'a>,
-        context: &mut dyn CellContext,
+        context: &'c dyn CellContext,
     ) -> Result<Option<Cell>, Error> {
         dict_get_subdict(self.0.as_ref(), N, &mut prefix, context)
     }
@@ -231,7 +231,7 @@ impl<const N: u16> RawDict<N> {
             DictBound::Min,
             false,
             signed,
-            &mut Cell::empty_context(),
+            Cell::empty_context(),
         )
     }
 
@@ -249,7 +249,7 @@ impl<const N: u16> RawDict<N> {
             DictBound::Max,
             true,
             signed,
-            &mut Cell::empty_context(),
+            Cell::empty_context(),
         )
     }
 
@@ -267,7 +267,7 @@ impl<const N: u16> RawDict<N> {
             DictBound::Min,
             true,
             signed,
-            &mut Cell::empty_context(),
+            Cell::empty_context(),
         )
     }
 
@@ -275,14 +275,14 @@ impl<const N: u16> RawDict<N> {
     ///
     /// NOTE: Uses the default cell context.
     pub fn get_owned(&self, key: CellSlice<'_>) -> Result<Option<CellSliceParts>, Error> {
-        dict_get_owned(self.0.as_ref(), N, key, &mut Cell::empty_context())
+        dict_get_owned(self.0.as_ref(), N, key, Cell::empty_context())
     }
 
     /// Returns cell slice parts of the value corresponding to the key.
     pub fn get_owned_ext(
         &self,
         key: CellSlice<'_>,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<Option<CellSliceParts>, Error> {
         dict_get_owned(self.0.as_ref(), N, key, context)
     }
@@ -294,7 +294,7 @@ impl<const N: u16> RawDict<N> {
             N,
             DictBound::Min,
             signed,
-            &mut Cell::empty_context(),
+            Cell::empty_context(),
         )
     }
 
@@ -305,7 +305,7 @@ impl<const N: u16> RawDict<N> {
             N,
             DictBound::Max,
             signed,
-            &mut Cell::empty_context(),
+            Cell::empty_context(),
         )
     }
 
@@ -315,22 +315,16 @@ impl<const N: u16> RawDict<N> {
         bound: DictBound,
         signed: bool,
     ) -> Result<Option<(CellBuilder, CellSlice<'_>)>, Error> {
-        dict_find_bound(
-            self.0.as_ref(),
-            N,
-            bound,
-            signed,
-            &mut Cell::empty_context(),
-        )
+        dict_find_bound(self.0.as_ref(), N, bound, signed, Cell::empty_context())
     }
 
     /// Finds the specified dict bound and returns a key and a value corresponding to the key.
-    pub fn get_bound_ext(
-        &self,
+    pub fn get_bound_ext<'a, 'c: 'a>(
+        &'a self,
         bound: DictBound,
         signed: bool,
-        context: &mut dyn CellContext,
-    ) -> Result<Option<(CellBuilder, CellSlice<'_>)>, Error> {
+        context: &'c dyn CellContext,
+    ) -> Result<Option<(CellBuilder, CellSlice<'a>)>, Error> {
         dict_find_bound(self.0.as_ref(), N, bound, signed, context)
     }
 
@@ -344,7 +338,7 @@ impl<const N: u16> RawDict<N> {
             N,
             DictBound::Min,
             signed,
-            &mut Cell::empty_context(),
+            Cell::empty_context(),
         )
     }
 
@@ -358,7 +352,7 @@ impl<const N: u16> RawDict<N> {
             N,
             DictBound::Max,
             signed,
-            &mut Cell::empty_context(),
+            Cell::empty_context(),
         )
     }
 
@@ -368,13 +362,7 @@ impl<const N: u16> RawDict<N> {
         bound: DictBound,
         signed: bool,
     ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
-        dict_find_bound_owned(
-            self.0.as_ref(),
-            N,
-            bound,
-            signed,
-            &mut Cell::empty_context(),
-        )
+        dict_find_bound_owned(self.0.as_ref(), N, bound, signed, Cell::empty_context())
     }
 
     /// Finds the specified dict bound and returns a key and cell slice parts corresponding to the key.
@@ -382,20 +370,14 @@ impl<const N: u16> RawDict<N> {
         &self,
         bound: DictBound,
         signed: bool,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
         dict_find_bound_owned(self.0.as_ref(), N, bound, signed, context)
     }
 
     /// Returns `true` if the dictionary contains a value for the specified key.
     pub fn contains_key(&self, key: CellSlice<'_>) -> Result<bool, Error> {
-        Ok(ok!(dict_get(
-            self.0.as_ref(),
-            N,
-            key,
-            &mut Cell::empty_context()
-        ))
-        .is_some())
+        Ok(ok!(dict_get(self.0.as_ref(), N, key, Cell::empty_context())).is_some())
     }
 
     /// Sets the value associated with the key in the dictionary.
@@ -403,7 +385,7 @@ impl<const N: u16> RawDict<N> {
         &mut self,
         mut key: CellSlice<'_>,
         value: &dyn Store,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<bool, Error> {
         dict_insert(&mut self.0, &mut key, N, &value, SetMode::Set, context)
     }
@@ -414,7 +396,7 @@ impl<const N: u16> RawDict<N> {
         &mut self,
         mut key: CellSlice<'_>,
         value: &dyn Store,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<bool, Error> {
         dict_insert(&mut self.0, &mut key, N, value, SetMode::Replace, context)
     }
@@ -425,7 +407,7 @@ impl<const N: u16> RawDict<N> {
         &mut self,
         mut key: CellSlice<'_>,
         value: &dyn Store,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<bool, Error> {
         dict_insert(&mut self.0, &mut key, N, value, SetMode::Add, context)
     }
@@ -435,7 +417,7 @@ impl<const N: u16> RawDict<N> {
     pub fn remove_ext(
         &mut self,
         mut key: CellSlice<'_>,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<Option<CellSliceParts>, Error> {
         dict_remove_owned(&mut self.0, &mut key, N, false, context)
     }
@@ -446,31 +428,31 @@ impl<const N: u16> RawDict<N> {
         &mut self,
         bound: DictBound,
         signed: bool,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<Option<DictOwnedEntry>, Error> {
         dict_remove_bound_owned(&mut self.0, N, bound, signed, context)
     }
 
     /// Split dictionary into 2 dictionaries by the first key bit.
     pub fn split(&self) -> Result<(Self, Self), Error> {
-        self.split_by_prefix_ext(&Default::default(), &mut Cell::empty_context())
+        self.split_by_prefix_ext(&Default::default(), Cell::empty_context())
     }
 
     /// Split dictionary into 2 dictionaries by the first key bit.
-    pub fn split_ext(&self, context: &mut dyn CellContext) -> Result<(Self, Self), Error> {
+    pub fn split_ext(&self, context: &dyn CellContext) -> Result<(Self, Self), Error> {
         self.split_by_prefix_ext(&Default::default(), context)
     }
 
     /// Split dictionary into 2 dictionaries at the prefix.
     pub fn split_by_prefix(&self, key_prefix: &CellSlice<'_>) -> Result<(Self, Self), Error> {
-        self.split_by_prefix_ext(key_prefix, &mut Cell::empty_context())
+        self.split_by_prefix_ext(key_prefix, Cell::empty_context())
     }
 
     /// Split dictionary into 2 dictionaries at the prefix.
     pub fn split_by_prefix_ext(
         &self,
         key_prefix: &CellSlice<'_>,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(Self, Self), Error> {
         let (left, right) = ok!(dict_split_by_prefix(
             self.0.as_ref(),
@@ -570,7 +552,7 @@ impl<const N: u16> RawDict<N> {
     ///
     /// [`set_ext`]: RawDict::set_ext
     pub fn set<T: Store>(&mut self, key: CellSlice<'_>, value: T) -> Result<bool, Error> {
-        self.set_ext(key, &value, &mut Cell::empty_context())
+        self.set_ext(key, &value, Cell::empty_context())
     }
 
     /// Sets the value associated with the key in the dictionary
@@ -580,7 +562,7 @@ impl<const N: u16> RawDict<N> {
     ///
     /// [`replace_ext`]: RawDict::replace_ext
     pub fn replace<T: Store>(&mut self, key: CellSlice<'_>, value: T) -> Result<bool, Error> {
-        self.replace_ext(key, &value, &mut Cell::empty_context())
+        self.replace_ext(key, &value, Cell::empty_context())
     }
 
     /// Sets the value associated with key in dictionary,
@@ -590,7 +572,7 @@ impl<const N: u16> RawDict<N> {
     ///
     /// [`add_ext`]: RawDict::add_ext
     pub fn add<T: Store>(&mut self, key: CellSlice<'_>, value: T) -> Result<bool, Error> {
-        self.add_ext(key, &value, &mut Cell::empty_context())
+        self.add_ext(key, &value, Cell::empty_context())
     }
 
     /// Removes the value associated with key in dictionary.
@@ -600,7 +582,7 @@ impl<const N: u16> RawDict<N> {
     ///
     /// [`remove_ext`]: RawDict::remove_ext
     pub fn remove(&mut self, key: CellSlice<'_>) -> Result<Option<CellSliceParts>, Error> {
-        self.remove_ext(key, &mut Cell::empty_context())
+        self.remove_ext(key, Cell::empty_context())
     }
 
     /// Removes the lowest key from the dict.
@@ -610,7 +592,7 @@ impl<const N: u16> RawDict<N> {
     ///
     /// [`remove_bound_ext`]: RawDict::remove_bound_ext
     pub fn remove_min(&mut self, signed: bool) -> Result<Option<DictOwnedEntry>, Error> {
-        self.remove_bound_ext(DictBound::Min, signed, &mut Cell::empty_context())
+        self.remove_bound_ext(DictBound::Min, signed, Cell::empty_context())
     }
 
     /// Removes the largest key from the dict.
@@ -620,7 +602,7 @@ impl<const N: u16> RawDict<N> {
     ///
     /// [`remove_bound_ext`]: RawDict::remove_bound_ext
     pub fn remove_max(&mut self, signed: bool) -> Result<Option<DictOwnedEntry>, Error> {
-        self.remove_bound_ext(DictBound::Max, signed, &mut Cell::empty_context())
+        self.remove_bound_ext(DictBound::Max, signed, Cell::empty_context())
     }
 
     /// Removes the specified dict bound.
@@ -634,7 +616,7 @@ impl<const N: u16> RawDict<N> {
         bound: DictBound,
         signed: bool,
     ) -> Result<Option<DictOwnedEntry>, Error> {
-        self.remove_bound_ext(bound, signed, &mut Cell::empty_context())
+        self.remove_bound_ext(bound, signed, Cell::empty_context())
     }
 }
 
@@ -1885,8 +1867,8 @@ mod tests {
 
     #[derive(Debug, Default)]
     struct SimpleContext {
-        used_gas: u64,
-        loaded_cells: ahash::HashSet<HashBytes>,
+        used_gas: std::cell::Cell<u64>,
+        loaded_cells: std::cell::RefCell<ahash::HashSet<HashBytes>>,
         empty_context: <Cell as CellFamily>::EmptyCellContext,
     }
 
@@ -1895,33 +1877,36 @@ mod tests {
         const NEW_CELL_GAS: u64 = 100;
         const OLD_CELL_GAS: u64 = 25;
 
-        fn consume_gas(&mut self, cell: &DynCell, mode: LoadMode) {
+        fn consume_gas(&self, cell: &DynCell, mode: LoadMode) {
             if mode.use_gas() {
-                self.used_gas += if self.loaded_cells.insert(*cell.repr_hash()) {
+                let consumed_gas = if self.loaded_cells.borrow_mut().insert(*cell.repr_hash()) {
                     Self::NEW_CELL_GAS
                 } else {
                     Self::OLD_CELL_GAS
                 };
+
+                self.used_gas.set(self.used_gas.get() + consumed_gas);
             }
         }
     }
 
     impl CellContext for SimpleContext {
         #[inline]
-        fn finalize_cell(&mut self, cell: CellParts<'_>) -> Result<Cell, Error> {
-            self.used_gas += Self::BUILD_CELL_GAS;
+        fn finalize_cell(&self, cell: CellParts<'_>) -> Result<Cell, Error> {
+            self.used_gas
+                .set(self.used_gas.get() + Self::BUILD_CELL_GAS);
             self.empty_context.finalize_cell(cell)
         }
 
         #[inline]
-        fn load_cell(&mut self, cell: Cell, mode: LoadMode) -> Result<Cell, Error> {
+        fn load_cell(&self, cell: Cell, mode: LoadMode) -> Result<Cell, Error> {
             self.consume_gas(cell.as_ref(), mode);
             Ok(cell)
         }
 
         #[inline]
-        fn load_dyn_cell<'a>(
-            &mut self,
+        fn load_dyn_cell<'s: 'a, 'a>(
+            &self,
             cell: &'a DynCell,
             mode: LoadMode,
         ) -> Result<&'a DynCell, Error> {
@@ -1947,26 +1932,26 @@ mod tests {
         key.store_u32(5)?;
 
         dict.get_ext(key.as_data_slice(), context)?.unwrap();
-        assert_eq!(context.used_gas, SimpleContext::NEW_CELL_GAS * 5);
+        assert_eq!(context.used_gas.get(), SimpleContext::NEW_CELL_GAS * 5);
 
-        context.used_gas = 0;
+        context.used_gas.set(0);
         dict.get_ext(key.as_data_slice(), context)?.unwrap();
-        assert_eq!(context.used_gas, SimpleContext::OLD_CELL_GAS * 5);
+        assert_eq!(context.used_gas.get(), SimpleContext::OLD_CELL_GAS * 5);
 
         // Second get
-        context.used_gas = 0;
+        context.used_gas.set(0);
         let mut key = CellBuilder::new();
         key.store_u32(9)?;
 
         dict.get_ext(key.as_data_slice(), context)?.unwrap();
         assert_eq!(
-            context.used_gas,
+            context.used_gas.get(),
             SimpleContext::OLD_CELL_GAS + SimpleContext::NEW_CELL_GAS * 2
         );
 
-        context.used_gas = 0;
+        context.used_gas.set(0);
         dict.get_ext(key.as_data_slice(), context)?.unwrap();
-        assert_eq!(context.used_gas, SimpleContext::OLD_CELL_GAS * 3);
+        assert_eq!(context.used_gas.get(), SimpleContext::OLD_CELL_GAS * 3);
 
         Ok(())
     }
@@ -1988,26 +1973,26 @@ mod tests {
         key.store_u32(5)?;
 
         dict.get_owned_ext(key.as_data_slice(), context)?.unwrap();
-        assert_eq!(context.used_gas, SimpleContext::NEW_CELL_GAS * 5);
+        assert_eq!(context.used_gas.get(), SimpleContext::NEW_CELL_GAS * 5);
 
-        context.used_gas = 0;
+        context.used_gas.set(0);
         dict.get_owned_ext(key.as_data_slice(), context)?.unwrap();
-        assert_eq!(context.used_gas, SimpleContext::OLD_CELL_GAS * 5);
+        assert_eq!(context.used_gas.get(), SimpleContext::OLD_CELL_GAS * 5);
 
         // Second get
-        context.used_gas = 0;
+        context.used_gas.set(0);
         let mut key = CellBuilder::new();
         key.store_u32(9)?;
 
         dict.get_owned_ext(key.as_data_slice(), context)?.unwrap();
         assert_eq!(
-            context.used_gas,
+            context.used_gas.get(),
             SimpleContext::OLD_CELL_GAS + SimpleContext::NEW_CELL_GAS * 2
         );
 
-        context.used_gas = 0;
+        context.used_gas.set(0);
         dict.get_owned_ext(key.as_data_slice(), context)?.unwrap();
-        assert_eq!(context.used_gas, SimpleContext::OLD_CELL_GAS * 3);
+        assert_eq!(context.used_gas.get(), SimpleContext::OLD_CELL_GAS * 3);
 
         Ok(())
     }
@@ -2028,7 +2013,7 @@ mod tests {
         let context = &mut SimpleContext::default();
         assert!(dict.remove_ext(key.as_data_slice(), context)?.is_none());
 
-        assert_eq!(context.used_gas, SimpleContext::NEW_CELL_GAS * 2);
+        assert_eq!(context.used_gas.get(), SimpleContext::NEW_CELL_GAS * 2);
 
         // Clear dict
         let target_gas = [
@@ -2055,7 +2040,7 @@ mod tests {
             let removed = dict.remove_ext(key.as_data_slice(), context)?;
             assert!(removed.is_some());
 
-            assert_eq!(context.used_gas, target_gas[i as usize]);
+            assert_eq!(context.used_gas.get(), target_gas[i as usize]);
         }
 
         Ok(())
@@ -2082,14 +2067,14 @@ mod tests {
                     let (key, _) = dict.get_bound_ext(bound, signed, context)?.unwrap();
                     let removed = dict.clone().remove_ext(key.as_data_slice(), context)?;
                     assert!(removed.is_some());
-                    assert_eq!(context.used_gas, target_gas);
+                    assert_eq!(context.used_gas.get(), target_gas);
 
                     println!("=== {range:?} bound={bound:?} signed={signed} [owned]");
                     let context = &mut SimpleContext::default();
                     let (key, _) = dict.get_bound_owned_ext(bound, signed, context)?.unwrap();
                     let removed = dict.remove_ext(key.as_data_slice(), context)?;
                     assert!(removed.is_some());
-                    assert_eq!(context.used_gas, target_gas);
+                    assert_eq!(context.used_gas.get(), target_gas);
                 }
 
                 Ok::<_, anyhow::Error>(())
@@ -2225,7 +2210,7 @@ mod tests {
 
             dict.set_ext(key.as_data_slice(), &i, context)?;
 
-            assert_eq!(context.used_gas, target_gas[i as usize]);
+            assert_eq!(context.used_gas.get(), target_gas[i as usize]);
 
             println!("===");
         }
@@ -2246,7 +2231,7 @@ mod tests {
                 SetMode::Set,
                 context,
             )?;
-            assert_eq!(context.used_gas, target_gas[i as usize]);
+            assert_eq!(context.used_gas.get(), target_gas[i as usize]);
 
             println!("===");
 
@@ -2262,7 +2247,7 @@ mod tests {
             )?;
             assert_eq!(dict, expected_new_root);
 
-            assert_eq!(context.used_gas, target_gas[i as usize]);
+            assert_eq!(context.used_gas.get(), target_gas[i as usize]);
 
             println!("===");
         }
@@ -2280,7 +2265,7 @@ mod tests {
             SetMode::Add,
             context,
         )?;
-        assert_eq!(context.used_gas, SimpleContext::NEW_CELL_GAS * 5); // Equivalent to simple get
+        assert_eq!(context.used_gas.get(), SimpleContext::NEW_CELL_GAS * 5); // Equivalent to simple get
 
         println!("===");
 
@@ -2293,7 +2278,7 @@ mod tests {
             SetMode::Add,
             context,
         )?;
-        assert_eq!(context.used_gas, SimpleContext::NEW_CELL_GAS * 5); // Equivalent to simple get
+        assert_eq!(context.used_gas.get(), SimpleContext::NEW_CELL_GAS * 5); // Equivalent to simple get
 
         Ok(())
     }

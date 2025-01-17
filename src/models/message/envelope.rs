@@ -78,7 +78,7 @@ impl From<IntermediateAddrExt> for IntermediateAddr {
 }
 
 impl Store for IntermediateAddr {
-    fn store_into(&self, builder: &mut CellBuilder, cx: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, cx: &dyn CellContext) -> Result<(), Error> {
         match self {
             IntermediateAddr::Regular(addr) => {
                 ok!(builder.store_bit_zero()); // tag = $0

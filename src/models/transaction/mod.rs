@@ -162,7 +162,7 @@ mod serde_out_msgs {
                 ahash::HashMap::<Uint15, crate::models::OwnedMessage>::deserialize(deserializer)
             );
 
-            let cx = &mut Cell::empty_context();
+            let cx = Cell::empty_context();
             let mut dict = Dict::new();
             for (key, value) in &messages {
                 let cell = ok!(CellBuilder::build_from(value).map_err(Error::custom));
@@ -215,7 +215,7 @@ impl Store for Transaction {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         let messages = {
             let mut builder = CellBuilder::new();
@@ -288,7 +288,7 @@ impl Store for TxInfo {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         match self {
             Self::Ordinary(info) => {
@@ -358,7 +358,7 @@ impl Store for OrdinaryTxInfo {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         let action_phase = match &self.action_phase {
             Some(action_phase) => {
@@ -422,7 +422,7 @@ impl Store for TickTockTxInfo {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         let action_phase = match &self.action_phase {
             Some(action_phase) => {
@@ -477,7 +477,7 @@ pub enum TickTock {
 
 impl Store for TickTock {
     #[inline]
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         builder.store_bit(*self == Self::Tock)
     }
 }

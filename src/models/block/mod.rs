@@ -91,7 +91,7 @@ impl Store for Block {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         #[cfg(not(feature = "tycho"))]
         let tag = if self.out_msg_queue_updates.is_none() {
@@ -312,7 +312,7 @@ impl BlockInfo {
     /// Set previous block reference (split).
     pub fn set_prev_ref_after_merge(&mut self, left: &BlockRef, right: &BlockRef) {
         fn store_split_ref(left: &BlockRef, right: &BlockRef) -> Result<Cell, Error> {
-            let cx = &mut Cell::empty_context();
+            let cx = Cell::empty_context();
             let mut builder = CellBuilder::new();
             ok!(builder.store_reference(ok!(CellBuilder::build_from_ext(left, cx))));
             ok!(builder.store_reference(ok!(CellBuilder::build_from_ext(right, cx))));
@@ -328,7 +328,7 @@ impl Store for BlockInfo {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         let packed_flags = ((self.master_ref.is_some() as u8) << 7)
             | ((self.after_merge as u8) << 6)
@@ -549,7 +549,7 @@ impl PrevBlockRef {
 }
 
 impl Store for PrevBlockRef {
-    fn store_into(&self, builder: &mut CellBuilder, cx: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, cx: &dyn CellContext) -> Result<(), Error> {
         match self {
             PrevBlockRef::Single(block_ref) => block_ref.store_into(builder, cx),
             PrevBlockRef::AfterMerge { left, right } => {
@@ -623,7 +623,7 @@ impl Store for ValueFlow {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         let tag = if self.copyleft_rewards.is_empty() {
             Self::TAG_V1

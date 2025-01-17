@@ -22,7 +22,7 @@ impl AugDictExtra for ImportFees {
         left: &mut CellSlice,
         right: &mut CellSlice,
         b: &mut CellBuilder,
-        cx: &mut dyn CellContext,
+        cx: &dyn CellContext,
     ) -> Result<(), Error> {
         let left = ok!(Self::load_from(left));
         let right = ok!(Self::load_from(right));
@@ -209,7 +209,7 @@ impl InMsg {
 }
 
 impl Store for InMsg {
-    fn store_into(&self, builder: &mut CellBuilder, cx: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, cx: &dyn CellContext) -> Result<(), Error> {
         match self {
             Self::External(msg) => {
                 ok!(builder.store_small_uint(Self::MSG_IMPORT_EXT, 3));

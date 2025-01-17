@@ -21,7 +21,7 @@ fn do_mine(code: &Cell, factory_addr: &StdAddr, recipient: &StdAddr, reward: u12
     const KEY_TWO: &DynCell =
         &unsafe { StaticCell::new(&[0, 0, 0, 0, 0, 0, 0, 2, 0x80], 64, &[0u8; 32]) };
 
-    let cx = &mut Cell::empty_context();
+    let cx = Cell::empty_context();
 
     let target_bits = factory_addr.address.0[0] >> 4;
 

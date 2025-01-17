@@ -158,7 +158,7 @@ impl<'a, T: Load<'a> + 'a> Lazy<T> {
 }
 
 impl<T> Store for Lazy<T> {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         builder.store_reference(self.cell.clone())
     }
 }

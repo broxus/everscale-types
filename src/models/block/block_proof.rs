@@ -26,7 +26,7 @@ impl Store for BlockProof {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         let child_cell = match &self.signatures {
             Some(signatures) => {

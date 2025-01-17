@@ -83,7 +83,7 @@ impl Store for BlockExtra {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         #[cfg(not(any(feature = "venom", feature = "tycho")))]
         ok!(builder.store_u32(Self::TAG_V1));
@@ -201,7 +201,7 @@ impl Store for AccountBlock {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         let transactions_root = match self.transactions.dict().root() {
             Some(root) => ok!(root.as_ref().as_slice()),
@@ -225,7 +225,7 @@ impl<'a> Load<'a> for AccountBlock {
 
         Ok(Self {
             account: ok!(slice.load_u256()),
-            transactions: ok!(AugDict::load_from_root(slice, &mut Cell::empty_context())),
+            transactions: ok!(AugDict::load_from_root(slice, Cell::empty_context())),
             state_update: ok!(Lazy::load_from(slice)),
         })
     }
@@ -298,7 +298,7 @@ impl Store for McBlockExtra {
     fn store_into(
         &self,
         builder: &mut CellBuilder,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         let tag = if self.copyleft_msgs.is_empty() {
             Self::TAG_V1
@@ -439,7 +439,7 @@ impl AugDictExtra for ShardFeeCreated {
         left: &mut CellSlice,
         right: &mut CellSlice,
         b: &mut CellBuilder,
-        cx: &mut dyn CellContext,
+        cx: &dyn CellContext,
     ) -> Result<(), Error> {
         let left = ok!(Self::load_from(left));
         let right = ok!(Self::load_from(right));
@@ -523,7 +523,7 @@ impl AsRef<[u8; 64]> for Signature {
 }
 
 impl Store for Signature {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         ok!(builder.store_small_uint(Self::TAG, Self::TAG_LEN));
         builder.store_raw(&self.0, 512)
     }

@@ -564,7 +564,7 @@ impl<'de> serde::Deserialize<'de> for Tokens {
 }
 
 impl Store for VarUint24 {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         let bytes = (4 - self.0.leading_zeros() / 8) as u8;
         let bits = bytes as u16 * 8;
 
@@ -588,7 +588,7 @@ impl<'a> Load<'a> for VarUint24 {
 }
 
 impl Store for VarUint56 {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         let bytes = (8 - self.0.leading_zeros() / 8) as u8;
         let bits = bytes as u16 * 8;
 
@@ -612,7 +612,7 @@ impl<'a> Load<'a> for VarUint56 {
 }
 
 impl Store for Tokens {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         let bytes = (16 - self.0.leading_zeros() / 8) as u8;
         let bits = bytes as u16 * 8;
 
@@ -741,7 +741,7 @@ macro_rules! impl_small_uints {
             fn store_into(
                 &self,
                 builder: &mut CellBuilder,
-                _: &mut dyn CellContext
+                _: &dyn CellContext
             ) -> Result<(), Error> {
                 if !self.is_valid() {
                     return Err(Error::IntOverflow);
@@ -845,7 +845,7 @@ impl ExactSize for SplitDepth {
 }
 
 impl Store for SplitDepth {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         builder.store_small_uint(self.0.get(), Self::BITS)
     }
 }
@@ -988,7 +988,7 @@ mod tests {
 
     macro_rules! impl_serialization_tests {
         ($ident:ident, $max_bits:literal) => {
-            let context = &mut Cell::empty_context();
+            let context = Cell::empty_context();
 
             for i in 0..$max_bits {
                 let value = $ident::ONE << i;
@@ -1007,7 +1007,7 @@ mod tests {
 
     macro_rules! impl_deserialization_tests {
         ($ident:ident, $max_bits:literal, $value:literal) => {
-            let context = &mut Cell::empty_context();
+            let context = Cell::empty_context();
 
             let mut value = $ident::new($value);
             for _ in 0..=$max_bits {
@@ -1025,7 +1025,7 @@ mod tests {
 
     macro_rules! impl_fixed_len_serialization_tests {
         ($ident:ident, $max_bits:literal) => {
-            let context = &mut Cell::empty_context();
+            let context = Cell::empty_context();
 
             for i in 0..$max_bits {
                 let value = $ident::ONE << i;

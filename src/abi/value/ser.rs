@@ -20,7 +20,7 @@ use crate::prelude::CellFamily;
 impl NamedAbiValue {
     /// Tries to store multiple values into a new builder according to the specified ABI version.
     pub fn tuple_to_builder(items: &[Self], version: AbiVersion) -> Result<CellBuilder, Error> {
-        let context = &mut Cell::empty_context();
+        let context = Cell::empty_context();
         let mut serializer = AbiSerializer::new(version);
         for item in items {
             serializer.reserve_value(&item.value);
@@ -50,7 +50,7 @@ impl NamedAbiValue {
 impl AbiValue {
     /// Tries to store multiple values into a new builder according to the specified ABI version.
     pub fn tuple_to_builder(values: &[Self], version: AbiVersion) -> Result<CellBuilder, Error> {
-        let context = &mut Cell::empty_context();
+        let context = Cell::empty_context();
         let mut serializer = AbiSerializer::new(version);
         for value in values {
             serializer.reserve_value(value);
@@ -68,7 +68,7 @@ impl AbiValue {
 
     /// Tries to store this value into a new builder according to the specified ABI version.
     pub fn make_builder(&self, version: AbiVersion) -> Result<CellBuilder, Error> {
-        let context = &mut Cell::empty_context();
+        let context = Cell::empty_context();
         let mut serializer = AbiSerializer::new(version);
         serializer.reserve_value(self);
         ok!(serializer.write_value(self, context));
@@ -264,7 +264,7 @@ impl AbiSerializer {
         }
     }
 
-    pub fn finalize(mut self, context: &mut dyn CellContext) -> Result<CellBuilder, Error> {
+    pub fn finalize(mut self, context: &dyn CellContext) -> Result<CellBuilder, Error> {
         debug_assert_eq!(self.remaining_total, CellTreeStats::ZERO);
 
         let mut result = self.stack.pop().unwrap_or_default();
@@ -275,7 +275,7 @@ impl AbiSerializer {
         Ok(result)
     }
 
-    pub fn take_finalize(&mut self, context: &mut dyn CellContext) -> Result<CellBuilder, Error> {
+    pub fn take_finalize(&mut self, context: &dyn CellContext) -> Result<CellBuilder, Error> {
         debug_assert_eq!(self.remaining_total, CellTreeStats::ZERO);
 
         self.current = Size::ZERO;
@@ -354,7 +354,7 @@ impl AbiSerializer {
     pub(crate) fn write_value(
         &mut self,
         value: &AbiValue,
-        c: &mut dyn CellContext,
+        c: &dyn CellContext,
     ) -> Result<(), Error> {
         match value {
             AbiValue::Uint(n, value) => self.write_int(*n, Sign::Plus, value),
@@ -379,7 +379,7 @@ impl AbiSerializer {
     pub(crate) fn write_tuple(
         &mut self,
         items: &[NamedAbiValue],
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         for item in items {
             ok!(self.write_value(&item.value, context));
@@ -436,7 +436,7 @@ impl AbiSerializer {
             },
             refs: 0,
         });
-        address.store_into(target, &mut Cell::empty_context())
+        address.store_into(target, Cell::empty_context())
     }
 
     fn write_tokens(&mut self, tokens: &Tokens) -> Result<(), Error> {
@@ -448,10 +448,10 @@ impl AbiSerializer {
             },
             refs: 0,
         });
-        tokens.store_into(target, &mut Cell::empty_context())
+        tokens.store_into(target, Cell::empty_context())
     }
 
-    fn write_bytes(&mut self, mut data: &[u8], context: &mut dyn CellContext) -> Result<(), Error> {
+    fn write_bytes(&mut self, mut data: &[u8], context: &dyn CellContext) -> Result<(), Error> {
         const MAX_BYTES_PER_BUILDER: usize = (MAX_BIT_LEN / 8) as usize;
         let mut len = data.len();
 
@@ -489,7 +489,7 @@ impl AbiSerializer {
         value_ty: &AbiType,
         values: &[AbiValue],
         fixed_len: bool,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         let inline_value = fits_into_dict_leaf(32, value_ty.max_bits());
 
@@ -535,7 +535,7 @@ impl AbiSerializer {
         key_ty: &PlainAbiType,
         value_ty: &AbiType,
         value: &BTreeMap<PlainAbiValue, AbiValue>,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         let key_bits = key_ty.key_bits();
         let inline_value = fits_into_dict_leaf(key_bits, value_ty.max_bits());
@@ -577,7 +577,7 @@ impl AbiSerializer {
         &mut self,
         ty: &AbiType,
         value: Option<&AbiValue>,
-        context: &mut dyn CellContext,
+        context: &dyn CellContext,
     ) -> Result<(), Error> {
         let (max_size, inline) = {
             let ty_size = ty.max_size();
@@ -630,7 +630,7 @@ impl AbiSerializer {
         }
     }
 
-    fn write_ref(&mut self, value: &AbiValue, context: &mut dyn CellContext) -> Result<(), Error> {
+    fn write_ref(&mut self, value: &AbiValue, context: &dyn CellContext) -> Result<(), Error> {
         let cell = {
             let mut serializer = self.begin_child();
             serializer.reserve_value(value);
@@ -695,7 +695,7 @@ enum InlineOrRef<'a> {
 }
 
 impl Store for InlineOrRef<'_> {
-    fn store_into(&self, builder: &mut CellBuilder, _: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         match self {
             Self::Inline(slice) => builder.store_slice(slice),
             Self::Ref(cell) => builder.store_reference(cell.clone()),
@@ -704,7 +704,7 @@ impl Store for InlineOrRef<'_> {
 }
 
 impl Store for PlainAbiValue {
-    fn store_into(&self, builder: &mut CellBuilder, f: &mut dyn CellContext) -> Result<(), Error> {
+    fn store_into(&self, builder: &mut CellBuilder, f: &dyn CellContext) -> Result<(), Error> {
         match self {
             Self::Uint(bits, value) => write_int(*bits, Sign::Plus, value, builder),
             Self::Int(bits, value) => write_int(*bits, value.sign(), value.magnitude(), builder),
