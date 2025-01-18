@@ -404,7 +404,7 @@ impl Store for LibDescr {
         ok!(builder.store_small_uint(0, 2));
         ok!(builder.store_reference(self.lib.clone()));
         match self.publishers.root() {
-            Some(root) => builder.store_reference(root.clone()),
+            Some(root) => builder.store_slice(root.as_slice_allow_pruned()),
             None => Err(Error::InvalidData),
         }
     }
