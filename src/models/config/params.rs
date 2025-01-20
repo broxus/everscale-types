@@ -633,7 +633,8 @@ pub struct WorkUnitsParams {
 ///     fixed:uint32
 ///     read_ext_msgs:uint16
 ///     read_int_msgs:uint16
-///     read_new_msgs:uint32
+///     read_new_msgs:uint16
+///     add_to_msg_groups:uint16
 ///     = WorkUnitsParamsPrepare;
 /// ```
 #[cfg(feature = "tycho")]
@@ -648,7 +649,9 @@ pub struct WorkUnitsParamsPrepare {
     /// TODO: Add docs.
     pub read_int_msgs: u16,
     /// TODO: Add docs.
-    pub read_new_msgs: u32,
+    pub read_new_msgs: u16,
+    /// TODO: Add docs.
+    pub add_to_msg_groups: u16,
 }
 
 /// Params to calculate messages execution work in wu.
@@ -661,7 +664,7 @@ pub struct WorkUnitsParamsPrepare {
 ///     execute_delimiter:uint32
 ///     serialize_enqueue:uint16
 ///     serialize_dequeue:uint16
-///     insert_new_msgs_to_iterator:uint16
+///     insert_new_msgs:uint16
 ///     subgroup_size:uint16
 ///     = WorkUnitsParamsExecute;
 /// ```
@@ -683,7 +686,7 @@ pub struct WorkUnitsParamsExecute {
     /// TODO: Add docs.
     pub serialize_dequeue: u16,
     /// TODO: Add docs.
-    pub insert_new_msgs_to_iterator: u16,
+    pub insert_new_msgs: u16,
     /// TODO: Add docs.
     pub subgroup_size: u16,
 }
