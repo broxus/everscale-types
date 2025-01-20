@@ -285,6 +285,19 @@ impl BlockchainConfigParams {
         )
     }
 
+    /// Returns a global id.
+    pub fn get_global_id(&self) -> Result<i32, Error> {
+        ok!(self.get::<ConfigParam19>()).ok_or(Error::CellUnderflow)
+    }
+
+    /// Updates a global id.
+    pub fn set_global_id(&mut self, global_id: i32) -> Result<bool, Error> {
+        self.set_raw(
+            ConfigParam19::ID,
+            ok!(CellBuilder::build_from(global_id as u32)),
+        )
+    }
+
     /// Returns gas limits and prices.
     ///
     /// Uses [`ConfigParam20`] (for masterchain) or [`ConfigParam21`] (for other workchains).
@@ -475,6 +488,16 @@ impl BlockchainConfigParams {
             None => self.get::<ConfigParam36>(),
             set => Ok(set),
         }
+    }
+
+    /// Returns size limits.
+    pub fn get_size_limits(&self) -> Result<SizeLimitsConfig, Error> {
+        ok!(self.get::<ConfigParam43>()).ok_or(Error::CellUnderflow)
+    }
+
+    /// Updates a global id.
+    pub fn set_size_limits(&mut self, size_limits: &SizeLimitsConfig) -> Result<bool, Error> {
+        self.set_raw(ConfigParam43::ID, ok!(CellBuilder::build_from(size_limits)))
     }
 
     /// Returns `true` if the config contains a param for the specified id.
@@ -958,6 +981,9 @@ define_config_params! {
     #[serde(transparent)]
     18 => ConfigParam18(NonEmptyDict => Dict<u32, StoragePrices>),
 
+    /// Global ID.
+    19 => ConfigParam19(i32),
+
     /// Masterchain gas limits and prices.
     ///
     /// Contains [`GasLimitsPrices`].
@@ -1058,6 +1084,11 @@ define_config_params! {
     /// Contains a [`ValidatorSet`].
     #[serde(transparent)]
     37 => ConfigParam37(ValidatorSet),
+
+    /// Size limits.
+    ///
+    /// Contains a [`SizeLimitsConfig`].
+    43 => ConfigParam43(SizeLimitsConfig),
 }
 
 #[cfg(feature = "serde")]
