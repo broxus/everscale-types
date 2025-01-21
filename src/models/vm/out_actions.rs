@@ -187,11 +187,16 @@ pub enum OutAction {
 }
 
 impl OutAction {
-    const TAG_SEND_MSG: u32 = 0x0ec3c86d;
-    const TAG_SET_CODE: u32 = 0xad4de08e;
-    const TAG_RESERVE: u32 = 0x36e6b809;
-    const TAG_CHANGE_LIB: u32 = 0x26fa1dd4;
-    const TAG_COPYLEFT: u32 = 0x24486f7a;
+    /// Tag for [`OutAction::SendMsg`].
+    pub const TAG_SEND_MSG: u32 = 0x0ec3c86d;
+    /// Tag for [`OutAction::SetCode`].
+    pub const TAG_SET_CODE: u32 = 0xad4de08e;
+    /// Tag for [`OutAction::ReserveCurrency`].
+    pub const TAG_RESERVE: u32 = 0x36e6b809;
+    /// Tag for [`OutAction::ChangeLibrary`].
+    pub const TAG_CHANGE_LIB: u32 = 0x26fa1dd4;
+    /// Tag for [`OutAction::CopyLeft`].
+    pub const TAG_COPYLEFT: u32 = 0x24486f7a;
 }
 
 impl Store for OutAction {

@@ -307,6 +307,26 @@ pub struct StoragePrices {
     pub mc_cell_price_ps: u64,
 }
 
+impl StoragePrices {
+    /// Computes the amount of fees for storing `stats` data for `delta` seconds.
+    pub fn compute_storage_fee(
+        &self,
+        is_masterchain: bool,
+        delta: u64,
+        stats: CellTreeStats,
+    ) -> Tokens {
+        let mut res = if is_masterchain {
+            (stats.cell_count as u128 * self.mc_cell_price_ps as u128)
+                .saturating_add(stats.bit_count as u128 * self.mc_bit_price_ps as u128)
+        } else {
+            (stats.cell_count as u128 * self.cell_price_ps as u128)
+                .saturating_add(stats.bit_count as u128 * self.bit_price_ps as u128)
+        };
+        res = res.saturating_mul(delta as u128);
+        Tokens::new(shift_ceil_price(res))
+    }
+}
+
 /// Gas limits and prices.
 #[derive(Default, Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -331,6 +351,17 @@ pub struct GasLimitsPrices {
     ///
     /// [`flat_gas_limit`]: GasLimitsPrices::flat_gas_limit
     pub flat_gas_price: u64,
+}
+
+impl GasLimitsPrices {
+    /// Converts gas units into tokens.
+    pub fn compute_gas_fee(&self, gas_used: u64) -> Tokens {
+        let mut res = self.flat_gas_price as u128;
+        if let Some(extra_gas) = gas_used.checked_sub(self.flat_gas_limit) {
+            res = res.saturating_add(shift_ceil_price(self.gas_price as u128 * extra_gas as u128));
+        }
+        Tokens::new(res)
+    }
 }
 
 impl GasLimitsPrices {
@@ -440,6 +471,18 @@ pub struct MsgForwardPrices {
     pub first_frac: u16,
     /// TODO: add docs
     pub next_frac: u16,
+}
+
+impl MsgForwardPrices {
+    /// Computes fees for forwarding the specified amount of data.
+    pub fn compute_fwd_fee(&self, stats: CellTreeStats) -> Tokens {
+        let lump = self.lump_price as u128;
+        let extra = shift_ceil_price(
+            (stats.cell_count as u128 * self.cell_price as u128)
+                .saturating_add(stats.bit_count as u128 * self.bit_price as u128),
+        );
+        Tokens::new(lump.saturating_add(extra))
+    }
 }
 
 /// Catchain configuration params.
@@ -1455,6 +1498,11 @@ pub struct SizeLimitsConfig {
     pub max_acc_public_libraries: u32,
     /// Size limit of a deferred out messages queue.
     pub defer_out_queue_size_limit: u32,
+}
+
+const fn shift_ceil_price(value: u128) -> u128 {
+    let r = value & 0xffff != 0;
+    (value >> 16) + r as u128
 }
 
 #[cfg(test)]
