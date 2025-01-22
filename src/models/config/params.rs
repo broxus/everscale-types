@@ -562,7 +562,7 @@ pub struct CollationConfig {
 ///     open_ranges_limit:uint16
 ///     par_0_int_msgs_count_limit:uint32
 ///     par_0_ext_msgs_count_limit:uint32
-///     group_slots_fractions:(HashmapE 8 uint8)
+///     group_slots_fractions:(HashmapE 16 uint8)
 ///     = MsgsExecutionParams;
 /// ```
 #[cfg(feature = "tycho")]
@@ -601,7 +601,7 @@ pub struct MsgsExecutionParams {
 
     /// The fractions of message group slots
     /// for messages subgroups
-    pub group_slots_fractions: Dict<u8, u8>,
+    pub group_slots_fractions: Dict<u16, u8>,
 }
 
 /// Params to calculate the collation work in wu.

@@ -429,7 +429,7 @@ impl<'a> Load<'a> for LibDescr {
 ///
 /// ```text
 /// processedUptoInfo#00
-///     partitions:(HashmapE 8 ProcessedUptoPartition)
+///     partitions:(HashmapE 16 ProcessedUptoPartition)
 ///     msgs_exec_params:(Maybe ^MsgsExecutionParams)
 ///     = ProcessedUptoInfo;
 /// ```
@@ -439,7 +439,7 @@ impl<'a> Load<'a> for LibDescr {
 pub struct ProcessedUptoInfo {
     /// We split messages by partitions.
     /// Main partition 0 and others.
-    pub partitions: Dict<u8, ProcessedUptoPartition>,
+    pub partitions: Dict<u16, ProcessedUptoPartition>,
 
     /// Actual messages execution params used for collated block.
     /// They help to refill messages buffers on sync/restart and
