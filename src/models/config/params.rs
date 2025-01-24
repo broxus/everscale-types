@@ -631,6 +631,8 @@ pub struct WorkUnitsParams {
 /// ```text
 /// work_units_params_prepare_tycho#00
 ///     fixed:uint32
+///     msgs_stats:uint16
+///     remaning_msgs_stats:uint16
 ///     read_ext_msgs:uint16
 ///     read_int_msgs:uint16
 ///     read_new_msgs:uint16
@@ -644,6 +646,10 @@ pub struct WorkUnitsParams {
 pub struct WorkUnitsParamsPrepare {
     /// TODO: Add docs.
     pub fixed_part: u32,
+    /// TODO: Add docs.
+    pub msgs_stats: u16,
+    /// TODO: Add docs.
+    pub remaning_msgs_stats: u16,
     /// TODO: Add docs.
     pub read_ext_msgs: u16,
     /// TODO: Add docs.
@@ -703,8 +709,12 @@ pub struct WorkUnitsParamsExecute {
 ///     serialize_accounts:uint16
 ///     serialize_msg:uint16
 ///     state_update_min:uint32
-///     state_update_accounts:uint32
+///     state_update_accounts:uint16
 ///     state_update_msg:uint16
+///     create_diff:uint16
+///     serialize_diff:uint16
+///     apply_diff:uint16
+///     diff_tail_len:uint16
 ///     = WorkUnitsParamsFinalize;
 /// ```
 #[cfg(feature = "tycho")]
@@ -729,9 +739,17 @@ pub struct WorkUnitsParamsFinalize {
     /// TODO: Add docs.
     pub state_update_min: u32,
     /// TODO: Add docs.
-    pub state_update_accounts: u32,
+    pub state_update_accounts: u16,
     /// TODO: Add docs.
     pub state_update_msg: u16,
+    /// TODO: Add docs.
+    pub create_diff: u16,
+    /// TODO: Add docs.
+    pub serialize_diff: u16,
+    /// TODO: Add docs.
+    pub apply_diff: u16,
+    /// TODO: Add docs.
+    pub diff_tail_len: u16,
 }
 
 /// DAG Consensus configuration params
