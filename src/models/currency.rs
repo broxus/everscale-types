@@ -104,6 +104,14 @@ impl CurrencyCollection {
         *self = ok!(self.checked_sub(other));
         Ok(())
     }
+
+    /// Returns the intersection between two currency collections.
+    pub fn checked_clamp(&self, other: &Self) -> Result<Self, Error> {
+        Ok(Self {
+            other: ok!(self.other.checked_clamp(&other.other)),
+            tokens: std::cmp::min(self.tokens, other.tokens),
+        })
+    }
 }
 
 impl From<Tokens> for CurrencyCollection {
@@ -206,6 +214,33 @@ impl ExtraCurrencyCollection {
                 Some(ref value) => ok!(result.0.set(currency_id, value)),
                 None => return Err(Error::IntOverflow),
             };
+        }
+        Ok(result)
+    }
+
+    /// Returns the intersection between two extra currency collections.
+    pub fn checked_clamp(&self, other: &Self) -> Result<Self, Error> {
+        let mut result = self.clone();
+        for entry in self.0.iter() {
+            let (currency_id, balance) = ok!(entry);
+            match ok!(other.0.get(currency_id)) {
+                // Other collection has this currency,
+                // so we must update to the lowest balance.
+                Some(other_balance) => {
+                    if balance > other_balance {
+                        ok!(result.0.set(currency_id, &other_balance));
+                    }
+                }
+                // Other collection doesn't have this currency,
+                // and we have a non-zero amount.
+                None if !balance.is_zero() => {
+                    // So we must delete it.
+                    ok!(result.0.remove_raw(currency_id));
+                }
+                // Other collection doesn't have this currency,
+                // and we have a zero amount. So we can do nothing.
+                None => {}
+            }
         }
         Ok(result)
     }
