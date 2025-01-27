@@ -30,6 +30,9 @@ mod __checks {
 pub trait MerkleFilter {
     /// Returns how the cell should be included in the Merkle proof or update.
     fn check(&self, cell: &HashBytes) -> FilterAction;
+
+    /// Returns the number of elements in the filter, if known.
+    fn size_hint(&self) -> Option<usize>;
 }
 
 /// Merkle filter action.
@@ -48,6 +51,11 @@ impl<T: MerkleFilter + ?Sized> MerkleFilter for &T {
     fn check(&self, cell: &HashBytes) -> FilterAction {
         <T as MerkleFilter>::check(self, cell)
     }
+
+    #[inline]
+    fn size_hint(&self) -> Option<usize> {
+        <T as MerkleFilter>::size_hint(self)
+    }
 }
 
 impl MerkleFilter for UsageTree {
@@ -57,6 +65,10 @@ impl MerkleFilter for UsageTree {
         } else {
             FilterAction::Skip
         }
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        Some(UsageTree::len(self))
     }
 }
 
@@ -70,6 +82,10 @@ impl MerkleFilter for UsageTreeWithSubtrees {
             FilterAction::Skip
         }
     }
+
+    fn size_hint(&self) -> Option<usize> {
+        Some(self.len())
+    }
 }
 
 impl<S: BuildHasher> MerkleFilter for HashSet<HashBytes, S> {
@@ -80,6 +96,10 @@ impl<S: BuildHasher> MerkleFilter for HashSet<HashBytes, S> {
             FilterAction::Skip
         }
     }
+
+    fn size_hint(&self) -> Option<usize> {
+        Some(self.len())
+    }
 }
 
 impl<S: BuildHasher> MerkleFilter for HashSet<&HashBytes, S> {
@@ -89,5 +109,9 @@ impl<S: BuildHasher> MerkleFilter for HashSet<&HashBytes, S> {
         } else {
             FilterAction::Skip
         }
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        Some(self.len())
     }
 }
