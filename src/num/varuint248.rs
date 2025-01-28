@@ -101,6 +101,46 @@ impl VarUint248 {
         }
     }
 
+    /// Saturating integer addition. Computes `self + rhs`,
+    /// saturating at the numeric bounds instead of overflowing.
+    #[must_use]
+    pub const fn saturating_add(self, rhs: &Self) -> Self {
+        match self.checked_add(rhs) {
+            Some(value) => value,
+            None => Self::MAX,
+        }
+    }
+
+    /// Saturating integer addition. Computes `self - rhs`,
+    /// saturating at the numeric bounds instead of overflowing.
+    #[must_use]
+    pub const fn saturating_sub(self, rhs: &Self) -> Self {
+        let (lo, carry_lo) = self.low().overflowing_sub(*rhs.low());
+        let (hi, carry_c) = self.high().overflowing_sub(carry_lo as _);
+        let (hi, carry_hi) = hi.overflowing_sub(*rhs.high());
+
+        if carry_c || carry_hi {
+            return Self::ZERO;
+        }
+
+        let res = Self::from_words(hi, lo);
+        if res.is_valid() {
+            res
+        } else {
+            Self::MAX
+        }
+    }
+
+    /// Saturating integer multiplication. Computes `self * rhs`,
+    /// returning `None` if overflow occurred.
+    #[must_use]
+    pub fn saturating_mul(self, rhs: &Self) -> Self {
+        match self.checked_mul(rhs) {
+            Some(value) => value,
+            None => Self::MAX,
+        }
+    }
+
     /// Checked integer addition. Computes `self + rhs`,
     /// returning `None` if overflow occurred.
     #[must_use]
@@ -109,10 +149,15 @@ impl VarUint248 {
         let (hi, carry_c) = self.high().overflowing_add(carry_lo as _);
         let (hi, carry_hi) = hi.overflowing_add(*rhs.high());
 
-        if carry_c || carry_hi || !self.is_valid() {
-            None
+        if carry_c || carry_hi {
+            return None;
+        }
+
+        let res = Self::from_words(hi, lo);
+        if res.is_valid() {
+            Some(res)
         } else {
-            Some(Self::from_words(hi, lo))
+            None
         }
     }
 
@@ -124,10 +169,15 @@ impl VarUint248 {
         let (hi, carry_c) = self.high().overflowing_sub(carry_lo as _);
         let (hi, carry_hi) = hi.overflowing_sub(*rhs.high());
 
-        if carry_c || carry_hi || !self.is_valid() {
-            None
+        if carry_c || carry_hi {
+            return None;
+        }
+
+        let res = Self::from_words(hi, lo);
+        if res.is_valid() {
+            Some(res)
         } else {
-            Some(Self::from_words(hi, lo))
+            None
         }
     }
 
@@ -1239,6 +1289,21 @@ mod tests {
 
         assert!(!VarUint248::from_words(u128::MAX >> 7, u128::MAX).is_valid());
         assert!(!VarUint248::from_words(u128::MAX, u128::MAX).is_valid());
+
+        assert_eq!(
+            VarUint248::new(123).saturating_sub(&VarUint248::new(321)),
+            VarUint248::ZERO
+        );
+
+        assert_eq!(
+            VarUint248::from_words(u128::MAX, u128::MAX).saturating_sub(&VarUint248::new(1)),
+            VarUint248::MAX
+        );
+        assert_eq!(
+            VarUint248::from_words(u128::MAX, u128::MAX)
+                .saturating_sub(&VarUint248::from_words(u128::MAX, u128::MAX)),
+            VarUint248::ZERO
+        );
     }
 
     #[test]

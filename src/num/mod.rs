@@ -382,6 +382,40 @@ macro_rules! impl_var_uints {
                 }
             }
 
+            /// Saturating integer addition. Computes `self + rhs`,
+            /// saturating at the numeric bounds instead of overflowing.
+            #[inline]
+            #[must_use]
+            pub const fn saturating_add(self, rhs: Self) -> Self {
+                match self.0.checked_add(rhs.0) {
+                    Some(value) if value <= Self::MAX.0 => $ident(value),
+                    _ => Self::MAX,
+                }
+            }
+
+            /// Saturating integer addition. Computes `self - rhs`,
+            /// saturating at the numeric bounds instead of overflowing.
+            #[inline]
+            #[must_use]
+            pub const fn saturating_sub(self, rhs: Self) -> Self {
+                match self.0.checked_sub(rhs.0) {
+                    Some(value) if value <= Self::MAX.0 => $ident(value),
+                    Some(_) => Self::MAX,
+                    None => Self::ZERO,
+                }
+            }
+
+            /// Saturating integer multiplication. Computes `self * rhs`,
+            /// returning `None` if overflow occurred.
+            #[inline]
+            #[must_use]
+            pub const fn saturating_mul(self, rhs: Self) -> Self {
+                match self.0.checked_mul(rhs.0) {
+                    Some(value) if value <= Self::MAX.0 => $ident(value),
+                    _ => Self::MAX,
+                }
+            }
+
             /// Checked integer addition. Computes `self + rhs`, returning `None` if overflow occurred.
             #[inline]
             #[must_use]
@@ -686,6 +720,40 @@ macro_rules! impl_small_uints {
             #[inline]
             pub const fn is_valid(&self) -> bool {
                 self.0 <= Self::MAX.0
+            }
+
+            /// Saturating integer addition. Computes `self + rhs`,
+            /// saturating at the numeric bounds instead of overflowing.
+            #[inline]
+            #[must_use]
+            pub const fn saturating_add(self, rhs: Self) -> Self {
+                match self.0.checked_add(rhs.0) {
+                    Some(value) if value <= Self::MAX.0 => $ident(value),
+                    _ => Self::MAX,
+                }
+            }
+
+            /// Saturating integer addition. Computes `self - rhs`,
+            /// saturating at the numeric bounds instead of overflowing.
+            #[inline]
+            #[must_use]
+            pub const fn saturating_sub(self, rhs: Self) -> Self {
+                match self.0.checked_sub(rhs.0) {
+                    Some(value) if value <= Self::MAX.0 => $ident(value),
+                    Some(_) => Self::MAX,
+                    None => Self::MIN,
+                }
+            }
+
+            /// Saturating integer multiplication. Computes `self * rhs`,
+            /// returning `None` if overflow occurred.
+            #[inline]
+            #[must_use]
+            pub const fn saturating_mul(self, rhs: Self) -> Self {
+                match self.0.checked_mul(rhs.0) {
+                    Some(value) if value <= Self::MAX.0 => $ident(value),
+                    _ => Self::MAX,
+                }
             }
 
             /// Checked integer addition. Computes `self + rhs`, returning `None` if overflow occurred.
