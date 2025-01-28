@@ -228,7 +228,7 @@ impl ExtraCurrencyCollection {
                 // so we must update to the lowest balance.
                 Some(other_balance) => {
                     if balance > other_balance {
-                        ok!(result.0.set(currency_id, &other_balance));
+                        ok!(result.0.set(currency_id, other_balance));
                     }
                 }
                 // Other collection doesn't have this currency,

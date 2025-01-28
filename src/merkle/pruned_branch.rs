@@ -44,8 +44,7 @@ mod test {
             builder.build().unwrap()
         };
 
-        let pruned_branch =
-            make_pruned_branch(cell.as_ref(), 0, Cell::empty_context()).unwrap();
+        let pruned_branch = make_pruned_branch(cell.as_ref(), 0, Cell::empty_context()).unwrap();
         assert_eq!(cell.repr_hash(), pruned_branch.hash(0));
         assert_eq!(cell.depth(0), pruned_branch.depth(0));
 

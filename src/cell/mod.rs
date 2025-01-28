@@ -1734,16 +1734,13 @@ mod tests {
         let cell = Cell::empty_cell();
 
         let pruned1 =
-            crate::merkle::make_pruned_branch(cell.as_ref(), 0, Cell::empty_context())
-                .unwrap();
+            crate::merkle::make_pruned_branch(cell.as_ref(), 0, Cell::empty_context()).unwrap();
 
         let pruned2 =
-            crate::merkle::make_pruned_branch(pruned1.as_ref(), 1, Cell::empty_context())
-                .unwrap();
+            crate::merkle::make_pruned_branch(pruned1.as_ref(), 1, Cell::empty_context()).unwrap();
 
         let pruned3 =
-            crate::merkle::make_pruned_branch(pruned2.as_ref(), 2, Cell::empty_context())
-                .unwrap();
+            crate::merkle::make_pruned_branch(pruned2.as_ref(), 2, Cell::empty_context()).unwrap();
 
         // Level 3 -> 2
         let pruned3 = pruned3.virtualize();

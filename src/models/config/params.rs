@@ -1476,6 +1476,7 @@ impl ValidatorSetPRNG {
 ///     max_acc_public_libraries:uint32
 ///     defer_out_queue_size_limit:uint32 = SizeLimitsConfig;
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[tlb(tag = "#02")]
 pub struct SizeLimitsConfig {
     /// Max number of bits in message.

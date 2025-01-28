@@ -702,12 +702,9 @@ mod tests {
                 (4258889371, 3256452222),
             ],
         ] {
-            let result = build_dict_from_sorted_iter(
-                entries.iter().copied(),
-                32,
-                Cell::empty_context(),
-            )
-            .unwrap();
+            let result =
+                build_dict_from_sorted_iter(entries.iter().copied(), 32, Cell::empty_context())
+                    .unwrap();
 
             let mut dict = Dict::<u32, u32>::new();
             for (k, v) in entries {
@@ -733,12 +730,9 @@ mod tests {
                 .collect::<Vec<_>>();
             entries.sort_by_key(|(k, _)| *k);
 
-            let built_from_dict = build_dict_from_sorted_iter(
-                entries.iter().copied(),
-                32,
-                Cell::empty_context(),
-            )
-            .unwrap();
+            let built_from_dict =
+                build_dict_from_sorted_iter(entries.iter().copied(), 32, Cell::empty_context())
+                    .unwrap();
 
             let mut dict = Dict::<u32, u32>::new();
             for (k, v) in entries {

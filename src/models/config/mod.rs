@@ -1088,6 +1088,7 @@ define_config_params! {
     /// Size limits.
     ///
     /// Contains a [`SizeLimitsConfig`].
+    #[serde(transparent)]
     43 => ConfigParam43(SizeLimitsConfig),
 }
 
