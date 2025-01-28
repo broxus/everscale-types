@@ -40,9 +40,6 @@ impl StorageUsed {
             storage.store_u64(account.last_trans_lt)?;
             account.balance.store_into(&mut storage, cx)?;
             account.state.store_into(&mut storage, cx)?;
-            if account.init_code_hash.is_some() {
-                account.init_code_hash.store_into(&mut storage, cx)?;
-            }
             storage.build_ext(cx)?
         };
 
@@ -226,24 +223,12 @@ impl Store for OptionalAccount {
         match &self.0 {
             None => builder.store_bit_zero(),
             Some(account) => {
-                let with_init_code_hash = account.init_code_hash.is_some();
-                ok!(if with_init_code_hash {
-                    builder.store_small_uint(0b0001, 4)
-                } else {
-                    builder.store_bit_one()
-                });
-
+                ok!(builder.store_bit_one());
                 ok!(account.address.store_into(builder, context));
                 ok!(account.storage_stat.store_into(builder, context));
                 ok!(builder.store_u64(account.last_trans_lt));
                 ok!(account.balance.store_into(builder, context));
-                ok!(account.state.store_into(builder, context));
-                if let Some(init_code_hash) = &account.init_code_hash {
-                    ok!(builder.store_bit_one());
-                    builder.store_u256(init_code_hash)
-                } else {
-                    Ok(())
-                }
+                account.state.store_into(builder, context)
             }
         }
     }
@@ -251,17 +236,8 @@ impl Store for OptionalAccount {
 
 impl<'a> Load<'a> for OptionalAccount {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        let with_init_code_hash = if ok!(slice.load_bit()) {
-            false // old version
-        } else if slice.is_data_empty() {
+        if !ok!(slice.load_bit()) {
             return Ok(Self::EMPTY);
-        } else {
-            let tag = ok!(slice.load_small_uint(3));
-            match tag {
-                0 => false, // old version
-                1 => true,  // new version
-                _ => return Err(Error::InvalidData),
-            }
         };
 
         Ok(Self(Some(Account {
@@ -270,11 +246,6 @@ impl<'a> Load<'a> for OptionalAccount {
             last_trans_lt: ok!(slice.load_u64()),
             balance: ok!(CurrencyCollection::load_from(slice)),
             state: ok!(AccountState::load_from(slice)),
-            init_code_hash: if with_init_code_hash {
-                ok!(Option::<HashBytes>::load_from(slice))
-            } else {
-                None
-            },
         })))
     }
 }
@@ -300,8 +271,6 @@ pub struct Account {
     pub balance: CurrencyCollection,
     /// Account state.
     pub state: AccountState,
-    /// Optional initial code hash.
-    pub init_code_hash: Option<HashBytes>,
 }
 
 /// State of an existing account.
