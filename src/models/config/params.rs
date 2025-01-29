@@ -237,6 +237,25 @@ impl WorkchainFormatExtended {
             && self.max_addr_len <= Uint12::new(1023)
             && self.addr_len_step <= Uint12::new(1023)
     }
+
+    /// Checks that address length is in a valid range and is aligned to the len step.
+    pub fn check_addr_len(&self, addr_len: u16) -> bool {
+        let addr_len = Uint12::new(addr_len);
+
+        let is_aligned = || {
+            if self.addr_len_step.is_zero() {
+                return false;
+            }
+
+            let var_part = addr_len - self.min_addr_len;
+            let step_rem = var_part.into_inner() % self.addr_len_step.into_inner();
+            step_rem == 0
+        };
+
+        addr_len >= self.min_addr_len
+            && addr_len <= self.max_addr_len
+            && (addr_len == self.min_addr_len || addr_len == self.max_addr_len || is_aligned())
+    }
 }
 
 /// Block creation reward.
