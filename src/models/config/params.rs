@@ -486,9 +486,9 @@ pub struct MsgForwardPrices {
     pub cell_price: u64,
     /// TODO: add docs
     pub ihr_price_factor: u32,
-    /// TODO: add docs
+    /// Part of fees that is included to the first block.
     pub first_frac: u16,
-    /// TODO: add docs
+    /// Part of fees that goes to transit blocks.
     pub next_frac: u16,
 }
 
@@ -501,6 +501,16 @@ impl MsgForwardPrices {
                 .saturating_add(stats.bit_count as u128 * self.bit_price as u128),
         );
         Tokens::new(lump.saturating_add(extra))
+    }
+
+    /// Computes the part of the fees that is included to the total fees of the current block.
+    pub fn get_first_part(&self, total: Tokens) -> Tokens {
+        Tokens::new(total.into_inner().saturating_mul(self.first_frac as _) >> 16)
+    }
+
+    /// Computes the part of the fees that is included to the total fees of the transit block.
+    pub fn get_next_part(&self, total: Tokens) -> Tokens {
+        Tokens::new(total.into_inner().saturating_mul(self.next_frac as _) >> 16)
     }
 }
 
