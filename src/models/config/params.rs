@@ -639,7 +639,7 @@ pub struct CollationConfig {
 /// ```
 #[cfg(feature = "tycho")]
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load, Default)]
-#[tlb(tag = "#00")]
+#[tlb(tag = ["#00", "#01"])]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MsgsExecutionParams {
     /// Maximum limit of messages buffer.
@@ -674,6 +674,10 @@ pub struct MsgsExecutionParams {
     /// The fractions of message group slots
     /// for messages subgroups
     pub group_slots_fractions: Dict<u16, u8>,
+
+    /// The maximum number of blocks messages in one range.
+    #[tlb(since_tag = 1)]
+    pub range_messages_limit: u32,
 }
 
 /// Params to calculate the collation work in wu.
