@@ -749,6 +749,27 @@ impl<'a> Load<'a> for MsgInfo {
     }
 }
 
+impl From<IntMsgInfo> for MsgInfo {
+    #[inline]
+    fn from(value: IntMsgInfo) -> Self {
+        Self::Int(value)
+    }
+}
+
+impl From<ExtInMsgInfo> for MsgInfo {
+    #[inline]
+    fn from(value: ExtInMsgInfo) -> Self {
+        Self::ExtIn(value)
+    }
+}
+
+impl From<ExtOutMsgInfo> for MsgInfo {
+    #[inline]
+    fn from(value: ExtOutMsgInfo) -> Self {
+        Self::ExtOut(value)
+    }
+}
+
 /// Internal message info.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

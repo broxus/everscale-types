@@ -322,6 +322,20 @@ impl<'a> Load<'a> for TxInfo {
     }
 }
 
+impl From<OrdinaryTxInfo> for TxInfo {
+    #[inline]
+    fn from(value: OrdinaryTxInfo) -> Self {
+        Self::Ordinary(value)
+    }
+}
+
+impl From<TickTockTxInfo> for TxInfo {
+    #[inline]
+    fn from(value: TickTockTxInfo) -> Self {
+        Self::TickTock(value)
+    }
+}
+
 /// Ordinary transaction info.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
