@@ -265,7 +265,7 @@ impl StdAddr {
 
                 #[cfg(not(fuzzing))]
                 {
-                    let crc = crc_16(&buffer[..34]);
+                    let crc = crate::crc::crc_16(&buffer[..34]);
                     if buffer[34] as u16 != (crc >> 8) || buffer[35] as u16 != (crc & 0xff) {
                         return Err(ParseAddrError::BadFormat);
                     }
@@ -645,7 +645,7 @@ impl std::fmt::Display for DisplayBase64StdAddr<'_> {
         buffer[1] = self.addr.workchain as u8;
         buffer[2..34].copy_from_slice(self.addr.address.as_array());
 
-        let crc = crc_16(&buffer[..34]);
+        let crc = crate::crc::crc_16(&buffer[..34]);
         buffer[34] = (crc >> 8) as u8;
         buffer[35] = (crc & 0xff) as u8;
 

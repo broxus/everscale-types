@@ -131,6 +131,7 @@ extern crate self as everscale_types;
 
 pub mod boc;
 pub mod cell;
+pub mod crc;
 pub mod dict;
 pub mod merkle;
 pub mod num;
