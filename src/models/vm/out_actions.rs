@@ -140,6 +140,7 @@ bitflags! {
 }
 
 /// Library reference.
+#[derive(Debug, Clone)]
 pub enum LibRef {
     /// Hash of the root cell of the library code.
     Hash(HashBytes),
@@ -148,6 +149,7 @@ pub enum LibRef {
 }
 
 /// Output action.
+#[derive(Debug, Clone)]
 pub enum OutAction {
     /// Sends a raw message contained in cell.
     SendMsg {
