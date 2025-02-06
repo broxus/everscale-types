@@ -40,6 +40,11 @@ impl CurrencyCollection {
         }
     }
 
+    /// Returns whether balance in tokens and extra currencies is empty.
+    pub fn is_zero(&self) -> bool {
+        self.tokens.is_zero() && self.other.is_empty()
+    }
+
     /// Returns the number of data bits that this struct occupies.
     pub const fn bit_len(&self) -> u16 {
         self.tokens.unwrap_bit_len() + 1
@@ -184,6 +189,31 @@ impl ExtraCurrencyCollection {
         &mut self.0
     }
 
+    /// Removes all currencies with zero balance.
+    pub fn normalized(&self) -> Result<Self, Error> {
+        let mut result = self.clone();
+        for entry in self.0.iter() {
+            let (currency_id, other) = ok!(entry);
+            if other.is_zero() {
+                ok!(result.0.remove(currency_id));
+            }
+        }
+        Ok(result)
+    }
+
+    /// Removes all currencies with zero balance.
+    pub fn normalize(&mut self) -> Result<(), Error> {
+        let mut result = self.clone();
+        for entry in self.0.iter() {
+            let (currency_id, other) = ok!(entry);
+            if other.is_zero() {
+                ok!(result.0.remove(currency_id));
+            }
+        }
+        *self = result;
+        Ok(())
+    }
+
     /// Checked extra currency collection addition.
     /// Computes `self + rhs` for each currency, returning `Err`
     /// if overflow occurred or dictionaries had invalid structure.
@@ -194,7 +224,12 @@ impl ExtraCurrencyCollection {
 
             let existing = ok!(result.as_dict().get(currency_id)).unwrap_or_default();
             match existing.checked_add(&other) {
-                Some(ref value) => ok!(result.0.set(currency_id, value)),
+                Some(value) if value.is_zero() => {
+                    ok!(result.0.remove(currency_id));
+                }
+                Some(ref value) => {
+                    ok!(result.0.set(currency_id, value));
+                }
                 None => return Err(Error::IntOverflow),
             };
         }
@@ -211,7 +246,12 @@ impl ExtraCurrencyCollection {
 
             let existing = ok!(result.as_dict().get(currency_id)).unwrap_or_default();
             match existing.checked_sub(&other) {
-                Some(ref value) => ok!(result.0.set(currency_id, value)),
+                Some(value) if value.is_zero() => {
+                    ok!(result.0.remove(currency_id));
+                }
+                Some(ref value) => {
+                    ok!(result.0.set(currency_id, value));
+                }
                 None => return Err(Error::IntOverflow),
             };
         }
