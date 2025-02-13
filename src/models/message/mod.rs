@@ -541,6 +541,50 @@ impl RelaxedMsgInfo {
     }
 }
 
+impl From<RelaxedIntMsgInfo> for RelaxedMsgInfo {
+    #[inline]
+    fn from(info: RelaxedIntMsgInfo) -> Self {
+        Self::Int(info)
+    }
+}
+
+impl From<RelaxedExtOutMsgInfo> for RelaxedMsgInfo {
+    #[inline]
+    fn from(info: RelaxedExtOutMsgInfo) -> Self {
+        Self::ExtOut(info)
+    }
+}
+
+impl From<IntMsgInfo> for RelaxedMsgInfo {
+    #[inline]
+    fn from(info: IntMsgInfo) -> Self {
+        Self::Int(RelaxedIntMsgInfo {
+            ihr_disabled: info.ihr_disabled,
+            bounce: info.bounce,
+            bounced: info.bounced,
+            src: Some(info.src),
+            dst: info.dst,
+            value: info.value,
+            ihr_fee: info.ihr_fee,
+            fwd_fee: info.fwd_fee,
+            created_lt: info.created_lt,
+            created_at: info.created_at,
+        })
+    }
+}
+
+impl From<ExtOutMsgInfo> for RelaxedMsgInfo {
+    #[inline]
+    fn from(info: ExtOutMsgInfo) -> Self {
+        Self::ExtOut(RelaxedExtOutMsgInfo {
+            src: Some(info.src),
+            dst: info.dst,
+            created_lt: info.created_lt,
+            created_at: info.created_at,
+        })
+    }
+}
+
 impl ExactSize for RelaxedMsgInfo {
     #[inline]
     fn exact_size(&self) -> Size {
