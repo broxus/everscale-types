@@ -922,10 +922,10 @@ impl FunctionBuilder {
     /// Sets method output types to the specified list of named arguments.
     pub fn with_outputs<I, T>(mut self, outputs: I) -> Self
     where
-        I: IntoIterator<Item = NamedAbiType>,
+        I: IntoIterator<Item = T>,
         T: Into<NamedAbiType>,
     {
-        self.outputs = outputs.into_iter().collect();
+        self.outputs = outputs.into_iter().map(Into::into).collect();
         self
     }
 
