@@ -103,6 +103,26 @@ impl Store for MerkleUpdate {
     }
 }
 
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for MerkleUpdate {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let old = Cell::arbitrary(u).and_then(crate::arbitrary::check_max_depth)?;
+        let new = Cell::arbitrary(u).and_then(crate::arbitrary::check_max_depth)?;
+        Ok(Self {
+            old_hash: *old.hash(0),
+            new_hash: *new.hash(0),
+            old_depth: old.depth(0),
+            new_depth: new.depth(0),
+            old,
+            new,
+        })
+    }
+
+    fn size_hint(_: usize) -> (usize, Option<usize>) {
+        (4, None)
+    }
+}
+
 impl MerkleUpdate {
     /// The number of data bits that the Merkle update occupies.
     pub const BITS: u16 = 8 + (256 + 16) * 2;

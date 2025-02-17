@@ -152,6 +152,22 @@ impl Store for MerkleProof {
     }
 }
 
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for MerkleProof {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let cell = Cell::arbitrary(u).and_then(crate::arbitrary::check_max_depth)?;
+        Ok(Self {
+            hash: *cell.hash(0),
+            depth: cell.depth(0),
+            cell,
+        })
+    }
+
+    fn size_hint(_: usize) -> (usize, Option<usize>) {
+        (2, None)
+    }
+}
+
 impl MerkleProof {
     /// The number of data bits that the Merkle proof occupies.
     pub const BITS: u16 = 8 + 256 + 16;

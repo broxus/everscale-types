@@ -149,6 +149,31 @@ impl AugDictExtra for CurrencyCollection {
     }
 }
 
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for CurrencyCollection {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self {
+            tokens: u.arbitrary()?,
+            other: u.arbitrary()?,
+        })
+    }
+
+    #[inline]
+    fn size_hint(depth: usize) -> (usize, Option<usize>) {
+        Self::try_size_hint(depth).unwrap_or_default()
+    }
+
+    #[inline]
+    fn try_size_hint(
+        depth: usize,
+    ) -> Result<(usize, Option<usize>), arbitrary::MaxRecursionReached> {
+        Ok(arbitrary::size_hint::and(
+            <Tokens as arbitrary::Arbitrary>::try_size_hint(depth)?,
+            <ExtraCurrencyCollection as arbitrary::Arbitrary>::try_size_hint(depth)?,
+        ))
+    }
+}
+
 /// Dictionary with amounts for multiple currencies.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -297,6 +322,27 @@ impl ExactSize for ExtraCurrencyCollection {
     #[inline]
     fn exact_size(&self) -> Size {
         self.0.exact_size()
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for ExtraCurrencyCollection {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let size = u.arbitrary::<u8>()?;
+        if size <= 128 {
+            Ok(Self(Dict::new()))
+        } else {
+            let mut dict = Dict::<u32, VarUint248>::new();
+            for _ in 128..size {
+                dict.set(u.arbitrary::<u32>()?, u.arbitrary::<VarUint248>()?)
+                    .unwrap();
+            }
+            Ok(Self(dict))
+        }
+    }
+
+    fn size_hint(_: usize) -> (usize, Option<usize>) {
+        (1, None)
     }
 }
 

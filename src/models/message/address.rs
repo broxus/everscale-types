@@ -205,6 +205,33 @@ impl<'de> serde::Deserialize<'de> for IntAddr {
     }
 }
 
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for IntAddr {
+    #[inline]
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        if u.ratio(1u8, 20u8)? {
+            u.arbitrary().map(Self::Var)
+        } else {
+            u.arbitrary().map(Self::Std)
+        }
+    }
+
+    #[inline]
+    fn size_hint(depth: usize) -> (usize, Option<usize>) {
+        Self::try_size_hint(depth).unwrap_or_default()
+    }
+
+    #[inline]
+    fn try_size_hint(
+        depth: usize,
+    ) -> Result<(usize, Option<usize>), arbitrary::MaxRecursionReached> {
+        Ok(arbitrary::size_hint::and(
+            <u8 as arbitrary::Arbitrary>::try_size_hint(depth)?,
+            arbitrary::size_hint::or(StdAddr::size_hint(depth), VarAddr::size_hint(depth)),
+        ))
+    }
+}
+
 /// Standard internal address.
 #[derive(Debug, Default, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct StdAddr {
@@ -538,6 +565,23 @@ impl<'de> serde::Deserialize<'de> for StdAddr {
     }
 }
 
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for StdAddr {
+    #[inline]
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self {
+            anycast: u.ratio(1u8, 20u8)?.then(|| u.arbitrary()).transpose()?,
+            workchain: u.arbitrary()?,
+            address: u.arbitrary()?,
+        })
+    }
+
+    #[inline]
+    fn size_hint(depth: usize) -> (usize, Option<usize>) {
+        arbitrary::size_hint::and(Option::<Anycast>::size_hint(depth), (33, Some(33)))
+    }
+}
+
 /// A helper struct to work with base64-encoded addresses.
 #[cfg(feature = "base64")]
 pub struct StdAddrBase64Repr<const URL_SAFE: bool = true>;
@@ -750,6 +794,37 @@ impl Addr for VarAddr {
     }
 }
 
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for VarAddr {
+    #[inline]
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let anycast = u.ratio(1u8, 20u8)?.then(|| u.arbitrary()).transpose()?;
+        let address_len = u.arbitrary::<Uint9>()?;
+        let workchain = u.arbitrary()?;
+
+        let bit_len = address_len.into_inner() as usize;
+        let mut address = u.bytes(bit_len.div_ceil(8))?.to_vec();
+        if let Some(last_byte) = address.last_mut() {
+            let rem = bit_len % 8;
+            if rem != 0 {
+                *last_byte &= u8::MAX << (8 - rem);
+            }
+        }
+
+        Ok(Self {
+            anycast,
+            address_len,
+            workchain,
+            address,
+        })
+    }
+
+    #[inline]
+    fn size_hint(_: usize) -> (usize, Option<usize>) {
+        (1 + 2 + 4, None)
+    }
+}
+
 /// External address.
 ///
 /// ```text
@@ -858,6 +933,29 @@ impl<'de> serde::Deserialize<'de> for ExtAddr {
     }
 }
 
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for ExtAddr {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let data_bit_len = u.arbitrary::<Uint9>()?;
+
+        let bit_len = data_bit_len.into_inner() as usize;
+        let mut data = u.bytes(bit_len.div_ceil(8))?.to_vec();
+        if let Some(last_byte) = data.last_mut() {
+            let rem = bit_len % 8;
+            if rem != 0 {
+                *last_byte &= u8::MAX << (8 - rem);
+            }
+        }
+
+        Ok(Self { data_bit_len, data })
+    }
+
+    #[inline]
+    fn size_hint(_: usize) -> (usize, Option<usize>) {
+        (2, None)
+    }
+}
+
 /// Anycast prefix info.
 ///
 /// ```text
@@ -937,6 +1035,25 @@ impl<'a> Load<'a> for Anycast {
             depth,
             rewrite_prefix,
         })
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for Anycast {
+    #[inline]
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let split_depth = SplitDepth::arbitrary(u)?;
+        let bit_len = split_depth.into_bit_len();
+
+        let bytes = u.bytes(bit_len.div_ceil(8) as _)?;
+
+        let b = CellBuilder::from_raw_data(bytes, bit_len).unwrap();
+        Ok(Self::from_slice(&b.as_data_slice()).unwrap())
+    }
+
+    #[inline]
+    fn size_hint(_: usize) -> (usize, Option<usize>) {
+        (2, Some(5))
     }
 }
 

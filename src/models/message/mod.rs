@@ -361,6 +361,7 @@ impl<'a, T: Load<'a>> Load<'a> for SliceOrCell<T> {
 /// Message payload layout.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct MessageLayout {
     /// Whether to store state init in a child cell.
     pub init_to_cell: bool,
@@ -509,6 +510,7 @@ impl DetailedMessageLayout {
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(tag = "ty"))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum RelaxedMsgInfo {
     /// Internal message info,
     Int(RelaxedIntMsgInfo),
@@ -631,6 +633,7 @@ impl<'a> Load<'a> for RelaxedMsgInfo {
 
 /// Message type.
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum MsgType {
     /// Internal message.
     Int,
@@ -683,6 +686,7 @@ impl<'a> Load<'a> for MsgType {
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(tag = "ty"))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum MsgInfo {
     /// Internal message info,
     Int(IntMsgInfo),
@@ -817,6 +821,7 @@ impl From<ExtOutMsgInfo> for MsgInfo {
 /// Internal message info.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct IntMsgInfo {
     /// Whether IHR is disabled for the message.
     pub ihr_disabled: bool,
@@ -912,6 +917,7 @@ impl<'a> Load<'a> for IntMsgInfo {
 /// Unfinished internal message info.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RelaxedIntMsgInfo {
     /// Whether IHR is disabled for the message.
     pub ihr_disabled: bool,
@@ -1007,6 +1013,7 @@ impl<'a> Load<'a> for RelaxedIntMsgInfo {
 /// External incoming message info.
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ExtInMsgInfo {
     /// Optional external source address.
     #[cfg_attr(
@@ -1062,6 +1069,7 @@ impl<'a> Load<'a> for ExtInMsgInfo {
 /// External outgoing message info.
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ExtOutMsgInfo {
     /// Internal source address.
     pub src: IntAddr,
@@ -1114,6 +1122,7 @@ impl<'a> Load<'a> for ExtOutMsgInfo {
 /// Unfinalized external outgoing message info.
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RelaxedExtOutMsgInfo {
     /// Optional internal source address.
     pub src: Option<IntAddr>,

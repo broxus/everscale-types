@@ -1083,6 +1083,94 @@ impl CellBuilder {
     }
 }
 
+/// Generates a fully random builder with any type of child cells.
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for CellBuilder {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        match u.arbitrary::<CellType>()? {
+            CellType::Ordinary => {
+                let bit_len = u.int_in_range(0..=MAX_BIT_LEN)?;
+                let refs = u.int_in_range(0..=4)?;
+
+                let mut b = CellBuilder::new();
+                b.store_raw(u.bytes(bit_len.div_ceil(8) as _)?, bit_len)
+                    .unwrap();
+
+                let mut children = ArrayVec::<Cell, 4>::new();
+                for i in 0..refs as u8 {
+                    let cell = 'cell: {
+                        if i > 0 {
+                            // Allow to reuse cells.
+                            if let Some(i) = u.int_in_range(0..=i)?.checked_sub(1) {
+                                break 'cell children.get(i).cloned().unwrap();
+                            }
+                        }
+
+                        u.arbitrary::<Cell>()
+                            .and_then(crate::arbitrary::check_max_depth)?
+                    };
+
+                    b.store_reference(cell.clone()).unwrap();
+
+                    // SAFETY: `refs` is at most 4.
+                    unsafe { children.push(cell) };
+                }
+
+                Ok(b)
+            }
+            CellType::PrunedBranch => {
+                let level_mask = LevelMask::new(u.int_in_range(0b001..=0b111)?);
+
+                let mut b = CellBuilder::new();
+                b.set_exotic(true);
+                b.store_u16(u16::from_be_bytes([
+                    CellType::PrunedBranch.to_byte(),
+                    level_mask.to_byte(),
+                ]))
+                .unwrap();
+
+                let level_count = level_mask.level() as usize;
+
+                let hashes = 32 * level_count;
+                b.store_raw(u.bytes(hashes)?, hashes as u16 * 8).unwrap();
+
+                for _ in 0..level_count {
+                    b.store_u16(u.int_in_range(0..=(u16::MAX - 1))?).unwrap();
+                }
+
+                Ok(b)
+            }
+            CellType::LibraryReference => {
+                let hash = u.bytes(32)?;
+
+                let mut b = CellBuilder::new();
+                b.set_exotic(true);
+                b.store_u8(CellType::LibraryReference.to_byte()).unwrap();
+                b.store_raw(hash, 256).unwrap();
+                Ok(b)
+            }
+            CellType::MerkleProof => {
+                let mut b = CellBuilder::new();
+                u.arbitrary::<crate::merkle::MerkleProof>()?
+                    .store_into(&mut b, Cell::empty_context())
+                    .unwrap();
+                Ok(b)
+            }
+            CellType::MerkleUpdate => {
+                let mut b = CellBuilder::new();
+                u.arbitrary::<crate::merkle::MerkleUpdate>()?
+                    .store_into(&mut b, Cell::empty_context())
+                    .unwrap();
+                Ok(b)
+            }
+        }
+    }
+
+    fn size_hint(_: usize) -> (usize, Option<usize>) {
+        (3, None)
+    }
+}
+
 /// Builder for constructing cell references array.
 ///
 /// Can be used later for [`CellBuilder::set_references`].

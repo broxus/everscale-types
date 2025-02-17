@@ -388,6 +388,22 @@ impl<'de> serde::Deserialize<'de> for VarUint248 {
     }
 }
 
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for VarUint248 {
+    #[inline]
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self::from_words(
+            u.int_in_range(0..=(u128::MAX >> 8))?,
+            u.arbitrary()?,
+        ))
+    }
+
+    #[inline]
+    fn size_hint(_: usize) -> (usize, Option<usize>) {
+        (32, Some(32))
+    }
+}
+
 impl std::ops::Add<u128> for VarUint248 {
     type Output = Self;
 

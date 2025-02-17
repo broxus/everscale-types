@@ -219,6 +219,16 @@ impl DynCell {
         self.depth(LevelMask::MAX_LEVEL)
     }
 
+    /// Returns `true` if any of cell levels has the maximum depth.
+    pub fn has_max_depth(&self) -> bool {
+        for level in self.descriptor().level_mask() {
+            if self.depth(level) == u16::MAX {
+                return false;
+            }
+        }
+        true
+    }
+
     /// Returns true if the cell is empty (no bits, no refs).
     pub fn is_empty(&self) -> bool {
         self.hash(LevelMask::MAX_LEVEL) == EMPTY_CELL_HASH
@@ -379,6 +389,26 @@ impl serde::Serialize for DynCell {
         } else {
             serializer.serialize_bytes(&boc)
         }
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for Cell {
+    #[inline]
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(u.arbitrary::<CellBuilder>()?.build().unwrap())
+    }
+
+    #[inline]
+    fn size_hint(depth: usize) -> (usize, Option<usize>) {
+        Self::try_size_hint(depth).unwrap_or_default()
+    }
+
+    #[inline]
+    fn try_size_hint(
+        depth: usize,
+    ) -> Result<(usize, Option<usize>), arbitrary::MaxRecursionReached> {
+        <CellBuilder as arbitrary::Arbitrary>::try_size_hint(depth)
     }
 }
 
@@ -892,6 +922,19 @@ impl<'de> serde::Deserialize<'de> for HashBytes {
     }
 }
 
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for HashBytes {
+    #[inline]
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        u.arbitrary().map(Self)
+    }
+
+    #[inline]
+    fn size_hint(_: usize) -> (usize, Option<usize>) {
+        (32, Some(32))
+    }
+}
+
 /// Hash of an empty (0 bits of data, no refs) ordinary cell.
 pub static EMPTY_CELL_HASH: &HashBytes = HashBytes::wrap(&[
     0x96, 0xa2, 0x96, 0xd2, 0x24, 0xf2, 0x85, 0xc6, 0x7b, 0xee, 0x93, 0xc3, 0x0f, 0x8a, 0x30, 0x91,
@@ -983,6 +1026,27 @@ impl From<CellType> for u8 {
     #[inline]
     fn from(cell_type: CellType) -> u8 {
         cell_type.to_byte()
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for CellType {
+    #[inline]
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        static ALL_TYPES: [CellType; 5] = [
+            CellType::Ordinary,
+            CellType::PrunedBranch,
+            CellType::LibraryReference,
+            CellType::MerkleProof,
+            CellType::MerkleUpdate,
+        ];
+
+        u.choose(&ALL_TYPES).copied()
+    }
+
+    #[inline]
+    fn size_hint(_: usize) -> (usize, Option<usize>) {
+        (1, Some(1))
     }
 }
 
@@ -1251,6 +1315,18 @@ impl From<LevelMask> for u8 {
 impl std::fmt::Debug for LevelMask {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("{:03b}", self.0))
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for LevelMask {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        u.int_in_range(0b000..=0b111).map(Self::new)
+    }
+
+    #[inline]
+    fn size_hint(_: usize) -> (usize, Option<usize>) {
+        (1, Some(1))
     }
 }
 

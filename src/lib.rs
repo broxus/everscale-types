@@ -145,7 +145,7 @@ pub mod models;
 pub mod abi;
 
 #[cfg(feature = "arbitrary")]
-mod arbitrary;
+pub mod arbitrary;
 
 pub mod error;
 

@@ -12,6 +12,7 @@ use crate::models::Lazy;
 /// Amount of unique cells and bits for shard states.
 #[derive(Debug, Default, Clone, Eq, PartialEq, Store, Load)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct StorageUsed {
     /// Amount of unique cells.
     pub cells: VarUint56,
@@ -64,6 +65,7 @@ impl StorageUsed {
 /// Amount of unique cells and bits.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Store, Load)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct StorageUsedShort {
     /// Amount of unique cells.
     pub cells: VarUint56,
@@ -82,6 +84,7 @@ impl StorageUsedShort {
 /// Storage profile of an account.
 #[derive(Debug, Default, Clone, Eq, PartialEq, Store, Load)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct StorageInfo {
     /// Amount of unique cells and bits which account state occupies.
     pub used: StorageUsed,
@@ -94,6 +97,7 @@ pub struct StorageInfo {
 /// Brief account status.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum AccountStatus {
     /// Account exists but has not yet been deployed.
     Uninit = 0b00,
@@ -154,6 +158,33 @@ impl ShardAccount {
     pub fn load_account(&self) -> Result<Option<Account>, Error> {
         let OptionalAccount(account) = ok!(self.account.load());
         Ok(account)
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for ShardAccount {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let account = u.arbitrary::<OptionalAccount>()?;
+        Ok(Self {
+            account: Lazy::new(&account).unwrap(),
+            last_trans_hash: u.arbitrary()?,
+            last_trans_lt: u.arbitrary()?,
+        })
+    }
+
+    #[inline]
+    fn size_hint(depth: usize) -> (usize, Option<usize>) {
+        Self::try_size_hint(depth).unwrap_or_default()
+    }
+
+    fn try_size_hint(
+        depth: usize,
+    ) -> arbitrary::Result<(usize, Option<usize>), arbitrary::MaxRecursionReached> {
+        Ok(arbitrary::size_hint::and_all(&[
+            <OptionalAccount as arbitrary::Arbitrary>::try_size_hint(depth)?,
+            <HashBytes as arbitrary::Arbitrary>::try_size_hint(depth)?,
+            <u64 as arbitrary::Arbitrary>::try_size_hint(depth)?,
+        ]))
     }
 }
 
@@ -257,9 +288,32 @@ impl From<Account> for OptionalAccount {
     }
 }
 
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for OptionalAccount {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        u.ratio(9u8, 10u8)?
+            .then(|| u.arbitrary())
+            .transpose()
+            .map(Self)
+    }
+
+    #[inline]
+    fn size_hint(depth: usize) -> (usize, Option<usize>) {
+        Self::try_size_hint(depth).unwrap_or_default()
+    }
+
+    #[inline]
+    fn try_size_hint(
+        depth: usize,
+    ) -> arbitrary::Result<(usize, Option<usize>), arbitrary::MaxRecursionReached> {
+        <Option<Account>>::try_size_hint(depth)
+    }
+}
+
 /// Existing account data.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Account {
     /// Account address.
     pub address: IntAddr,
@@ -277,6 +331,7 @@ pub struct Account {
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(tag = "status"))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum AccountState {
     /// Account exists but has not yet been deployed.
     Uninit,
@@ -394,9 +449,57 @@ impl ExactSize for StateInit {
     }
 }
 
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for StateInit {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let split_depth = u.ratio(1u8, 50u8)?.then(|| u.arbitrary()).transpose()?;
+        let special = u.ratio(1u8, 50u8)?.then(|| u.arbitrary()).transpose()?;
+        let code = u.ratio(9u8, 10u8)?.then(|| u.arbitrary()).transpose()?;
+        let data = u.ratio(9u8, 10u8)?.then(|| u.arbitrary()).transpose()?;
+
+        let mut libraries = Dict::new();
+        match u.arbitrary::<u8>()? {
+            0..=128 => {}
+            n => {
+                for _ in 128..n {
+                    libraries
+                        .set(u.arbitrary::<HashBytes>()?, u.arbitrary::<SimpleLib>()?)
+                        .unwrap();
+                }
+            }
+        }
+
+        Ok(Self {
+            split_depth,
+            special,
+            code,
+            data,
+            libraries,
+        })
+    }
+
+    #[inline]
+    fn size_hint(depth: usize) -> (usize, Option<usize>) {
+        Self::try_size_hint(depth).unwrap_or_default()
+    }
+
+    fn try_size_hint(
+        depth: usize,
+    ) -> arbitrary::Result<(usize, Option<usize>), arbitrary::MaxRecursionReached> {
+        Ok(arbitrary::size_hint::and_all(&[
+            <Option<SplitDepth>>::try_size_hint(depth)?,
+            <Option<SpecialFlags>>::try_size_hint(depth)?,
+            <Option<Cell>>::try_size_hint(depth)?,
+            <Option<Cell>>::try_size_hint(depth)?,
+            (1, None),
+        ]))
+    }
+}
+
 /// Special transactions execution flags.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct SpecialFlags {
     /// Account will be called at the beginning of each block.
     pub tick: bool,
@@ -430,6 +533,7 @@ impl<'a> Load<'a> for SpecialFlags {
 /// Simple TVM library.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct SimpleLib {
     /// Whether this library is accessible from other accounts.
     pub public: bool,

@@ -855,6 +855,33 @@ impl_serde!(Uint9, u16);
 impl_serde!(Uint12, u16);
 impl_serde!(Uint15, u16);
 
+#[cfg(feature = "arbitrary")]
+macro_rules! impl_arbitrary {
+    ($($ty:ty => $n:literal),*$(,)?) => {
+        $(impl<'a> arbitrary::Arbitrary<'a> for $ty {
+            #[inline]
+            fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+                u.int_in_range(0..=<$ty>::MAX.into_inner()).map(<$ty>::new)
+            }
+
+            #[inline]
+            fn size_hint(_: usize) -> (usize, Option<usize>) {
+                ($n, Some($n))
+            }
+        })*
+    };
+}
+
+#[cfg(feature = "arbitrary")]
+impl_arbitrary! {
+    Uint9 => 2,
+    Uint12 => 2,
+    Uint15 => 2,
+    VarUint24 => 4,
+    VarUint56 => 8,
+    Tokens => 16,
+}
+
 /// Account split depth. Fixed-length 5-bit integer of range `1..=30`
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Ord, PartialOrd)]
 #[repr(transparent)]
@@ -948,6 +975,20 @@ impl<'de> serde::Deserialize<'de> for SplitDepth {
             Ok(value) => Self::new(value).map_err(serde::de::Error::custom),
             Err(e) => Err(e),
         }
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for SplitDepth {
+    #[inline]
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        const MIN: u8 = SplitDepth::MIN.into_bit_len() as u8;
+        const MAX: u8 = SplitDepth::MAX.into_bit_len() as u8;
+        Ok(Self::new(u.int_in_range(MIN..=MAX)?).unwrap())
+    }
+
+    fn size_hint(_: usize) -> (usize, Option<usize>) {
+        (1, Some(1))
     }
 }
 
