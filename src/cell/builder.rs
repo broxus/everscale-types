@@ -318,6 +318,32 @@ impl CellBuilder {
         build_from_ext_impl(&data, context)
     }
 
+    /// Builds a new library cell referencing the specified library.
+    ///
+    /// Uses the default cell context.
+    #[inline]
+    pub fn build_library<T: AsRef<[u8; 32]>>(hash: &T) -> Cell {
+        Self::build_library_ext(hash, Cell::empty_context())
+    }
+
+    /// Builds a new library cell referencing the specified library.
+    ///
+    /// Uses the specified cell context.
+    #[inline]
+    pub fn build_library_ext<T: AsRef<[u8; 32]>>(hash: &T, context: &dyn CellContext) -> Cell {
+        fn build_library_ext_impl(
+            hash: &[u8; 32],
+            context: &dyn CellContext,
+        ) -> Result<Cell, Error> {
+            let mut b = CellBuilder::new();
+            b.set_exotic(true);
+            ok!(b.store_u8(CellType::LibraryReference.to_byte()));
+            ok!(b.store_u256(HashBytes::wrap(hash)));
+            b.build_ext(context)
+        }
+        build_library_ext_impl(hash.as_ref(), context).unwrap()
+    }
+
     /// Creates an empty cell builder.
     pub const fn new() -> Self {
         Self {

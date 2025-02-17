@@ -144,6 +144,9 @@ pub mod models;
 #[cfg(feature = "abi")]
 pub mod abi;
 
+#[cfg(feature = "arbitrary")]
+mod arbitrary;
+
 pub mod error;
 
 #[cfg(test)]
