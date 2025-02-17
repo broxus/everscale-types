@@ -53,6 +53,7 @@ impl<'a> Arbitrary<'a> for OrdinaryCell {
 
 /// [`Arbitrary`] helper for generating trees of only ordinary cells.
 #[repr(transparent)]
+#[derive(Debug)]
 pub struct OrdinaryCellBuilder(pub CellBuilder);
 
 impl From<OrdinaryCellBuilder> for CellBuilder {
@@ -101,6 +102,7 @@ impl<'a> Arbitrary<'a> for OrdinaryCellBuilder {
 
 /// [`Arbitrary`] helper for generating a "real-life" balance.
 #[cfg(feature = "models")]
+#[derive(Debug)]
 #[repr(transparent)]
 pub struct SimpleBalance(pub crate::models::CurrencyCollection);
 

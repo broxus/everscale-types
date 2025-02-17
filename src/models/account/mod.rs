@@ -462,9 +462,11 @@ impl<'a> arbitrary::Arbitrary<'a> for StateInit {
             0..=128 => {}
             n => {
                 for _ in 128..n {
-                    libraries
-                        .set(u.arbitrary::<HashBytes>()?, u.arbitrary::<SimpleLib>()?)
-                        .unwrap();
+                    let lib = u.arbitrary::<SimpleLib>()?;
+                    if lib.root.level() != 0 || lib.root.has_max_depth() {
+                        return Err(arbitrary::Error::IncorrectFormat);
+                    }
+                    libraries.set(u.arbitrary::<HashBytes>()?, lib).unwrap();
                 }
             }
         }

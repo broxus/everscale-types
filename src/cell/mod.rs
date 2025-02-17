@@ -223,10 +223,10 @@ impl DynCell {
     pub fn has_max_depth(&self) -> bool {
         for level in self.descriptor().level_mask() {
             if self.depth(level) == u16::MAX {
-                return false;
+                return true;
             }
         }
-        true
+        false
     }
 
     /// Returns true if the cell is empty (no bits, no refs).

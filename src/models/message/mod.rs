@@ -133,6 +133,37 @@ where
     }
 }
 
+#[cfg(feature = "arbitrary")]
+impl<'a, I: arbitrary::Arbitrary<'a>> arbitrary::Arbitrary<'a> for BaseMessage<I, CellSliceParts> {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self {
+            info: u.arbitrary()?,
+            init: u.arbitrary()?,
+            body: {
+                let cell = u.arbitrary::<Cell>()?;
+                let range = CellSliceRange::full(cell.as_ref());
+                (cell, range)
+            },
+            layout: u.arbitrary()?,
+        })
+    }
+
+    fn size_hint(depth: usize) -> (usize, Option<usize>) {
+        Self::try_size_hint(depth).unwrap_or_default()
+    }
+
+    fn try_size_hint(
+        depth: usize,
+    ) -> arbitrary::Result<(usize, Option<usize>), arbitrary::MaxRecursionReached> {
+        Ok(arbitrary::size_hint::and_all(&[
+            <I as arbitrary::Arbitrary>::try_size_hint(depth)?,
+            <Option<StateInit> as arbitrary::Arbitrary>::try_size_hint(depth)?,
+            <Cell as arbitrary::Arbitrary>::try_size_hint(depth)?,
+            <Option<MessageLayout> as arbitrary::Arbitrary>::try_size_hint(depth)?,
+        ]))
+    }
+}
+
 impl<I: Borrow<MsgInfo>, B> BaseMessage<I, B> {
     /// Returns the type of this message.
     pub fn ty(&self) -> MsgType {

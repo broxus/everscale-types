@@ -80,6 +80,18 @@ impl<'a> Load<'a> for SendMsgFlags {
     }
 }
 
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for SendMsgFlags {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        u.arbitrary().map(Self::from_bits_retain)
+    }
+
+    #[inline]
+    fn size_hint(_: usize) -> (usize, Option<usize>) {
+        (1, Some(1))
+    }
+}
+
 bitflags! {
     /// Mode flags for `ReserveCurrency` output action.
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -113,6 +125,18 @@ impl<'a> Load<'a> for ReserveCurrencyFlags {
     }
 }
 
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for ReserveCurrencyFlags {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        u.arbitrary().map(Self::from_bits_retain)
+    }
+
+    #[inline]
+    fn size_hint(_: usize) -> (usize, Option<usize>) {
+        (1, Some(1))
+    }
+}
+
 bitflags! {
     /// Mode flags for `ChangeLibrary` output action.
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -139,6 +163,18 @@ bitflags! {
     }
 }
 
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for ChangeLibraryMode {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        u.arbitrary().map(Self::from_bits_retain)
+    }
+
+    #[inline]
+    fn size_hint(_: usize) -> (usize, Option<usize>) {
+        (1, Some(1))
+    }
+}
+
 /// Library reference.
 #[derive(Debug, Clone)]
 pub enum LibRef {
@@ -146,6 +182,26 @@ pub enum LibRef {
     Hash(HashBytes),
     /// Library code itself.
     Cell(Cell),
+}
+
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for LibRef {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        if u.arbitrary::<bool>()? {
+            u.arbitrary().map(Self::Hash)
+        } else {
+            let crate::arbitrary::OrdinaryCell(code) = u.arbitrary()?;
+            if code.level() != 0 {
+                return Err(arbitrary::Error::IncorrectFormat);
+            }
+            Ok(Self::Cell(code))
+        }
+    }
+
+    #[inline]
+    fn size_hint(_: usize) -> (usize, Option<usize>) {
+        (4, None)
+    }
 }
 
 /// Output action.
@@ -259,5 +315,79 @@ impl<'a> Load<'a> for OutAction {
             }
             _ => return Err(Error::InvalidTag),
         })
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for OutAction {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(match u.int_in_range(0u8..=3u8)? {
+            0 => Self::SendMsg {
+                mode: u.arbitrary()?,
+                out_msg: {
+                    let msg: Lazy<OwnedRelaxedMessage> = u.arbitrary()?;
+                    if msg.inner().level() != 0 {
+                        return Err(arbitrary::Error::IncorrectFormat);
+                    }
+                    msg
+                },
+            },
+            1 => Self::SetCode {
+                new_code: {
+                    let code: Cell = u.arbitrary()?;
+                    if code.level() != 0 {
+                        return Err(arbitrary::Error::IncorrectFormat);
+                    }
+                    code
+                },
+            },
+            2 => Self::ReserveCurrency {
+                mode: u.arbitrary()?,
+                value: u.arbitrary()?,
+            },
+            3 => Self::ChangeLibrary {
+                mode: u.arbitrary()?,
+                lib: {
+                    let lib = u.arbitrary()?;
+                    if let LibRef::Cell(code) = &lib {
+                        if code.level() != 0 {
+                            return Err(arbitrary::Error::IncorrectFormat);
+                        }
+                    }
+                    lib
+                },
+            },
+            _ => unreachable!(),
+        })
+    }
+
+    #[inline]
+    fn size_hint(depth: usize) -> (usize, Option<usize>) {
+        Self::try_size_hint(depth).unwrap_or_default()
+    }
+
+    fn try_size_hint(
+        depth: usize,
+    ) -> arbitrary::Result<(usize, Option<usize>), arbitrary::MaxRecursionReached> {
+        use arbitrary::{size_hint, Arbitrary};
+
+        Ok(size_hint::and(
+            (1, Some(1)),
+            size_hint::or_all(&[
+                size_hint::and(
+                    <SendMsgFlags as Arbitrary>::try_size_hint(depth)?,
+                    <Lazy<OwnedRelaxedMessage> as Arbitrary>::try_size_hint(depth)?,
+                ),
+                <Cell as Arbitrary>::try_size_hint(depth)?,
+                size_hint::and(
+                    <ReserveCurrencyFlags as Arbitrary>::try_size_hint(depth)?,
+                    <CurrencyCollection as Arbitrary>::try_size_hint(depth)?,
+                ),
+                size_hint::and(
+                    <ChangeLibraryMode as Arbitrary>::try_size_hint(depth)?,
+                    <LibRef as Arbitrary>::try_size_hint(depth)?,
+                ),
+            ]),
+        ))
     }
 }

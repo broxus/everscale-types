@@ -210,3 +210,23 @@ where
         }
     }
 }
+
+#[cfg(feature = "arbitrary")]
+impl<'a, T: Store + arbitrary::Arbitrary<'a>> arbitrary::Arbitrary<'a> for Lazy<T> {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let inner = u.arbitrary::<T>()?;
+        Lazy::new(&inner).map_err(|_| arbitrary::Error::IncorrectFormat)
+    }
+
+    #[inline]
+    fn size_hint(depth: usize) -> (usize, Option<usize>) {
+        Self::try_size_hint(depth).unwrap_or_default()
+    }
+
+    #[inline]
+    fn try_size_hint(
+        depth: usize,
+    ) -> arbitrary::Result<(usize, Option<usize>), arbitrary::MaxRecursionReached> {
+        <T as arbitrary::Arbitrary>::try_size_hint(depth)
+    }
+}
