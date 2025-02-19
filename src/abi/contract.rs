@@ -1,11 +1,7 @@
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
-
-use ahash::HashMap;
-use anyhow::Result;
-use serde::Deserialize;
-use sha2::Digest;
 
 use crate::abi::value::ser::AbiSerializer;
 use crate::abi::AbiHeader;
@@ -19,6 +15,12 @@ use crate::models::{
 };
 use crate::num::Tokens;
 use crate::prelude::Dict;
+use ahash::HashMap;
+use anyhow::Result;
+use everscale_types::abi::error::ParseNamedAbiTypeError;
+use serde::__private::de::IdentifierDeserializer;
+use serde::{Deserialize, Deserializer};
+use sha2::Digest;
 
 use super::error::AbiError;
 use super::{AbiHeaderType, AbiType, AbiValue, AbiVersion, NamedAbiType, NamedAbiValue};
@@ -249,6 +251,89 @@ impl<'de> Deserialize<'de> for Contract {
             }
         }
 
+        struct SerdeNamedAbiType {
+            named_abi_type: NamedAbiType,
+            #[serde(default)]
+            init: bool,
+        }
+
+        impl<'de> Deserialize<'de> for SerdeNamedAbiType {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                use serde::de::Error;
+
+                #[derive(Deserialize)]
+                struct Helper<'a> {
+                    name: String,
+                    #[serde(rename = "type", borrow)]
+                    ty: Cow<'a, str>,
+                    #[serde(default)]
+                    init: bool,
+                    #[serde(default)]
+                    components: Option<Vec<Helper<'a>>>,
+                }
+
+                impl From<SerdeNamedAbiType> for NamedAbiType {
+                    fn from(value: SerdeNamedAbiType) -> Self {
+                        Self {
+                            name: value.named_abi_type.name,
+                            ty: value.named_abi_type.ty,
+                        }
+                    }
+                }
+
+                impl TryFrom<Helper<'_>> for SerdeNamedAbiType {
+                    type Error = ParseNamedAbiTypeError;
+
+                    fn try_from(value: Helper<'_>) -> Result<Self, Self::Error> {
+                        let mut ty = match AbiType::from_simple_str(&value.ty) {
+                            Ok(ty) => ty,
+                            Err(error) => {
+                                return Err(ParseNamedAbiTypeError::InvalidType {
+                                    ty: value.ty.into(),
+                                    error,
+                                });
+                            }
+                        };
+
+                        match (ty.components_mut(), value.components) {
+                            (Some(ty), Some(components)) => {
+                                *ty = ok!(components
+                                    .into_iter()
+                                    .map(Self::try_from)
+                                    .map(NamedAbiType::from)
+                                    .collect::<Result<Arc<[_]>, _>>());
+                            }
+                            (Some(_), None) => {
+                                return Err(ParseNamedAbiTypeError::ExpectedComponents {
+                                    ty: value.ty.into(),
+                                })
+                            }
+                            (None, Some(_)) => {
+                                return Err(ParseNamedAbiTypeError::UnexpectedComponents {
+                                    ty: value.ty.into(),
+                                });
+                            }
+                            (None, None) => {}
+                        }
+
+                        Ok(Self {
+                            named_abi_type: NamedAbiType {
+                                name: value.name.into(),
+                                ty,
+                            },
+                            init: value.init,
+                        })
+                    }
+                }
+
+                let helper = ok!(<Helper as Deserialize>::deserialize(deserializer));
+                helper.try_into().map_err(Error::custom)
+            }
+        }
+
         #[derive(Deserialize)]
         struct SerdeContract {
             #[serde(default, rename = "ABI version")]
@@ -263,7 +348,7 @@ impl<'de> Deserialize<'de> for Contract {
             #[serde(default)]
             data: Vec<InitData>,
             #[serde(default)]
-            fields: Vec<NamedAbiType>,
+            fields: Vec<SerdeNamedAbiType>,
         }
 
         #[derive(Deserialize)]
@@ -361,14 +446,27 @@ impl<'de> Deserialize<'de> for Contract {
             })
             .collect();
 
-        let init_data = contract
-            .data
-            .into_iter()
-            .map(|item| {
-                let name = item.ty.name.clone();
-                (name, (item.key, item.ty))
-            })
-            .collect();
+        let init_data = if abi_version >= AbiVersion::V2_4 {
+            contract
+                .fields
+                .clone()
+                .into_iter()
+                .filter(|x| x.init)
+                .map(|item| {
+                    let name = item.named_abi_type.name.clone();
+                    (name, (item.key, item.named_abi_type.ty))
+                })
+                .collect()
+        } else {
+            contract
+                .data
+                .into_iter()
+                .map(|item| {
+                    let name = item.ty.name.clone();
+                    (name, (item.key, item.ty))
+                })
+                .collect()
+        };
 
         Ok(Self {
             abi_version,
@@ -376,7 +474,13 @@ impl<'de> Deserialize<'de> for Contract {
             functions,
             events,
             init_data,
-            fields: Arc::from(contract.fields),
+            fields: Arc::from(
+                contract
+                    .fields
+                    .into_iter()
+                    .map(|x| x.named_abi_type)
+                    .collect(),
+            ),
         })
     }
 }

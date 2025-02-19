@@ -22,6 +22,8 @@ pub struct NamedAbiValue {
     pub name: Arc<str>,
     /// ABI value.
     pub value: AbiValue,
+    /// Item `init` value
+    pub init: bool,
 }
 
 impl NamedAbiValue {
@@ -232,7 +234,9 @@ impl AbiValue {
             AbiValue::Tuple(items) => AbiType::Tuple(
                 items
                     .iter()
-                    .map(|item| NamedAbiType::new(item.name.clone(), item.value.get_type()))
+                    .map(|item| {
+                        NamedAbiType::new(item.name.clone(), item.value.get_type(), item.init)
+                    })
                     .collect(),
             ),
             AbiValue::Array(ty, _) => AbiType::Array(ty.clone()),

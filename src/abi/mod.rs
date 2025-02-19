@@ -48,6 +48,7 @@ impl AbiVersion {
     pub const V2_2: Self = Self::new(2, 2);
     /// Same as 2.2 but uses an address during signing.
     pub const V2_3: Self = Self::new(2, 3);
+    pub const V2_4: Self = Self::new(2, 4);
 
     /// Creates an ABI version from components.
     pub const fn new(major: u8, minor: u8) -> Self {
