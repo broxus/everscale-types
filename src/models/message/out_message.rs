@@ -1,7 +1,7 @@
 use crate::cell::*;
 use crate::error::Error;
 use crate::models::{
-    CurrencyCollection, ExtOutMsgInfo, InMsg, IntMsgInfo, Lazy, Message, MsgEnvelope, MsgInfo,
+    CurrencyCollection, ExtOutMsgInfo, InMsg, IntMsgInfo, Message, MsgEnvelope, MsgInfo,
     OwnedMessage, Transaction,
 };
 
@@ -27,19 +27,19 @@ impl EnqueuedMsg {
 
     /// Loads a message info.
     pub fn load_out_msg_info(&self) -> Result<MsgInfo, Error> {
-        let mut envelope = ok!(self.out_msg_envelope.cell.as_slice());
+        let mut envelope = ok!(self.out_msg_envelope.as_slice());
         MsgInfo::load_from(&mut ok!(envelope.load_reference_as_slice()))
     }
 
     /// Loads a non-owned message.
     pub fn load_out_msg(&self) -> Result<Message<'_>, Error> {
-        let mut envelope = ok!(self.out_msg_envelope.cell.as_slice());
+        let mut envelope = ok!(self.out_msg_envelope.as_slice());
         Message::load_from(&mut ok!(envelope.load_reference_as_slice()))
     }
 
     /// Loads an owned message.
     pub fn load_out_msg_owned(&self) -> Result<OwnedMessage, Error> {
-        let mut envelope = ok!(self.out_msg_envelope.cell.as_slice());
+        let mut envelope = ok!(self.out_msg_envelope.as_slice());
         OwnedMessage::load_from(&mut ok!(envelope.load_reference_as_slice()))
     }
 }
@@ -87,10 +87,10 @@ impl OutMsg {
     pub fn out_msg_envelope_cell(&self) -> Option<Cell> {
         match self {
             Self::External(_) => None,
-            Self::New(msg) => Some(msg.out_msg_envelope.cell.clone()),
-            Self::Immediate(msg) => Some(msg.out_msg_envelope.cell.clone()),
+            Self::New(msg) => Some(msg.out_msg_envelope.inner().clone()),
+            Self::Immediate(msg) => Some(msg.out_msg_envelope.inner().clone()),
             Self::DequeueShort(_) => None,
-            Self::DequeueImmediate(msg) => Some(msg.out_msg_envelope.cell.clone()),
+            Self::DequeueImmediate(msg) => Some(msg.out_msg_envelope.inner().clone()),
         }
     }
 
@@ -119,9 +119,9 @@ impl OutMsg {
     /// Returns a source transaction of the outbound message.
     pub fn transaction_cell(&self) -> Option<Cell> {
         match self {
-            Self::External(msg) => Some(msg.transaction.cell.clone()),
-            Self::New(msg) => Some(msg.transaction.cell.clone()),
-            Self::Immediate(msg) => Some(msg.transaction.cell.clone()),
+            Self::External(msg) => Some(msg.transaction.inner().clone()),
+            Self::New(msg) => Some(msg.transaction.inner().clone()),
+            Self::Immediate(msg) => Some(msg.transaction.inner().clone()),
             Self::DequeueShort(_) => None,
             Self::DequeueImmediate(_) => None,
         }
@@ -150,8 +150,8 @@ impl OutMsg {
     /// Returns a reimport message cell.
     pub fn reimport_msg_cell(&self) -> Option<Cell> {
         match self {
-            Self::Immediate(msg) => Some(msg.reimport.cell.clone()),
-            Self::DequeueImmediate(msg) => Some(msg.reimport.cell.clone()),
+            Self::Immediate(msg) => Some(msg.reimport.inner().clone()),
+            Self::DequeueImmediate(msg) => Some(msg.reimport.inner().clone()),
             _ => None,
         }
     }
@@ -232,7 +232,7 @@ pub struct OutMsgExternal {
 impl OutMsgExternal {
     /// Loads only message info.
     pub fn load_out_msg_info(&self) -> Result<ExtOutMsgInfo, Error> {
-        if let MsgInfo::ExtOut(info) = ok!(<_>::load_from(&mut ok!(self.out_msg.cell.as_slice()))) {
+        if let MsgInfo::ExtOut(info) = ok!(<_>::load_from(&mut ok!(self.out_msg.as_slice()))) {
             Ok(info)
         } else {
             Err(Error::InvalidData)
@@ -276,7 +276,7 @@ impl OutMsgImmediate {
 
     /// Loads only message info.
     pub fn load_out_msg_info(&self) -> Result<IntMsgInfo, Error> {
-        let mut envelope = ok!(self.out_msg_envelope.cell.as_slice());
+        let mut envelope = ok!(self.out_msg_envelope.as_slice());
         let mut message = ok!(envelope.load_reference_as_slice());
         if let MsgInfo::Int(info) = ok!(<_>::load_from(&mut message)) {
             Ok(info)
@@ -287,13 +287,13 @@ impl OutMsgImmediate {
 
     /// Loads a non-owned message.
     pub fn load_out_msg(&self) -> Result<Message<'_>, Error> {
-        let mut envelope = ok!(self.out_msg_envelope.cell.as_slice());
+        let mut envelope = ok!(self.out_msg_envelope.as_slice());
         Message::load_from(&mut ok!(envelope.load_reference_as_slice()))
     }
 
     /// Loads an owned message.
     pub fn load_out_msg_owned(&self) -> Result<OwnedMessage, Error> {
-        let mut envelope = ok!(self.out_msg_envelope.cell.as_slice());
+        let mut envelope = ok!(self.out_msg_envelope.as_slice());
         OwnedMessage::load_from(&mut ok!(envelope.load_reference_as_slice()))
     }
 
@@ -328,7 +328,7 @@ impl OutMsgNew {
 
     /// Loads only message info.
     pub fn load_out_msg_info(&self) -> Result<IntMsgInfo, Error> {
-        let mut envelope = ok!(self.out_msg_envelope.cell.as_slice());
+        let mut envelope = ok!(self.out_msg_envelope.as_slice());
         let mut message = ok!(envelope.load_reference_as_slice());
         if let MsgInfo::Int(info) = ok!(<_>::load_from(&mut message)) {
             Ok(info)
@@ -339,13 +339,13 @@ impl OutMsgNew {
 
     /// Loads a non-owned message.
     pub fn load_out_msg(&self) -> Result<Message<'_>, Error> {
-        let mut envelope = ok!(self.out_msg_envelope.cell.as_slice());
+        let mut envelope = ok!(self.out_msg_envelope.as_slice());
         Message::load_from(&mut ok!(envelope.load_reference_as_slice()))
     }
 
     /// Loads an owned message.
     pub fn load_out_msg_owned(&self) -> Result<OwnedMessage, Error> {
-        let mut envelope = ok!(self.out_msg_envelope.cell.as_slice());
+        let mut envelope = ok!(self.out_msg_envelope.as_slice());
         OwnedMessage::load_from(&mut ok!(envelope.load_reference_as_slice()))
     }
 
@@ -374,7 +374,7 @@ impl OutMsgDequeueImmediate {
 
     /// Loads only message info.
     pub fn load_out_msg_info(&self) -> Result<IntMsgInfo, Error> {
-        let mut envelope = ok!(self.out_msg_envelope.cell.as_slice());
+        let mut envelope = ok!(self.out_msg_envelope.as_slice());
         let mut message = ok!(envelope.load_reference_as_slice());
         if let MsgInfo::Int(info) = ok!(<_>::load_from(&mut message)) {
             Ok(info)
@@ -385,13 +385,13 @@ impl OutMsgDequeueImmediate {
 
     /// Loads a non-owned message.
     pub fn load_out_msg(&self) -> Result<Message<'_>, Error> {
-        let mut envelope = ok!(self.out_msg_envelope.cell.as_slice());
+        let mut envelope = ok!(self.out_msg_envelope.as_slice());
         Message::load_from(&mut ok!(envelope.load_reference_as_slice()))
     }
 
     /// Loads an owned message.
     pub fn load_out_msg_owned(&self) -> Result<OwnedMessage, Error> {
-        let mut envelope = ok!(self.out_msg_envelope.cell.as_slice());
+        let mut envelope = ok!(self.out_msg_envelope.as_slice());
         OwnedMessage::load_from(&mut ok!(envelope.load_reference_as_slice()))
     }
 

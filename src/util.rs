@@ -206,7 +206,7 @@ pub(crate) enum IterStatus {
     /// Iterator is still valid.
     Valid,
     /// Iterator started with a pruned branch cell.
-    Pruned,
+    UnexpectedCell,
     /// [`RawDict`] has invalid structure.
     Broken,
 }
@@ -218,8 +218,8 @@ impl IterStatus {
     }
 
     #[inline]
-    pub(crate) const fn is_pruned(self) -> bool {
-        matches!(self, Self::Pruned)
+    pub(crate) const fn is_unexpected_cell(self) -> bool {
+        matches!(self, Self::UnexpectedCell)
     }
 }
 

@@ -9,7 +9,7 @@ use crate::models::config::{BlockchainConfig, ValidatorDescription};
 use crate::models::currency::CurrencyCollection;
 use crate::models::message::{ImportFees, InMsg, OutMsg};
 use crate::models::transaction::{HashUpdate, Transaction};
-use crate::models::{Lazy, ShardHashes, ShardIdent};
+use crate::models::{ShardHashes, ShardIdent};
 
 /// Block content.
 #[derive(Debug, Clone)]
@@ -81,9 +81,9 @@ impl Store for BlockExtra {
         #[cfg(feature = "tycho")]
         ok!(builder.store_u32(Self::TAG_V2));
 
-        ok!(builder.store_reference(self.in_msg_description.cell.clone()));
-        ok!(builder.store_reference(self.out_msg_description.cell.clone()));
-        ok!(builder.store_reference(self.account_blocks.cell.clone()));
+        ok!(builder.store_reference(self.in_msg_description.inner().clone()));
+        ok!(builder.store_reference(self.out_msg_description.inner().clone()));
+        ok!(builder.store_reference(self.account_blocks.inner().clone()));
         ok!(builder.store_u256(&self.rand_seed));
         ok!(builder.store_u256(&self.created_by));
 

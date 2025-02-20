@@ -1,6 +1,6 @@
 use crate::cell::*;
 use crate::error::Error;
-use crate::models::{Lazy, Message, MsgInfo, OwnedMessage};
+use crate::models::{Message, MsgInfo, OwnedMessage};
 use crate::num::Tokens;
 use crate::util::unlikely;
 
@@ -201,7 +201,7 @@ pub struct MsgEnvelope {
 impl MsgEnvelope {
     /// Load only message info.
     pub fn load_message_info(&self) -> Result<IntMsgInfo, Error> {
-        if let MsgInfo::Int(info) = ok!(<_>::load_from(&mut ok!(self.message.cell.as_slice()))) {
+        if let MsgInfo::Int(info) = ok!(<_>::load_from(&mut ok!(self.message.as_slice()))) {
             Ok(info)
         } else {
             Err(Error::InvalidData)
@@ -220,7 +220,7 @@ impl MsgEnvelope {
 
     /// Returns a hash of the message.
     pub fn message_hash(&self) -> &HashBytes {
-        self.message.cell.repr_hash()
+        self.message.repr_hash()
     }
 
     /// Tries to substract transfer fee from envelope.

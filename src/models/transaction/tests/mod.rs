@@ -40,10 +40,10 @@ fn check_tx(boc: &[u8]) -> Cell {
 
     let info = tx.load_info().unwrap();
     println!("info: {info:#?}");
-    assert_eq!(tx.info.cell, CellBuilder::build_from(info).unwrap());
+    assert_eq!(tx.info, CellBuilder::build_from(info).unwrap());
 
     let serialized = CellBuilder::build_from(tx).unwrap();
-    assert_eq!(serialized.as_ref(), boc.as_ref());
+    assert_eq!(serialized, boc);
     serialized
 }
 

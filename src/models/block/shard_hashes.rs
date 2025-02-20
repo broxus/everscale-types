@@ -662,9 +662,9 @@ impl<'a> Iterator for ShardsTreeRawIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if unlikely(!self.status.is_valid()) {
-            return if self.status.is_pruned() {
+            return if self.status.is_unexpected_cell() {
                 self.status = IterStatus::Broken;
-                Some(Err(Error::PrunedBranchAccess))
+                Some(Err(Error::UnexpectedExoticCell))
             } else {
                 None
             };
@@ -770,7 +770,7 @@ impl<'a> WorkchainShardsTreeRawIter<'a> {
         let status = 'error: {
             let mut slice = match root.as_slice() {
                 Ok(slice) => slice,
-                Err(_) => break 'error IterStatus::Pruned,
+                Err(_) => break 'error IterStatus::UnexpectedCell,
             };
 
             let is_fork = match slice.load_bit() {
@@ -819,15 +819,15 @@ impl<'a> Iterator for WorkchainShardsTreeRawIter<'a> {
         fn build_shard_prefix(segments: &[IterSegment<'_>]) -> u64 {
             let mut result = ShardIdent::PREFIX_FULL;
             for segment in segments.iter().rev() {
-                result = (ShardIdent::PREFIX_FULL * segment.is_right as u64) | result >> 1;
+                result = (ShardIdent::PREFIX_FULL * segment.is_right as u64) | (result >> 1);
             }
             result
         }
 
         if unlikely(!self.status.is_valid()) {
-            return if self.status.is_pruned() {
+            return if self.status.is_unexpected_cell() {
                 self.status = IterStatus::Broken;
-                Some(Err(Error::PrunedBranchAccess))
+                Some(Err(Error::UnexpectedExoticCell))
             } else {
                 None
             };

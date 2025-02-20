@@ -27,16 +27,16 @@ fn do_mine(code: &Cell, factory_addr: &StdAddr, recipient: &StdAddr, reward: u12
 
     let mut data = RawDict::<64>::new();
 
-    data.set_ext(KEY_ZERO.as_slice_allow_pruned(), &HashBytes::ZERO, cx)
+    data.set_ext(KEY_ZERO.as_slice_allow_exotic(), &HashBytes::ZERO, cx)
         .unwrap();
 
     let airdrop_data_child = CellBuilder::build_from_ext((recipient, reward), cx).unwrap();
     let airdrop_data = CellBuilder::build_from_ext((factory_addr, airdrop_data_child), cx).unwrap();
 
-    data.set_ext(KEY_TWO.as_slice_allow_pruned(), &airdrop_data, cx)
+    data.set_ext(KEY_TWO.as_slice_allow_exotic(), &airdrop_data, cx)
         .unwrap();
 
-    let nonce_key = KEY_ONE.as_slice_allow_pruned();
+    let nonce_key = KEY_ONE.as_slice_allow_exotic();
 
     let mut nonce = 0;
     loop {

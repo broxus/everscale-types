@@ -19,27 +19,21 @@ fn check_block(boc: &[u8], expected_shards: Option<Vec<ShardIdent>>) -> Cell {
         let json = serde_json::to_string_pretty(&info).unwrap();
         let parsed: BlockInfo = serde_json::from_str(&json).unwrap();
         let parsed_boc = CellBuilder::build_from(&parsed).unwrap();
-        assert_eq!(block.info.cell.repr_hash(), parsed_boc.repr_hash());
+        assert_eq!(block.info, parsed_boc);
     }
 
     println!("info: {info:#?}");
     let prev_ref = info.load_prev_ref().unwrap();
     println!("prev_ref: {prev_ref:#?}");
-    assert_eq!(serialize_any(info).as_ref(), block.info.cell.as_ref());
+    assert_eq!(serialize_any(info), block.info);
 
     let value_flow = block.load_value_flow().unwrap();
     println!("value_flow: {value_flow:#?}");
-    assert_eq!(
-        serialize_any(value_flow).as_ref(),
-        block.value_flow.cell.as_ref()
-    );
+    assert_eq!(serialize_any(value_flow), block.value_flow);
 
     let state_update = block.load_state_update().unwrap();
     println!("state_update: {state_update:#?}");
-    assert_eq!(
-        serialize_any(state_update).as_ref(),
-        block.state_update.cell.as_ref()
-    );
+    assert_eq!(serialize_any(state_update), block.state_update);
 
     let extra = block.load_extra().unwrap();
     println!("extra: {extra:#?}");
@@ -56,10 +50,7 @@ fn check_block(boc: &[u8], expected_shards: Option<Vec<ShardIdent>>) -> Cell {
             assert_eq!(account, tx.account);
         }
     }
-    assert_eq!(
-        serialize_any(account_blocks).as_ref(),
-        extra.account_blocks.cell.as_ref()
-    );
+    assert_eq!(serialize_any(account_blocks), extra.account_blocks);
 
     let custom = extra.load_custom().unwrap();
     assert_eq!(expected_shards.is_some(), custom.is_some());
@@ -103,16 +94,13 @@ fn check_block(boc: &[u8], expected_shards: Option<Vec<ShardIdent>>) -> Cell {
             println!("block_id: {block_id}");
         }
 
-        assert_eq!(
-            serialize_any(custom).as_ref(),
-            extra.custom.as_ref().unwrap().cell.as_ref()
-        )
+        assert_eq!(serialize_any(custom), extra.custom.as_ref().unwrap())
     }
 
-    assert_eq!(serialize_any(extra).as_ref(), block.extra.cell.as_ref());
+    assert_eq!(serialize_any(extra), block.extra);
 
     let serialized = serialize_any(block);
-    assert_eq!(serialized.as_ref(), boc.as_ref());
+    assert_eq!(serialized, boc);
 
     boc
 }

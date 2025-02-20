@@ -8,7 +8,7 @@ use crate::error::Error;
 use crate::num::{Tokens, Uint12};
 
 use crate::models::block::ShardIdent;
-use crate::models::{Lazy, Signature};
+use crate::models::Signature;
 
 /// Config voting setup params.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]

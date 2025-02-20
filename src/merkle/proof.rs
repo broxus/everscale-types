@@ -4,6 +4,7 @@ use std::hash::BuildHasher;
 use super::{make_pruned_branch, FilterAction, MerkleFilter};
 use crate::cell::*;
 use crate::error::Error;
+use crate::util::unlikely;
 
 /// Non-owning parsed Merkle proof representation.
 ///
@@ -43,15 +44,18 @@ impl Default for MerkleProofRef<'_> {
     }
 }
 
-impl<'a> Load<'a> for MerkleProofRef<'a> {
-    fn load_from(s: &mut CellSlice<'a>) -> Result<Self, Error> {
-        if !s.is_full() || s.size_bits() != MerkleProof::BITS || s.size_refs() != MerkleProof::REFS
-        {
+impl<'a> LoadCell<'a> for MerkleProofRef<'a> {
+    fn load_from_cell(cell: &'a DynCell) -> Result<Self, Error> {
+        if unlikely(!cell.is_exotic()) {
+            return Err(Error::UnexpectedOrdinaryCell);
+        }
+
+        let mut s = cell.as_slice_allow_exotic();
+        if s.size_bits() != MerkleProof::BITS || s.size_refs() != MerkleProof::REFS {
             return Err(Error::CellUnderflow);
         }
 
-        if !s.cell().descriptor().is_exotic() || ok!(s.load_u8()) != CellType::MerkleProof.to_byte()
-        {
+        if ok!(s.load_u8()) != CellType::MerkleProof.to_byte() {
             return Err(Error::InvalidCell);
         }
 
@@ -111,15 +115,18 @@ impl Default for MerkleProof {
     }
 }
 
-impl Load<'_> for MerkleProof {
-    fn load_from(s: &mut CellSlice) -> Result<Self, Error> {
-        if !s.is_full() || s.size_bits() != MerkleProof::BITS || s.size_refs() != MerkleProof::REFS
-        {
+impl<'a> LoadCell<'a> for MerkleProof {
+    fn load_from_cell(cell: &'a DynCell) -> Result<Self, Error> {
+        if unlikely(!cell.is_exotic()) {
+            return Err(Error::UnexpectedOrdinaryCell);
+        }
+
+        let mut s = cell.as_slice_allow_exotic();
+        if s.size_bits() != MerkleProof::BITS || s.size_refs() != MerkleProof::REFS {
             return Err(Error::CellUnderflow);
         }
 
-        if !s.cell().descriptor().is_exotic() || ok!(s.load_u8()) != CellType::MerkleProof.to_byte()
-        {
+        if ok!(s.load_u8()) != CellType::MerkleProof.to_byte() {
             return Err(Error::InvalidCell);
         }
 

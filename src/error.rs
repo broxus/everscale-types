@@ -9,9 +9,12 @@ pub enum Error {
     /// There were not enough bits or refs capacity in the cell builder.
     #[error("cell overflow")]
     CellOverflow,
-    /// Something tried to load a pruned branch cell.
-    #[error("pruned branch access")]
-    PrunedBranchAccess,
+    /// Something tried to load an exotic cell but an ordinary was required.
+    #[error("unexpected exotic cell")]
+    UnexpectedExoticCell,
+    /// Something tried to load an ordinary cell but an exotic was required.
+    #[error("unexpected exotic cell")]
+    UnexpectedOrdinaryCell,
     /// Cell contains invalid descriptor or data.
     #[error("invalid cell")]
     InvalidCell,

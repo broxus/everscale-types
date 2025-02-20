@@ -4,7 +4,6 @@ use crate::cell::*;
 use crate::error::Error;
 use crate::models::currency::CurrencyCollection;
 use crate::models::message::OwnedRelaxedMessage;
-use crate::models::Lazy;
 
 /// Out actions list reverse iterator.
 pub struct OutActionsRevIter<'a> {
@@ -326,7 +325,7 @@ impl<'a> arbitrary::Arbitrary<'a> for OutAction {
                 mode: u.arbitrary()?,
                 out_msg: {
                     let msg: Lazy<OwnedRelaxedMessage> = u.arbitrary()?;
-                    if msg.inner().level() != 0 {
+                    if msg.level() != 0 {
                         return Err(arbitrary::Error::IncorrectFormat);
                     }
                     msg

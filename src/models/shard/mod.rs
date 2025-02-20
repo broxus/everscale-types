@@ -9,7 +9,6 @@ use crate::error::*;
 
 use crate::models::block::{BlockRef, ShardIdent};
 use crate::models::currency::CurrencyCollection;
-use crate::models::Lazy;
 
 #[cfg(feature = "tycho")]
 use crate::models::ShardIdentFull;
@@ -284,7 +283,7 @@ impl Store for ShardStateUnsplit {
         #[cfg(feature = "tycho")]
         ok!(self.processed_upto.store_into(builder, context));
         ok!(builder.store_bit(self.before_split));
-        ok!(builder.store_reference(self.accounts.cell.clone()));
+        ok!(builder.store_reference(self.accounts.inner().clone()));
         ok!(builder.store_reference(child_cell));
 
         ok!(self.custom.store_into(builder, context));
@@ -375,7 +374,7 @@ impl Store for LibDescr {
         ok!(builder.store_small_uint(0, 2));
         ok!(builder.store_reference(self.lib.clone()));
         match self.publishers.root() {
-            Some(root) => builder.store_slice(root.as_slice_allow_pruned()),
+            Some(root) => builder.store_slice(root.as_slice_allow_exotic()),
             None => Err(Error::InvalidData),
         }
     }

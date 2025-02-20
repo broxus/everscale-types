@@ -51,9 +51,16 @@ struct SerdeWithRepr {
     #[serde(with = "BocRepr")]
     dict: crate::dict::RawDict<32>,
     #[serde(with = "BocRepr")]
-    merkle_proof: crate::merkle::MerkleProof,
-    #[serde(with = "BocRepr")]
-    merkle_update: crate::merkle::MerkleUpdate,
+    tuple: SomeStruct,
+}
+
+#[cfg(feature = "serde")]
+#[derive(Debug, Eq, PartialEq, Store, Load, ::serde::Serialize, ::serde::Deserialize)]
+struct SomeStruct {
+    field1: bool,
+    field2: HashBytes,
+    #[serde(with = "Boc")]
+    field3: Cell,
 }
 
 #[cfg(feature = "serde")]
@@ -89,29 +96,18 @@ fn struct_with_repr() {
     let boc_dict_escaped =
         "te6ccgEBC\\u0041EAMAABAcABAgPPQAUCAgEgBAMACQAAADqgAAkAAABQYAIBIAcGAAkAAAAe4AAJAAAAbCA=";
 
-    let boc_merkle_proof = "te6ccgECBQEAARwACUYDcijLZ4hNbjcLQiThSx8fvxTaVufKbXsXRYbyiUZApXoADQEiccAJ2Y4sgpswmr6/odN0WmKosRtoIzobXRBE9uCeOA1nuXKSo06DG3E/cAAAdbacX3gRQHLHOx0TQAQCAdURYfZ8pYDdK5k1lnsEEJ4OmIYB/AiU4UX3zVZTToFyVwAAAYRmS/s2iLD7PlLAbpXMmss9gghPB0xDAP4ESnCi++arKadAuSuAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAsAMARaACLD7PlLAbpXMmss9gghPB0xDAP4ESnCi++arKadAuSuAQKEgBAYDWxHxKJVQ8mzl7cXFvP64eLF0kcXTFLiwZvYlkQrEFAAw=";
-    let boc_merkle_update = "te6ccgECEAEAARwACooEmiQq0C+sMHHtQMrhM1KQs0bAR0to7UTxJ/BQaQGQ83mYWpNZrI3tjuzPRZkP0y+odW6SpuxZc6qHEJbPhzX/oAAFAAUIASEBwAIiA85AAwoiASAEDCIBIAUOAgEgBwYACQAAAAKgAAkAAAAAYCEBwAkiA85ACwooSAEBGK24YcgkheIaweTweCPOdGONsG1894aroQWmpQQGjHEAASIBIA0MKEgBAcoZQygrtOJrqvmwmN7NXJy91VsFFfgo/bXAJjbPwI+zAAIiASAPDihIAQGIedrQvLIQIcZHiObah2QWYzPcsgz02CKj0RfEEjv9NwABKEgBAf96V360Wpctur/NPJVfI6Mc5W43dmQzVmLGk0RxKb5RAAE=";
+    let boc_tuple = "te6ccgEBAgEAJgABQYAAAAAAAAAAAAAAAAAAAAAAAAAAAAUXneTYztHJnZqRwAEAAA==";
 
-    let test = format!(
-        r#"{{"dict":"{boc_dict_escaped}","merkle_proof":"{boc_merkle_proof}","merkle_update":"{boc_merkle_update}"}}"#
-    );
-    let SerdeWithRepr {
-        dict,
-        merkle_proof,
-        merkle_update,
-    } = serde_json::from_str(&test).unwrap();
+    let test = format!(r#"{{"dict":"{boc_dict_escaped}","tuple":"{boc_tuple}"}}"#);
+    let SerdeWithRepr { dict, tuple } = serde_json::from_str(&test).unwrap();
 
     let boc = Boc::decode_base64(boc_dict).unwrap();
     let orig_dict = boc.parse::<crate::dict::RawDict<32>>().unwrap();
     assert_eq!(dict, orig_dict);
 
-    let boc = Boc::decode_base64(boc_merkle_proof).unwrap();
-    let orig_merkle_proof = boc.parse::<crate::merkle::MerkleProof>().unwrap();
-    assert_eq!(merkle_proof, orig_merkle_proof);
-
-    let boc = Boc::decode_base64(boc_merkle_update).unwrap();
-    let orig_merkle_update = boc.parse::<crate::merkle::MerkleUpdate>().unwrap();
-    assert_eq!(merkle_update, orig_merkle_update);
+    let boc = Boc::decode_base64(boc_tuple).unwrap();
+    let orig_tuple = boc.parse::<SomeStruct>().unwrap();
+    assert_eq!(tuple, orig_tuple);
 }
 
 #[test]

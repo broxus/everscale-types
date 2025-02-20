@@ -5,7 +5,7 @@
 pub use crate::boc::{Boc, BocRepr};
 pub use crate::cell::{
     Cell, CellBuilder, CellContext, CellFamily, CellImpl, CellSlice, CellSliceParts,
-    CellSliceRange, CellType, DynCell, EquivalentRepr, ExactSize, HashBytes, Load, Size, Store,
-    UsageTree, UsageTreeMode, WeakCell,
+    CellSliceRange, CellType, DynCell, EquivalentRepr, ExactSize, HashBytes, Load, LoadCell, Size,
+    Store, UsageTree, UsageTreeMode, WeakCell,
 };
 pub use crate::dict::{AugDict, Dict, RawDict};

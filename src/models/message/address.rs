@@ -508,8 +508,8 @@ impl crate::dict::DictKey for StdAddr {
         // SAFETY: transmuting [[u8; 16]; 2] to [u8; 32] is safe
         result.address = unsafe {
             std::mem::transmute::<[[u8; 16]; 2], HashBytes>([
-                (hi >> SHIFT | ((*second_byte as u128) << REV_SHIFT)).to_be_bytes(),
-                (lo >> SHIFT | (hi << REV_SHIFT)).to_be_bytes(),
+                ((hi >> SHIFT) | ((*second_byte as u128) << REV_SHIFT)).to_be_bytes(),
+                ((lo >> SHIFT) | (hi << REV_SHIFT)).to_be_bytes(),
             ])
         };
 

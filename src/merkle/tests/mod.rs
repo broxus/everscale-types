@@ -8,10 +8,10 @@ fn correct_proof_store_load() {
     let proof = MerkleProof::default();
     let cell = CellBuilder::build_from(&proof).unwrap();
 
-    let parsed = cell.as_ref().parse::<MerkleProof>().unwrap();
+    let parsed = cell.as_ref().parse_exotic::<MerkleProof>().unwrap();
     assert_eq!(parsed, proof);
 
-    let parsed = cell.as_ref().parse::<MerkleProofRef<'_>>().unwrap();
+    let parsed = cell.as_ref().parse_exotic::<MerkleProofRef<'_>>().unwrap();
     assert_eq!(parsed, proof);
 }
 
@@ -65,7 +65,7 @@ fn create_proof_for_deep_cell() {
     let decoded = Boc::decode_base64(encoded)
         .unwrap()
         .as_ref()
-        .parse::<MerkleProof>()
+        .parse_exotic::<MerkleProof>()
         .unwrap();
 
     assert_eq!(cell, decoded);
@@ -98,7 +98,7 @@ fn create_proof_for_dict() {
     dict.get(0).unwrap().unwrap();
     dict.get(9).unwrap().unwrap();
 
-    assert!(matches!(dict.get(5), Err(Error::PrunedBranchAccess)));
+    assert!(matches!(dict.get(5), Err(Error::UnexpectedExoticCell)));
 }
 
 #[test]

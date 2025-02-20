@@ -12,7 +12,6 @@ use crate::util::*;
 
 use crate::models::currency::CurrencyCollection;
 use crate::models::global_version::GlobalVersion;
-use crate::models::Lazy;
 
 pub use self::block_extra::*;
 pub use self::block_id::*;
@@ -38,10 +37,10 @@ pub struct Block {
     /// Tokens flow info.
     pub value_flow: Lazy<ValueFlow>,
     /// Merkle update for the shard state.
-    pub state_update: Lazy<MerkleUpdate>,
+    pub state_update: LazyExotic<MerkleUpdate>,
     /// Merkle updates for the outgoing messages queue.
     #[cfg(not(feature = "tycho"))]
-    pub out_msg_queue_updates: Option<Dict<u32, Lazy<MerkleUpdate>>>,
+    pub out_msg_queue_updates: Option<Dict<u32, LazyExotic<MerkleUpdate>>>,
     /// Out messages queue info.
     #[cfg(feature = "tycho")]
     pub out_msg_queue_updates: OutMsgQueueUpdates,
@@ -104,8 +103,8 @@ impl Store for Block {
 
         ok!(builder.store_u32(tag));
         ok!(builder.store_u32(self.global_id as u32));
-        ok!(builder.store_reference(self.info.cell.clone()));
-        ok!(builder.store_reference(self.value_flow.cell.clone()));
+        ok!(builder.store_reference(self.info.inner().clone()));
+        ok!(builder.store_reference(self.value_flow.inner().clone()));
 
         #[cfg(not(feature = "tycho"))]
         let out_msg_queue_updates = self.out_msg_queue_updates.as_ref();
@@ -364,13 +363,13 @@ impl Store for BlockInfo {
         }
 
         if let Some(master_ref) = &self.master_ref {
-            ok!(builder.store_reference(master_ref.cell.clone()));
+            ok!(builder.store_reference(master_ref.inner().clone()));
         }
 
         ok!(builder.store_reference(self.prev_ref.clone()));
 
         if let Some(prev_vert_ref) = &self.prev_vert_ref {
-            builder.store_reference(prev_vert_ref.cell.clone())
+            builder.store_reference(prev_vert_ref.inner().clone())
         } else {
             Ok(())
         }

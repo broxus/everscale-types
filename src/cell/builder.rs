@@ -367,14 +367,14 @@ impl CellBuilder {
     ///
     /// NOTE: intermediate cell hash is undefined.
     pub fn as_data_slice(&self) -> CellSlice<'_> {
-        CellSlice::new_allow_pruned(IntermediateDataCell::wrap(self))
+        CellSlice::new_allow_exotic(IntermediateDataCell::wrap(self))
     }
 
     /// Returns a slice which contains builder data and references.
     ///
     /// NOTE: intermediate cell hash is undefined.
     pub fn as_full_slice(&self) -> CellSlice<'_> {
-        CellSlice::new_allow_pruned(IntermediateFullCell::wrap(self))
+        CellSlice::new_allow_exotic(IntermediateFullCell::wrap(self))
     }
 
     /// Returns an underlying cell data.

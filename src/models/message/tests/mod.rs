@@ -1,7 +1,6 @@
 use std::borrow::Borrow;
 
 use super::*;
-use crate::models::Lazy;
 use crate::prelude::*;
 
 fn serialize_message<'a, T: Borrow<Message<'a>>>(message: T) -> Cell {
@@ -24,6 +23,7 @@ fn check_message(boc: &[u8]) -> Cell {
     // Check an owned version
     {
         let owned = Lazy::<Message<'_>>::from_raw(boc.clone())
+            .unwrap()
             .cast_into::<OwnedMessage>()
             .load()
             .unwrap();

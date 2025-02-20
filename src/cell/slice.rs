@@ -10,7 +10,43 @@ use crate::util::{unlikely, Bitstring};
 
 use super::CellFamily;
 
-/// A data structure that can be deserialized from cells.
+/// A data structure that can be deserialized from the full cell.
+pub trait LoadCell<'a>: Sized {
+    /// Tries to load itself from cell.
+    fn load_from_cell(cell: &'a DynCell) -> Result<Self, Error>;
+}
+
+impl<'a, T: LoadCell<'a>> LoadCell<'a> for Box<T> {
+    #[inline]
+    fn load_from_cell(cell: &'a DynCell) -> Result<Self, Error> {
+        match <T as LoadCell>::load_from_cell(cell) {
+            Ok(value) => Ok(Box::new(value)),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+impl<'a, T: LoadCell<'a>> LoadCell<'a> for Arc<T> {
+    #[inline]
+    fn load_from_cell(cell: &'a DynCell) -> Result<Self, Error> {
+        match <T as LoadCell>::load_from_cell(cell) {
+            Ok(value) => Ok(Arc::new(value)),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+impl<'a, T: LoadCell<'a>> LoadCell<'a> for Rc<T> {
+    #[inline]
+    fn load_from_cell(cell: &'a DynCell) -> Result<Self, Error> {
+        match <T as LoadCell>::load_from_cell(cell) {
+            Ok(value) => Ok(Rc::new(value)),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+/// A data structure that can be deserialized from ordinary cells.
 pub trait Load<'a>: Sized {
     /// Tries to load itself from a cell slice.
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error>;
@@ -236,8 +272,8 @@ impl CellSliceRange {
     {
         fn apply_impl(range: CellSliceRange, cell: &DynCell) -> Result<CellSlice<'_>, Error> {
             // Handle pruned branch access
-            if unlikely(cell.descriptor().is_pruned_branch()) {
-                Err(Error::PrunedBranchAccess)
+            if unlikely(cell.is_exotic()) {
+                Err(Error::UnexpectedExoticCell)
             } else {
                 let bits_end = std::cmp::min(range.bits_end, cell.bit_len());
                 let refs_end = std::cmp::min(range.refs_end, cell.reference_count());
@@ -264,7 +300,7 @@ impl CellSliceRange {
     /// The following must be true:
     /// - cell is not pruned
     /// - range is in cell bounds
-    pub fn apply_allow_special<T>(self, cell: &T) -> CellSlice<'_>
+    pub fn apply_allow_exotic<T>(self, cell: &T) -> CellSlice<'_>
     where
         T: AsRef<DynCell> + ?Sized,
     {
@@ -456,7 +492,7 @@ pub struct CellSlice<'a> {
 impl Default for CellSlice<'_> {
     #[inline]
     fn default() -> Self {
-        Cell::empty_cell_ref().as_slice_allow_pruned()
+        Cell::empty_cell_ref().as_slice_allow_exotic()
     }
 }
 
@@ -476,11 +512,11 @@ impl<'a> AsMut<CellSlice<'a>> for CellSlice<'a> {
 
 impl<'a> CellSlice<'a> {
     /// Constructs a new cell slice from the specified cell.
-    /// Returns an error if the cell is pruned.
+    /// Returns an error if the cell is not ordinary.
     pub fn new(cell: &'a DynCell) -> Result<Self, Error> {
         // Handle pruned branch access
-        if unlikely(cell.descriptor().is_pruned_branch()) {
-            Err(Error::PrunedBranchAccess)
+        if unlikely(cell.is_exotic()) {
+            Err(Error::UnexpectedExoticCell)
         } else {
             Ok(Self {
                 range: CellSliceRange::full(cell),
@@ -490,7 +526,7 @@ impl<'a> CellSlice<'a> {
     }
 
     /// Constructs a new cell slice from the specified cell.
-    pub fn new_allow_pruned(cell: &'a DynCell) -> Self {
+    pub fn new_allow_exotic(cell: &'a DynCell) -> Self {
         Self {
             range: CellSliceRange::full(cell),
             cell,
@@ -1367,8 +1403,8 @@ impl<'a> CellSlice<'a> {
 
                     // Shift right, putting `ovf` to the high bits
                     Ok(std::mem::transmute::<[[u8; 16]; 2], HashBytes>([
-                        (hi >> shift | ((ovf as u128) << rev_shift)).to_be_bytes(),
-                        (lo >> shift | (hi << rev_shift)).to_be_bytes(),
+                        ((hi >> shift) | ((ovf as u128) << rev_shift)).to_be_bytes(),
+                        ((lo >> shift) | (hi << rev_shift)).to_be_bytes(),
                     ]))
                 }
             } else {

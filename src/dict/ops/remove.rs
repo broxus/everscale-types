@@ -220,7 +220,7 @@ pub fn dict_remove_bound_owned(
 
         // Load parent label
         let pfx = ok!(read_label(
-            &mut last.data.as_slice_allow_pruned(),
+            &mut last.data.as_slice_allow_exotic(),
             prev_key_bit_len
         ));
 

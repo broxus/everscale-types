@@ -428,7 +428,7 @@ impl Segment<'_> {
 
         // Load parent label
         let pfx = ok!(read_label(
-            &mut self.data.as_slice_allow_pruned(),
+            &mut self.data.as_slice_allow_exotic(),
             prev_key_bit_len
         ));
 
@@ -601,7 +601,7 @@ fn read_hml_same<'a>(label: &mut CellSlice<'a>, bits_for_len: u16) -> Result<Cel
     };
     let len = ok!(label.load_uint(bits_for_len)) as u16;
 
-    Ok(cell.as_slice_allow_pruned().get_prefix(len, 0))
+    Ok(cell.as_slice_allow_exotic().get_prefix(len, 0))
 }
 
 /// Which branch to take when traversing the tree.

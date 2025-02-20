@@ -8,7 +8,6 @@ use crate::num::*;
 use crate::models::account::AccountStatus;
 use crate::models::currency::CurrencyCollection;
 use crate::models::message::Message;
-use crate::models::Lazy;
 
 pub use self::phases::*;
 

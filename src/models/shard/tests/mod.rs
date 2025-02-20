@@ -10,7 +10,7 @@ fn check_master_state(cell: Cell) {
     let shard_accounts = data.load_accounts().unwrap();
     assert_eq!(
         CellBuilder::build_from(&shard_accounts).unwrap(),
-        data.accounts.cell
+        data.accounts
     );
 
     for entry in shard_accounts.iter() {
@@ -35,7 +35,7 @@ fn check_master_state(cell: Cell) {
     println!("custom: {custom:#?}");
     assert_eq!(
         CellBuilder::build_from(&custom).unwrap(),
-        data.custom.unwrap().cell
+        data.custom.unwrap()
     );
 }
 

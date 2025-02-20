@@ -9,7 +9,8 @@ use crate::util::Bitstring;
 pub use self::builder::{CellBuilder, CellRefsBuilder, Store};
 pub use self::cell_context::{CellContext, CellParts, LoadMode};
 pub use self::cell_impl::{StaticCell, VirtualCellWrapper};
-pub use self::slice::{CellSlice, CellSliceParts, CellSliceRange, ExactSize, Load};
+pub use self::lazy::{Lazy, LazyExotic};
+pub use self::slice::{CellSlice, CellSliceParts, CellSliceRange, ExactSize, Load, LoadCell};
 pub use self::usage_tree::{UsageTree, UsageTreeMode, UsageTreeWithSubtrees};
 
 #[cfg(not(feature = "sync"))]
@@ -31,6 +32,9 @@ mod slice;
 
 /// Cell creation utils.
 mod builder;
+
+/// Lazy-loaded cell data.
+mod lazy;
 
 mod usage_tree;
 
@@ -245,7 +249,7 @@ impl DynCell {
     }
 
     /// Returns this cell as a cell slice.
-    /// Returns an error if the cell is pruned.
+    /// Returns an error if the cell is not ordinary.
     #[inline]
     pub fn as_slice(&'_ self) -> Result<CellSlice<'_>, Error> {
         CellSlice::new(self)
@@ -255,20 +259,8 @@ impl DynCell {
     ///
     /// Loads cell as is.
     #[inline]
-    pub fn as_slice_allow_pruned(&'_ self) -> CellSlice<'_> {
-        CellSlice::new_allow_pruned(self)
-    }
-
-    /// Returns this cell as a cell slice.
-    ///
-    /// # Safety
-    ///
-    /// The following must be true:
-    /// - cell is not pruned
-    #[inline]
-    #[deprecated = "use `{Self}::as_slice_allow_pruned` instead"]
-    pub unsafe fn as_slice_unchecked(&'_ self) -> CellSlice<'_> {
-        CellSlice::new_allow_pruned(self)
+    pub fn as_slice_allow_exotic(&'_ self) -> CellSlice<'_> {
+        CellSlice::new_allow_exotic(self)
     }
 
     /// Recursively computes the count of distinct cells returning
@@ -350,11 +342,22 @@ impl DynCell {
     }
 
     /// Converts this cell into a slice and tries to load the specified type from it.
+    /// Fails if the cell is not ordinary.
     ///
     /// NOTE: parsing `Cell` will load the first reference!
     #[inline]
     pub fn parse<'a, T: Load<'a>>(&'a self) -> Result<T, Error> {
         T::load_from(&mut ok!(self.as_slice()))
+    }
+
+    /// Loads an exotic cell.
+    #[inline]
+    pub fn parse_exotic<'a, T: LoadCell<'a>>(&'a self) -> Result<T, Error> {
+        if self.is_exotic() {
+            T::load_from_cell(self)
+        } else {
+            Err(Error::UnexpectedOrdinaryCell)
+        }
     }
 }
 
@@ -1278,7 +1281,7 @@ impl IntoIterator for LevelMask {
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
         // Include zero level
-        LevelMaskIter(1 | self.0 << 1)
+        LevelMaskIter(1 | (self.0 << 1))
     }
 }
 

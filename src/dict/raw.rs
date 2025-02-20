@@ -718,7 +718,7 @@ impl<'a> RawIter<'a> {
             let Ok(data) = root.as_slice() else {
                 return Self {
                     segments: Vec::new(),
-                    status: IterStatus::Pruned,
+                    status: IterStatus::UnexpectedCell,
                     builder: Box::default(),
                     reversed,
                     signed,
@@ -818,9 +818,9 @@ impl<'a> Iterator for RawIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if unlikely(!self.status.is_valid()) {
-            return if self.status.is_pruned() {
+            return if self.status.is_unexpected_cell() {
                 self.status = IterStatus::Broken;
-                Some(Err(Error::PrunedBranchAccess))
+                Some(Err(Error::UnexpectedExoticCell))
             } else {
                 None
             };
@@ -1039,13 +1039,13 @@ impl<'a> Iterator for UnionRawIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if unlikely(!self.left.status.is_valid() || !self.right.status.is_valid()) {
-            if !self.left.status.is_pruned() && !self.right.status.is_pruned() {
+            if !self.left.status.is_unexpected_cell() && !self.right.status.is_unexpected_cell() {
                 return None;
             }
 
             self.left.status = IterStatus::Broken;
             self.right.status = IterStatus::Broken;
-            return Some(Err(Error::PrunedBranchAccess));
+            return Some(Err(Error::UnexpectedExoticCell));
         }
 
         let reversed = self.is_reversed();
@@ -1316,7 +1316,7 @@ impl<'a> RawValues<'a> {
             let Ok(data) = root.as_slice() else {
                 return Self {
                     segments: Vec::new(),
-                    status: IterStatus::Pruned,
+                    status: IterStatus::UnexpectedCell,
                     reversed,
                     signed,
                 };
@@ -1373,9 +1373,9 @@ impl<'a> Iterator for RawValues<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if unlikely(!self.status.is_valid()) {
-            return if self.status.is_pruned() {
+            return if self.status.is_unexpected_cell() {
                 self.status = IterStatus::Broken;
-                Some(Err(Error::PrunedBranchAccess))
+                Some(Err(Error::UnexpectedExoticCell))
             } else {
                 None
             };

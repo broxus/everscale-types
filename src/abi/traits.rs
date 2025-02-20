@@ -12,7 +12,7 @@ use num_traits::ToPrimitive;
 use super::{
     AbiType, AbiValue, NamedAbiType, NamedAbiValue, PlainAbiType, PlainAbiValue, WithoutName,
 };
-use crate::cell::{Cell, HashBytes};
+use crate::cell::{Cell, HashBytes, Lazy};
 use crate::num::*;
 
 use crate::models::message::{IntAddr, StdAddr, VarAddr};
@@ -307,7 +307,7 @@ impl<K: WithPlainAbiType, V: WithAbiType, S> WithAbiType for HashMap<K, V, S> {
 }
 
 #[cfg(feature = "models")]
-impl<T: WithAbiType> WithAbiType for crate::models::Lazy<T> {
+impl<T: WithAbiType> WithAbiType for Lazy<T> {
     fn abi_type() -> AbiType {
         AbiType::Ref(Arc::new(T::abi_type()))
     }

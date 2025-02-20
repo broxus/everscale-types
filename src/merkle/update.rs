@@ -4,6 +4,7 @@ use std::hash::BuildHasher;
 use super::{make_pruned_branch, FilterAction, MerkleFilter, MerkleProofBuilder};
 use crate::cell::*;
 use crate::error::Error;
+use crate::util::unlikely;
 
 /// Parsed Merkle update representation.
 ///
@@ -53,15 +54,18 @@ impl Default for MerkleUpdate {
     }
 }
 
-impl Load<'_> for MerkleUpdate {
-    fn load_from(s: &mut CellSlice) -> Result<Self, Error> {
-        if !s.is_full() || s.size_bits() != Self::BITS || s.size_refs() != Self::REFS {
+impl<'a> LoadCell<'a> for MerkleUpdate {
+    fn load_from_cell(cell: &'a DynCell) -> Result<Self, Error> {
+        if unlikely(!cell.is_exotic()) {
+            return Err(Error::UnexpectedOrdinaryCell);
+        }
+
+        let mut s = cell.as_slice_allow_exotic();
+        if s.size_bits() != Self::BITS || s.size_refs() != Self::REFS {
             return Err(Error::CellUnderflow);
         }
 
-        if !s.cell().descriptor().is_exotic()
-            || ok!(s.load_u8()) != CellType::MerkleUpdate.to_byte()
-        {
+        if ok!(s.load_u8()) != CellType::MerkleUpdate.to_byte() {
             return Err(Error::InvalidCell);
         }
 
@@ -672,7 +676,7 @@ mod tests {
             .unwrap();
         let cell = builder.build().unwrap();
 
-        let parsed = cell.parse::<MerkleUpdate>().unwrap();
+        let parsed = cell.parse_exotic::<MerkleUpdate>().unwrap();
         assert_eq!(default, parsed);
     }
 

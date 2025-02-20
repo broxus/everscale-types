@@ -2,8 +2,8 @@ use crate::cell::*;
 use crate::dict::AugDictExtra;
 use crate::error::Error;
 use crate::models::{
-    CurrencyCollection, ExtInMsgInfo, IntMsgInfo, Lazy, Message, MsgEnvelope, MsgInfo,
-    OwnedMessage, Transaction,
+    CurrencyCollection, ExtInMsgInfo, IntMsgInfo, Message, MsgEnvelope, MsgInfo, OwnedMessage,
+    Transaction,
 };
 use crate::num::Tokens;
 
@@ -83,8 +83,8 @@ impl InMsg {
     /// [`Final`]: InMsg::Final
     pub fn transaction_cell(&self) -> Option<Cell> {
         match self {
-            Self::External(msg) => Some(msg.transaction.cell.clone()),
-            Self::Immediate(msg) | Self::Final(msg) => Some(msg.transaction.cell.clone()),
+            Self::External(msg) => Some(msg.transaction.inner().clone()),
+            Self::Immediate(msg) | Self::Final(msg) => Some(msg.transaction.inner().clone()),
             Self::Transit(_) => None,
         }
     }
@@ -112,7 +112,7 @@ impl InMsg {
     /// Loads an inbound message cell.
     pub fn load_msg_cell(&self) -> Result<Cell, Error> {
         match self {
-            Self::External(msg) => Ok(msg.in_msg.cell.clone()),
+            Self::External(msg) => Ok(msg.in_msg.inner().clone()),
             Self::Immediate(msg) => msg.load_in_msg_cell(),
             Self::Final(msg) => msg.load_in_msg_cell(),
             Self::Transit(msg) => msg.load_in_msg_cell(),
@@ -123,9 +123,9 @@ impl InMsg {
     pub fn in_msg_envelope_cell(&self) -> Option<Cell> {
         match self {
             Self::External(_) => None,
-            Self::Immediate(msg) => Some(msg.in_msg_envelope.cell.clone()),
-            Self::Final(msg) => Some(msg.in_msg_envelope.cell.clone()),
-            Self::Transit(msg) => Some(msg.in_msg_envelope.cell.clone()),
+            Self::Immediate(msg) => Some(msg.in_msg_envelope.inner().clone()),
+            Self::Final(msg) => Some(msg.in_msg_envelope.inner().clone()),
+            Self::Transit(msg) => Some(msg.in_msg_envelope.inner().clone()),
         }
     }
 
@@ -145,7 +145,7 @@ impl InMsg {
             Self::External(_) => None,
             Self::Immediate(_) => None,
             Self::Final(_) => None,
-            Self::Transit(msg) => Some(msg.out_msg_envelope.cell.clone()),
+            Self::Transit(msg) => Some(msg.out_msg_envelope.inner().clone()),
         }
     }
 
@@ -259,7 +259,7 @@ pub struct InMsgExternal {
 impl InMsgExternal {
     /// Loads only message info.
     pub fn load_in_msg_info(&self) -> Result<ExtInMsgInfo, Error> {
-        if let MsgInfo::ExtIn(info) = ok!(<_>::load_from(&mut ok!(self.in_msg.cell.as_slice()))) {
+        if let MsgInfo::ExtIn(info) = ok!(<_>::load_from(&mut ok!(self.in_msg.as_slice()))) {
             Ok(info)
         } else {
             Err(Error::InvalidData)
@@ -303,13 +303,13 @@ impl InMsgFinal {
 
     /// Load a non-owned inbound message.
     pub fn load_in_msg(&self) -> Result<Message<'_>, Error> {
-        let mut envelope = ok!(self.in_msg_envelope.cell.as_slice());
+        let mut envelope = ok!(self.in_msg_envelope.as_slice());
         Message::load_from(&mut ok!(envelope.load_reference_as_slice()))
     }
 
     /// Load an inbound message envelope.
     pub fn load_in_msg_info(&self) -> Result<IntMsgInfo, Error> {
-        let mut envelope = ok!(self.in_msg_envelope.cell.as_slice());
+        let mut envelope = ok!(self.in_msg_envelope.as_slice());
         let mut message = ok!(envelope.load_reference_as_slice());
         if let MsgInfo::Int(info) = ok!(<_>::load_from(&mut message)) {
             Ok(info)
@@ -320,18 +320,18 @@ impl InMsgFinal {
 
     /// Load an owned inbound message.
     pub fn load_in_msg_owned(&self) -> Result<OwnedMessage, Error> {
-        let mut envelope = ok!(self.in_msg_envelope.cell.as_slice());
+        let mut envelope = ok!(self.in_msg_envelope.as_slice());
         OwnedMessage::load_from(&mut ok!(envelope.load_reference_as_slice()))
     }
 
     /// Loads an inbound message cell.
     pub fn load_in_msg_cell(&self) -> Result<Cell, Error> {
-        ok!(self.in_msg_envelope.cell.as_slice()).load_reference_cloned()
+        ok!(self.in_msg_envelope.as_slice()).load_reference_cloned()
     }
 
     /// Returns a hash of the envelope with the inbound message.
     pub fn in_msg_envelope_hash(&self) -> &HashBytes {
-        self.in_msg_envelope.cell.repr_hash()
+        self.in_msg_envelope.repr_hash()
     }
 
     /// Loads transaction.
@@ -355,36 +355,36 @@ pub struct InMsgTransit {
 impl InMsgTransit {
     /// Load a non-owned inbound message.
     pub fn load_in_msg(&self) -> Result<Message<'_>, Error> {
-        let mut envelope = ok!(self.in_msg_envelope.cell.as_slice());
+        let mut envelope = ok!(self.in_msg_envelope.as_slice());
         Message::load_from(&mut ok!(envelope.load_reference_as_slice()))
     }
 
     /// Load an owned inbound message.
     pub fn load_in_msg_owned(&self) -> Result<OwnedMessage, Error> {
-        let mut envelope = ok!(self.in_msg_envelope.cell.as_slice());
+        let mut envelope = ok!(self.in_msg_envelope.as_slice());
         OwnedMessage::load_from(&mut ok!(envelope.load_reference_as_slice()))
     }
 
     /// Load a non-owned outbound message.
     pub fn load_out_msg(&self) -> Result<Message<'_>, Error> {
-        let mut envelope = ok!(self.out_msg_envelope.cell.as_slice());
+        let mut envelope = ok!(self.out_msg_envelope.as_slice());
         Message::load_from(&mut ok!(envelope.load_reference_as_slice()))
     }
 
     /// Load an owned outbound message.
     pub fn load_out_msg_owned(&self) -> Result<OwnedMessage, Error> {
-        let mut envelope = ok!(self.out_msg_envelope.cell.as_slice());
+        let mut envelope = ok!(self.out_msg_envelope.as_slice());
         OwnedMessage::load_from(&mut ok!(envelope.load_reference_as_slice()))
     }
 
     /// Load inbound message cell.
     pub fn load_in_msg_cell(&self) -> Result<Cell, Error> {
-        ok!(self.in_msg_envelope.cell.as_slice()).load_reference_cloned()
+        ok!(self.in_msg_envelope.as_slice()).load_reference_cloned()
     }
 
     /// Load outbound message cell.
     pub fn load_out_msg_cell(&self) -> Result<Cell, Error> {
-        ok!(self.out_msg_envelope.cell.as_slice()).load_reference_cloned()
+        ok!(self.out_msg_envelope.as_slice()).load_reference_cloned()
     }
 
     /// Load inbound message envelope.
@@ -399,11 +399,11 @@ impl InMsgTransit {
 
     /// Returns a hash of the envelope with the inbound message.
     pub fn in_msg_envelope_hash(&self) -> &HashBytes {
-        self.in_msg_envelope.cell.repr_hash()
+        self.in_msg_envelope.repr_hash()
     }
 
     /// Returns a hash of the envelope with the outbound message.
     pub fn out_msg_envelope_hash(&self) -> &HashBytes {
-        self.out_msg_envelope.cell.repr_hash()
+        self.out_msg_envelope.repr_hash()
     }
 }
