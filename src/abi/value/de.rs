@@ -13,7 +13,7 @@ use crate::abi::{
 use crate::cell::{Cell, CellSlice, Load, MAX_BIT_LEN, MAX_REF_COUNT};
 use crate::dict::{self, RawDict};
 use crate::error::Error;
-use crate::models::IntAddr;
+use crate::models::{AnyAddr, IntAddr};
 use crate::num::Tokens;
 
 impl NamedAbiValue {
@@ -196,7 +196,7 @@ impl AbiValue {
             AbiType::Cell => load_cell(version, last, slice).map(Self::Cell),
             AbiType::Address => {
                 ok!(preload_bits(1, slice));
-                Ok(Self::Address(IntAddr::load_from(slice).map(Box::new)?))
+                Ok(Self::Address(AnyAddr::load_from(slice).map(Box::new)?))
             }
             AbiType::Bytes => load_bytes(version, last, slice).map(Self::Bytes),
             AbiType::FixedBytes(len) => {
@@ -837,7 +837,7 @@ mod tests {
             load_simple(
                 v,
                 addr.clone(),
-                AbiValue::Address(Box::new(IntAddr::Std(addr))),
+                AbiValue::Address(Box::new(AnyAddr::Std(addr))),
             )?;
 
             let addr: VarAddr = VarAddr {
@@ -849,7 +849,7 @@ mod tests {
             load_simple(
                 v,
                 addr.clone(),
-                AbiValue::Address(Box::new(IntAddr::Var(addr))),
+                AbiValue::Address(Box::new(AnyAddr::Var(addr))),
             )?;
         }
 

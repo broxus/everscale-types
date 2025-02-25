@@ -13,7 +13,7 @@ use crate::cell::{
 };
 use crate::dict::{self, RawDict};
 use crate::error::Error;
-use crate::models::IntAddr;
+use crate::models::{AnyAddr, IntAddr};
 use crate::num::Tokens;
 use crate::prelude::CellFamily;
 
@@ -131,10 +131,18 @@ impl AbiValue {
             | Self::FixedBytes(_)
             | Self::String(_)
             | Self::Ref(_) => Size { bits: 0, refs: 1 },
-            Self::Address(value) => Size {
-                bits: value.bit_len(),
-                refs: 0,
-            },
+            Self::Address(value) => {
+                let bit_len = match value.as_ref() {
+                    AnyAddr::Var(addr) => addr.bit_len(),
+                    AnyAddr::Std(addr) => addr.bit_len(),
+                    AnyAddr::Ext(addr) => addr.bit_len(),
+                    AnyAddr::None => 2,
+                };
+                Size {
+                    bits: bit_len,
+                    refs: 0,
+                }
+            }
             Self::Token(tokens) => Size {
                 bits: tokens.bit_len().unwrap_or(Tokens::MAX_BITS),
                 refs: 0,
@@ -432,7 +440,7 @@ impl AbiSerializer {
         target.store_reference(cell.clone())
     }
 
-    fn write_address(&mut self, address: &IntAddr) -> Result<(), Error> {
+    fn write_address(&mut self, address: &AnyAddr) -> Result<(), Error> {
         let target = self.require_builder(Size {
             bits: if self.version.use_max_size() {
                 IntAddr::BITS_MAX

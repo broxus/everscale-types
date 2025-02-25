@@ -1,10 +1,9 @@
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::hash::Hash;
 use std::num::NonZeroU8;
 use std::str::FromStr;
 use std::sync::Arc;
-
-use serde::{Deserialize, Serialize};
 
 use super::error::{ParseAbiTypeError, ParseNamedAbiTypeError};
 use crate::abi::WithoutName;
@@ -433,7 +432,7 @@ impl AbiType {
         }
     }
 
-    fn components_mut(&mut self) -> Option<&mut Arc<[NamedAbiType]>> {
+    pub(crate) fn components_mut(&mut self) -> Option<&mut Arc<[NamedAbiType]>> {
         match self {
             Self::Tuple(types) => Some(types),
             Self::Array(ty) => Arc::make_mut(ty).components_mut(),
@@ -545,7 +544,7 @@ impl AbiType {
         Self::Ref(Arc::<AbiType>::from(ty))
     }
 
-    fn from_simple_str(s: &str) -> Result<Self, ParseAbiTypeError> {
+    pub(crate) fn from_simple_str(s: &str) -> Result<Self, ParseAbiTypeError> {
         if let Some(arr_ty) = s.strip_suffix(']') {
             let (ty, len) = ok!(arr_ty
                 .rsplit_once('[')
