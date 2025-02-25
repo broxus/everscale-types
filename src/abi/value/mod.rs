@@ -9,7 +9,7 @@ use num_bigint::{BigInt, BigUint};
 use super::{ty::*, IntoAbi, IntoPlainAbi, WithAbiType, WithPlainAbiType, WithoutName};
 use crate::abi::error::AbiError;
 use crate::cell::{Cell, CellFamily};
-use crate::models::IntAddr;
+use crate::models::{AnyAddr, IntAddr};
 use crate::num::Tokens;
 
 mod de;
@@ -135,10 +135,10 @@ pub enum AbiValue {
     ///
     /// [`Cell`]: crate::cell::Cell
     Cell(Cell),
-    /// Internal address ([`IntAddr`]).
+    /// Any address ([`AnyAddr`]).
     ///
-    /// [`IntAddr`]: crate::models::message::IntAddr
-    Address(Box<IntAddr>),
+    /// [`AnyAddr`]: crate::models::message::AnyAddr
+    Address(Box<AnyAddr>),
     /// Byte array.
     Bytes(Bytes),
     /// Byte array of fixed length.
@@ -289,9 +289,9 @@ impl AbiValue {
     #[inline]
     pub fn address<T>(value: T) -> Self
     where
-        IntAddr: From<T>,
+        AnyAddr: From<T>,
     {
-        Self::Address(Box::new(IntAddr::from(value)))
+        Self::Address(Box::new(AnyAddr::from(value)))
     }
 
     /// Simple `bytes` constructor.
@@ -520,7 +520,13 @@ impl From<PlainAbiValue> for AbiValue {
             PlainAbiValue::Uint(n, value) => Self::Uint(n, value),
             PlainAbiValue::Int(n, value) => Self::Int(n, value),
             PlainAbiValue::Bool(value) => Self::Bool(value),
-            PlainAbiValue::Address(value) => Self::Address(value),
+            PlainAbiValue::Address(value) => {
+                let addr = match value.as_ref() {
+                    IntAddr::Std(addr) => AnyAddr::Std(addr.clone()),
+                    IntAddr::Var(addr) => AnyAddr::Var(addr.clone()),
+                };
+                AbiValue::Address(Box::new(addr))
+            }
         }
     }
 }
