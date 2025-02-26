@@ -78,7 +78,7 @@ fn test_fixed_bytes() {
     let value = AbiValue::FixedBytes(Bytes::from(bytes.clone()));
     let cell_2 = value.make_cell(AbiVersion::V2_3).unwrap();
     let cell_24 = value.make_cell(AbiVersion::V2_4).unwrap();
-    let mut bytes_builder = CellBuilder::from_raw_data(bytes.as_ref(), 256).unwrap();
+    let bytes_builder = CellBuilder::from_raw_data(bytes.as_ref(), 256).unwrap();
 
     let mut builder_v24 = builder.clone();
     builder_v24.store_builder(&bytes_builder).unwrap();
