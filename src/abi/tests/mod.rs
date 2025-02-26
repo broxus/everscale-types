@@ -71,6 +71,45 @@ fn decode_json_abi_v24() {
 }
 
 #[test]
+fn test_fixed_bytes() {
+    let mut builder = CellBuilder::new();
+
+    let bytes = vec![0u8; 32];
+    let value = AbiValue::FixedBytes(Bytes::from(bytes.clone()));
+    let cell_2 = value.make_cell(AbiVersion::V2_3).unwrap();
+    let cell_24 = value.make_cell(AbiVersion::V2_4).unwrap();
+    let mut bytes_builder = CellBuilder::from_raw_data(bytes.as_ref(), 256).unwrap();
+
+    let mut builder_v24 = builder.clone();
+    builder_v24.store_builder(&bytes_builder).unwrap();
+    builder
+        .store_reference(bytes_builder.build().unwrap())
+        .unwrap();
+
+    let built_24 = builder_v24.build().unwrap();
+    let built_2 = builder.build().unwrap();
+
+    assert_eq!(built_24, cell_24);
+    assert_eq!(built_2, cell_2);
+
+    let value_2 = AbiValue::load(
+        &AbiType::FixedBytes(32),
+        AbiVersion::V2_3,
+        &mut built_2.as_slice().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(value_2, value);
+
+    let value_24 = AbiValue::load(
+        &AbiType::FixedBytes(32),
+        AbiVersion::V2_4,
+        &mut built_24.as_slice().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(value_24, value);
+}
+
+#[test]
 fn encode_internal_input() {
     let contract = serde_json::from_str::<Contract>(DEPOOL_ABI).unwrap();
     let function = contract.find_function_by_id(0x4e73744b, true).unwrap();

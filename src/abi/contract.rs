@@ -564,8 +564,8 @@ impl Function {
         }
 
         let context = Cell::empty_context();
-        serializer.write_value(&output_id, context)?;
-        serializer.write_tuple(tokens, context)?;
+        serializer.write_value(&output_id, version, context)?;
+        serializer.write_tuple(tokens, version, context)?;
         serializer.finalize(context).map_err(From::from)
     }
 
@@ -868,7 +868,7 @@ impl<'a> ExternalInput<'_, 'a> {
                 AbiValue::Bool(false)
             };
             serializer.reserve_value(&value);
-            serializer.write_value(&value, context)?;
+            serializer.write_value(&value, abi_version, context)?;
         }
 
         let time = self.time.unwrap_or_else(now_ms);
@@ -886,8 +886,8 @@ impl<'a> ExternalInput<'_, 'a> {
             })?;
         }
 
-        serializer.write_value(&input_id, context)?;
-        serializer.write_tuple(self.tokens, context)?;
+        serializer.write_value(&input_id, abi_version, context)?;
+        serializer.write_tuple(self.tokens, abi_version, context)?;
 
         let payload = serializer.finalize(context)?.build_ext(context)?;
         Ok((expire_at, payload))
