@@ -305,6 +305,8 @@ pub enum AbiType {
     ///
     /// [`IntAddr`]: crate::models::message::IntAddr
     Address,
+    /// Standard internal address.
+    AddressStd,
     /// Byte array.
     Bytes,
     /// Byte array of fixed length.
@@ -382,6 +384,10 @@ impl AbiType {
             Self::Address => CellTreeStats {
                 bit_count: IntAddr::BITS_MAX as _,
                 cell_count: 0,
+            },
+            Self::AddressStd => CellTreeStats {
+                bit_count: StdAddr::BITS_MAX as _,
+                cell_count: 0
             },
             Self::Token => CellTreeStats {
                 bit_count: Tokens::MAX_BITS as _,
@@ -574,6 +580,7 @@ impl AbiType {
             "bool" => Self::Bool,
             "cell" => Self::Cell,
             "address" => Self::Address,
+            "address_std" => Self::AddressStd,
             "bytes" => Self::Bytes,
             "string" => Self::String,
             "gram" | "token" => Self::Token,
@@ -652,6 +659,7 @@ impl std::fmt::Display for AbiType {
             Self::Bool => "bool",
             Self::Cell => "cell",
             Self::Address => "address",
+            Self::AddressStd => "address_std",
             Self::Bytes => "bytes",
             Self::FixedBytes(n) => return write!(f, "fixedbytes{n}"),
             Self::String => "string",
@@ -710,6 +718,7 @@ impl PartialEq for WithoutName<AbiType> {
             (AbiType::Bool, AbiType::Bool) => true,
             (AbiType::Cell, AbiType::Cell) => true,
             (AbiType::Address, AbiType::Address) => true,
+            (AbiType::AddressStd, AbiType::AddressStd) => true,
             (AbiType::Bytes, AbiType::Bytes) => true,
             (AbiType::FixedBytes(a), AbiType::FixedBytes(b)) => a.eq(b),
             (AbiType::String, AbiType::String) => true,
@@ -748,6 +757,7 @@ impl Hash for WithoutName<AbiType> {
             AbiType::Bool => {}
             AbiType::Cell => {}
             AbiType::Address => {}
+            AbiType::AddressStd => {}
             AbiType::Bytes => {}
             AbiType::FixedBytes(x) => x.hash(state),
             AbiType::String => {}

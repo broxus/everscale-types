@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use bytes::Bytes;
 use num_bigint::{BigInt, BigUint};
-
+use everscale_types::models::StdAddr;
 use super::{ty::*, IntoAbi, IntoPlainAbi, WithAbiType, WithPlainAbiType, WithoutName};
 use crate::abi::error::AbiError;
 use crate::cell::{Cell, CellFamily};
@@ -139,6 +139,9 @@ pub enum AbiValue {
     ///
     /// [`AnyAddr`]: crate::models::message::AnyAddr
     Address(Box<AnyAddr>),
+    ///Standard internal address ([`StdAddr`])
+    ///[`StdAddr`]: crate::models::message::StdAddr
+    AddressStd(Box<Option<StdAddr>>),
     /// Byte array.
     Bytes(Bytes),
     /// Byte array of fixed length.
@@ -225,6 +228,7 @@ impl AbiValue {
             AbiValue::Bool(_) => AbiType::Bool,
             AbiValue::Cell(_) => AbiType::Cell,
             AbiValue::Address(_) => AbiType::Address,
+            AbiValue::AddressStd(_) => AbiType::AddressStd,
             AbiValue::Bytes(_) => AbiType::Bytes,
             AbiValue::FixedBytes(bytes) => AbiType::FixedBytes(bytes.len()),
             AbiValue::String(_) => AbiType::String,
@@ -414,6 +418,7 @@ impl AbiType {
             AbiType::Bool => AbiValue::Bool(false),
             AbiType::Cell => AbiValue::Cell(Cell::empty_cell()),
             AbiType::Address => AbiValue::Address(Box::default()),
+            AbiType::AddressStd => AbiValue::AddressStd(Box::default()),
             AbiType::Bytes => AbiValue::Bytes(Bytes::default()),
             AbiType::FixedBytes(len) => AbiValue::FixedBytes(Bytes::from(vec![0u8; *len])),
             AbiType::String => AbiValue::String(String::default()),
@@ -597,6 +602,7 @@ impl std::fmt::Display for DisplayValueType<'_> {
             AbiValue::Bool(_) => "bool",
             AbiValue::Cell(_) => "cell",
             AbiValue::Address(_) => "address",
+            AbiValue::AddressStd(_) => "address_std",
             AbiValue::Bytes(_) => "bytes",
             AbiValue::FixedBytes(bytes) => return write!(f, "fixedbytes{}", bytes.len()),
             AbiValue::String(_) => "string",
