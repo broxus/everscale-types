@@ -13,7 +13,7 @@ use crate::cell::{
 };
 use crate::dict::{self, RawDict};
 use crate::error::Error;
-use crate::models::{AnyAddr, IntAddr};
+use crate::models::{AnyAddr, IntAddr, StdAddr};
 use crate::num::Tokens;
 use crate::prelude::CellFamily;
 
@@ -143,6 +143,16 @@ impl AbiValue {
                     refs: 0,
                 }
             }
+            Self::AddressStd(value) => {
+                let bit_len = match value.as_ref() {
+                    Some(addr) => addr.bit_len(),
+                    None => 2,
+                };
+                Size {
+                    bits: bit_len,
+                    refs: 0
+                }
+            }
             Self::Token(tokens) => Size {
                 bits: tokens.bit_len().unwrap_or(Tokens::MAX_BITS),
                 refs: 0,
@@ -203,6 +213,10 @@ impl AbiValue {
             | Self::Ref(_) => Size { bits: 0, refs: 1 },
             Self::Address(_) => Size {
                 bits: IntAddr::BITS_MAX,
+                refs: 0,
+            },
+            Self::AddressStd(_) => Size {
+                bits: StdAddr::BITS_MAX,
                 refs: 0,
             },
             Self::Token(_) => Size {
@@ -377,6 +391,7 @@ impl AbiSerializer {
             AbiValue::Bool(value) => self.write_bool(*value),
             AbiValue::Cell(value) => self.write_cell(value),
             AbiValue::Address(value) => self.write_address(value),
+            AbiValue::AddressStd(value) => self.write_address_std(value),
             AbiValue::Bytes(value) => self.write_bytes(value, c),
             AbiValue::FixedBytes(value) => self.write_fixed_bytes(value, abi_version, c),
             AbiValue::String(value) => self.write_bytes(value.as_bytes(), c),
@@ -459,6 +474,26 @@ impl AbiSerializer {
             refs: 0,
         });
         address.store_into(target, Cell::empty_context())
+    }
+
+    fn write_address_std(&mut self, address: &Option<StdAddr>) -> Result<(), Error> {
+        let target = self.require_builder(Size {
+            bits: if self.version.use_max_size() {
+                StdAddr::BITS_MAX
+            } else {
+                match address {
+                    None => 2,
+                    Some(address) => address.bit_len(),
+                }
+            },
+            refs: 0,
+        });
+
+        match address {
+            None => target.store_zeros(2),
+            Some(address) => address.store_into(target, Cell::empty_context())
+        }
+
     }
 
     fn write_tokens(&mut self, tokens: &Tokens) -> Result<(), Error> {
