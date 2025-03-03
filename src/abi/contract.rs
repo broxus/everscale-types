@@ -44,6 +44,9 @@ pub struct Contract {
 
     /// Contract storage fields.
     pub fields: Arc<[NamedAbiType]>,
+
+    /// A mapping with all contract getters by name. Supported for ABI 2.7 and later
+    pub getters: HashMap<Arc<str>, Function>,
 }
 
 pub enum ContractInitData {
@@ -52,6 +55,10 @@ pub enum ContractInitData {
 }
 
 impl Contract {
+    /// Gets a contract getter as a function by its name
+    pub fn get_getter_by_name(&self, name: &str) -> Option<&Function> {
+        self.getters.get(name)
+    }
     /// Finds a method declaration with the specfied id.
     pub fn find_function_by_id(&self, id: u32, input: bool) -> Option<&Function> {
         self.functions
@@ -372,6 +379,8 @@ impl<'de> Deserialize<'de> for Contract {
             data: Vec<InitData>,
             #[serde(default)]
             fields: Vec<SerdeNamedAbiType>,
+            #[serde(default)]
+            getters: Vec<SerdeFunction>,
         }
 
         #[derive(Deserialize)]
@@ -442,6 +451,39 @@ impl<'de> Deserialize<'de> for Contract {
             })
             .collect();
 
+        let getters = contract
+            .getters
+            .into_iter()
+            .map(|item| {
+                let (input_id, output_id) = match item.id {
+                    Some(Id(id)) => (id, id),
+                    None => {
+                        let id = Function::compute_function_id(
+                            abi_version,
+                            &item.name,
+                            headers.as_ref(),
+                            &item.inputs,
+                            &item.outputs,
+                        );
+                        (id & Function::INPUT_ID_MASK, id | !Function::INPUT_ID_MASK)
+                    }
+                };
+                let name = Arc::<str>::from(item.name);
+                (
+                    name.clone(),
+                    Function {
+                        abi_version,
+                        name,
+                        headers: headers.clone(),
+                        inputs: Arc::from(item.inputs),
+                        outputs: Arc::from(item.outputs),
+                        input_id,
+                        output_id,
+                    },
+                )
+            })
+            .collect();
+
         let events = contract
             .events
             .into_iter()
@@ -497,6 +539,7 @@ impl<'de> Deserialize<'de> for Contract {
                     .map(|x| x.named_abi_type)
                     .collect::<Vec<_>>(),
             ),
+            getters
         })
     }
 }
