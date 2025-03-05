@@ -8,7 +8,7 @@ fn boc_with_crc() {
     let cell = Boc::decode(&boc_without_crc).unwrap();
 
     let mut boc_with_crc = Vec::new();
-    ser::BocHeader::<ahash::RandomState>::with_root(cell.as_ref())
+    ser::BocHeader::with_root(cell.as_ref())
         .with_crc(true)
         .encode(&mut boc_with_crc);
     assert_eq!(boc_without_crc.len() + 4, boc_with_crc.len());
