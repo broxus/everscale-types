@@ -97,6 +97,20 @@ impl BlockchainConfigParams {
         self.set_raw(ConfigParam2::ID, ok!(CellBuilder::build_from(address)))
     }
 
+    /// Returns the blackhole account address (in masterchain).
+    ///
+    /// Uses [`ConfigParam5`].
+    pub fn get_blackhole_address(&self) -> Result<Option<HashBytes>, Error> {
+        self.get::<ConfigParam5>()
+    }
+
+    /// Updates the blackhole account address (in masterchain).
+    ///
+    /// Uses [`ConfigParam5`].
+    pub fn set_blackhole_address(&mut self, address: &HashBytes) -> Result<bool, Error> {
+        self.set_raw(ConfigParam5::ID, ok!(CellBuilder::build_from(address)))
+    }
+
     /// Returns the fee collector account address (in masterchain).
     ///
     /// Uses [`ConfigParam3`] with a fallback to [`ConfigParam1`] (elector).
@@ -914,6 +928,10 @@ define_config_params! {
     /// DNS root account address (in masterchain).
     #[serde(transparent)]
     4 => ConfigParam4(HashBytes),
+
+    /// Blackhole account address (in masterchain).
+    #[serde(transparent)]
+    5 => ConfigParam5(HashBytes),
 
     /// Mint new price and mint add price (unused).
     6 => ConfigParam6(CellSlice<'a>),
