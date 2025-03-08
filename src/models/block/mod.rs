@@ -600,18 +600,42 @@ pub struct ValueFlow {
 
     /// Total fees collected in this block.
     pub fees_collected: CurrencyCollection,
+
+    /// Burned native tokens and extra currencies.
+    pub burned: CurrencyCollection,
+
     /// Shard fees imported to this block.
     pub fees_imported: CurrencyCollection,
     /// Fee recovery (?)
     pub recovered: CurrencyCollection,
     /// Block creation fees.
     pub created: CurrencyCollection,
-    /// Minted extra currencies.
+    /// Minted native tokens and extra currencies.
     pub minted: CurrencyCollection,
 }
 
 impl ValueFlow {
     const TAG_V1: u32 = 0xb8e48dfb;
+    const TAG_V2: u32 = 0x3ebf98b7;
+
+    /// Returns `true` if an inbound value flow is in sync with an outbound.
+    pub fn validate(&self) -> Result<bool, Error> {
+        let in_val = self
+            .from_prev_block
+            .checked_add(&self.imported)
+            .and_then(|val| val.checked_add(&self.fees_imported))
+            .and_then(|val| val.checked_add(&self.created))
+            .and_then(|val| val.checked_add(&self.minted))
+            .and_then(|val| val.checked_add(&self.recovered))?;
+
+        let out_val = self
+            .to_next_block
+            .checked_add(&self.exported)
+            .and_then(|val| val.checked_add(&self.fees_collected))
+            .and_then(|val| val.checked_add(&self.burned))?;
+
+        Ok(in_val == out_val)
+    }
 }
 
 impl Store for ValueFlow {
@@ -620,6 +644,12 @@ impl Store for ValueFlow {
         builder: &mut CellBuilder,
         context: &dyn CellContext,
     ) -> Result<(), Error> {
+        let (tag, store_burned) = if self.burned.is_zero() {
+            (Self::TAG_V1, false)
+        } else {
+            (Self::TAG_V2, true)
+        };
+
         let cell1 = {
             let mut builder = CellBuilder::new();
             ok!(self.from_prev_block.store_into(&mut builder, context));
@@ -629,10 +659,13 @@ impl Store for ValueFlow {
             ok!(builder.build_ext(context))
         };
 
-        ok!(builder.store_u32(Self::TAG_V1));
+        ok!(builder.store_u32(tag));
         ok!(builder.store_reference(cell1));
 
         ok!(self.fees_collected.store_into(builder, context));
+        if store_burned {
+            ok!(self.burned.store_into(builder, context));
+        }
 
         let cell2 = {
             let mut builder = CellBuilder::new();
@@ -648,12 +681,19 @@ impl Store for ValueFlow {
 
 impl<'a> Load<'a> for ValueFlow {
     fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        match ok!(slice.load_u32()) {
-            Self::TAG_V1 => {}
+        let with_burned = match ok!(slice.load_u32()) {
+            Self::TAG_V1 => false,
+            Self::TAG_V2 => true,
             _ => return Err(Error::InvalidTag),
         };
 
         let fees_collected = ok!(CurrencyCollection::load_from(slice));
+        let burned = if with_burned {
+            ok!(CurrencyCollection::load_from(slice))
+        } else {
+            CurrencyCollection::ZERO
+        };
+
         let slice1 = &mut ok!(slice.load_reference_as_slice());
         let slice2 = &mut ok!(slice.load_reference_as_slice());
 
@@ -663,6 +703,7 @@ impl<'a> Load<'a> for ValueFlow {
             imported: ok!(CurrencyCollection::load_from(slice1)),
             exported: ok!(CurrencyCollection::load_from(slice1)),
             fees_collected,
+            burned,
             fees_imported: ok!(CurrencyCollection::load_from(slice2)),
             recovered: ok!(CurrencyCollection::load_from(slice2)),
             created: ok!(CurrencyCollection::load_from(slice2)),

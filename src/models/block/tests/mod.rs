@@ -398,6 +398,10 @@ fn block_with_tycho_updates_store_load() {
                 tokens: Tokens::new(3195840031),
                 other: ExtraCurrencyCollection::new(),
             },
+            burned: CurrencyCollection {
+                tokens: Tokens::new(1),
+                other: ExtraCurrencyCollection::new(),
+            },
             fees_imported: CurrencyCollection {
                 tokens: Tokens::new(1495840031),
                 other: ExtraCurrencyCollection::new(),
