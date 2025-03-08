@@ -97,6 +97,20 @@ impl BlockchainConfigParams {
         self.set_raw(ConfigParam2::ID, ok!(CellBuilder::build_from(address)))
     }
 
+    /// Returns the burning config.
+    ///
+    /// Uses [`ConfigParam5`].
+    pub fn get_burning_config(&self) -> Result<BurningConfig, Error> {
+        ok!(self.get::<ConfigParam5>()).ok_or(Error::CellUnderflow)
+    }
+
+    /// Updates the burning config.
+    ///
+    /// Uses [`ConfigParam5`].
+    pub fn set_burning_config(&mut self, config: &BurningConfig) -> Result<bool, Error> {
+        self.set_raw(ConfigParam5::ID, ok!(CellBuilder::build_from(config)))
+    }
+
     /// Returns the fee collector account address (in masterchain).
     ///
     /// Uses [`ConfigParam3`] with a fallback to [`ConfigParam1`] (elector).
@@ -527,11 +541,30 @@ impl BlockchainConfigParams {
         self.set_raw(T::ID, value)
     }
 
-    /// Tries to get a raw parameter from the blockchain config.
+    /// Tries to get a raw parameter from the blockchain config (as slice).
     pub fn get_raw(&self, id: u32) -> Result<Option<CellSlice<'_>>, Error> {
+        match ok!(self.get_raw_cell_ref(id)) {
+            Some(cell) => cell.as_slice().map(Some),
+            None => Ok(None),
+        }
+    }
+
+    /// Tries to get a raw parameter from the blockchain config (as cell).
+    pub fn get_raw_cell(&self, id: u32) -> Result<Option<Cell>, Error> {
         match ok!(self.0.get_raw(id)) {
-            Some(slice) => match slice.get_reference_as_slice(0) {
-                Ok(slice) => Ok(Some(slice)),
+            Some(slice) => match slice.get_reference_cloned(0) {
+                Ok(cell) => Ok(Some(cell)),
+                Err(e) => Err(e),
+            },
+            None => Ok(None),
+        }
+    }
+
+    /// Tries to get a raw parameter from the blockchain config (as cell ref).
+    pub fn get_raw_cell_ref(&self, id: u32) -> Result<Option<&'_ DynCell>, Error> {
+        match ok!(self.0.get_raw(id)) {
+            Some(slice) => match slice.get_reference(0) {
+                Ok(cell) => Ok(Some(cell)),
                 Err(e) => Err(e),
             },
             None => Ok(None),
@@ -914,6 +947,10 @@ define_config_params! {
     /// DNS root account address (in masterchain).
     #[serde(transparent)]
     4 => ConfigParam4(HashBytes),
+
+    /// Burning config.
+    #[serde(transparent)]
+    5 => ConfigParam5(BurningConfig),
 
     /// Mint new price and mint add price (unused).
     6 => ConfigParam6(CellSlice<'a>),

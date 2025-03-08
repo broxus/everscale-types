@@ -5,10 +5,54 @@ use everscale_crypto::ed25519;
 use crate::cell::*;
 use crate::dict::Dict;
 use crate::error::Error;
-use crate::num::{Tokens, Uint12};
+use crate::num::{Tokens, Uint12, VarUint248};
 
 use crate::models::block::ShardIdent;
 use crate::models::Signature;
+
+/// Value flow burning config.
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[tlb(tag = "#01", validate_with = "Self::is_valid")]
+pub struct BurningConfig {
+    /// Address of the masterchain account which will burn all inbound message balance.
+    pub blackhole_addr: Option<HashBytes>,
+    /// Numerator of the potion of burned fees.
+    pub fee_burn_num: u32,
+    /// Denominator of the potion of burned fees.
+    pub fee_burn_denom: u32,
+}
+
+impl BurningConfig {
+    /// Returns whether the config is well-formed.
+    pub fn is_valid(&self) -> bool {
+        self.fee_burn_num <= self.fee_burn_denom && self.fee_burn_denom > 0
+    }
+
+    /// Computes how much fees to burn.
+    ///
+    /// NOTE: For a well-formed [`BurningConfig`] it never fails
+    ///       and returns a value not greater than `tokens`.
+    pub fn compute_burned_fees(&self, tokens: Tokens) -> Result<Tokens, Error> {
+        if self.fee_burn_num == 0 {
+            return Ok(Tokens::ZERO);
+        } else if self.fee_burn_denom == 0 {
+            return Err(Error::IntOverflow);
+        } else if self.fee_burn_num > self.fee_burn_denom {
+            return Err(Error::InvalidData);
+        }
+
+        let mut tokens = VarUint248::new(tokens.into_inner());
+        tokens *= self.fee_burn_num as u128;
+        tokens /= self.fee_burn_denom as u128;
+        let (hi, lo) = tokens.into_words();
+        debug_assert_eq!(
+            hi, 0,
+            "burned fees must never be greater than original fees"
+        );
+        Ok(Tokens::new(lo))
+    }
+}
 
 /// Config voting setup params.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
