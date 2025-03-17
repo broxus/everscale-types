@@ -20,13 +20,24 @@ pub struct BurningConfig {
     /// Numerator of the potion of burned fees.
     pub fee_burn_num: u32,
     /// Denominator of the potion of burned fees.
-    pub fee_burn_denom: u32,
+    pub fee_burn_denom: NonZeroU32,
+}
+
+impl Default for BurningConfig {
+    #[inline]
+    fn default() -> Self {
+        Self {
+            blackhole_addr: None,
+            fee_burn_num: 0,
+            fee_burn_denom: NonZeroU32::MIN,
+        }
+    }
 }
 
 impl BurningConfig {
     /// Returns whether the config is well-formed.
     pub fn is_valid(&self) -> bool {
-        self.fee_burn_num <= self.fee_burn_denom && self.fee_burn_denom > 0
+        self.fee_burn_num <= self.fee_burn_denom.get()
     }
 
     /// Computes how much fees to burn.
@@ -36,15 +47,13 @@ impl BurningConfig {
     pub fn compute_burned_fees(&self, tokens: Tokens) -> Result<Tokens, Error> {
         if self.fee_burn_num == 0 {
             return Ok(Tokens::ZERO);
-        } else if self.fee_burn_denom == 0 {
-            return Err(Error::IntOverflow);
-        } else if self.fee_burn_num > self.fee_burn_denom {
+        } else if !self.is_valid() {
             return Err(Error::InvalidData);
         }
 
         let mut tokens = VarUint248::new(tokens.into_inner());
         tokens *= self.fee_burn_num as u128;
-        tokens /= self.fee_burn_denom as u128;
+        tokens /= self.fee_burn_denom.get() as u128;
         let (hi, lo) = tokens.into_words();
         debug_assert_eq!(
             hi, 0,
