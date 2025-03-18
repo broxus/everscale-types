@@ -167,7 +167,7 @@ pub fn dict_get_subdict<'a: 'b, 'b, 'c: 'a>(
                         break split_edge;
                     }
                     std::cmp::Ordering::Less => {
-                        if data.cell().reference_count() != 2 {
+                        if data.cell().reference_count() < 2 {
                             return Err(Error::CellUnderflow);
                         }
                         prefix.skip_first(lcp.size_bits(), 0).ok();

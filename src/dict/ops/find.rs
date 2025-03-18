@@ -62,7 +62,7 @@ pub fn dict_find_owned(
 
                 // The key contains the entire prefix, but there are still some bits left.
                 // Fail fast if there are not enough references in the fork
-                if data.reference_count() != 2 {
+                if data.reference_count() < 2 {
                     return Err(Error::CellUnderflow);
                 }
 

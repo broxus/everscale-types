@@ -69,7 +69,7 @@ pub fn dict_insert(
             // The key contains the entire prefix, but there are still some bits left
             std::cmp::Ordering::Less => {
                 // Fail fast if there are not enough references in the fork
-                if data.reference_count() != 2 {
+                if data.reference_count() < 2 {
                     return Err(Error::CellUnderflow);
                 }
 
@@ -190,7 +190,7 @@ pub fn aug_dict_insert(
             // The key contains the entire prefix, but there are still some bits left
             std::cmp::Ordering::Less => {
                 // Fail fast if there are not enough references in the fork
-                if data.reference_count() != 2 {
+                if data.reference_count() < 2 {
                     return Err(Error::CellUnderflow);
                 }
 
@@ -324,7 +324,7 @@ pub fn dict_insert_owned(
             // The key contains the entire prefix, but there are still some bits left
             std::cmp::Ordering::Less => {
                 // Fail fast if there are not enough references in the fork
-                if data.reference_count() != 2 {
+                if data.reference_count() < 2 {
                     return Err(Error::CellUnderflow);
                 }
 

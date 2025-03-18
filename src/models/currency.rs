@@ -1,5 +1,7 @@
 //! Currency collection stuff.
 
+use std::collections::{BTreeMap, HashMap};
+
 use crate::cell::*;
 use crate::dict::{AugDictExtra, Dict};
 use crate::error::Error;
@@ -199,6 +201,16 @@ impl ExtraCurrencyCollection {
         Self(Dict::from_raw(dict))
     }
 
+    /// Creates an `ExtraCurrencyCollection` from an iterator of id-amount pairs.
+    pub fn try_from_iter<I>(iter: I) -> Result<Self, Error>
+    where
+        I: IntoIterator<Item = (u32, VarUint248)>,
+    {
+        let mut values = iter.into_iter().collect::<Box<[_]>>();
+        values.sort_unstable_by_key(|(id, _)| *id);
+        Dict::try_from_sorted_slice(&values).map(Self)
+    }
+
     /// Returns `true` if the dictionary contains no elements.
     pub const fn is_empty(&self) -> bool {
         self.0.is_empty()
@@ -311,6 +323,50 @@ impl ExtraCurrencyCollection {
     }
 }
 
+impl<S> TryFrom<&'_ HashMap<u32, VarUint248, S>> for ExtraCurrencyCollection
+where
+    S: std::hash::BuildHasher,
+{
+    type Error = Error;
+
+    fn try_from(value: &'_ HashMap<u32, VarUint248, S>) -> Result<Self, Self::Error> {
+        let mut values = value.iter().collect::<Box<[_]>>();
+        values.sort_unstable_by_key(|(id, _)| *id);
+        Dict::try_from_sorted_slice(&values).map(Self)
+    }
+}
+
+impl<S> TryFrom<HashMap<u32, VarUint248, S>> for ExtraCurrencyCollection
+where
+    S: std::hash::BuildHasher,
+{
+    type Error = Error;
+
+    fn try_from(value: HashMap<u32, VarUint248, S>) -> Result<Self, Self::Error> {
+        let mut values = value.into_iter().collect::<Box<[_]>>();
+        values.sort_unstable_by_key(|(id, _)| *id);
+        Dict::try_from_sorted_slice(&values).map(Self)
+    }
+}
+
+impl TryFrom<&'_ BTreeMap<u32, VarUint248>> for ExtraCurrencyCollection {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(value: &'_ BTreeMap<u32, VarUint248>) -> Result<Self, Self::Error> {
+        Dict::try_from_btree(value).map(Self)
+    }
+}
+
+impl TryFrom<BTreeMap<u32, VarUint248>> for ExtraCurrencyCollection {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(value: BTreeMap<u32, VarUint248>) -> Result<Self, Self::Error> {
+        Self::try_from(&value)
+    }
+}
+
 impl From<Dict<u32, VarUint248>> for ExtraCurrencyCollection {
     #[inline]
     fn from(value: Dict<u32, VarUint248>) -> Self {
@@ -348,6 +404,9 @@ impl<'a> arbitrary::Arbitrary<'a> for ExtraCurrencyCollection {
 
 #[cfg(test)]
 mod tests {
+    use crate::cell::Lazy;
+    use crate::models::{DepthBalanceInfo, ShardAccount, ShardAccounts};
+
     use super::*;
 
     fn _cc_must_use() -> anyhow::Result<()> {
@@ -360,6 +419,64 @@ mod tests {
         {
             ExtraCurrencyCollection::new().checked_add(&ExtraCurrencyCollection::new())?;
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn cc_math() -> anyhow::Result<()> {
+        let value = CurrencyCollection {
+            tokens: Tokens::new(1),
+            other: ExtraCurrencyCollection::try_from_iter([(1, VarUint248::new(1000))])?,
+        };
+
+        let mut new_value = CurrencyCollection::ZERO;
+        new_value.try_add_assign(&value)?;
+        assert_eq!(new_value, value);
+
+        new_value.try_add_assign(&value)?;
+        assert_ne!(new_value, value);
+
+        let extra = new_value.other.as_dict().get(1)?;
+        assert_eq!(extra, Some(VarUint248::new(2000)));
+
+        Ok(())
+    }
+
+    #[test]
+    fn aug_dict() -> anyhow::Result<()> {
+        let mut accounts = ShardAccounts::new();
+        accounts.set(
+            HashBytes([0; 32]),
+            DepthBalanceInfo {
+                split_depth: 0,
+                balance: CurrencyCollection {
+                    tokens: Tokens::new(500_000_000_000),
+                    other: ExtraCurrencyCollection::new(),
+                },
+            },
+            ShardAccount {
+                account: Lazy::from_raw(Cell::empty_cell())?,
+                last_trans_lt: 0,
+                last_trans_hash: Default::default(),
+            },
+        )?;
+
+        accounts.set(
+            HashBytes([1; 32]),
+            DepthBalanceInfo {
+                split_depth: 0,
+                balance: CurrencyCollection {
+                    tokens: Tokens::new(500_000_000_000),
+                    other: ExtraCurrencyCollection::try_from_iter([(2, VarUint248::new(1000))])?,
+                },
+            },
+            ShardAccount {
+                account: Lazy::from_raw(Cell::empty_cell())?,
+                last_trans_lt: 0,
+                last_trans_hash: Default::default(),
+            },
+        )?;
 
         Ok(())
     }
