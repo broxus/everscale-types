@@ -1127,6 +1127,11 @@ define_config_params! {
     /// Contains a [`SizeLimitsConfig`].
     #[serde(transparent)]
     43 => ConfigParam43(SizeLimitsConfig),
+
+    /// Mint once config (can be used by L2 to mint native currency).
+    ///
+    /// Contains a [`MintOnceConfig`].
+    50 => ConfigParam50(MintOnceConfig),
 }
 
 #[cfg(feature = "serde")]

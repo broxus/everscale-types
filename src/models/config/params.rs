@@ -8,7 +8,7 @@ use crate::error::Error;
 use crate::num::{Tokens, Uint12, VarUint248};
 
 use crate::models::block::ShardIdent;
-use crate::models::Signature;
+use crate::models::{CurrencyCollection, Signature};
 
 /// Value flow burning config.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
@@ -61,6 +61,17 @@ impl BurningConfig {
         );
         Ok(Tokens::new(lo))
     }
+}
+
+/// One-time minting config (can be used by L2 to mint native currency).
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[tlb(tag = "#01")]
+pub struct MintOnceConfig {
+    /// Exact masterchain block seqno.
+    pub mint_at: u32,
+    /// Native and extra currencies to mint.
+    pub delta: CurrencyCollection,
 }
 
 /// Config voting setup params.
