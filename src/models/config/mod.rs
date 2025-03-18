@@ -1019,6 +1019,7 @@ define_config_params! {
     18 => ConfigParam18(NonEmptyDict => Dict<u32, StoragePrices>),
 
     /// Global ID.
+    #[serde(transparent)]
     19 => ConfigParam19(i32),
 
     /// Masterchain gas limits and prices.
@@ -1131,6 +1132,7 @@ define_config_params! {
     /// Mint once config (can be used by L2 to mint native currency).
     ///
     /// Contains a [`MintOnceConfig`].
+    #[serde(transparent)]
     50 => ConfigParam50(MintOnceConfig),
 }
 
