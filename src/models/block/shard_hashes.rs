@@ -92,6 +92,21 @@ pub struct WorkchainShardHashes {
 }
 
 impl WorkchainShardHashes {
+    /// Returns the workchain of this tree.
+    pub fn workchain(&self) -> i32 {
+        self.workchain
+    }
+
+    /// Returns the root cell of this tree.
+    pub fn root(&'_ self) -> &'_ DynCell {
+        self.root.as_ref()
+    }
+
+    /// Returns the root cell of this tree.
+    pub fn into_root(self) -> Cell {
+        self.root
+    }
+
     /// Gets an iterator over the keys of the shard descriptions tree, sorted by key.
     /// The iterator element type is `Result<ShardIdent>`.
     ///
@@ -219,6 +234,13 @@ impl WorkchainShardHashes {
         }
 
         Err(Error::Unbalanced)
+    }
+}
+
+impl From<WorkchainShardHashes> for Cell {
+    #[inline]
+    fn from(value: WorkchainShardHashes) -> Self {
+        value.root
     }
 }
 
