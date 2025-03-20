@@ -731,21 +731,19 @@ impl<'a> ExternalInput<'_, 'a> {
 
         let mut serializer = AbiSerializer::new(abi_version);
 
-        if reserve_signature {
-            serializer.add_offset(if abi_version.major == 1 {
-                // Reserve reference for signature
-                Size { bits: 0, refs: 1 }
+        serializer.add_offset(if abi_version.major == 1 {
+            // Reserve reference for signature
+            Size { bits: 0, refs: 1 }
+        } else {
+            let bits = if abi_version >= AbiVersion::V2_3 {
+                // Reserve only for address as it also ensures the the signature will fit
+                IntAddr::BITS_MAX
             } else {
-                let bits = if abi_version >= AbiVersion::V2_3 {
-                    // Reserve only for address as it also ensures the the signature will fit
-                    IntAddr::BITS_MAX
-                } else {
-                    // Reserve for `Some` non-empty signature
-                    1 + 512
-                };
-                Size { bits, refs: 0 }
-            });
-        }
+                // Reserve for `Some` non-empty signature
+                1 + 512
+            };
+            Size { bits, refs: 0 }
+        });
 
         let input_id = AbiValue::uint(32, self.function.input_id);
 
