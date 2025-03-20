@@ -1337,6 +1337,13 @@ impl<'a> arbitrary::Arbitrary<'a> for LevelMask {
 #[derive(Clone)]
 pub struct LevelMaskIter(u8);
 
+impl LevelMaskIter {
+    /// Returns `true` if all levels were consumed.
+    pub fn is_empty(&self) -> bool {
+        self.0 == 0
+    }
+}
+
 impl Iterator for LevelMaskIter {
     type Item = u8;
 
