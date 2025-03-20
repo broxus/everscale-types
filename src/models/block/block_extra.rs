@@ -192,7 +192,7 @@ impl<'a> Load<'a> for AccountBlock {
 
         Ok(Self {
             account: ok!(slice.load_u256()),
-            transactions: ok!(AugDict::load_from_root(slice, Cell::empty_context())),
+            transactions: ok!(AugDict::load_from_root_ext(slice, Cell::empty_context())),
             state_update: ok!(Lazy::load_from(slice)),
         })
     }

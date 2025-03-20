@@ -160,8 +160,8 @@ impl<K, A: Default, V> AugDict<K, A, V> {
 }
 
 impl<K: DictKey, A, V> AugDict<K, A, V> {
-    #[allow(unused)]
-    pub(crate) fn load_from_root<'a>(
+    /// Loads a non-empty dictionary from a root cell.
+    pub fn load_from_root_ext<'a>(
         slice: &mut CellSlice<'a>,
         context: &dyn CellContext,
     ) -> Result<Self, Error>
