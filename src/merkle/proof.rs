@@ -240,6 +240,7 @@ pub struct MerkleProofBuilder<'a, F> {
     root: &'a DynCell,
     filter: F,
     allow_different_root: bool,
+    prune_big_cells: bool,
 }
 
 impl<'a, F> MerkleProofBuilder<'a, F>
@@ -253,12 +254,20 @@ where
             root,
             filter: f,
             allow_different_root: false,
+            prune_big_cells: false,
         }
     }
 
     /// Mark whether the different root is ok for this proof.
     pub fn allow_different_root(mut self, allow: bool) -> Self {
         self.allow_different_root = allow;
+        self
+    }
+
+    /// Prune not visited ordinary cells without references based on
+    /// their bit len.
+    pub fn prune_big_cells(mut self, allow: bool) -> Self {
+        self.prune_big_cells = allow;
         self
     }
 
@@ -269,6 +278,7 @@ where
             root: self.root,
             filter: self.filter,
             allow_different_root: self.allow_different_root,
+            prune_big_cells: self.prune_big_cells,
         }
     }
 
@@ -292,6 +302,7 @@ where
             pruned_branches: None,
             context,
             allow_different_root: self.allow_different_root,
+            prune_big_cells: self.prune_big_cells,
         }
         .build()
     }
@@ -312,12 +323,20 @@ pub struct MerkleProofExtBuilder<'a, F> {
     root: &'a DynCell,
     filter: F,
     allow_different_root: bool,
+    prune_big_cells: bool,
 }
 
 impl<F> MerkleProofExtBuilder<'_, F> {
     /// Mark whether the different root is ok for this proof.
     pub fn allow_different_root(mut self, allow: bool) -> Self {
         self.allow_different_root = allow;
+        self
+    }
+
+    /// Prune not visited ordinary cells without references based on
+    /// their bit len.
+    pub fn prune_big_cells(mut self, allow: bool) -> Self {
+        self.prune_big_cells = allow;
         self
     }
 }
@@ -339,6 +358,7 @@ where
             pruned_branches: Some(&mut pruned_branches),
             context,
             allow_different_root: self.allow_different_root,
+            prune_big_cells: self.prune_big_cells,
         };
         let cell = ok!(builder.build());
         Ok((cell, pruned_branches))
@@ -352,6 +372,7 @@ struct BuilderImpl<'a, 'b, 'c: 'a, S = ahash::RandomState> {
     pruned_branches: Option<&'b mut HashMap<&'a HashBytes, bool, S>>,
     context: &'c dyn CellContext,
     allow_different_root: bool,
+    prune_big_cells: bool,
 }
 
 impl<S> BuilderImpl<'_, '_, '_, S>
@@ -359,6 +380,8 @@ where
     S: BuildHasher + Default,
 {
     fn build(&mut self) -> Result<Cell, Error> {
+        const PRUNED_BITS_THRESHOLD: u16 = 288;
+
         struct Node<'a> {
             references: RefsIter<'a>,
             descriptor: CellDescriptor,
@@ -402,7 +425,11 @@ where
                             last.references.peek_prev_cloned().expect("mut not fail")
                         }
                         // Replace all skipped subtrees with pruned branch cells
-                        FilterAction::Skip if descriptor.reference_count() > 0 => {
+                        FilterAction::Skip
+                            if descriptor.reference_count() > 0
+                                || self.prune_big_cells
+                                    && child.bit_len() > PRUNED_BITS_THRESHOLD =>
+                        {
                             // Create pruned branch
                             let child = ok!(make_pruned_branch_cold(
                                 child,
