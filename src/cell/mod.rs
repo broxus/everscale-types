@@ -273,6 +273,7 @@ impl DynCell {
     /// Recursively traverses the cells tree without tracking a uniqueness
     /// of cells. Usefull for adding small subtrees to merkle proofs.
     pub fn touch_recursive(&self) {
+        self.data(); // Touch data to include it if `OnDataAccess` is used.
         for child in self.references() {
             child.touch_recursive();
         }
