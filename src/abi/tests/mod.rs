@@ -182,10 +182,20 @@ fn encode_unsigned_external_input() {
         builder.store_u64(123).unwrap();
         builder.store_u64(321).unwrap();
         builder.store_reference(Cell::default()).unwrap();
-        StdAddr::default()
-            .store_into(&mut builder, Cell::empty_context())
+        builder
+            .store_reference({
+                let mut b = CellBuilder::new();
+                b.store_slice(
+                    CellBuilder::build_from(StdAddr::default())
+                        .unwrap()
+                        .as_slice()
+                        .unwrap(),
+                )
+                .unwrap();
+                b.store_u8(1).unwrap();
+                b.build().unwrap()
+            })
             .unwrap();
-        builder.store_u8(1).unwrap();
         builder.build().unwrap()
     };
 
