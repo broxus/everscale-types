@@ -4,16 +4,16 @@ use std::num::NonZeroU8;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use anyhow::Result;
-use bytes::Bytes;
-use num_bigint::{BigInt, BigUint};
-use num_traits::ToPrimitive;
-
 use super::{
     AbiType, AbiValue, NamedAbiType, NamedAbiValue, PlainAbiType, PlainAbiValue, WithoutName,
 };
 use crate::cell::{Cell, HashBytes, Lazy};
 use crate::num::*;
+use anyhow::Result;
+use bytes::Bytes;
+use everscale_types::models::{AnyAddr, ExtAddr};
+use num_bigint::{BigInt, BigUint};
+use num_traits::ToPrimitive;
 
 use crate::models::message::{IntAddr, StdAddr, VarAddr};
 
@@ -222,6 +222,9 @@ impl_with_abi_type! {
     Bytes => Bytes,
     String => String,
     str => String,
+
+    AnyAddr => Address,
+    ExtAddr => Address,
 
     IntAddr => Address,
     StdAddr => Address,
@@ -631,9 +634,20 @@ impl_into_abi! {
         AbiValue::String(v),
     },
 
-    IntAddr => |v| {
+    AnyAddr => |v| {
         AbiValue::Address(Box::new(v.clone())),
         AbiValue::Address(Box::new(v)),
+    },
+
+    ExtAddr => |v| {
+        AbiValue::Address(Box::new(v.clone().into())),
+        AbiValue::Address(Box::new(v.into())),
+    },
+
+
+    IntAddr => |v| {
+        AbiValue::Address(Box::new(v.clone().into())),
+        AbiValue::Address(Box::new(v.into())),
     },
     StdAddr => |v| {
         AbiValue::Address(Box::new(v.clone().into())),
@@ -1045,12 +1059,25 @@ impl FromAbi for String {
     }
 }
 
-impl FromAbi for IntAddr {
+impl FromAbi for AnyAddr {
     fn from_abi(value: AbiValue) -> Result<Self> {
         match value {
             AbiValue::Address(address) => Ok(*address),
             value => Err(expected_type("address", &value)),
         }
+    }
+}
+
+impl FromAbi for IntAddr {
+    fn from_abi(value: AbiValue) -> Result<Self> {
+        if let AbiValue::Address(address) = &value {
+            match address.as_ref() {
+                AnyAddr::Std(addr) => return Ok(IntAddr::Std(addr.clone())),
+                AnyAddr::Var(addr) => return Ok(IntAddr::Var(addr.clone())),
+                AnyAddr::None | AnyAddr::Ext(_) => (),
+            }
+        }
+        Err(expected_type("int address", &value))
     }
 }
 
@@ -1066,7 +1093,7 @@ impl FromPlainAbi for IntAddr {
 impl FromAbi for StdAddr {
     fn from_abi(value: AbiValue) -> Result<Self> {
         if let AbiValue::Address(address) = &value {
-            if let IntAddr::Std(address) = address.as_ref() {
+            if let AnyAddr::Std(address) = address.as_ref() {
                 return Ok(address.clone());
             }
         }
@@ -1088,13 +1115,37 @@ impl FromPlainAbi for StdAddr {
 impl FromAbi for VarAddr {
     fn from_abi(value: AbiValue) -> Result<Self> {
         if let AbiValue::Address(address) = &value {
-            if let IntAddr::Var(address) = address.as_ref() {
+            if let AnyAddr::Var(address) = address.as_ref() {
                 return Ok(address.clone());
             }
         }
         Err(expected_type("var address", &value))
     }
 }
+
+impl FromAbi for ExtAddr {
+    fn from_abi(value: AbiValue) -> Result<Self> {
+        if let AbiValue::Address(address) = &value {
+            if let AnyAddr::Ext(address) = address.as_ref() {
+                return Ok(address.clone());
+            }
+        }
+        Err(expected_type("ext address", &value))
+    }
+}
+
+// impl FromAbi for Option<ExtAddr> {
+//     fn from_abi(value: AbiValue) -> Result<Self> {
+//         if let AbiValue::Address(address) = &value {
+//             match address.as_ref() {
+//                 AnyAddr::Std(_) | AnyAddr::Var(_) => (),
+//                 AnyAddr::Ext(addr) => return Ok(Some(addr.clone())),
+//                 AnyAddr::None => return Ok(None),
+//             }
+//         }
+//         Err(expected_type("ext address", &value))
+//     }
+// }
 
 impl FromPlainAbi for VarAddr {
     fn from_plain_abi(value: PlainAbiValue) -> Result<Self> {
