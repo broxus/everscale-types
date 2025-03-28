@@ -1,3 +1,5 @@
+use crate::common;
+use crate::common::FieldAttributes;
 use quote::quote;
 
 pub fn impl_derive(input: syn::DeriveInput) -> Result<proc_macro2::TokenStream, syn::Error> {
@@ -22,10 +24,13 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<proc_macro2::TokenStream, 
     let mut tuple = Vec::new();
 
     for i in data.fields {
-        let Some(name) = i.ident else {
+        let Some(name) = &i.ident else {
             continue;
         };
-        let token = construct_with_abi_type_named(&name, &i.ty);
+
+        let attributes = common::extract_field_attributes(i.attrs.as_slice());
+        let token = construct_with_abi_type(name, &i.ty, attributes);
+
         tuple.push(token);
     }
 
@@ -44,10 +49,19 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<proc_macro2::TokenStream, 
     Ok(token_stream)
 }
 
-pub fn construct_with_abi_type_named(
-    name_ident: &syn::Ident,
+pub fn construct_with_abi_type(
+    field_name: &syn::Ident,
     ty: &syn::Type,
+    attrs: FieldAttributes,
 ) -> proc_macro2::TokenStream {
-    let str_name = name_ident.to_string();
-    quote!(<#ty>::abi_type().named(#str_name))
+    let to_change = match &attrs.custom_name {
+        Some(custom) => custom.to_string(),
+        None => field_name.to_string(),
+    };
+    let custom_name = to_change.to_string();
+
+    match &attrs.custom_handler {
+        Some(handler) => quote!(#handler::abi_type(self.#field_name).named(#custom_name)),
+        None => quote!(<#ty>::abi_type().named(#custom_name)),
+    }
 }
