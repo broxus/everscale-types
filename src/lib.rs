@@ -148,7 +148,6 @@ pub mod abi;
 pub mod arbitrary;
 
 pub mod error;
-
 #[cfg(test)]
 mod tests {
     use crate::cell::{CellTreeStats, MAX_BIT_LEN};
