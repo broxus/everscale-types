@@ -39,7 +39,7 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<proc_macro2::TokenStream, 
     };
 
     let token_stream = quote! {
-        impl WithAbiType for #ident {
+        impl ::everscale_types::abi::WithAbiType for #ident {
             fn abi_type() -> ::everscale_types::abi::AbiType {
                 ::everscale_types::abi::AbiType::tuple(#abi_values_slice)
             }
@@ -61,7 +61,7 @@ pub fn construct_with_abi_type(
     let custom_name = to_change.to_string();
 
     match &attrs.custom_handler {
-        Some(handler) => quote!(#handler::abi_type(self.#field_name).named(#custom_name)),
+        Some(handler) => quote!(#handler::abi_type().named(#custom_name)),
         None => quote!(<#ty>::abi_type().named(#custom_name)),
     }
 }
