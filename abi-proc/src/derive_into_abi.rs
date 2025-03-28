@@ -1,18 +1,19 @@
 use crate::common;
-use crate::common::FieldAttributes;
+use crate::common::{FieldAttributes, HandlerType};
 use quote::quote;
+use syn::Error;
 
-pub fn impl_derive(input: syn::DeriveInput) -> Result<proc_macro2::TokenStream, syn::Error> {
+pub fn impl_derive(input: syn::DeriveInput) -> Result<proc_macro2::TokenStream, Error> {
     let data = match input.data {
         syn::Data::Struct(data_struct) => data_struct,
         syn::Data::Enum(_) => {
-            return Err(syn::Error::new_spanned(
+            return Err(Error::new_spanned(
                 &input,
                 "IntoAbi is not supported for enum",
             ))
         }
         syn::Data::Union(_) => {
-            return Err(syn::Error::new_spanned(
+            return Err(Error::new_spanned(
                 &input,
                 "IntoAbi is not supported for unions",
             ))
@@ -28,8 +29,8 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<proc_macro2::TokenStream, 
             continue;
         };
 
-        let attributes = common::extract_field_attributes(i.attrs.as_slice());
-        let token = construct_named_abi_value(name, &attributes);
+        let attributes = common::extract_field_attributes(i.attrs.as_slice())?;
+        let token = construct_named_abi_value(name, &attributes)?;
 
         tuple.push(token);
     }
@@ -61,15 +62,28 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<proc_macro2::TokenStream, 
 pub fn construct_named_abi_value(
     field_name: &syn::Ident,
     attrs: &FieldAttributes,
-) -> proc_macro2::TokenStream {
+) -> Result<proc_macro2::TokenStream, Error> {
+    attrs.check()?;
+
     let to_change = match &attrs.custom_name {
         Some(custom) => custom.to_string(),
         None => field_name.to_string(),
     };
     let custom_name = to_change.to_string();
 
-    match &attrs.custom_handler {
+    for (ty, path) in &attrs.with_handlers {
+        if !matches!(ty, HandlerType::IntoAbi) {
+            continue;
+        }
+
+        return Ok(quote! {
+            quote!(#path(self.#field_name.clone()).named(#custom_name))
+        });
+    }
+
+    //fallback to mod handler if present
+    Ok(match &attrs.mod_handler {
         Some(handler) => quote!(#handler::into_abi(self.#field_name.clone()).named(#custom_name)),
         None => quote!(self.#field_name.clone().into_abi().named(#custom_name)),
-    }
+    })
 }
