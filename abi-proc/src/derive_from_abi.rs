@@ -1,18 +1,19 @@
 use crate::common;
-use crate::common::FieldAttributes;
+use crate::common::{FieldAttributes, HandlerType};
 use quote::quote;
+use syn::Error;
 
-pub fn impl_derive(input: syn::DeriveInput) -> Result<proc_macro2::TokenStream, syn::Error> {
+pub fn impl_derive(input: syn::DeriveInput) -> Result<proc_macro2::TokenStream, Error> {
     let data = match &input.data {
         syn::Data::Struct(data_struct) => data_struct,
         syn::Data::Enum(_) => {
-            return Err(syn::Error::new_spanned(
+            return Err(Error::new_spanned(
                 &input,
                 "FromAbi is not supported for enum",
             ))
         }
         syn::Data::Union(_) => {
-            return Err(syn::Error::new_spanned(
+            return Err(Error::new_spanned(
                 &input,
                 "FromAbi is not supported for unions",
             ))
@@ -28,8 +29,8 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<proc_macro2::TokenStream, 
             continue;
         };
 
-        let attributes = common::extract_field_attributes(i.attrs.as_slice());
-        let token = construct_from_abi(name, &attributes);
+        let attributes = common::extract_field_attributes(i.attrs.as_slice())?;
+        let token = construct_from_abi(name, &attributes)?;
         struct_fields.push(token);
     }
 
@@ -51,13 +52,29 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<proc_macro2::TokenStream, 
 pub fn construct_from_abi(
     field_name: &syn::Ident,
     attrs: &FieldAttributes,
-) -> proc_macro2::TokenStream {
-    match &attrs.custom_handler {
-        Some(handler) => {
-            quote!(#field_name: #handler::from_abi(
+) -> Result<proc_macro2::TokenStream, Error> {
+    attrs.check()?;
+
+    for (ty, path) in &attrs.with_handlers {
+        if !matches!(ty, HandlerType::FromAbi) {
+            continue;
+        }
+
+        return Ok(quote! {
+            #field_name: #path(
                 iter.next()
                 .ok_or(anyhow::anyhow!("unable to get field from abi"))?.value.clone())?
-            )
+        });
+    }
+
+    //fallback to mod handler if present
+    Ok(match &attrs.mod_handler {
+        Some(path) => {
+            quote! {
+                #field_name: #path::from_abi(
+                    iter.next()
+                    .ok_or(anyhow::anyhow!("unable to get field from abi"))?.value.clone())?
+            }
         }
         None => {
             quote!(#field_name: <_>::from_abi(
@@ -65,5 +82,5 @@ pub fn construct_from_abi(
                 .ok_or(anyhow::anyhow!("unable to get field from abi"))?.value.clone())?
             )
         }
-    }
+    })
 }
