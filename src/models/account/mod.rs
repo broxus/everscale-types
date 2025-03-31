@@ -188,7 +188,8 @@ impl<'a> arbitrary::Arbitrary<'a> for ShardAccount {
 }
 
 /// A wrapper for `Option<Account>` with customized representation.
-#[derive(Default, Debug, Clone, Eq, PartialEq)]
+#[derive(Default, Debug, Clone, Eq, PartialEq, Store, Load)]
+#[repr(transparent)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OptionalAccount(pub Option<Account>);
 
@@ -244,42 +245,6 @@ impl AsMut<Option<Account>> for OptionalAccount {
     }
 }
 
-impl Store for OptionalAccount {
-    fn store_into(
-        &self,
-        builder: &mut CellBuilder,
-        context: &dyn CellContext,
-    ) -> Result<(), Error> {
-        match &self.0 {
-            None => builder.store_bit_zero(),
-            Some(account) => {
-                ok!(builder.store_bit_one());
-                ok!(account.address.store_into(builder, context));
-                ok!(account.storage_stat.store_into(builder, context));
-                ok!(builder.store_u64(account.last_trans_lt));
-                ok!(account.balance.store_into(builder, context));
-                account.state.store_into(builder, context)
-            }
-        }
-    }
-}
-
-impl<'a> Load<'a> for OptionalAccount {
-    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        if !ok!(slice.load_bit()) {
-            return Ok(Self::EMPTY);
-        };
-
-        Ok(Self(Some(Account {
-            address: ok!(IntAddr::load_from(slice)),
-            storage_stat: ok!(StorageInfo::load_from(slice)),
-            last_trans_lt: ok!(slice.load_u64()),
-            balance: ok!(CurrencyCollection::load_from(slice)),
-            state: ok!(AccountState::load_from(slice)),
-        })))
-    }
-}
-
 impl From<Account> for OptionalAccount {
     #[inline]
     fn from(value: Account) -> Self {
@@ -310,7 +275,7 @@ impl<'a> arbitrary::Arbitrary<'a> for OptionalAccount {
 }
 
 /// Existing account data.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Account {
