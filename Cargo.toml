@@ -79,7 +79,7 @@ serde = { version = "1", features = ["derive"], optional = true }
 sha2 = "0.10"
 smallvec = { version = "1.9", features = ["union"] }
 thiserror = "2.0"
-tl-proto = { version = "0.5.1", optional = true }
+tl-proto = { version = "0.5.3", optional = true }
 typeid = "1.0"
 
 everscale-types-proc = { version = "=0.1.5", path = "proc" }
