@@ -510,78 +510,6 @@ struct BuilderImpl<'a, 'b, 'c: 'a> {
 
 impl<'a: 'b, 'b, 'c: 'a> BuilderImpl<'a, 'b, 'c> {
     fn build(self) -> Result<MerkleUpdate, Error> {
-        struct Resolver<'a, S> {
-            pruned_branches: HashMap<&'a HashBytes, bool, S>,
-            visited: HashSet<&'a HashBytes, S>,
-            filter: &'a dyn MerkleFilter,
-            changed_cells: HashSet<&'a HashBytes, S>,
-        }
-
-        impl<'a, S> Resolver<'a, S>
-        where
-            S: BuildHasher,
-        {
-            fn fill(&mut self, cell: &'a DynCell, mut skip_filter: bool) -> bool {
-                let repr_hash = cell.repr_hash();
-
-                // Skip visited cells
-                if self.visited.contains(repr_hash) {
-                    return false;
-                }
-                self.visited.insert(repr_hash);
-
-                let is_pruned = match self.pruned_branches.get_mut(repr_hash) {
-                    Some(true) => return false,
-                    Some(visited) => {
-                        *visited = true;
-                        true
-                    }
-                    None => false,
-                };
-
-                let process_children = if skip_filter {
-                    true
-                } else {
-                    match self.filter.check(repr_hash) {
-                        FilterAction::Skip => false,
-                        FilterAction::Include => true,
-                        FilterAction::IncludeSubtree => {
-                            skip_filter = true;
-                            true
-                        }
-                    }
-                };
-
-                let mut result = false;
-                if process_children {
-                    for child in cell.references() {
-                        result |= self.fill(child, skip_filter);
-                    }
-
-                    if result {
-                        self.changed_cells.insert(repr_hash);
-                    }
-                }
-
-                result | is_pruned
-            }
-        }
-
-        struct InvertedFilter<F>(F);
-
-        impl<F: MerkleFilter> MerkleFilter for InvertedFilter<F> {
-            #[inline]
-            fn check(&self, cell: &HashBytes) -> FilterAction {
-                if self.0.check(cell) == FilterAction::Skip {
-                    // TODO: check if FilterAction::IncludeSubtree is correct,
-                    // because it is more optimal to just include the new subtree
-                    FilterAction::Include
-                } else {
-                    FilterAction::Skip
-                }
-            }
-        }
-
         let old_hash = self.old.repr_hash();
         let old_depth = self.old.repr_depth();
         let new_hash = self.new.repr_hash();
@@ -614,9 +542,15 @@ impl<'a: 'b, 'b, 'c: 'a> BuilderImpl<'a, 'b, 'c> {
         // Prepare cell diff resolver
         let mut resolver = Resolver {
             pruned_branches,
-            visited: Default::default(),
+            visited: HashSet::with_capacity_and_hasher(
+                self.filter.size_hint().unwrap_or(512),
+                Default::default(),
+            ),
             filter: self.filter,
-            changed_cells: Default::default(),
+            changed_cells: HashSet::with_capacity_and_hasher(
+                self.filter.size_hint().unwrap_or(512),
+                Default::default(),
+            ),
         };
 
         // Find all changed cells in the old cell tree
@@ -640,6 +574,92 @@ impl<'a: 'b, 'b, 'c: 'a> BuilderImpl<'a, 'b, 'c> {
             old,
             new,
         })
+    }
+}
+
+struct Resolver<'a, S> {
+    pruned_branches: HashMap<&'a HashBytes, bool, S>,
+    visited: HashSet<&'a HashBytes, S>,
+    filter: &'a dyn MerkleFilter,
+    changed_cells: HashSet<&'a HashBytes, S>,
+}
+
+impl<'a, S> Resolver<'a, S>
+where
+    S: BuildHasher,
+{
+    fn fill(&mut self, cell: &'a DynCell, mut skip_filter: bool) -> bool {
+        let repr_hash = cell.repr_hash();
+
+        if !self.visited.insert(repr_hash) {
+            return false;
+        }
+
+        let is_pruned = match self.pruned_branches.get_mut(repr_hash) {
+            Some(visited) => {
+                if *visited {
+                    return false;
+                }
+                *visited = true;
+                true
+            }
+            None => false,
+        };
+
+        let (process_children, new_skip_filter) = if skip_filter {
+            (true, true)
+        } else {
+            match self.filter.check(repr_hash) {
+                FilterAction::Skip => (false, false),
+                FilterAction::Include => (true, false),
+                FilterAction::IncludeSubtree => (true, true),
+            }
+        };
+        skip_filter = new_skip_filter;
+
+        // Process children only if needed
+        if !process_children {
+            return is_pruned;
+        }
+
+        let mut result = false;
+        let refs = cell.references();
+
+        // Process all references
+        for child in refs {
+            result |= self.fill(child, skip_filter);
+
+            // early exit if we found changes and don't need to process all children
+            if result && !skip_filter {
+                break;
+            }
+        }
+
+        // update changed cells if needed
+        if result {
+            self.changed_cells.insert(repr_hash);
+        }
+
+        result | is_pruned
+    }
+}
+
+struct InvertedFilter<F>(F);
+
+impl<F: MerkleFilter> MerkleFilter for InvertedFilter<F> {
+    #[inline]
+    fn check(&self, cell: &HashBytes) -> FilterAction {
+        if self.0.check(cell) == FilterAction::Skip {
+            // TODO: check if FilterAction::IncludeSubtree is correct,
+            // because it is more optimal to just include the new subtree
+            FilterAction::Include
+        } else {
+            FilterAction::Skip
+        }
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        self.0.size_hint()
     }
 }
 

@@ -18,6 +18,10 @@ name = "mine"
 harness = false
 
 [[bench]]
+name = "merkle_update"
+harness = false
+
+[[bench]]
 name = "dict_from_slice"
 harness = false
 
@@ -94,6 +98,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 iai-callgrind = "0.14"
 paste = "1.0.15"
+
 
 [features]
 default = ["base64", "serde", "models", "sync"]

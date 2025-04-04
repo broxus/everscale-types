@@ -213,6 +213,10 @@ impl MerkleProof {
                     FilterAction::Skip
                 }
             }
+
+            fn size_hint(&self) -> Option<usize> {
+                Some(self.cells.len())
+            }
         }
 
         let mut stack = vec![root.references()];
