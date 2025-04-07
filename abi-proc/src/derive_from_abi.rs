@@ -1,9 +1,12 @@
-use crate::internals::container::Container;
-use crate::internals::context::Ctxt;
+use proc_macro2::TokenStream;
 use quote::quote;
 use syn::Error;
 
-pub fn impl_derive(input: syn::DeriveInput) -> Result<proc_macro2::TokenStream, Vec<Error>> {
+use crate::internals::container::Container;
+use crate::internals::context::Ctxt;
+use crate::internals::field::{extract_field_attributes, FieldAttributes, StructField};
+
+pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<Error>> {
     let ctx = Ctxt::new();
     let container_opt = Container::from_ast(&ctx, &input);
 
@@ -11,7 +14,7 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<proc_macro2::TokenStream, 
         return Err(ctx.check().unwrap_err());
     };
 
-    let Some(struct_fields) = container.construct_from_abi(&ctx) else {
+    let Some(struct_fields) = construct_from_abi(&container.data.fields, &ctx) else {
         return Err(ctx.check().unwrap_err());
     };
 
@@ -31,4 +34,83 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<proc_macro2::TokenStream, 
     };
 
     Ok(token_stream)
+}
+
+pub fn construct_from_abi(fields: &syn::Fields, ctx: &Ctxt) -> Option<Vec<TokenStream>> {
+    let mut struct_fields = Vec::new();
+
+    let mut named = true;
+    for (index, field) in fields.iter().enumerate() {
+        let struct_field = match &field.ident {
+            Some(named) => StructField::named(named),
+            None => {
+                named = false;
+                StructField::unnamed(index)
+            }
+        };
+
+        let attributes = extract_field_attributes(ctx, field.attrs.as_slice());
+
+        if !attributes.extracted {
+            return None;
+        }
+
+        let token = construct_from_abi_inner(&struct_field, &attributes, named);
+
+        struct_fields.push(token);
+    }
+    Some(struct_fields)
+}
+
+fn construct_from_abi_inner(
+    struct_field: &StructField,
+    attrs: &FieldAttributes,
+    named: bool,
+) -> TokenStream {
+    let field_name = &struct_field.field_name;
+
+    if let Some(path) = &attrs.with_handlers.from_abi_handler {
+        let base = quote! {
+             #path(
+                iter.next()
+                    .ok_or(everscale_types::abi::__export::anyhow::anyhow!("unable to get field from abi"))?.value.clone())?
+        };
+
+        return if named {
+            quote! {
+                 #field_name: #base
+            }
+        } else {
+            base
+        };
+    }
+
+    //fallback to mod handler if present
+    match &attrs.mod_handler {
+        Some(path) => {
+            let base = quote!(#path::from_abi(
+                    iter.next()
+                    .ok_or(everscale_types::abi::__export::anyhow::anyhow!("unable to get field from abi"))?.value.clone())?);
+            if named {
+                quote!(#field_name: #base)
+            } else {
+                base
+            }
+        }
+        None => {
+            let base = quote!(<_>::from_abi(
+                iter.next()
+                    .ok_or(everscale_types::abi::__export::anyhow::anyhow!(
+                        "unable to get field from abi"
+                    ))?
+                    .value
+                    .clone()
+            )?);
+            if named {
+                quote!(#field_name: #base)
+            } else {
+                base
+            }
+        }
+    }
 }
