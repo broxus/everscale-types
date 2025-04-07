@@ -18,7 +18,7 @@ impl StructField {
     pub fn unnamed(field_index: usize) -> Self {
         Self {
             field_name: syn::Member::Unnamed(syn::Index::from(field_index)),
-            name_ident: format_ident!("field_{field_index}"),
+            name_ident: format_ident!("value{field_index}"),
         }
     }
 }
@@ -27,6 +27,7 @@ impl StructField {
 pub struct WithHandlers {
     pub abi_type_handler: Option<Path>,
     pub into_abi_handler: Option<Path>,
+    pub as_abi_handler: Option<Path>,
     pub from_abi_handler: Option<Path>,
 }
 
@@ -42,14 +43,25 @@ impl FieldAttributes {
         if let Some(path) = &self.mod_handler {
             if self.with_handlers.into_abi_handler.is_some()
                 && self.with_handlers.from_abi_handler.is_some()
+                && self.with_handlers.as_abi_handler.is_some()
                 && self.with_handlers.abi_type_handler.is_some()
             {
                 return Err(Error::new_spanned(
-                    path.into_token_stream(),
-                    "`with` parameter should not be used simultaneously with other 3 handling parameters",
+                    path,
+                    "`with` parameter should not be used simultaneously with other handling parameters",
                 ));
             }
         }
+
+        if let Some(path) = &self.with_handlers.into_abi_handler {
+            if self.with_handlers.as_abi_handler.is_none() {
+                return Err(Error::new_spanned(
+                    path,
+                    "`into_abi_with` also requires `as_abi_with`",
+                ));
+            }
+        }
+
         Ok(())
     }
 }
@@ -59,6 +71,7 @@ const NAME: &str = "name";
 const WITH: &str = "with";
 const ABI_TYPE_WITH: &str = "abi_type_with";
 const INTO_ABI_WITH: &str = "into_abi_with";
+const AS_ABI_WITH: &str = "as_abi_with";
 const FROM_ABI_WITH: &str = "from_abi_with";
 
 pub fn extract_field_attributes(ctx: &Ctxt, attrs: &[Attribute]) -> FieldAttributes {
@@ -87,10 +100,7 @@ pub fn extract_field_attributes(ctx: &Ctxt, attrs: &[Attribute]) -> FieldAttribu
                 path if path.is_ident(NAME) => {
                     if attributes.custom_name.is_some() {
                         attributes.extracted = false;
-                        ctx.error_spanned_by(
-                            path,
-                            format!("Another {NAME} parameter already defined"),
-                        );
+                        ctx.error_spanned_by(path, format!("`{NAME}` already defined"));
                     }
                     match value.parse::<LitStr>() {
                         Ok(lit) => {
@@ -106,10 +116,7 @@ pub fn extract_field_attributes(ctx: &Ctxt, attrs: &[Attribute]) -> FieldAttribu
                 path if path.is_ident(WITH) => {
                     if attributes.mod_handler.is_some() {
                         attributes.extracted = false;
-                        ctx.error_spanned_by(
-                            path,
-                            format!("Another {WITH} parameter already defined"),
-                        );
+                        ctx.error_spanned_by(path, format!("`{WITH}` already defined"));
                     }
 
                     match parse_path(value) {
@@ -123,10 +130,7 @@ pub fn extract_field_attributes(ctx: &Ctxt, attrs: &[Attribute]) -> FieldAttribu
                 path if path.is_ident(ABI_TYPE_WITH) => {
                     if attributes.with_handlers.abi_type_handler.is_some() {
                         attributes.extracted = false;
-                        ctx.error_spanned_by(
-                            path,
-                            format!("Another {ABI_TYPE_WITH} parameter already defined"),
-                        );
+                        ctx.error_spanned_by(path, format!("`{ABI_TYPE_WITH}` already defined"));
                     }
 
                     match parse_path(value) {
@@ -140,10 +144,7 @@ pub fn extract_field_attributes(ctx: &Ctxt, attrs: &[Attribute]) -> FieldAttribu
                 path if path.is_ident(INTO_ABI_WITH) => {
                     if attributes.with_handlers.into_abi_handler.is_some() {
                         attributes.extracted = false;
-                        ctx.error_spanned_by(
-                            path,
-                            format!("Another {INTO_ABI_WITH} parameter already defined"),
-                        );
+                        ctx.error_spanned_by(path, format!("`{INTO_ABI_WITH}` already defined"));
                     }
                     match parse_path(value) {
                         Ok(path) => attributes.with_handlers.into_abi_handler = Some(path),
@@ -153,13 +154,23 @@ pub fn extract_field_attributes(ctx: &Ctxt, attrs: &[Attribute]) -> FieldAttribu
                         }
                     }
                 }
+                path if path.is_ident(AS_ABI_WITH) => {
+                    if attributes.with_handlers.as_abi_handler.is_some() {
+                        attributes.extracted = false;
+                        ctx.error_spanned_by(path, format!("`{AS_ABI_WITH}` already defined"));
+                    }
+                    match parse_path(value) {
+                        Ok(path) => attributes.with_handlers.as_abi_handler = Some(path),
+                        Err(e) => {
+                            attributes.extracted = false;
+                            ctx.syn_error(e);
+                        }
+                    }
+                }
                 path if path.is_ident(FROM_ABI_WITH) => {
                     if attributes.with_handlers.from_abi_handler.is_some() {
                         attributes.extracted = false;
-                        ctx.error_spanned_by(
-                            path,
-                            format!("Another {FROM_ABI_WITH} parameter already defined"),
-                        );
+                        ctx.error_spanned_by(path, format!("`{FROM_ABI_WITH}` already defined"));
                     }
 
                     match parse_path(value) {
@@ -171,7 +182,10 @@ pub fn extract_field_attributes(ctx: &Ctxt, attrs: &[Attribute]) -> FieldAttribu
                     }
                 }
 
-                path => ctx.error_spanned_by(path, "Parameter is not supported"),
+                path => {
+                    let str = meta.path.to_token_stream().to_string().replace(' ', "");
+                    ctx.error_spanned_by(path, format!("unknown abi container attribute `{str}`"))
+                }
             }
 
             Ok(())

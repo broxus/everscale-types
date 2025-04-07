@@ -25,9 +25,11 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<Error>> {
         impl #impl_generics ::everscale_types::abi::FromAbi for #ident #ty_generics #where_clause {
             fn from_abi(value: ::everscale_types::abi::AbiValue) -> everscale_types::abi::__export::anyhow::Result<Self> {
                 let ::everscale_types::abi::AbiValue::Tuple(inner) = value else {
-                     everscale_types::abi::__export::anyhow::bail!("AbiValue has incorrect type")
+                    return Err(everscale_types::abi::__export::anyhow::anyhow!(
+                        "expected tuple while parsing AbiValue"
+                    ));
                 };
-                let mut iter = inner.iter();
+                let mut __iter = inner.into_iter();
                 Ok(Self { #(#struct_fields),* })
             }
         }
@@ -50,15 +52,14 @@ pub fn construct_from_abi(fields: &syn::Fields, ctx: &Ctxt) -> Option<Vec<TokenS
         };
 
         let attributes = extract_field_attributes(ctx, field.attrs.as_slice());
-
         if !attributes.extracted {
             return None;
         }
 
         let token = construct_from_abi_inner(&struct_field, &attributes, named);
-
         struct_fields.push(token);
     }
+
     Some(struct_fields)
 }
 
@@ -69,48 +70,28 @@ fn construct_from_abi_inner(
 ) -> TokenStream {
     let field_name = &struct_field.field_name;
 
-    if let Some(path) = &attrs.with_handlers.from_abi_handler {
-        let base = quote! {
-             #path(
-                iter.next()
-                    .ok_or(everscale_types::abi::__export::anyhow::anyhow!("unable to get field from abi"))?.value.clone())?
-        };
+    let extractor = if let Some(path) = &attrs.with_handlers.from_abi_handler {
+        quote! { #path }
+    } else if let Some(path) = &attrs.mod_handler {
+        quote! { #path::from_abi }
+    } else {
+        quote! { <_ as ::everscale_types::abi::FromAbi>::from_abi }
+    };
 
-        return if named {
-            quote! {
-                 #field_name: #base
-            }
-        } else {
-            base
-        };
-    }
+    let base = quote! {
+        match __iter.next() {
+            Some(__item) => #extractor(__item.value)?,
+            None => return Err(everscale_types::abi::__export::anyhow::anyhow!(
+                "not enough tuple items while parsing AbiValue",
+            )),
+        }
+    };
 
-    //fallback to mod handler if present
-    match &attrs.mod_handler {
-        Some(path) => {
-            let base = quote!(#path::from_abi(
-                    iter.next()
-                    .ok_or(everscale_types::abi::__export::anyhow::anyhow!("unable to get field from abi"))?.value.clone())?);
-            if named {
-                quote!(#field_name: #base)
-            } else {
-                base
-            }
+    if named {
+        quote! {
+            #field_name: #base
         }
-        None => {
-            let base = quote!(<_>::from_abi(
-                iter.next()
-                    .ok_or(everscale_types::abi::__export::anyhow::anyhow!(
-                        "unable to get field from abi"
-                    ))?
-                    .value
-                    .clone()
-            )?);
-            if named {
-                quote!(#field_name: #base)
-            } else {
-                base
-            }
-        }
+    } else {
+        base
     }
 }

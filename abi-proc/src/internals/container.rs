@@ -13,11 +13,11 @@ impl<'a> Container<'a> {
         let data = match &input.data {
             syn::Data::Struct(data_struct) => data_struct,
             syn::Data::Enum(_) => {
-                ctx.error_spanned_by(input, "FromAbi is not supported for enum");
+                ctx.error_spanned_by(input, "FromAbi doesn't support derive for enums");
                 return None;
             }
             syn::Data::Union(_) => {
-                ctx.error_spanned_by(input, "FromAbi is not supported for unions");
+                ctx.error_spanned_by(input, "FromAbi doesn't support derive for unions");
                 return None;
             }
         };

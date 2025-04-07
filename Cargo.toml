@@ -56,7 +56,7 @@ name = "callgrind_usage_cell"
 harness = false
 
 [workspace]
-members = [ "abi-proc","proc"]
+members = ["abi-proc", "proc"]
 
 [dependencies]
 ahash = "0.8.11"
@@ -114,7 +114,7 @@ abi = [
     "dep:num-traits",
     "dep:serde",
     "models",
-    "dep:everscale-types-abi-proc"
+    "dep:everscale-types-abi-proc",
 ]
 tycho = []
 

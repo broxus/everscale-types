@@ -17,6 +17,8 @@ pub use self::ty::{
 };
 pub use self::value::{AbiHeader, AbiValue, NamedAbiValue, PlainAbiValue};
 
+pub use everscale_types_abi_proc::{FromAbi, IntoAbi, WithAbiType};
+
 pub mod error;
 
 mod contract;
@@ -32,6 +34,7 @@ mod tests;
 pub mod __export {
     pub use anyhow;
 }
+
 /// ABI version.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct AbiVersion {

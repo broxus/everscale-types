@@ -19,14 +19,14 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Erro
     let ident = &input.ident;
     let (impl_generics, ty_generics, where_clause) = container.generics.split_for_impl();
 
-    let abi_values_slice = quote! {
-        [ #(#tuple),* ]
+    let abi_values = quote! {
+        vec![#(#tuple),*]
     };
 
     let token_stream = quote! {
         impl #impl_generics ::everscale_types::abi::WithAbiType for #ident #ty_generics #where_clause {
             fn abi_type() -> ::everscale_types::abi::AbiType {
-                ::everscale_types::abi::AbiType::tuple(#abi_values_slice)
+                ::everscale_types::abi::AbiType::Tuple(::std::sync::Arc::from(#abi_values))
             }
         }
     };
@@ -44,12 +44,11 @@ fn construct_with_abi_type(fields: &Fields, ctx: &Ctxt) -> Option<Vec<TokenStrea
         };
 
         let attributes = extract_field_attributes(ctx, field.attrs.as_slice());
-
         if !attributes.extracted {
             return None;
         }
-        let token = construct_with_abi_type_inner(&struct_field, &field.ty, attributes);
 
+        let token = construct_with_abi_type_inner(&struct_field, &field.ty, attributes);
         tuple.push(token);
     }
 
@@ -61,21 +60,19 @@ fn construct_with_abi_type_inner(
     ty: &syn::Type,
     attrs: FieldAttributes,
 ) -> TokenStream {
-    let to_change = match &attrs.custom_name {
+    let name = match &attrs.custom_name {
         Some(custom) => custom,
         None => &struct_field.name_ident,
+    }
+    .to_string();
+
+    let extractor = if let Some(path) = &attrs.with_handlers.abi_type_handler {
+        quote! { #path }
+    } else if let Some(path) = &attrs.mod_handler {
+        quote! { #path::abi_type }
+    } else {
+        quote! { <#ty as ::everscale_types::abi::WithAbiType>::abi_type }
     };
-    let custom_name = to_change.to_string();
 
-    if let Some(path) = &attrs.with_handlers.abi_type_handler {
-        return quote! {
-            #path().named(#custom_name)
-        };
-    }
-
-    //fallback to mod handler if present
-    match &attrs.mod_handler {
-        Some(handler) => quote!(#handler::abi_type().named(#custom_name)),
-        None => quote!(<#ty>::abi_type().named(#custom_name)),
-    }
+    quote! { #extractor().named(#name) }
 }

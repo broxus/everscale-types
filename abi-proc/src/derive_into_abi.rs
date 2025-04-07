@@ -12,12 +12,15 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<Error>> {
     let Some(container) = container_opt else {
         return Err(ctx.check().unwrap_err());
     };
-    let Some(tuple) = construct_into_abi(&container.data.fields, &ctx) else {
+    let Some((into_fields, as_fields)) = construct_into_abi(&container.data.fields, &ctx) else {
         return Err(ctx.check().unwrap_err());
     };
 
-    let abi_values_slice = quote! {
-        [ #(#tuple),* ]
+    let into_abi_items = quote! {
+        vec![#(#into_fields),*]
+    };
+    let as_abi_items = quote! {
+        vec![#(#as_fields),*]
     };
 
     let ident = container.name_ident;
@@ -25,17 +28,15 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<Error>> {
 
     let token_stream = quote! {
         impl #impl_generics ::everscale_types::abi::IntoAbi for #ident #ty_generics #where_clause {
-            #[inline]
-            fn as_abi(&self) -> ::everscale_types::abi::AbiValue {
-                ::everscale_types::abi::AbiValue::tuple(#abi_values_slice)
-            }
-
-            #[inline]
             fn into_abi(self) -> ::everscale_types::abi::AbiValue
             where
                 Self: Sized,
             {
-                self.as_abi()
+                ::everscale_types::abi::AbiValue::Tuple(#into_abi_items)
+            }
+
+            fn as_abi(&self) -> ::everscale_types::abi::AbiValue {
+                ::everscale_types::abi::AbiValue::Tuple(#as_abi_items)
             }
         }
     };
@@ -43,8 +44,9 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<Error>> {
     Ok(token_stream)
 }
 
-fn construct_into_abi(fields: &Fields, ctx: &Ctxt) -> Option<Vec<TokenStream>> {
-    let mut struct_fields = Vec::new();
+fn construct_into_abi(fields: &Fields, ctx: &Ctxt) -> Option<(Vec<TokenStream>, Vec<TokenStream>)> {
+    let mut into_fields = Vec::new();
+    let mut as_fields = Vec::new();
 
     for (index, field) in fields.iter().enumerate() {
         let struct_field = match &field.ident {
@@ -53,43 +55,62 @@ fn construct_into_abi(fields: &Fields, ctx: &Ctxt) -> Option<Vec<TokenStream>> {
         };
 
         let attributes = extract_field_attributes(ctx, field.attrs.as_slice());
-
         if !attributes.extracted {
             return None;
         }
 
-        let token = construct_named_abi_value_inner(&struct_field, &attributes);
-
-        struct_fields.push(token);
+        let (into_abi, as_abi) = construct_named_abi_value_inner(&struct_field, &attributes);
+        into_fields.push(into_abi);
+        as_fields.push(as_abi);
     }
-    Some(struct_fields)
+
+    Some((into_fields, as_fields))
 }
 
+// Returns `into_abi` and `as_abi` items.
 fn construct_named_abi_value_inner(
     struct_field: &StructField,
     custom_attributes: &FieldAttributes,
-) -> TokenStream {
-    let to_change = match &custom_attributes.custom_name {
+) -> (TokenStream, TokenStream) {
+    let name = match &custom_attributes.custom_name {
         Some(custom) => custom,
         None => &struct_field.name_ident,
-    };
-
-    let custom_name = to_change.to_string();
+    }
+    .to_string();
 
     let field_name = &struct_field.field_name;
-    if let Some(path) = &custom_attributes.with_handlers.into_abi_handler {
-        return quote! {
-            quote!(#path(&self.#field_name).named(#custom_name))
-        };
-    }
 
-    //fallback to mod handler if present
-    match &custom_attributes.mod_handler {
-        Some(handler) => {
-            quote!(#handler::as_abi(&self.#field_name).named(#custom_name))
-        }
-        None => {
-            quote!(self.#field_name.as_abi().named(#custom_name))
-        }
-    }
+    let (into_abi, as_abi) = if let Some(path) = &custom_attributes.with_handlers.into_abi_handler {
+        let path_as_abi = custom_attributes
+            .with_handlers
+            .as_abi_handler
+            .as_ref()
+            .expect("must be checked");
+
+        (
+            quote! { #path(self.#field_name) },
+            quote! { #path_as_abi(&self.#field_name) },
+        )
+    } else if let Some(path) = &custom_attributes.with_handlers.as_abi_handler {
+        (
+            quote! { #path(&self.#field_name) },
+            quote! { #path(&self.#field_name) },
+        )
+    } else if let Some(path) = &custom_attributes.mod_handler {
+        (
+            quote! { #path::into_abi(self.#field_name) },
+            quote! { #path::as_abi(&self.#field_name) },
+        )
+    } else {
+        let path = quote! { ::everscale_types::abi::IntoAbi };
+        (
+            quote! { #path::into_abi(self.#field_name) },
+            quote! { #path::as_abi(&self.#field_name) },
+        )
+    };
+
+    (
+        quote! { #into_abi.named(#name) },
+        quote! { #as_abi.named(#name) },
+    )
 }

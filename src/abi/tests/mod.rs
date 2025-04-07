@@ -1,4 +1,5 @@
 use bytes::Bytes;
+use std::sync::Arc;
 
 use crate::abi::*;
 use crate::models::StdAddr;
@@ -269,4 +270,74 @@ fn encode_empty_init_data() {
     let init_data = contract.encode_init_data(&pubkey, &[]).unwrap();
 
     assert_eq!(init_data, expected);
+}
+
+#[test]
+fn test_abi_derivation() {
+    let test_value = Test::<Inner> {
+        first: "aaa".to_string(),
+        second: Inner {
+            inner_first: ("bbb".to_string(), "ccc".to_string()),
+        },
+        third: vec![1, 2, 3],
+    };
+
+    let abi = test_value.as_abi();
+    let moved_abi = test_value.clone().into_abi();
+
+    let abi_value_manual = AbiValue::Tuple(vec![
+        AbiValue::String(String::from("aaa")).named("kek"),
+        AbiValue::Tuple(vec![AbiValue::Tuple(vec![
+            AbiValue::String(String::from("bbb")).named("value0"),
+            AbiValue::String(String::from("ccc")).named("value1"),
+        ])
+        .named("inner_first")])
+        .named("lol"),
+        AbiValue::Array(
+            Arc::from(AbiType::Uint(64)),
+            vec![
+                AbiValue::uint(64, 1u64),
+                AbiValue::uint(64, 2u64),
+                AbiValue::uint(64, 3u64),
+            ],
+        )
+        .named("third"),
+    ]);
+
+    assert_eq!(abi, moved_abi);
+    assert_eq!(abi, abi_value_manual);
+
+    let abi_type = Test::<Inner>::abi_type();
+    let abi_type_manual = AbiType::Tuple(std::sync::Arc::from([
+        AbiType::String.named("kek"),
+        AbiType::Tuple(Arc::from([AbiType::Tuple(Arc::from([
+            AbiType::String.named("value0"),
+            AbiType::String.named("value1"),
+        ]))
+        .named("inner_first")]))
+        .named("lol"),
+        AbiType::Array(Arc::from(AbiType::Uint(64))).named("third"),
+    ]));
+
+    assert_eq!(abi_type, abi_type_manual);
+
+    let from_abi = Test::<Inner>::from_abi(abi).unwrap();
+    let from_moved_abi = Test::<Inner>::from_abi(moved_abi).unwrap();
+
+    assert_eq!(from_abi, from_moved_abi);
+    assert_eq!(from_abi, test_value);
+}
+
+#[derive(IntoAbi, FromAbi, WithAbiType, Eq, PartialEq, Debug, Clone)]
+pub struct Test<T: IntoAbi + FromAbi + WithAbiType> {
+    #[abi(name = "kek")]
+    pub first: String,
+    #[abi(name = "lol")]
+    pub second: T,
+    pub third: Vec<u64>,
+}
+
+#[derive(IntoAbi, FromAbi, WithAbiType, Eq, PartialEq, Debug, Clone)]
+pub struct Inner {
+    pub inner_first: (String, String),
 }
