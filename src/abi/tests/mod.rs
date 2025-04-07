@@ -1,9 +1,8 @@
-use bytes::Bytes;
-use std::sync::Arc;
-
 use crate::abi::*;
 use crate::models::StdAddr;
 use crate::prelude::{Cell, CellBuilder, CellFamily, HashBytes, RawDict, Store};
+use bytes::Bytes;
+use std::sync::Arc;
 
 const DEPOOL_ABI: &str = include_str!("depool.abi.json");
 
@@ -273,6 +272,29 @@ fn encode_empty_init_data() {
 }
 
 #[test]
+fn test_unnamed_derivation() {
+    let smt = SomeType("hello".to_string());
+    let abi = smt.as_abi();
+    let moved_abi = smt.clone().into_abi();
+
+    let abi_value_manual =
+        AbiValue::Tuple(vec![AbiValue::String("hello".to_string()).named("value0")]);
+
+    assert_eq!(abi_value_manual, abi);
+    assert_eq!(moved_abi, abi);
+
+    let abi_type = SomeType::<String>::abi_type();
+    let abi_type_manual = AbiType::Tuple(Arc::from([AbiType::String.named("value0")]));
+    assert_eq!(abi_type_manual, abi_type);
+
+    let from_abi = SomeType::<String>::from_abi(abi).unwrap();
+    let from_moved_abi = SomeType::<String>::from_abi(moved_abi).unwrap();
+
+    assert_eq!(from_abi, from_moved_abi);
+    assert_eq!(from_abi, smt);
+}
+
+#[test]
 fn test_abi_derivation() {
     let test_value = Test::<Inner> {
         first: "aaa".to_string(),
@@ -341,3 +363,6 @@ pub struct Test<T: IntoAbi + FromAbi + WithAbiType> {
 pub struct Inner {
     pub inner_first: (String, String),
 }
+
+#[derive(IntoAbi, WithAbiType, FromAbi, Debug, Eq, PartialEq, Clone)]
+pub struct SomeType<T: FromAbi + WithAbiType + IntoAbi>(pub T);

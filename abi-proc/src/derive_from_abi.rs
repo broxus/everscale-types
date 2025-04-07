@@ -14,12 +14,18 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<Error>> {
         return Err(ctx.check().unwrap_err());
     };
 
-    let Some(struct_fields) = construct_from_abi(&container.data.fields, &ctx) else {
+    let Some((named, struct_fields)) = construct_from_abi(&container.data.fields, &ctx) else {
         return Err(ctx.check().unwrap_err());
     };
 
     let ident = container.name_ident;
     let (impl_generics, ty_generics, where_clause) = container.generics.split_for_impl();
+
+    let slf = if named {
+        quote!(Ok(Self { #(#struct_fields),* }))
+    } else {
+        quote!(Ok(Self ( #(#struct_fields),* )))
+    };
 
     let token_stream = quote! {
         impl #impl_generics ::everscale_types::abi::FromAbi for #ident #ty_generics #where_clause {
@@ -30,7 +36,7 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<Error>> {
                     ));
                 };
                 let mut __iter = inner.into_iter();
-                Ok(Self { #(#struct_fields),* })
+                #slf
             }
         }
     };
@@ -38,7 +44,7 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<Error>> {
     Ok(token_stream)
 }
 
-pub fn construct_from_abi(fields: &syn::Fields, ctx: &Ctxt) -> Option<Vec<TokenStream>> {
+pub fn construct_from_abi(fields: &syn::Fields, ctx: &Ctxt) -> Option<(bool, Vec<TokenStream>)> {
     let mut struct_fields = Vec::new();
 
     let mut named = true;
@@ -60,7 +66,7 @@ pub fn construct_from_abi(fields: &syn::Fields, ctx: &Ctxt) -> Option<Vec<TokenS
         struct_fields.push(token);
     }
 
-    Some(struct_fields)
+    Some((named, struct_fields))
 }
 
 fn construct_from_abi_inner(
