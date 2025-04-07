@@ -28,6 +28,11 @@ mod value;
 #[cfg(test)]
 mod tests;
 
+
+#[doc(hidden)]
+pub mod __export {
+    pub use anyhow;
+}
 /// ABI version.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct AbiVersion {

@@ -20,9 +20,9 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<proc_macro2::TokenStream, 
 
     let token_stream = quote! {
         impl #impl_generics ::everscale_types::abi::FromAbi for #ident #ty_generics #where_clause {
-            fn from_abi(value: ::everscale_types::abi::AbiValue) -> anyhow::Result<Self> {
+            fn from_abi(value: ::everscale_types::abi::AbiValue) -> everscale_types::abi::__export::anyhow::Result<Self> {
                 let ::everscale_types::abi::AbiValue::Tuple(inner) = value else {
-                    anyhow::bail!("AbiValue has incorrect type")
+                     everscale_types::abi::__export::anyhow::bail!("AbiValue has incorrect type")
                 };
                 let mut iter = inner.iter();
                 Ok(Self { #(#struct_fields),* })
