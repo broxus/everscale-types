@@ -1065,7 +1065,7 @@ pub fn div_mod_knuth(u: &VarUint248, v: &VarUint248) -> (VarUint248, VarUint248)
     // b = 1 << WORD_BITS
     // Theorem B: q_hat >= q_j >= q_hat - 2
     let mut q_hat = if u_jn < v_n_1 {
-        //let (mut q_hat, mut r_hat) = _div_mod_u128(u_jn, u[j + n - 1], v_n_1);
+        // let (mut q_hat, mut r_hat) = _div_mod_u128(u_jn, u[j + n - 1], v_n_1);
         let mut q_hat = udiv256_by_128_to_128(u_jn, u[1], v_n_1, &mut r_hat);
         let mut overflow: bool;
         // this loop takes at most 2 iterations

@@ -5,10 +5,9 @@ use everscale_crypto::ed25519;
 use crate::cell::*;
 use crate::dict::Dict;
 use crate::error::Error;
-use crate::num::{Tokens, Uint12, VarUint248};
-
 use crate::models::block::ShardIdent;
 use crate::models::{CurrencyCollection, Signature};
+use crate::num::{Tokens, Uint12, VarUint248};
 
 /// Value flow burning config.
 #[derive(Debug, Clone, Eq, PartialEq, Store, Load)]

@@ -6,7 +6,8 @@ use anyhow::Result;
 use bytes::Bytes;
 use num_bigint::{BigInt, BigUint};
 
-use super::{ty::*, IntoAbi, IntoPlainAbi, WithAbiType, WithPlainAbiType, WithoutName};
+use super::ty::*;
+use super::{IntoAbi, IntoPlainAbi, WithAbiType, WithPlainAbiType, WithoutName};
 use crate::abi::error::AbiError;
 use crate::cell::{Cell, CellFamily};
 use crate::models::IntAddr;
@@ -27,13 +28,10 @@ pub struct NamedAbiValue {
 impl NamedAbiValue {
     /// Ensures that all values satisfy the provided types.
     pub fn check_types(items: &[Self], types: &[NamedAbiType]) -> Result<()> {
-        anyhow::ensure!(
-            Self::have_types(items, types),
-            AbiError::TypeMismatch {
-                expected: DisplayTupleType(types).to_string().into(),
-                ty: DisplayTupleValueType(items).to_string().into(),
-            }
-        );
+        anyhow::ensure!(Self::have_types(items, types), AbiError::TypeMismatch {
+            expected: DisplayTupleType(types).to_string().into(),
+            ty: DisplayTupleValueType(items).to_string().into(),
+        });
         Ok(())
     }
 

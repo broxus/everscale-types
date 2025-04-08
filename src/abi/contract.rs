@@ -7,6 +7,8 @@ use anyhow::Result;
 use serde::Deserialize;
 use sha2::Digest;
 
+use super::error::AbiError;
+use super::{AbiHeaderType, AbiType, AbiValue, AbiVersion, NamedAbiType, NamedAbiValue};
 use crate::abi::value::ser::AbiSerializer;
 use crate::abi::AbiHeader;
 use crate::cell::{
@@ -19,9 +21,6 @@ use crate::models::{
 };
 use crate::num::Tokens;
 use crate::prelude::Dict;
-
-use super::error::AbiError;
-use super::{AbiHeaderType, AbiType, AbiValue, AbiVersion, NamedAbiType, NamedAbiValue};
 
 /// Contract ABI definition.
 pub struct Contract {
@@ -322,18 +321,15 @@ impl<'de> Deserialize<'de> for Contract {
                     }
                 };
                 let name = Arc::<str>::from(item.name);
-                (
-                    name.clone(),
-                    Function {
-                        abi_version,
-                        name,
-                        headers: headers.clone(),
-                        inputs: Arc::from(item.inputs),
-                        outputs: Arc::from(item.outputs),
-                        input_id,
-                        output_id,
-                    },
-                )
+                (name.clone(), Function {
+                    abi_version,
+                    name,
+                    headers: headers.clone(),
+                    inputs: Arc::from(item.inputs),
+                    outputs: Arc::from(item.outputs),
+                    input_id,
+                    output_id,
+                })
             })
             .collect();
 
@@ -349,15 +345,12 @@ impl<'de> Deserialize<'de> for Contract {
                     }
                 };
                 let name = Arc::<str>::from(item.name);
-                (
-                    name.clone(),
-                    Event {
-                        abi_version,
-                        name,
-                        inputs: Arc::from(item.inputs),
-                        id,
-                    },
-                )
+                (name.clone(), Event {
+                    abi_version,
+                    name,
+                    inputs: Arc::from(item.inputs),
+                    id,
+                })
             })
             .collect();
 
@@ -505,13 +498,10 @@ impl Function {
         };
 
         // Check input id
-        anyhow::ensure!(
-            id == self.input_id,
-            AbiError::InputIdMismatch {
-                expected: self.input_id,
-                id
-            }
-        );
+        anyhow::ensure!(id == self.input_id, AbiError::InputIdMismatch {
+            expected: self.input_id,
+            id
+        });
 
         let res = ok!(NamedAbiValue::load_tuple_ext(
             &self.inputs,
@@ -570,13 +560,10 @@ impl Function {
         allow_partial: bool,
     ) -> Result<Vec<NamedAbiValue>> {
         let id = slice.load_u32()?;
-        anyhow::ensure!(
-            id == self.input_id,
-            AbiError::InputIdMismatch {
-                expected: self.input_id,
-                id
-            }
-        );
+        anyhow::ensure!(id == self.input_id, AbiError::InputIdMismatch {
+            expected: self.input_id,
+            id
+        });
         let res = ok!(NamedAbiValue::load_tuple_ext(
             &self.inputs,
             self.abi_version,
@@ -608,13 +595,10 @@ impl Function {
         allow_partial: bool,
     ) -> Result<Vec<NamedAbiValue>> {
         let id = slice.load_u32()?;
-        anyhow::ensure!(
-            id == self.output_id,
-            AbiError::OutputIdMismatch {
-                expected: self.output_id,
-                id
-            }
-        );
+        anyhow::ensure!(id == self.output_id, AbiError::OutputIdMismatch {
+            expected: self.output_id,
+            id
+        });
         let res = ok!(NamedAbiValue::load_tuple_ext(
             &self.outputs,
             self.abi_version,
@@ -664,18 +648,15 @@ impl<'a> ExternalInput<'_, 'a> {
     ) -> Result<(u32, OwnedMessage)> {
         let (expire_at, body) = ok!(self.build_input_without_signature());
         let range = CellSliceRange::full(body.as_ref());
-        Ok((
-            expire_at,
-            OwnedMessage {
-                info: MsgInfo::ExtIn(ExtInMsgInfo {
-                    dst: IntAddr::Std(address.clone()),
-                    ..Default::default()
-                }),
-                body: (body, range),
-                init: None,
-                layout: None,
-            },
-        ))
+        Ok((expire_at, OwnedMessage {
+            info: MsgInfo::ExtIn(ExtInMsgInfo {
+                dst: IntAddr::Std(address.clone()),
+                ..Default::default()
+            }),
+            body: (body, range),
+            init: None,
+            layout: None,
+        }))
     }
 
     /// Builds an external message body.
@@ -998,13 +979,10 @@ impl Event {
         allow_partial: bool,
     ) -> Result<Vec<NamedAbiValue>> {
         let id = slice.load_u32()?;
-        anyhow::ensure!(
-            id == self.id,
-            AbiError::InputIdMismatch {
-                expected: self.id,
-                id
-            }
-        );
+        anyhow::ensure!(id == self.id, AbiError::InputIdMismatch {
+            expected: self.id,
+            id
+        });
         let res = ok!(NamedAbiValue::load_tuple_ext(
             &self.inputs,
             self.abi_version,

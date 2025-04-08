@@ -3,6 +3,8 @@
 use std::hash::{BuildHasher, Hash};
 use std::str::FromStr;
 
+pub use everscale_types_abi_proc::{FromAbi, IntoAbi, WithAbiType};
+
 pub use self::contract::{
     Contract, Event, EventBuilder, ExternalInput, Function, FunctionBuilder, UnsignedBody,
     UnsignedExternalMessage,
@@ -16,8 +18,6 @@ pub use self::ty::{
     AbiHeaderType, AbiType, AbiTypeFlatten, NamedAbiType, NamedAbiTypeFlatten, PlainAbiType,
 };
 pub use self::value::{AbiHeader, AbiValue, NamedAbiValue, PlainAbiValue};
-
-pub use everscale_types_abi_proc::{FromAbi, IntoAbi, WithAbiType};
 
 pub mod error;
 

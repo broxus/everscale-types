@@ -3,11 +3,10 @@ use std::ops::Deref;
 use smallvec::SmallVec;
 
 use super::BocTag;
-use crate::cell::{Cell, CellContext, CellDescriptor, CellParts, LevelMask, MAX_REF_COUNT};
-use crate::util::{read_be_u32_fast, read_be_u64_fast, unlikely, ArrayVec};
-
 #[cfg(feature = "stats")]
 use crate::cell::CellTreeStats;
+use crate::cell::{Cell, CellContext, CellDescriptor, CellParts, LevelMask, MAX_REF_COUNT};
+use crate::util::{read_be_u32_fast, read_be_u64_fast, unlikely, ArrayVec};
 
 /// BOC deserialization options.
 #[derive(Debug, Default, Clone)]

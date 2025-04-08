@@ -404,10 +404,9 @@ impl<'a> arbitrary::Arbitrary<'a> for ExtraCurrencyCollection {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::cell::Lazy;
     use crate::models::{DepthBalanceInfo, ShardAccount, ShardAccounts};
-
-    use super::*;
 
     fn _cc_must_use() -> anyhow::Result<()> {
         #[expect(unused_must_use)]

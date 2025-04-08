@@ -1,10 +1,9 @@
+use super::IntMsgInfo;
 use crate::cell::*;
 use crate::error::Error;
 use crate::models::{Message, MsgInfo, OwnedMessage};
 use crate::num::Tokens;
 use crate::util::unlikely;
-
-use super::IntMsgInfo;
 
 /// Next-hop address for a message.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

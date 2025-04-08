@@ -1,14 +1,12 @@
 //! Blockchain config and params.
 
+pub use self::params::*;
 use crate::cell::*;
 use crate::dict::{Dict, DictKey};
 use crate::error::Error;
-use crate::num::Tokens;
-
 use crate::models::currency::ExtraCurrencyCollection;
 use crate::models::global_version::GlobalVersion;
-
-pub use self::params::*;
+use crate::num::Tokens;
 
 mod params;
 

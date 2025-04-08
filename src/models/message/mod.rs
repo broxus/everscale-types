@@ -2,17 +2,15 @@
 
 use std::borrow::Borrow;
 
-use crate::cell::*;
-use crate::error::Error;
-use crate::num::*;
-
-use crate::models::account::StateInit;
-use crate::models::currency::CurrencyCollection;
-
 pub use self::address::*;
 pub use self::envelope::*;
 pub use self::in_message::*;
 pub use self::out_message::*;
+use crate::cell::*;
+use crate::error::Error;
+use crate::models::account::StateInit;
+use crate::models::currency::CurrencyCollection;
+use crate::num::*;
 
 mod address;
 mod envelope;
@@ -457,13 +455,10 @@ impl MessageLayout {
                 init_to_cell: false,
                 body_to_cell: false,
             };
-            return (
-                layout,
-                Size {
-                    bits: total_bits,
-                    refs: total_refs,
-                },
-            );
+            return (layout, Size {
+                bits: total_bits,
+                refs: total_refs,
+            });
         }
 
         // Try body to ref
@@ -474,13 +469,10 @@ impl MessageLayout {
                 init_to_cell: false,
                 body_to_cell: true,
             };
-            return (
-                layout,
-                Size {
-                    bits: total_bits,
-                    refs: total_refs + 1,
-                },
-            );
+            return (layout, Size {
+                bits: total_bits,
+                refs: total_refs + 1,
+            });
         }
 
         // Try init to ref
@@ -491,13 +483,10 @@ impl MessageLayout {
                 init_to_cell: true,
                 body_to_cell: false,
             };
-            return (
-                layout,
-                Size {
-                    bits: total_bits,
-                    refs: total_refs + 1,
-                },
-            );
+            return (layout, Size {
+                bits: total_bits,
+                refs: total_refs + 1,
+            });
         }
 
         // Fallback to init and body to ref
@@ -505,13 +494,10 @@ impl MessageLayout {
             init_to_cell: true,
             body_to_cell: true,
         };
-        (
-            layout,
-            Size {
-                bits: l.info.bits,
-                refs: l.info.refs + 2,
-            },
-        )
+        (layout, Size {
+            bits: l.info.bits,
+            refs: l.info.refs + 2,
+        })
     }
 }
 
@@ -1240,7 +1226,7 @@ fn load_ext_addr(slice: &mut CellSlice<'_>) -> Result<Option<ExtAddr>, Error> {
         return Err(Error::CellUnderflow);
     }
 
-    let mut data = vec![0; (data_bit_len.into_inner() as usize + 7) / 8];
+    let mut data = vec![0; data_bit_len.into_inner().div_ceil(8) as usize];
     ok!(slice.load_raw(&mut data, data_bit_len.into_inner()));
     Ok(Some(ExtAddr { data_bit_len, data }))
 }

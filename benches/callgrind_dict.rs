@@ -1,8 +1,10 @@
-use everscale_types::{cell::*, dict::*};
+use std::hint::black_box;
+
+use everscale_types::cell::*;
+use everscale_types::dict::*;
 use iai_callgrind::{library_benchmark, library_benchmark_group, main};
 use rand::distributions::{Distribution, Standard};
 use rand::{Rng, SeedableRng};
-use std::hint::black_box;
 
 fn build_dict<K, V>(num_elements: usize) -> Dict<K, V>
 where

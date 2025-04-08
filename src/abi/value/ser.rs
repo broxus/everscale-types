@@ -114,7 +114,7 @@ impl AbiValue {
         fn compute_varuint_size(n: &NonZeroU8, value: &BigUint) -> Size {
             let value_bytes: u8 = n.get() - 1;
             let len_bits = (8 - value_bytes.leading_zeros()) as u16;
-            let value_bits = std::cmp::max(8, 8 * ((value.bits() + 7) / 8) as u16);
+            let value_bits = std::cmp::max(8, 8 * value.bits().div_ceil(8) as u16);
             Size {
                 bits: len_bits + value_bits,
                 refs: 0,
@@ -766,12 +766,11 @@ mod tests {
 
     use bytes::Bytes;
 
+    use super::*;
     use crate::dict::Dict;
     use crate::models::{StdAddr, VarAddr};
     use crate::num::Uint9;
     use crate::prelude::{CellFamily, HashBytes};
-
-    use super::*;
 
     const VX_X: [AbiVersion; 5] = [
         AbiVersion::V1_0,

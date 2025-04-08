@@ -1,9 +1,8 @@
 use super::cell_impl::VirtualCellWrapper;
-use super::{Cell, CellDescriptor, CellImpl, CellInner, DynCell, HashBytes};
-use crate::util::TryAsMut;
-
 #[cfg(feature = "stats")]
 use super::CellTreeStats;
+use super::{Cell, CellDescriptor, CellImpl, CellInner, DynCell, HashBytes};
+use crate::util::TryAsMut;
 
 /// Rule for including cells in the usage tree.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -106,7 +105,6 @@ impl UsageTreeWithSubtrees {
 
 #[cfg(not(feature = "sync"))]
 use self::rc::{SharedState, UsageCell, UsageTreeState};
-
 #[cfg(feature = "sync")]
 use self::sync::{SharedState, UsageCell, UsageTreeState};
 

@@ -1,11 +1,10 @@
 use sha2::digest::Digest;
 
+#[cfg(feature = "stats")]
+use crate::cell::CellTreeStats;
 use crate::cell::{Cell, CellDescriptor, CellType, DynCell, HashBytes, LevelMask, MAX_REF_COUNT};
 use crate::error::Error;
 use crate::util::{unlikely, ArrayVec};
-
-#[cfg(feature = "stats")]
-use crate::cell::CellTreeStats;
 
 /// Gas accounting and resolcing exotic cells.
 pub trait CellContext {

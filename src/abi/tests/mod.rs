@@ -1,8 +1,10 @@
+use std::sync::Arc;
+
+use bytes::Bytes;
+
 use crate::abi::*;
 use crate::models::StdAddr;
 use crate::prelude::{Cell, CellBuilder, CellFamily, HashBytes, RawDict, Store};
-use bytes::Bytes;
-use std::sync::Arc;
 
 const DEPOOL_ABI: &str = include_str!("depool.abi.json");
 
@@ -315,14 +317,11 @@ fn test_abi_derivation() {
         ])
         .named("inner_first")])
         .named("lol"),
-        AbiValue::Array(
-            Arc::from(AbiType::Uint(64)),
-            vec![
-                AbiValue::uint(64, 1u64),
-                AbiValue::uint(64, 2u64),
-                AbiValue::uint(64, 3u64),
-            ],
-        )
+        AbiValue::Array(Arc::from(AbiType::Uint(64)), vec![
+            AbiValue::uint(64, 1u64),
+            AbiValue::uint(64, 2u64),
+            AbiValue::uint(64, 3u64),
+        ])
         .named("third"),
     ]);
 

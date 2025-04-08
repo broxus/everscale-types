@@ -346,7 +346,7 @@ fn load_uint_plain(bits: u16, slice: &mut CellSlice) -> Result<BigUint, Error> {
         1..=64 => slice.load_uint(bits).map(BigUint::from),
         _ => {
             let rem = bits % 8;
-            let mut buffer = vec![0u8; ((bits + 7) / 8) as usize];
+            let mut buffer = vec![0u8; bits.div_ceil(8) as usize];
             slice.load_raw(&mut buffer, bits)?;
 
             buffer.reverse();
@@ -371,7 +371,7 @@ fn load_int_plain(bits: u16, slice: &mut CellSlice) -> Result<BigInt, Error> {
         }),
         _ => {
             let rem = bits % 8;
-            let mut buffer = vec![0u8; ((bits + 7) / 8) as usize];
+            let mut buffer = vec![0u8; bits.div_ceil(8) as usize];
             slice.load_raw(&mut buffer, bits)?;
 
             buffer.reverse();
@@ -451,13 +451,10 @@ fn load_fixed_bytes(
     slice: &mut CellSlice,
 ) -> Result<Bytes> {
     let bytes = ok!(load_bytes(version, last, slice));
-    anyhow::ensure!(
-        bytes.len() == len,
-        AbiError::BytesSizeMismatch {
-            expected: len,
-            len: bytes.len()
-        }
-    );
+    anyhow::ensure!(bytes.len() == len, AbiError::BytesSizeMismatch {
+        expected: len,
+        len: bytes.len()
+    });
     Ok(bytes)
 }
 
@@ -509,13 +506,10 @@ fn load_fixed_array(
     slice: &mut CellSlice,
 ) -> Result<Vec<AbiValue>> {
     let values = ok!(load_array_raw(ty, len, version, allow_partial, slice));
-    anyhow::ensure!(
-        values.len() == len,
-        AbiError::ArraySizeMismatch {
-            expected: len,
-            len: values.len()
-        }
-    );
+    anyhow::ensure!(values.len() == len, AbiError::ArraySizeMismatch {
+        expected: len,
+        len: values.len()
+    });
     Ok(values)
 }
 
@@ -592,13 +586,12 @@ fn load_ref(
 mod tests {
     use std::sync::Arc;
 
+    use super::*;
     use crate::boc::Boc;
     use crate::dict::Dict;
     use crate::models::{StdAddr, VarAddr};
     use crate::num::{Uint9, VarUint24, VarUint56};
     use crate::prelude::{CellBuilder, CellFamily, HashBytes, Store};
-
-    use super::*;
 
     trait BuildCell {
         fn build_cell(&self) -> Result<Cell>;

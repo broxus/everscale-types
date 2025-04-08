@@ -1,8 +1,7 @@
+use super::{BlockId, BlockSignature};
 use crate::cell::*;
 use crate::dict::Dict;
 use crate::error::Error;
-
-use super::{BlockId, BlockSignature};
 #[cfg(feature = "tycho")]
 use crate::models::shard::ConsensusInfo;
 use crate::models::shard::ValidatorBaseInfo;

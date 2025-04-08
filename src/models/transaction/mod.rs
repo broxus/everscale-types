@@ -1,15 +1,13 @@
 //! Transaction models.
 
+pub use self::phases::*;
 use crate::cell::*;
 use crate::dict::{self, Dict};
 use crate::error::*;
-use crate::num::*;
-
 use crate::models::account::AccountStatus;
 use crate::models::currency::CurrencyCollection;
 use crate::models::message::Message;
-
-pub use self::phases::*;
+use crate::num::*;
 
 mod phases;
 

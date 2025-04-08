@@ -1,14 +1,13 @@
 use std::collections::BTreeMap;
 
-use crate::cell::*;
-use crate::error::Error;
-use crate::util::{unlikely, IterStatus};
-
 use super::{
     build_dict_from_sorted_iter, dict_find_bound, dict_find_bound_owned, dict_find_owned, dict_get,
     dict_get_owned, dict_get_subdict, dict_insert, dict_load_from_root, dict_remove_bound_owned,
     dict_remove_owned, dict_split_by_prefix, read_label, DictBound, DictOwnedEntry, SetMode,
 };
+use crate::cell::*;
+use crate::error::Error;
+use crate::util::{unlikely, IterStatus};
 
 /// Dictionary with fixed length keys (where `N` is a number of bits in each key).
 ///
@@ -1651,7 +1650,7 @@ mod tests {
     fn dict_get_subdict() -> anyhow::Result<()> {
         let mut dict = RawDict::<32>::new();
         for i in 0u32..4 {
-            //let key = i % 2;
+            // let key = i % 2;
             let key = CellBuilder::build_from(i)?;
             println!("ADDING KEY {}", key.display_data());
             dict.add(key.as_slice()?, i)?;
@@ -1795,72 +1794,60 @@ mod tests {
         }
 
         // Unsigned
-        compare_iter_values(
-            left.iter_union(&right),
-            &[
-                (0, Some(0), Some(100)),
-                (1, Some(1), Some(101)),
-                (2, Some(2), Some(102)),
-                (3, Some(3), Some(103)),
-                (4, None, Some(104)),
-                (5, None, Some(105)),
-                (-4, Some(-4), None),
-                (-3, Some(-3), None),
-                (-2, Some(-2), Some(98)),
-                (-1, Some(-1), Some(99)),
-            ],
-        );
+        compare_iter_values(left.iter_union(&right), &[
+            (0, Some(0), Some(100)),
+            (1, Some(1), Some(101)),
+            (2, Some(2), Some(102)),
+            (3, Some(3), Some(103)),
+            (4, None, Some(104)),
+            (5, None, Some(105)),
+            (-4, Some(-4), None),
+            (-3, Some(-3), None),
+            (-2, Some(-2), Some(98)),
+            (-1, Some(-1), Some(99)),
+        ]);
 
         // Unsigned reversed
-        compare_iter_values(
-            left.iter_union(&right).reversed(),
-            &[
-                (-1, Some(-1), Some(99)),
-                (-2, Some(-2), Some(98)),
-                (-3, Some(-3), None),
-                (-4, Some(-4), None),
-                (5, None, Some(105)),
-                (4, None, Some(104)),
-                (3, Some(3), Some(103)),
-                (2, Some(2), Some(102)),
-                (1, Some(1), Some(101)),
-                (0, Some(0), Some(100)),
-            ],
-        );
+        compare_iter_values(left.iter_union(&right).reversed(), &[
+            (-1, Some(-1), Some(99)),
+            (-2, Some(-2), Some(98)),
+            (-3, Some(-3), None),
+            (-4, Some(-4), None),
+            (5, None, Some(105)),
+            (4, None, Some(104)),
+            (3, Some(3), Some(103)),
+            (2, Some(2), Some(102)),
+            (1, Some(1), Some(101)),
+            (0, Some(0), Some(100)),
+        ]);
 
         // Signed
-        compare_iter_values(
-            left.iter_union(&right).signed(),
-            &[
-                (-4, Some(-4), None),
-                (-3, Some(-3), None),
-                (-2, Some(-2), Some(98)),
-                (-1, Some(-1), Some(99)),
-                (0, Some(0), Some(100)),
-                (1, Some(1), Some(101)),
-                (2, Some(2), Some(102)),
-                (3, Some(3), Some(103)),
-                (4, None, Some(104)),
-                (5, None, Some(105)),
-            ],
-        );
+        compare_iter_values(left.iter_union(&right).signed(), &[
+            (-4, Some(-4), None),
+            (-3, Some(-3), None),
+            (-2, Some(-2), Some(98)),
+            (-1, Some(-1), Some(99)),
+            (0, Some(0), Some(100)),
+            (1, Some(1), Some(101)),
+            (2, Some(2), Some(102)),
+            (3, Some(3), Some(103)),
+            (4, None, Some(104)),
+            (5, None, Some(105)),
+        ]);
 
         // Signed reversed
-        compare_iter_values(
-            left.iter_union(&right).signed().reversed(),
-            &[
-                (5, None, Some(105)),
-                (4, None, Some(104)),
-                (3, Some(3), Some(103)),
-                (2, Some(2), Some(102)),
-                (1, Some(1), Some(101)),
-                (0, Some(0), Some(100)),
-                (-1, Some(-1), Some(99)),
-                (-2, Some(-2), Some(98)),
-                (-3, Some(-3), None),
-                (-4, Some(-4), None),
-            ],
-        );
+        compare_iter_values(left.iter_union(&right).signed().reversed(), &[
+            (5, None, Some(105)),
+            (4, None, Some(104)),
+            (3, Some(3), Some(103)),
+            (2, Some(2), Some(102)),
+            (1, Some(1), Some(101)),
+            (0, Some(0), Some(100)),
+            (-1, Some(-1), Some(99)),
+            (-2, Some(-2), Some(98)),
+            (-3, Some(-3), None),
+            (-4, Some(-4), None),
+        ]);
 
         Ok(())
     }

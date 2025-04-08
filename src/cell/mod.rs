@@ -3,23 +3,20 @@
 use std::ops::{BitOr, BitOrAssign};
 use std::str::FromStr;
 
-use crate::error::{Error, ParseHashBytesError};
-use crate::util::Bitstring;
+pub use everscale_types_proc::{Load, Store};
 
 pub use self::builder::{CellBuilder, CellRefsBuilder, Store};
 pub use self::cell_context::{CellContext, CellParts, LoadMode};
+#[cfg(not(feature = "sync"))]
+pub use self::cell_impl::rc::{Cell, CellInner, WeakCell};
+#[cfg(feature = "sync")]
+pub use self::cell_impl::sync::{Cell, CellInner, WeakCell};
 pub use self::cell_impl::{StaticCell, VirtualCellWrapper};
 pub use self::lazy::{Lazy, LazyExotic};
 pub use self::slice::{CellSlice, CellSliceParts, CellSliceRange, ExactSize, Load, LoadCell};
 pub use self::usage_tree::{UsageTree, UsageTreeMode, UsageTreeWithSubtrees};
-
-#[cfg(not(feature = "sync"))]
-pub use self::cell_impl::rc::{Cell, CellInner, WeakCell};
-
-#[cfg(feature = "sync")]
-pub use self::cell_impl::sync::{Cell, CellInner, WeakCell};
-
-pub use everscale_types_proc::{Load, Store};
+use crate::error::{Error, ParseHashBytesError};
+use crate::util::Bitstring;
 
 /// Generic cell implementation.
 mod cell_impl;

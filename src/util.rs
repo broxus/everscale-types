@@ -296,7 +296,7 @@ impl Bitstring<'_> {
                 }
             }
 
-            data.truncate((bit_len as usize + 7) / 8);
+            data.truncate(bit_len.div_ceil(8) as usize);
         }
 
         Ok((data, bit_len))
@@ -308,7 +308,7 @@ impl std::fmt::Display for Bitstring<'_> {
         const CHUNK_LEN: usize = 16;
 
         let bit_len = std::cmp::min(self.bit_len as usize, self.bytes.len() * 8) as u16;
-        let byte_len = ((bit_len + 7) / 8) as usize;
+        let byte_len = bit_len.div_ceil(8) as usize;
         let bytes = &self.bytes[..byte_len];
 
         let rem = bit_len % 8;
@@ -347,7 +347,7 @@ impl std::fmt::Display for Bitstring<'_> {
 impl std::fmt::Binary for Bitstring<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let bit_len = std::cmp::min(self.bit_len as usize, self.bytes.len() * 8) as u16;
-        let byte_len = ((bit_len + 7) / 8) as usize;
+        let byte_len = bit_len.div_ceil(8) as usize;
         let bytes = &self.bytes[..byte_len];
 
         let rem = (bit_len % 8) as usize;
@@ -435,53 +435,38 @@ mod tests {
     #[test]
     fn bitstring_zero_char_with_completion_tag() {
         assert_eq!(
-            format!(
-                "{}",
-                Bitstring {
-                    bytes: &[0b_0011_0000],
-                    bit_len: 4
-                }
-            ),
+            format!("{}", Bitstring {
+                bytes: &[0b_0011_0000],
+                bit_len: 4
+            }),
             format!("{:x}", 0b_0011)
         );
         assert_eq!(
-            format!(
-                "{}",
-                Bitstring {
-                    bytes: &[0b_0100_0000],
-                    bit_len: 2
-                }
-            ),
+            format!("{}", Bitstring {
+                bytes: &[0b_0100_0000],
+                bit_len: 2
+            }),
             format!("{:x}_", 0b_0110)
         );
         assert_eq!(
-            format!(
-                "{}",
-                Bitstring {
-                    bytes: &[0b_0000_1000],
-                    bit_len: 5
-                }
-            ),
+            format!("{}", Bitstring {
+                bytes: &[0b_0000_1000],
+                bit_len: 5
+            }),
             format!("{:x}{:x}_", 0b_0000, 0b_1100)
         );
         assert_eq!(
-            format!(
-                "{}",
-                Bitstring {
-                    bytes: &[0b_0000_1000, 0b_0100_0000],
-                    bit_len: 8 + 2
-                }
-            ),
+            format!("{}", Bitstring {
+                bytes: &[0b_0000_1000, 0b_0100_0000],
+                bit_len: 8 + 2
+            }),
             format!("{:x}{:x}{:x}_", 0b_0000, 0b_1000, 0b_0110)
         );
         assert_eq!(
-            format!(
-                "{}",
-                Bitstring {
-                    bytes: &[0b_0100_0000, 0b_0000_1000],
-                    bit_len: 8 + 5
-                }
-            ),
+            format!("{}", Bitstring {
+                bytes: &[0b_0100_0000, 0b_0000_1000],
+                bit_len: 8 + 5
+            }),
             format!("{:x}{:x}{:x}{:x}_", 0b_0100, 0b_0000, 0b_0000, 0b_1100)
         );
     }

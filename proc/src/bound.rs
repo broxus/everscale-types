@@ -3,8 +3,7 @@ use std::collections::HashSet;
 use syn::punctuated::Pair;
 use syn::visit::{self, Visit};
 
-use crate::internals::ast;
-use crate::internals::attr;
+use crate::internals::{ast, attr};
 
 pub fn without_default(generics: &syn::Generics) -> syn::Generics {
     syn::Generics {

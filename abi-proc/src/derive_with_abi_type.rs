@@ -1,10 +1,11 @@
+use proc_macro2::TokenStream;
+use quote::quote;
+use syn::Fields;
+
 use crate::internals::container;
 use crate::internals::container::Container;
 use crate::internals::context::Ctxt;
 use crate::internals::field::{extract_field_attributes, FieldAttributes, StructField};
-use proc_macro2::TokenStream;
-use quote::quote;
-use syn::Fields;
 
 pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Error>> {
     let ctx = Ctxt::new();

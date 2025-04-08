@@ -3,6 +3,9 @@ use std::mem::MaybeUninit;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use super::CellFamily;
+#[cfg(feature = "stats")]
+use super::CellTreeStats;
 use crate::cell::cell_context::{CellContext, CellParts};
 use crate::cell::{
     Cell, CellDescriptor, CellImpl, CellInner, CellSlice, CellType, DynCell, HashBytes, LevelMask,
@@ -10,10 +13,6 @@ use crate::cell::{
 };
 use crate::error::Error;
 use crate::util::{ArrayVec, Bitstring};
-
-use super::CellFamily;
-#[cfg(feature = "stats")]
-use super::CellTreeStats;
 
 /// A data structure that can be serialized into cells.
 pub trait Store {
@@ -464,7 +463,7 @@ impl CellBuilder {
                 data_ptr = data_ptr.add(1);
             }
 
-            std::ptr::write_bytes(data_ptr, 0, ((bits + 7) / 8) as usize);
+            std::ptr::write_bytes(data_ptr, 0, bits.div_ceil(8) as usize);
         }
 
         self.bit_len = new_bit_len;
@@ -693,7 +692,7 @@ impl CellBuilder {
             unsafe {
                 let data_ptr = self.data.as_mut_ptr().add(q);
                 if r == 0 {
-                    let byte_len = ((bits + 7) / 8) as usize;
+                    let byte_len = bits.div_ceil(8) as usize;
                     debug_assert!(q + byte_len <= 128);
 
                     // Just append data
@@ -709,7 +708,7 @@ impl CellBuilder {
                     // If there are some bits left
                     if let Some(bits) = bits.checked_sub(shift) {
                         if bits > 0 {
-                            let byte_len = ((bits + 7) / 8) as usize;
+                            let byte_len = bits.div_ceil(8) as usize;
                             debug_assert!(q + 1 + byte_len <= 128);
 
                             // Make shifted bytes
@@ -858,7 +857,7 @@ fn store_raw(
             let mut value_ptr = value.as_ptr();
 
             if r == 0 {
-                let byte_len = ((bits + 7) / 8) as usize;
+                let byte_len = bits.div_ceil(8) as usize;
                 debug_assert!(q + byte_len <= 128);
                 debug_assert!(byte_len <= value.len());
 
@@ -869,8 +868,8 @@ fn store_raw(
                     *data_ptr.add(byte_len - 1) &= 0xff << (8 - bits_r);
                 }
             } else {
-                let byte_len = ((bits + r + 7) / 8) as usize - 1;
-                let value_len = ((bits + 7) / 8) as usize;
+                let byte_len = (bits + r).div_ceil(8) as usize - 1;
+                let value_len = bits.div_ceil(8) as usize;
                 debug_assert!(q + byte_len <= 128);
                 debug_assert!(byte_len <= value_len && value_len <= value.len());
 
@@ -1026,7 +1025,7 @@ impl CellBuilder {
             *last_byte = (*last_byte & data_mask) | tag_mask;
         }
 
-        let byte_len = (self.bit_len + 7) / 8;
+        let byte_len = self.bit_len.div_ceil(8);
         let data = &self.data[..std::cmp::min(byte_len as usize, 128)];
 
         let cell_parts = CellParts {
@@ -1411,15 +1410,13 @@ mod tests {
 
         builder.store_u32(0xdeafbeaf).unwrap();
         assert_eq!(builder.size_bits(), 32 + 27);
-        assert_eq!(
-            builder.data[..8],
-            [0xde, 0xaf, 0xbe, 0xbb, 0xd5, 0xf7, 0xd5, 0xe0]
-        );
+        assert_eq!(builder.data[..8], [
+            0xde, 0xaf, 0xbe, 0xbb, 0xd5, 0xf7, 0xd5, 0xe0
+        ]);
         builder.rewind(32).unwrap();
-        assert_eq!(
-            builder.data[..8],
-            [0xde, 0xaf, 0xbe, 0xa0, 0x00, 0x00, 0x00, 0x00]
-        );
+        assert_eq!(builder.data[..8], [
+            0xde, 0xaf, 0xbe, 0xa0, 0x00, 0x00, 0x00, 0x00
+        ]);
 
         assert_eq!(builder.rewind(32), Err(Error::CellUnderflow));
 

@@ -4,7 +4,6 @@ use std::sync::OnceLock;
 use crate::cell::*;
 use crate::dict::{AugDict, AugDictExtra, Dict, DictKey};
 use crate::error::Error;
-
 use crate::models::config::{BlockchainConfig, ValidatorDescription};
 use crate::models::currency::CurrencyCollection;
 use crate::models::message::{ImportFees, InMsg, OutMsg};

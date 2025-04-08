@@ -2,11 +2,10 @@
 
 use std::num::NonZeroU8;
 
+pub use self::varuint248::VarUint248;
 use crate::cell::*;
 use crate::error::{Error, ParseIntError};
 use crate::util::unlikely;
-
-pub use self::varuint248::VarUint248;
 
 mod varuint248;
 

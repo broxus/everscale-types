@@ -1,9 +1,8 @@
 use crate::cell::*;
 use crate::error::Error;
-use crate::num::*;
-
 use crate::models::account::StorageUsedShort;
 use crate::models::currency::CurrencyCollection;
+use crate::num::*;
 
 /// Storage phase info.
 ///

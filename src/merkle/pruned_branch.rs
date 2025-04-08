@@ -38,10 +38,9 @@ pub fn make_pruned_branch(
 
 #[cfg(test)]
 mod test {
+    use super::*;
     use crate::boc::Boc;
     use crate::merkle::MerkleProof;
-
-    use super::*;
 
     #[test]
     fn correct_pruned_branch() {

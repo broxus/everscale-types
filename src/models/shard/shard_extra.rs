@@ -1,7 +1,6 @@
 use crate::cell::*;
 use crate::dict::{AugDict, AugDictExtra, Dict};
 use crate::error::Error;
-
 use crate::models::block::{BlockRef, ShardHashes};
 use crate::models::config::BlockchainConfig;
 use crate::models::currency::CurrencyCollection;

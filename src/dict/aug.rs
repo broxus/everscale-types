@@ -2,17 +2,15 @@ use std::borrow::Borrow;
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
+use super::raw::*;
+use super::typed::*;
 use super::{
     aug_dict_find_by_extra, aug_dict_insert, aug_dict_remove_owned,
-    build_aug_dict_from_sorted_iter, SearchByExtra, SetMode,
+    build_aug_dict_from_sorted_iter, read_label, DictKey, SearchByExtra, SetMode,
 };
 use crate::cell::*;
 use crate::error::*;
 use crate::util::*;
-
-use super::raw::*;
-use super::typed::*;
-use super::{read_label, DictKey};
 
 /// A trait for values that can be used as augmented values in an augmented dictionary.
 pub trait AugDictExtra: Default {

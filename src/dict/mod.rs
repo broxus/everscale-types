@@ -6,7 +6,6 @@ pub use self::aug::*;
 pub use self::ops::*;
 pub use self::raw::*;
 pub use self::typed::*;
-
 use crate::cell::*;
 use crate::error::Error;
 

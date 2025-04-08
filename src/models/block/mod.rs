@@ -3,20 +3,18 @@
 #[cfg(feature = "sync")]
 use std::sync::OnceLock;
 
+pub use self::block_extra::*;
+pub use self::block_id::*;
+pub use self::block_proof::*;
+pub use self::shard_hashes::*;
 use crate::cell::*;
 #[allow(unused)]
 use crate::dict::Dict;
 use crate::error::Error;
 use crate::merkle::MerkleUpdate;
-use crate::util::*;
-
 use crate::models::currency::CurrencyCollection;
 use crate::models::global_version::GlobalVersion;
-
-pub use self::block_extra::*;
-pub use self::block_id::*;
-pub use self::block_proof::*;
-pub use self::shard_hashes::*;
+use crate::util::*;
 
 mod block_extra;
 mod block_id;

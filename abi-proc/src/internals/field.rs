@@ -1,6 +1,7 @@
-use crate::internals::context::Ctxt;
 use quote::{format_ident, ToTokens};
 use syn::{Attribute, Error, Ident, LitStr, Path};
+
+use crate::internals::context::Ctxt;
 
 pub struct StructField {
     pub field_name: syn::Member,

@@ -450,11 +450,8 @@ fn block_with_tycho_updates_store_load() {
     let decoded = cell.parse::<Block>().unwrap();
     assert_eq!(decoded, block);
 
-    assert_eq!(
-        decoded.out_msg_queue_updates,
-        OutMsgQueueUpdates {
-            diff_hash: HashBytes::ZERO,
-            tail_len: 123
-        }
-    );
+    assert_eq!(decoded.out_msg_queue_updates, OutMsgQueueUpdates {
+        diff_hash: HashBytes::ZERO,
+        tail_len: 123
+    });
 }

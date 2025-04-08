@@ -3,10 +3,9 @@
 use crate::cell::*;
 use crate::dict::*;
 use crate::error::*;
-use crate::num::*;
-
 use crate::models::currency::CurrencyCollection;
 use crate::models::message::IntAddr;
+use crate::num::*;
 
 /// Amount of unique cells and bits for shard states.
 #[derive(Debug, Default, Clone, Eq, PartialEq, Store, Load)]

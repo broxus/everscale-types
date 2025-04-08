@@ -84,7 +84,7 @@ pub fn dict_merge(
         (Some(left_cell), Some(right_cell)) => {
             let bit_len = left_cell.bit_len();
             if bit_len != right_cell.bit_len() && bit_len != key_bit_length {
-                return Err(Error::InvalidCell); //KEY LENGTH ERROR?
+                return Err(Error::InvalidCell); // KEY LENGTH ERROR?
             }
 
             let mut right_dict_iter = RawIter::new(right, key_bit_length);

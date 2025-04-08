@@ -159,7 +159,7 @@ impl<'a> Load<'a> for IntAddr {
                 return Err(Error::CellUnderflow);
             }
 
-            let mut address = vec![0; (address_len.into_inner() as usize + 7) / 8];
+            let mut address = vec![0; address_len.into_inner().div_ceil(8) as usize];
             ok!(slice.load_raw(&mut address, address_len.into_inner()));
 
             Self::Var(VarAddr {
@@ -982,7 +982,7 @@ impl Anycast {
     pub fn from_slice(rewrite_prefix: &CellSlice<'_>) -> Result<Self, Error> {
         let depth = ok!(SplitDepth::from_bit_len(rewrite_prefix.size_bits()));
 
-        let mut data = vec![0; (depth.into_bit_len() as usize + 7) / 8];
+        let mut data = vec![0; depth.into_bit_len().div_ceil(8) as usize];
         ok!(rewrite_prefix.get_raw(0, &mut data, depth.into_bit_len()));
 
         Ok(Self {
@@ -1028,7 +1028,7 @@ impl<'a> Load<'a> for Anycast {
             return Err(Error::CellUnderflow);
         }
 
-        let mut rewrite_prefix = vec![0; (depth.into_bit_len() as usize + 7) / 8];
+        let mut rewrite_prefix = vec![0; depth.into_bit_len().div_ceil(8) as usize];
         ok!(slice.load_raw(&mut rewrite_prefix, depth.into_bit_len()));
 
         Ok(Self {
@@ -1145,14 +1145,11 @@ mod tests {
                 StdAddrFormat::any()
             )
             .unwrap(),
-            (
-                addr,
-                Base64StdAddrFlags {
-                    testnet: false,
-                    base64_url: false,
-                    bounceable: true,
-                }
-            )
+            (addr, Base64StdAddrFlags {
+                testnet: false,
+                base64_url: false,
+                bounceable: true,
+            })
         );
 
         let addr = "0:dddde93b1d3398f0b4305c08de9a032e0bc1b257c4ce2c72090aea1ff3e9ecfd"
@@ -1173,14 +1170,11 @@ mod tests {
                 StdAddrFormat::any()
             )
             .unwrap(),
-            (
-                addr.clone(),
-                Base64StdAddrFlags {
-                    testnet: false,
-                    base64_url: false,
-                    bounceable: false,
-                }
-            )
+            (addr.clone(), Base64StdAddrFlags {
+                testnet: false,
+                base64_url: false,
+                bounceable: false,
+            })
         );
 
         assert_eq!(
@@ -1198,14 +1192,11 @@ mod tests {
                 StdAddrFormat::any()
             )
             .unwrap(),
-            (
-                addr,
-                Base64StdAddrFlags {
-                    testnet: false,
-                    base64_url: true,
-                    bounceable: true,
-                }
-            )
+            (addr, Base64StdAddrFlags {
+                testnet: false,
+                base64_url: true,
+                bounceable: true,
+            })
         );
     }
 }

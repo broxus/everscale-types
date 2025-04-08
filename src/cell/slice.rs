@@ -2,13 +2,12 @@ use std::num::{NonZeroU16, NonZeroU32, NonZeroU8};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use super::CellFamily;
 use crate::cell::{
     Cell, CellTreeStats, CellType, DynCell, HashBytes, LevelMask, RefsIter, Size, StorageStat,
 };
 use crate::error::Error;
 use crate::util::{unlikely, Bitstring};
-
-use super::CellFamily;
 
 /// A data structure that can be deserialized from the full cell.
 pub trait LoadCell<'a>: Sized {
@@ -944,9 +943,9 @@ impl<'a> CellSlice<'a> {
         let other_q = (other.range.bits_start / 8) as usize;
 
         // Compute remaining bytes to check
-        let self_bytes = (((self_r + max_bit_len) + 7) / 8) as usize;
+        let self_bytes = (self_r + max_bit_len).div_ceil(8) as usize;
         debug_assert!((self_q + self_bytes) <= self_data.len());
-        let other_bytes = (((other_r + max_bit_len) + 7) / 8) as usize;
+        let other_bytes = (other_r + max_bit_len).div_ceil(8) as usize;
         debug_assert!((other_q + other_bytes) <= other_data.len());
 
         let aligned_bytes = std::cmp::min(self_bytes, other_bytes);
@@ -1015,7 +1014,7 @@ impl<'a> CellSlice<'a> {
         let data = self.cell.data();
 
         // Check if data is enough
-        if (self.range.bits_end + 7) / 8 > data.len() as u16 {
+        if self.range.bits_end.div_ceil(8) as usize > data.len() {
             return Err(Error::CellUnderflow);
         }
 
@@ -1033,7 +1032,7 @@ impl<'a> CellSlice<'a> {
         let data = self.cell.data();
 
         // Check if data is enough
-        if (self.range.bits_end + 7) / 8 > data.len() as u16 {
+        if self.range.bits_end.div_ceil(8) as usize > data.len() {
             return Err(Error::CellUnderflow);
         }
 
@@ -1080,7 +1079,7 @@ impl<'a> CellSlice<'a> {
         let data = self.cell.data();
 
         // Check if data is enough
-        if (self.range.bits_end + 7) / 8 > data.len() as u16 {
+        if self.range.bits_end.div_ceil(8) as usize > data.len() {
             return None;
         }
 
@@ -1491,7 +1490,7 @@ impl<'a> CellSlice<'a> {
             let data_len = data.len();
 
             // Check if data is enough
-            if (self.range.bits_end + 7) / 8 > data_len as u16 {
+            if self.range.bits_end.div_ceil(8) as usize > data_len {
                 return Err(Error::CellUnderflow);
             }
 
@@ -1516,7 +1515,7 @@ impl<'a> CellSlice<'a> {
                     std::ptr::copy_nonoverlapping(
                         data_ptr.add(1),
                         bytes.as_mut_ptr(),
-                        ((bits + 7) / 8) as usize,
+                        bits.div_ceil(8) as usize,
                     );
 
                     let mut result = u64::from_be_bytes(bytes) >> (64 - bits);
@@ -1556,7 +1555,7 @@ impl<'a> CellSlice<'a> {
             let data = self.cell.data();
             let data_len = data.len();
 
-            let target_len = ((bits + 7) / 8) as usize;
+            let target_len = bits.div_ceil(8) as usize;
             let target = if target_len <= target.len() {
                 &mut target[..target_len]
             } else {
@@ -1575,7 +1574,7 @@ impl<'a> CellSlice<'a> {
                 if r == 0 && q + target_len <= data_len {
                     std::ptr::copy_nonoverlapping(data_ptr, target_ptr, target_len);
                 } else if r != 0 {
-                    let byte_len = ((bits + r + 7) / 8) as usize - 1;
+                    let byte_len = (bits + r).div_ceil(8) as usize - 1;
                     if q + byte_len > data_len {
                         return Err(Error::CellUnderflow);
                     }

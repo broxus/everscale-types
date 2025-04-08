@@ -13,9 +13,8 @@ use super::{
     AbiType, AbiValue, NamedAbiType, NamedAbiValue, PlainAbiType, PlainAbiValue, WithoutName,
 };
 use crate::cell::{Cell, HashBytes, Lazy};
-use crate::num::*;
-
 use crate::models::message::{IntAddr, StdAddr, VarAddr};
+use crate::num::*;
 
 /// ABI entity wrapper.
 pub trait IgnoreName {
@@ -1284,9 +1283,8 @@ unsafe fn cast_vec<T1, T2>(v: Vec<T1>) -> Vec<T2> {
 mod tests {
     use ahash::HashSet;
 
-    use crate::prelude::CellFamily;
-
     use super::*;
+    use crate::prelude::CellFamily;
 
     #[test]
     fn tuple_to_abi() {

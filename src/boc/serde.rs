@@ -398,9 +398,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::cell::CellFamily;
-
     use super::*;
+    use crate::cell::CellFamily;
 
     #[derive(serde::Serialize)]
     struct StructWithDynCell<'a> {

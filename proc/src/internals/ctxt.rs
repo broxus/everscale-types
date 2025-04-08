@@ -1,5 +1,6 @@
-use quote::ToTokens;
 use std::cell::RefCell;
+
+use quote::ToTokens;
 
 pub struct Ctxt {
     errors: RefCell<Vec<syn::Error>>,

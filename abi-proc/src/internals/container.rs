@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+
 use syn::punctuated::Pair;
 use syn::visit::Visit;
 use syn::{visit, DataStruct, Fields};
