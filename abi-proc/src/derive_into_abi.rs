@@ -1,10 +1,10 @@
-use proc_macro2::TokenStream;
-use quote::quote;
-use syn::{Error, Fields};
-
+use crate::internals::container;
 use crate::internals::container::Container;
 use crate::internals::context::Ctxt;
 use crate::internals::field::{extract_field_attributes, FieldAttributes, StructField};
+use proc_macro2::TokenStream;
+use quote::quote;
+use syn::{Error, Fields};
 
 pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<Error>> {
     let ctx = Ctxt::new();
@@ -23,8 +23,14 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<Error>> {
         vec![#(#as_fields),*]
     };
 
+    let generics = container::with_bound(
+        &container.data.fields,
+        &container.generics,
+        &syn::parse_quote!(::everscale_types::abi::IntoAbi),
+    );
+
     let ident = container.name_ident;
-    let (impl_generics, ty_generics, where_clause) = container.generics.split_for_impl();
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     let token_stream = quote! {
         impl #impl_generics ::everscale_types::abi::IntoAbi for #ident #ty_generics #where_clause {

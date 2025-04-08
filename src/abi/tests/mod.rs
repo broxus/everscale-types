@@ -351,7 +351,7 @@ fn test_abi_derivation() {
 }
 
 #[derive(IntoAbi, FromAbi, WithAbiType, Eq, PartialEq, Debug, Clone)]
-pub struct Test<T: IntoAbi + FromAbi + WithAbiType> {
+pub struct Test<T> {
     #[abi(name = "kek")]
     pub first: String,
     #[abi(name = "lol")]
@@ -365,4 +365,4 @@ pub struct Inner {
 }
 
 #[derive(IntoAbi, WithAbiType, FromAbi, Debug, Eq, PartialEq, Clone)]
-pub struct SomeType<T: FromAbi + WithAbiType + IntoAbi>(pub T);
+pub struct SomeType<T>(pub T);
