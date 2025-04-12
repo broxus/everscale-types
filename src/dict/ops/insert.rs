@@ -289,9 +289,9 @@ pub fn dict_insert_owned(
                 if !mode.can_replace() {
                     // TODO: change mode to `LoadMode::Noop` if copy-on-write for libraries is not ok.
                     let value = (
+                        remaining_data.range(),
                         ok!(last(&stack, context, LoadMode::Resolve))
                             .unwrap_or_else(|| root.clone()),
-                        remaining_data.range(),
                     );
                     // TODO: what is the desired behavior for root as a library?
                     return Ok((false, Some(value)));
@@ -364,7 +364,7 @@ pub fn dict_insert_owned(
             // TODO: change mode to `LoadMode::Noop` if copy-on-write for libraries is not ok
             let last = ok!(last(&stack, context, LoadMode::Resolve));
             leaf = ok!(rebuild_dict_from_stack(stack, leaf, context));
-            Some((last.unwrap_or(root), range))
+            Some((range, last.unwrap_or(root)))
         }
         None => {
             leaf = ok!(rebuild_dict_from_stack(stack, leaf, context));

@@ -109,7 +109,7 @@ pub fn dict_find_owned(
             let original_key = ok!(original_key_range.apply(key.cell()));
             ok!(result_key.store_slice_data(original_key));
 
-            return Ok(Some((result_key, (cell, value_range))));
+            return Ok(Some((result_key, (value_range, cell))));
         }
     }
 
@@ -209,7 +209,7 @@ pub fn dict_find_owned(
         None => root,
     };
 
-    Ok(Some((result_key, (cell, value_range))))
+    Ok(Some((result_key, (value_range, cell))))
 }
 
 /// Finds the specified dict bound and returns a key and a value corresponding to the key.
@@ -324,9 +324,9 @@ pub fn dict_find_bound_owned(
                 Some(cell) => ok!(context.load_cell(cell, LoadMode::Resolve)),
                 None => return Err(Error::CellUnderflow),
             };
-            (cell, range)
+            (range, cell)
         }
-        None => (root, range),
+        None => (range, root),
     };
 
     // Return the last slice as data

@@ -221,12 +221,12 @@ impl ExactSize for Cell {
 }
 
 /// Owned cell slice parts alias.
-pub type CellSliceParts = (Cell, CellSliceRange);
+pub type CellSliceParts = (CellSliceRange, Cell);
 
 impl ExactSize for CellSliceParts {
     #[inline]
     fn exact_size(&self) -> Size {
-        self.1.size()
+        self.0.size()
     }
 }
 
@@ -251,7 +251,12 @@ impl CellSliceRange {
     }
 
     /// Returns a full range for the specified cell.
-    pub fn full(cell: &DynCell) -> Self {
+    #[inline]
+    pub fn full<T>(cell: &T) -> Self
+    where
+        T: AsRef<DynCell> + ?Sized,
+    {
+        let cell = cell.as_ref();
         Self {
             bits_start: 0,
             bits_end: cell.bit_len(),
@@ -473,7 +478,11 @@ impl CellSliceRange {
 
     /// Returns whether this range has the same size as the cell.
     #[inline]
-    pub fn is_full(&self, cell: &DynCell) -> bool {
+    pub fn is_full<T>(&self, cell: &T) -> bool
+    where
+        T: AsRef<DynCell> + ?Sized,
+    {
+        let cell = cell.as_ref();
         self.bits_start == 0
             && self.refs_start == 0
             && self.bits_end == cell.bit_len()
@@ -530,6 +539,26 @@ impl<'a> CellSlice<'a> {
             range: CellSliceRange::full(cell),
             cell,
         }
+    }
+
+    /// Alias for [`CellSliceRange::apply`].
+    ///
+    /// NOTE: the resulting range will be truncated to cell bounds.
+    #[inline]
+    pub fn apply((range, cell): &'a CellSliceParts) -> Result<Self, Error> {
+        range.apply(cell)
+    }
+
+    /// Alias for [`CellSliceRange::apply_allow_exotic`].
+    ///
+    /// # Safety
+    ///
+    /// The following must be true:
+    /// - cell is not pruned
+    /// - range is in cell bounds
+    #[inline]
+    pub fn apply_allow_exotic((range, cell): &'a CellSliceParts) -> Self {
+        range.apply_allow_exotic(cell)
     }
 
     /// Returns an underlying range indices.

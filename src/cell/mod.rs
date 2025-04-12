@@ -413,6 +413,13 @@ impl<'a> arbitrary::Arbitrary<'a> for Cell {
     }
 }
 
+impl From<Cell> for CellSliceParts {
+    #[inline]
+    fn from(value: Cell) -> Self {
+        (CellSliceRange::full(&value), value)
+    }
+}
+
 /// An iterator through child nodes.
 #[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct RefsIter<'a> {

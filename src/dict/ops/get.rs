@@ -113,11 +113,11 @@ pub fn dict_get_owned(
                     Some(cell) => ok!(context.load_cell(cell, LoadMode::Resolve)),
                     None => return Err(Error::CellUnderflow),
                 };
-                (cell, data.range())
+                (data.range(), cell)
             }
             None => {
                 let range = data.range();
-                (root, range)
+                (range, root)
             }
         })
     } else {

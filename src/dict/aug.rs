@@ -488,8 +488,8 @@ where
         for<'a> V: Load<'a> + 'static,
     {
         match ok!(self.remove_raw_ext(key, Cell::empty_context())) {
-            Some((cell, range)) => {
-                let mut slice = ok!(range.apply(&cell));
+            Some(parts) => {
+                let mut slice = ok!(CellSlice::apply(&parts));
                 let extra = ok!(A::load_from(&mut slice));
                 let value = ok!(V::load_from(&mut slice));
                 Ok(Some((extra, value)))
@@ -543,7 +543,7 @@ where
         &mut self,
         key: &K,
         context: &dyn CellContext,
-    ) -> Result<Option<(Cell, CellSliceRange)>, Error> {
+    ) -> Result<Option<CellSliceParts>, Error> {
         let mut key_builder = CellBuilder::new();
         ok!(key.store_into(&mut key_builder, Cell::empty_context()));
         let res = ok!(aug_dict_remove_owned(

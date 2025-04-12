@@ -307,8 +307,8 @@ where
         for<'a> V: Load<'a> + 'static,
     {
         match ok!(self.remove_raw_ext(key, Cell::empty_context())) {
-            Some((cell, range)) => {
-                let mut slice = ok!(range.apply(&cell));
+            Some(parts) => {
+                let mut slice = ok!(CellSlice::apply(&parts));
                 Ok(Some(ok!(V::load_from(&mut slice))))
             }
             None => Ok(None),
@@ -601,7 +601,7 @@ where
             for<'a> V: Load<'a>,
         {
             let context = Cell::empty_context();
-            let Some((key, (cell, range))) = ({
+            let Some((key, parts)) = ({
                 let mut builder = CellBuilder::new();
                 ok!(key.store_into(&mut builder, context));
                 // TODO: add `dict_find` with non-owned return type
@@ -617,7 +617,7 @@ where
             }) else {
                 return Ok(None);
             };
-            let value = &mut ok!(range.apply(&cell));
+            let value = &mut ok!(CellSlice::apply(&parts));
 
             match K::from_raw_data(key.raw_data()) {
                 Some(key) => Ok(Some((key, ok!(V::load_from(value))))),
@@ -1272,8 +1272,8 @@ mod tests {
             dict.set(i, i < 0).unwrap();
         }
 
-        let parse_removed = |(i, (cell, range)): (i32, CellSliceParts)| {
-            let mut value = range.apply(&cell)?;
+        let parse_removed = |(i, parts): (i32, CellSliceParts)| {
+            let mut value = CellSlice::apply(&parts)?;
             let value = bool::load_from(&mut value)?;
             Ok::<_, Error>((i, value))
         };

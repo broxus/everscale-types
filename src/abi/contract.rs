@@ -11,9 +11,7 @@ use super::error::AbiError;
 use super::{AbiHeaderType, AbiType, AbiValue, AbiVersion, NamedAbiType, NamedAbiValue};
 use crate::abi::value::ser::AbiSerializer;
 use crate::abi::AbiHeader;
-use crate::cell::{
-    Cell, CellBuilder, CellFamily, CellSlice, CellSliceRange, DynCell, HashBytes, Size, Store,
-};
+use crate::cell::{Cell, CellBuilder, CellFamily, CellSlice, DynCell, HashBytes, Size, Store};
 use crate::dict::RawDict;
 use crate::models::{
     ExtInMsgInfo, IntAddr, MsgInfo, OwnedMessage, OwnedRelaxedMessage, RelaxedIntMsgInfo,
@@ -530,8 +528,7 @@ impl Function {
         state_init: Option<&StateInit>,
     ) -> Result<Box<OwnedRelaxedMessage>> {
         let body = self.encode_internal_input(tokens)?;
-        let cell = body.build()?;
-        let range = CellSliceRange::full(cell.as_ref());
+        let body = body.build()?;
 
         Ok(Box::new(OwnedRelaxedMessage {
             info: RelaxedMsgInfo::Int(RelaxedIntMsgInfo {
@@ -540,7 +537,7 @@ impl Function {
                 value: value.into(),
                 ..Default::default()
             }),
-            body: (cell, range),
+            body: body.into(),
             init: state_init.cloned(),
             layout: None,
         }))
@@ -647,13 +644,12 @@ impl<'a> ExternalInput<'_, 'a> {
         address: &StdAddr,
     ) -> Result<(u32, OwnedMessage)> {
         let (expire_at, body) = ok!(self.build_input_without_signature());
-        let range = CellSliceRange::full(body.as_ref());
         Ok((expire_at, OwnedMessage {
             info: MsgInfo::ExtIn(ExtInMsgInfo {
                 dst: IntAddr::Std(address.clone()),
                 ..Default::default()
             }),
-            body: (body, range),
+            body: body.into(),
             init: None,
             layout: None,
         }))
@@ -1126,13 +1122,12 @@ impl UnsignedExternalMessage {
     /// Returns an external message with filled signature.
     pub fn fill_signature(&self, signature: Option<&[u8; 64]>) -> Result<OwnedMessage> {
         let body = self.body.fill_signature(signature)?;
-        let range = CellSliceRange::full(body.as_ref());
         Ok(OwnedMessage {
             info: MsgInfo::ExtIn(ExtInMsgInfo {
                 dst: IntAddr::Std(self.dst.clone()),
                 ..Default::default()
             }),
-            body: (body, range),
+            body: body.into(),
             init: self.init.clone(),
             layout: None,
         })
@@ -1141,13 +1136,12 @@ impl UnsignedExternalMessage {
     /// Converts an unsigned message into an external message with filled signature.
     fn into_signed(self, signature: Option<&[u8; 64]>) -> Result<OwnedMessage> {
         let body = self.body.fill_signature(signature)?;
-        let range = CellSliceRange::full(body.as_ref());
         Ok(OwnedMessage {
             info: MsgInfo::ExtIn(ExtInMsgInfo {
                 dst: IntAddr::Std(self.dst),
                 ..Default::default()
             }),
-            body: (body, range),
+            body: body.into(),
             init: self.init,
             layout: None,
         })

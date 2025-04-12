@@ -118,11 +118,10 @@ where
 
         if deserializer.is_human_readable() {
             let msg = Message::deserialize(deserializer)?;
-            let body_range = CellSliceRange::full(msg.body.as_ref());
             Ok(Self {
                 info: msg.info,
                 init: msg.init,
-                body: (msg.body, body_range),
+                body: msg.body.into(),
                 layout: msg.layout,
             })
         } else {
@@ -137,11 +136,7 @@ impl<'a, I: arbitrary::Arbitrary<'a>> arbitrary::Arbitrary<'a> for BaseMessage<I
         Ok(Self {
             info: u.arbitrary()?,
             init: u.arbitrary()?,
-            body: {
-                let cell = u.arbitrary::<Cell>()?;
-                let range = CellSliceRange::full(cell.as_ref());
-                (cell, range)
-            },
+            body: u.arbitrary::<Cell>()?.into(),
             layout: u.arbitrary()?,
         })
     }
@@ -287,7 +282,7 @@ impl StoreBody for CellSliceParts {
         builder: &mut CellBuilder,
         context: &dyn CellContext,
     ) -> Result<(), Error> {
-        let (cell, range) = self;
+        let (range, cell) = self;
         if to_cell && range.is_full(cell.as_ref()) {
             builder.store_reference(cell.clone())
         } else {
@@ -316,17 +311,15 @@ impl<'a> LoadBody<'a> for CellSlice<'a> {
 
 impl<'a> LoadBody<'a> for CellSliceParts {
     fn load_body(from_cell: bool, slice: &mut CellSlice<'a>) -> Result<Self, Error> {
-        let body = ok!(if from_cell {
+        if from_cell {
             slice.load_reference_cloned()
         } else {
             let slice = slice.load_remaining();
             let mut builder = CellBuilder::new();
             ok!(builder.store_slice(slice));
             builder.build()
-        });
-
-        let range = CellSliceRange::full(body.as_ref());
-        Ok((body, range))
+        }
+        .map(From::from)
     }
 }
 

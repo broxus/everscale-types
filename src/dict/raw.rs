@@ -799,7 +799,7 @@ impl<'a> RawIter<'a> {
                         }
                     },
                 };
-                Ok((key, (parent, slice.range())))
+                Ok((key, (slice.range(), parent)))
             }
             Err(e) => Err(e),
         })
@@ -1278,7 +1278,7 @@ impl Iterator for RawOwnedValues<'_> {
                         }
                     },
                 };
-                Ok((parent, slice.range()))
+                Ok((slice.range(), parent))
             }
             Err(e) => Err(e),
         })
@@ -1687,7 +1687,7 @@ mod tests {
         let value = dict.get(key.as_slice()?)?.unwrap();
 
         {
-            let (cell, range) = dict.get_owned(key.as_slice()?)?.unwrap();
+            let (range, cell) = dict.get_owned(key.as_slice()?)?.unwrap();
             assert_eq!(range.apply(&cell).unwrap(), value);
         }
 
@@ -1730,7 +1730,7 @@ mod tests {
 
         let mut last = None;
         for (i, entry) in dict.iter_owned().enumerate() {
-            let (key, (cell, range)) = entry?;
+            let (key, (range, cell)) = entry?;
 
             {
                 let mut slice = range.apply(&cell).unwrap();
@@ -1751,7 +1751,7 @@ mod tests {
         let mut values_owned = dict.values_owned();
         for (value_ref, value_owned) in (&mut values_ref).zip(&mut values_owned) {
             let value_ref = value_ref.unwrap();
-            let (cell, range) = value_owned.unwrap();
+            let (range, cell) = value_owned.unwrap();
             let value_owned = range.apply(&cell).unwrap();
             assert_eq!(
                 value_ref.lex_cmp(&value_owned),

@@ -39,7 +39,7 @@ pub fn dict_remove_owned(
         value
     };
 
-    Ok(Some((value, removed)))
+    Ok(Some((removed, value)))
 }
 
 /// Removes the value associated with key in aug dictionary.
@@ -79,7 +79,7 @@ pub fn aug_dict_remove_owned(
         value
     };
 
-    Ok(Some((value, removed)))
+    Ok(Some((removed, value)))
 }
 
 fn dict_find_value_to_remove<'a, 'c: 'a>(
@@ -247,10 +247,10 @@ pub fn dict_remove_bound_owned(
         let leaf = ok!(builder.build_ext(context));
 
         // Return the new cell and the removed one
-        (leaf, (value, removed))
+        (leaf, (removed, value))
     } else {
         *dict = None;
-        return Ok(Some((key, (root, removed))));
+        return Ok(Some((key, (removed, root))));
     };
 
     *dict = Some(ok!(rebuild_dict_from_stack(stack, leaf, context)));
