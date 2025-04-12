@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 pub use everscale_types_proc::{Load, Store};
 
-pub use self::builder::{CellBuilder, CellRefsBuilder, Store};
+pub use self::builder::{CellBuilder, CellRefsBuilder, DisplayCellBuilderData, Store};
 pub use self::cell_context::{CellContext, CellParts, LoadMode};
 #[cfg(not(feature = "sync"))]
 pub use self::cell_impl::rc::{Cell, CellInner, WeakCell};
@@ -13,7 +13,9 @@ pub use self::cell_impl::rc::{Cell, CellInner, WeakCell};
 pub use self::cell_impl::sync::{Cell, CellInner, WeakCell};
 pub use self::cell_impl::{StaticCell, VirtualCellWrapper};
 pub use self::lazy::{Lazy, LazyExotic};
-pub use self::slice::{CellSlice, CellSliceParts, CellSliceRange, ExactSize, Load, LoadCell};
+pub use self::slice::{
+    CellSlice, CellSliceParts, CellSliceRange, DisplayCellSliceData, ExactSize, Load, LoadCell,
+};
 pub use self::usage_tree::{UsageTree, UsageTreeMode, UsageTreeWithSubtrees};
 use crate::error::{Error, ParseHashBytesError};
 use crate::util::Bitstring;
@@ -667,6 +669,16 @@ impl HashBytes {
             None => unsafe { std::hint::unreachable_unchecked() },
         }
     }
+
+    #[inline(always)]
+    fn fmt_hex(&self, f: &mut std::fmt::Formatter<'_>, table: &[u8; 16]) -> std::fmt::Result {
+        let mut output = [0u8; 64];
+        crate::util::encode_to_hex_slice(&self.0, &mut output, table).ok();
+
+        // SAFETY: output is guaranteed to contain only [0-9a-f]
+        let output = unsafe { std::str::from_utf8_unchecked(&output) };
+        f.write_str(output)
+    }
 }
 
 impl Default for HashBytes {
@@ -811,13 +823,21 @@ impl FromStr for HashBytes {
 }
 
 impl std::fmt::Display for HashBytes {
+    #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut output = [0u8; 64];
-        hex::encode_to_slice(self, &mut output).ok();
+        std::fmt::LowerHex::fmt(self, f)
+    }
+}
 
-        // SAFETY: output is guaranteed to contain only [0-9a-f]
-        let output = unsafe { std::str::from_utf8_unchecked(&output) };
-        f.write_str(output)
+impl std::fmt::LowerHex for HashBytes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Self::fmt_hex(self, f, crate::util::HEX_CHARS_LOWER)
+    }
+}
+
+impl std::fmt::UpperHex for HashBytes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Self::fmt_hex(self, f, crate::util::HEX_CHARS_UPPER)
     }
 }
 
@@ -866,7 +886,8 @@ impl serde::Serialize for HashBytes {
     {
         if serializer.is_human_readable() {
             let mut output = [0u8; 64];
-            hex::encode_to_slice(self.0.as_slice(), &mut output).ok();
+            crate::util::encode_to_hex_slice(&self.0, &mut output, crate::util::HEX_CHARS_LOWER)
+                .ok();
 
             // SAFETY: output is guaranteed to contain only [0-9a-f]
             let output = unsafe { std::str::from_utf8_unchecked(&output) };

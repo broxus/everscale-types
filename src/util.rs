@@ -301,10 +301,8 @@ impl Bitstring<'_> {
 
         Ok((data, bit_len))
     }
-}
 
-impl std::fmt::Display for Bitstring<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt_hex<const UPPER: bool>(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         const CHUNK_LEN: usize = 16;
 
         let bit_len = std::cmp::min(self.bit_len as usize, self.bytes.len() * 8) as u16;
@@ -325,7 +323,12 @@ impl std::fmt::Display for Bitstring<'_> {
         let mut chunk = [0u8; CHUNK_LEN * 2];
         for data in bytes.chunks(CHUNK_LEN) {
             let chunk = &mut chunk[..data.len() * 2];
-            hex::encode_to_slice(data, chunk).unwrap();
+
+            if UPPER {
+                encode_to_hex_slice(data, chunk, HEX_CHARS_UPPER).unwrap();
+            } else {
+                encode_to_hex_slice(data, chunk, HEX_CHARS_LOWER).unwrap();
+            }
 
             // SAFETY: result was constructed from valid ascii `HEX_CHARS_LOWER`
             ok!(f.write_str(unsafe { std::str::from_utf8_unchecked(chunk) }));
@@ -337,10 +340,36 @@ impl std::fmt::Display for Bitstring<'_> {
             if rem == 1 {
                 last_byte >>= 4;
             }
-            ok!(write!(f, "{last_byte:0rem$x}{tag}"));
+
+            if UPPER {
+                ok!(write!(f, "{last_byte:0rem$X}{tag}"));
+            } else {
+                ok!(write!(f, "{last_byte:0rem$x}{tag}"));
+            }
         }
 
         Ok(())
+    }
+}
+
+impl std::fmt::Display for Bitstring<'_> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::LowerHex::fmt(self, f)
+    }
+}
+
+impl std::fmt::LowerHex for Bitstring<'_> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Self::fmt_hex::<false>(self, f)
+    }
+}
+
+impl std::fmt::UpperHex for Bitstring<'_> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Self::fmt_hex::<true>(self, f)
     }
 }
 
@@ -368,6 +397,36 @@ impl std::fmt::Binary for Bitstring<'_> {
         Ok(())
     }
 }
+
+pub(crate) fn encode_to_hex_slice(
+    input: &[u8],
+    output: &mut [u8],
+    table: &[u8; 16],
+) -> Result<(), hex::FromHexError> {
+    if input.len() * 2 != output.len() {
+        return Err(hex::FromHexError::InvalidStringLength);
+    }
+
+    for (byte, output) in input.iter().zip(output.chunks_exact_mut(2)) {
+        let (high, low) = byte2hex(*byte, table);
+        output[0] = high;
+        output[1] = low;
+    }
+
+    Ok(())
+}
+
+#[inline]
+#[must_use]
+fn byte2hex(byte: u8, table: &[u8; 16]) -> (u8, u8) {
+    let high = table[((byte & 0xf0) >> 4) as usize];
+    let low = table[(byte & 0x0f) as usize];
+
+    (high, low)
+}
+
+pub(crate) const HEX_CHARS_LOWER: &[u8; 16] = b"0123456789abcdef";
+pub(crate) const HEX_CHARS_UPPER: &[u8; 16] = b"0123456789ABCDEF";
 
 #[allow(unused)]
 pub(crate) fn debug_tuple_field1_finish(

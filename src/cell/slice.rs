@@ -1780,36 +1780,54 @@ impl<'a> CellSlice<'a> {
 
     /// Returns an object which will display data as a bitstring
     /// with a termination bit.
-    pub fn display_data<'b: 'a>(&'b self) -> impl std::fmt::Display + std::fmt::Binary + 'b {
-        fn make_bitstring<'b: 'a, 'a>(
-            s: &'b CellSlice<'a>,
-            bytes: &'b mut [u8; 128],
-        ) -> Result<Bitstring<'b>, std::fmt::Error> {
-            let bit_len = s.size_bits();
-            if s.get_raw(0, bytes, bit_len).is_err() {
-                return Err(std::fmt::Error);
-            }
-            Ok(Bitstring { bytes, bit_len })
-        }
-
-        struct DisplayData<'b, 'a>(&'b CellSlice<'a>);
-
-        impl<'b: 'a, 'a> std::fmt::Display for DisplayData<'b, 'a> {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                let mut bytes = [0u8; 128];
-                std::fmt::Display::fmt(&ok!(make_bitstring(self.0, &mut bytes)), f)
-            }
-        }
-
-        impl<'b: 'a, 'a> std::fmt::Binary for DisplayData<'b, 'a> {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                let mut bytes = [0u8; 128];
-                std::fmt::Binary::fmt(&ok!(make_bitstring(self.0, &mut bytes)), f)
-            }
-        }
-
-        DisplayData(self)
+    #[inline]
+    pub fn display_data<'b: 'a>(&'b self) -> DisplayCellSliceData<'b, 'a> {
+        DisplayCellSliceData(self)
     }
+}
+
+/// Helper struct to print the cell slice data.
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct DisplayCellSliceData<'b, 'a>(&'b CellSlice<'a>);
+
+impl<'b: 'a, 'a> std::fmt::Display for DisplayCellSliceData<'b, 'a> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::LowerHex::fmt(self, f)
+    }
+}
+
+impl<'b: 'a, 'a> std::fmt::LowerHex for DisplayCellSliceData<'b, 'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut bytes = [0u8; 128];
+        std::fmt::LowerHex::fmt(&ok!(make_bitstring(self.0, &mut bytes)), f)
+    }
+}
+
+impl<'b: 'a, 'a> std::fmt::UpperHex for DisplayCellSliceData<'b, 'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut bytes = [0u8; 128];
+        std::fmt::UpperHex::fmt(&ok!(make_bitstring(self.0, &mut bytes)), f)
+    }
+}
+
+impl<'b: 'a, 'a> std::fmt::Binary for DisplayCellSliceData<'b, 'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut bytes = [0u8; 128];
+        std::fmt::Binary::fmt(&ok!(make_bitstring(self.0, &mut bytes)), f)
+    }
+}
+
+fn make_bitstring<'b: 'a, 'a>(
+    s: &'b CellSlice<'a>,
+    bytes: &'b mut [u8; 128],
+) -> Result<Bitstring<'b>, std::fmt::Error> {
+    let bit_len = s.size_bits();
+    if s.get_raw(0, bytes, bit_len).is_err() {
+        return Err(std::fmt::Error);
+    }
+    Ok(Bitstring { bytes, bit_len })
 }
 
 impl ExactSize for CellSlice<'_> {

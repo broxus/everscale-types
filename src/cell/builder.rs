@@ -1051,34 +1051,50 @@ impl CellBuilder {
 
     /// Returns an object which will display data as a bitstring
     /// with a termination bit.
-    pub fn display_data(&self) -> impl std::fmt::Display + std::fmt::Binary + '_ {
-        struct DisplayData<'a>(&'a CellBuilder);
+    #[inline]
+    pub fn display_data(&self) -> DisplayCellBuilderData<'_> {
+        DisplayCellBuilderData(self)
+    }
 
-        impl std::fmt::Display for DisplayData<'_> {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                std::fmt::Display::fmt(
-                    &Bitstring {
-                        bytes: &self.0.data,
-                        bit_len: self.0.bit_len,
-                    },
-                    f,
-                )
-            }
+    #[inline]
+    fn as_bitstring(&self) -> Bitstring<'_> {
+        Bitstring {
+            bytes: &self.data,
+            bit_len: self.bit_len,
         }
+    }
+}
 
-        impl std::fmt::Binary for DisplayData<'_> {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                std::fmt::Binary::fmt(
-                    &Bitstring {
-                        bytes: &self.0.data,
-                        bit_len: self.0.bit_len,
-                    },
-                    f,
-                )
-            }
-        }
+/// Helper struct to print the cell builder data.
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct DisplayCellBuilderData<'a>(&'a CellBuilder);
 
-        DisplayData(self)
+impl std::fmt::Display for DisplayCellBuilderData<'_> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::LowerHex::fmt(self, f)
+    }
+}
+
+impl std::fmt::LowerHex for DisplayCellBuilderData<'_> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::LowerHex::fmt(&self.0.as_bitstring(), f)
+    }
+}
+
+impl std::fmt::UpperHex for DisplayCellBuilderData<'_> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::UpperHex::fmt(&self.0.as_bitstring(), f)
+    }
+}
+
+impl std::fmt::Binary for DisplayCellBuilderData<'_> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Binary::fmt(&self.0.as_bitstring(), f)
     }
 }
 
