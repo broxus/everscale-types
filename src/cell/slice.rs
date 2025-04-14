@@ -231,7 +231,7 @@ impl ExactSize for CellSliceParts {
 }
 
 /// Indices of the slice data and refs windows.
-#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct CellSliceRange {
     bits_start: u16,
     bits_end: u16,
