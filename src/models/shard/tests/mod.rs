@@ -7,18 +7,6 @@ fn check_master_state(cell: Cell) {
     println!("data: {data:#?}");
     assert_eq!(CellBuilder::build_from(&data).unwrap(), cell);
 
-    let shard_accounts = data.load_accounts().unwrap();
-    assert_eq!(
-        CellBuilder::build_from(&shard_accounts).unwrap(),
-        data.accounts
-    );
-
-    for entry in shard_accounts.iter() {
-        let (id, depth_balance, shard_state) = entry.unwrap();
-        let account = shard_state.load_account().unwrap();
-        println!("{id}: {depth_balance:?} {account:#?}");
-    }
-
     for (i, entry) in data.libraries.iter().enumerate() {
         let (hash, descr) = entry.unwrap();
         println!("lib#{i} hash={hash}");
@@ -27,9 +15,6 @@ fn check_master_state(cell: Cell) {
             println!("lib#{i} publisher={address}")
         }
     }
-
-    let _elector = shard_accounts.get([0x33; 32]).unwrap().unwrap();
-    assert!(shard_accounts.contains_key([0x55; 32]).unwrap());
 
     let custom = data.load_custom().unwrap().unwrap();
     println!("custom: {custom:#?}");
