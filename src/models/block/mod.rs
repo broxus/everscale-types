@@ -9,7 +9,7 @@ pub use self::block_proof::*;
 pub use self::shard_hashes::*;
 use crate::cell::*;
 #[allow(unused)]
-use crate::dict::Dict;
+use crate::dict::{Dict, RawValues};
 use crate::error::Error;
 use crate::merkle::MerkleUpdate;
 use crate::models::currency::CurrencyCollection;
@@ -36,6 +36,8 @@ pub struct Block {
     pub value_flow: Lazy<ValueFlow>,
     /// Merkle update for the shard state.
     pub state_update: LazyExotic<MerkleUpdate>,
+    /// Merkle update for the shard state.
+    pub state_data_updates: Dict<u32, LazyExotic<MerkleUpdate>>,
     /// Merkle updates for the outgoing messages queue.
     #[cfg(not(feature = "tycho"))]
     pub out_msg_queue_updates: Option<Dict<u32, LazyExotic<MerkleUpdate>>>,
@@ -67,6 +69,13 @@ impl Block {
     /// Tries to load state update.
     pub fn load_state_update(&self) -> Result<MerkleUpdate, Error> {
         self.state_update.load()
+    }
+
+    /// TODO: Add docs.
+    pub fn iter_state_data_updates(&'_ self) -> StateDataUpdateIter<'_> {
+        StateDataUpdateIter {
+            inner: self.state_data_updates.raw_values(),
+        }
     }
 
     /// Tries to load block content.
@@ -113,12 +122,14 @@ impl Store for Block {
             let cell = {
                 let mut builder = CellBuilder::new();
                 ok!(self.state_update.store_into(&mut builder, context));
+                ok!(self.state_data_updates.store_into(&mut builder, context));
                 ok!(out_msg_queue_updates.store_into(&mut builder, context));
                 ok!(builder.build_ext(context))
             };
             builder.store_reference(cell)
         } else {
-            self.state_update.store_into(builder, context)
+            ok!(self.state_update.store_into(builder, context));
+            self.state_data_updates.store_into(builder, context)
         });
 
         self.extra.store_into(builder, context)
@@ -144,15 +155,21 @@ impl<'a> Load<'a> for Block {
         let value_flow = ok!(Lazy::load_from(slice));
 
         #[cfg(not(feature = "tycho"))]
-        let (state_update, out_msg_queue_updates) = if with_out_msg_queue_updates {
-            let slice = &mut ok!(slice.load_reference_as_slice());
-            (
-                ok!(Lazy::load_from(slice)),
-                Some(ok!(Dict::load_from(slice))),
-            )
-        } else {
-            (ok!(Lazy::load_from(slice)), None)
-        };
+        let (state_update, state_data_updates, out_msg_queue_updates) =
+            if with_out_msg_queue_updates {
+                let slice = &mut ok!(slice.load_reference_as_slice());
+                (
+                    ok!(Lazy::load_from(slice)),
+                    ok!(Dict::load_from(slice)),
+                    Some(ok!(Dict::load_from(slice))),
+                )
+            } else {
+                (
+                    ok!(Lazy::load_from(slice)),
+                    ok!(Dict::load_from(slice)),
+                    None,
+                )
+            };
 
         #[cfg(feature = "tycho")]
         let (state_update, out_msg_queue_updates) = {
@@ -165,6 +182,7 @@ impl<'a> Load<'a> for Block {
             info,
             value_flow,
             state_update,
+            state_data_updates,
             out_msg_queue_updates,
             extra: ok!(<_>::load_from(slice)),
         })
@@ -721,4 +739,31 @@ pub struct OutMsgQueueUpdates {
     /// The number of additional queue diffs, excluding the current one,
     /// that may still be required by other shards.
     pub tail_len: u32,
+}
+
+/// TODO: Add docs.
+#[derive(Clone)]
+pub struct StateDataUpdateIter<'a> {
+    inner: RawValues<'a>,
+}
+
+impl Iterator for StateDataUpdateIter<'_> {
+    type Item = Result<Lazy<MerkleUpdate>, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.inner.next()? {
+            Ok(mut value) => {
+                let e = match value.load_reference_as_slice() {
+                    Ok(mut value) => match Lazy::load_from(&mut value) {
+                        Ok(merkle_update) => return Some(Ok(merkle_update)),
+                        Err(e) => e,
+                    },
+                    Err(e) => e,
+                };
+
+                Some(Err(self.inner.finish(e)))
+            }
+            Err(e) => Some(Err(e)),
+        }
+    }
 }
