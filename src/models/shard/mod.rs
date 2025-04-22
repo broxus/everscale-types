@@ -99,7 +99,7 @@ impl<'a> Load<'a> for ShardState {
 ///     min_ref_mc_seqno:uint32
 ///     processed_upto:^ProcessedUptoInfo
 ///     before_split:(## 1)
-///     accounts:^ShardAccounts
+///     accounts:(HashmapE uint64 256)
 ///     ^[
 ///         overload_history:uint64
 ///         underload_history:uint64
@@ -141,6 +141,15 @@ pub struct ShardStateUnsplit {
 
     /// Whether this state was produced before the shards split.
     pub before_split: bool,
+
+    /// Reference to the dictionary with shard accounts.
+    #[cfg(not(feature = "tycho"))]
+    pub accounts: Lazy<ShardAccounts>,
+
+    /// Dictionary with all virtual shard accounts root hashes.
+    #[cfg(feature = "tycho")]
+    pub accounts: Dict<u64, HashBytes>,
+
     /// Mask for the overloaded blocks.
     pub overload_history: u64,
     /// Mask for the underloaded blocks.
@@ -175,6 +184,10 @@ impl Default for ShardStateUnsplit {
             #[cfg(feature = "tycho")]
             processed_upto: Self::empty_processed_upto_info().clone(),
             before_split: false,
+            #[cfg(not(feature = "tycho"))]
+            accounts: Self::empty_shard_accounts().clone(),
+            #[cfg(feature = "tycho")]
+            accounts: Dict::new(),
             overload_history: 0,
             underload_history: 0,
             total_balance: CurrencyCollection::ZERO,
@@ -203,6 +216,12 @@ impl ShardStateUnsplit {
     pub fn empty_shard_accounts() -> &'static Lazy<ShardAccounts> {
         static SHARD_ACCOUNTS: OnceLock<Lazy<ShardAccounts>> = OnceLock::new();
         SHARD_ACCOUNTS.get_or_init(|| Lazy::new(&ShardAccounts::new()).unwrap())
+    }
+
+    /// Tries to load shard accounts dictionary.
+    #[cfg(not(feature = "tycho"))]
+    pub fn load_accounts(&self) -> Result<ShardAccounts, Error> {
+        self.accounts.load()
     }
 
     /// Tries to load additional masterchain data.
@@ -271,6 +290,16 @@ impl Store for ShardStateUnsplit {
         #[cfg(feature = "tycho")]
         ok!(self.processed_upto.store_into(builder, context));
         ok!(builder.store_bit(self.before_split));
+        #[cfg(not(feature = "tycho"))]
+        ok!(builder.store_reference(self.accounts.inner().clone()));
+        #[cfg(feature = "tycho")]
+        ok!(builder.store_reference(
+            self.accounts
+                .root
+                .as_ref()
+                .ok_or_else(|| Error::InvalidData)?
+                .clone()
+        ));
         ok!(builder.store_reference(child_cell));
 
         ok!(self.custom.store_into(builder, context));
@@ -298,6 +327,15 @@ impl<'a> Load<'a> for ShardStateUnsplit {
         #[cfg(feature = "tycho")]
         let processed_upto = ok!(Lazy::load_from(slice));
 
+        #[cfg(not(feature = "tycho"))]
+        let accounts = ok!(Lazy::load_from(slice));
+
+        #[cfg(feature = "tycho")]
+        let accounts = {
+            let cell = slice.load_reference_cloned()?;
+            Dict::from_raw(Some(cell))
+        };
+
         let child_slice = &mut ok!(slice.load_reference_as_slice());
 
         let global_id = ok!(slice.load_u32()) as i32;
@@ -318,6 +356,7 @@ impl<'a> Load<'a> for ShardStateUnsplit {
             gen_lt: ok!(slice.load_u64()),
             min_ref_mc_seqno: ok!(slice.load_u32()),
             before_split: ok!(slice.load_bit()),
+            accounts,
             overload_history: ok!(child_slice.load_u64()),
             underload_history: ok!(child_slice.load_u64()),
             total_balance: ok!(CurrencyCollection::load_from(child_slice)),
