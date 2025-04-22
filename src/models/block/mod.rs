@@ -37,8 +37,9 @@ pub struct Block {
     pub value_flow: Lazy<ValueFlow>,
     /// Merkle update for the shard state.
     pub state_update: LazyExotic<MerkleUpdate>,
-    /// Merkle update for the shard state.
-    pub state_data_updates: Dict<u8, LazyExotic<MerkleUpdate>>,
+    /// Merkle updates for the virtual shards state data.
+    #[cfg(feature = "tycho")]
+    pub state_data_updates: Dict<u64, LazyExotic<MerkleUpdate>>,
     /// Merkle updates for the outgoing messages queue.
     #[cfg(not(feature = "tycho"))]
     pub out_msg_queue_updates: Option<Dict<u32, LazyExotic<MerkleUpdate>>>,
@@ -72,7 +73,8 @@ impl Block {
         self.state_update.load()
     }
 
-    /// TODO: Add docs.
+    /// Gets an iterator over all virtual shards merkle updates
+    #[cfg(feature = "tycho")]
     pub fn iter_state_data_updates(&'_ self) -> StateDataUpdateIter<'_> {
         StateDataUpdateIter {
             inner: self.state_data_updates.raw_iter(),
@@ -123,6 +125,7 @@ impl Store for Block {
             let cell = {
                 let mut builder = CellBuilder::new();
                 ok!(self.state_update.store_into(&mut builder, context));
+                #[cfg(feature = "tycho")]
                 ok!(self.state_data_updates.store_into(&mut builder, context));
                 ok!(out_msg_queue_updates.store_into(&mut builder, context));
                 ok!(builder.build_ext(context))
@@ -130,7 +133,9 @@ impl Store for Block {
             builder.store_reference(cell)
         } else {
             ok!(self.state_update.store_into(builder, context));
-            self.state_data_updates.store_into(builder, context)
+            #[cfg(feature = "tycho")]
+            ok!(self.state_data_updates.store_into(builder, context));
+            Ok(())
         });
 
         self.extra.store_into(builder, context)
@@ -156,21 +161,15 @@ impl<'a> Load<'a> for Block {
         let value_flow = ok!(Lazy::load_from(slice));
 
         #[cfg(not(feature = "tycho"))]
-        let (state_update, state_data_updates, out_msg_queue_updates) =
-            if with_out_msg_queue_updates {
-                let slice = &mut ok!(slice.load_reference_as_slice());
-                (
-                    ok!(Lazy::load_from(slice)),
-                    ok!(Dict::load_from(slice)),
-                    Some(ok!(Dict::load_from(slice))),
-                )
-            } else {
-                (
-                    ok!(Lazy::load_from(slice)),
-                    ok!(Dict::load_from(slice)),
-                    None,
-                )
-            };
+        let (state_update, out_msg_queue_updates) = if with_out_msg_queue_updates {
+            let slice = &mut ok!(slice.load_reference_as_slice());
+            (
+                ok!(Lazy::load_from(slice)),
+                Some(ok!(Dict::load_from(slice))),
+            )
+        } else {
+            (ok!(Lazy::load_from(slice)), None)
+        };
 
         #[cfg(feature = "tycho")]
         let (state_update, state_data_updates, out_msg_queue_updates) = {
@@ -187,6 +186,7 @@ impl<'a> Load<'a> for Block {
             info,
             value_flow,
             state_update,
+            #[cfg(feature = "tycho")]
             state_data_updates,
             out_msg_queue_updates,
             extra: ok!(<_>::load_from(slice)),
@@ -753,16 +753,12 @@ pub struct StateDataUpdateIter<'a> {
 }
 
 impl Iterator for StateDataUpdateIter<'_> {
-    type Item = Result<(u8, MerkleUpdate), Error>;
+    type Item = Result<(u64, MerkleUpdate), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.inner.next()? {
             Ok((key, mut value)) => {
-                let key = match u8::from_raw_data(key.raw_data()) {
-                    Some(key) => key,
-                    None => return None,
-                };
-
+                let key = u64::from_raw_data(key.raw_data())?;
                 let e = match value.load_reference() {
                     Ok(cell) => match cell.parse_exotic::<MerkleUpdate>() {
                         Ok(merkle_update) => return Some(Ok((key, merkle_update))),
