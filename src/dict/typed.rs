@@ -1236,6 +1236,20 @@ mod tests {
     }
 
     #[test]
+    fn dict_get_with_value_refs() -> anyhow::Result<()> {
+        let mut dict = Dict::<u32, (Cell, Cell)>::new();
+        for i in 0..10 {
+            if i != 5 {
+                continue;
+            }
+            dict.set(i, (Cell::empty_cell(), Cell::empty_cell()))?;
+        }
+
+        assert_eq!(dict.get(5).unwrap(), None);
+        Ok(())
+    }
+
+    #[test]
     #[cfg_attr(miri, ignore)] // takes too long to execute on miri
     fn dict_set_complex() {
         let mut dict = Dict::<u32, bool>::new();
