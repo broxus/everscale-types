@@ -35,7 +35,7 @@ where
         Same(CellSlice<'static>),
     }
 
-    impl<'a> IterItem {
+    impl IterItem {
         fn load(prefix: CellBuilder, key_bit_len: u16, cell: Cell) -> Result<Self, Error> {
             let mut data = ok!(cell.as_slice());
             let label = ok!(read_label(&mut data, key_bit_len));
@@ -190,8 +190,8 @@ where
         do_seek(key, before_remove, iter_stack, res_stack)
     }
 
-    fn seek_next<'p, 'k, V: Store>(
-        prev_key: CellSlice<'p>,
+    fn seek_next<'k, V: Store>(
+        prev_key: CellSlice<'_>,
         mut key: CellSlice<'k>,
         before_remove: bool,
         iter_stack: &mut Vec<IterItem>,

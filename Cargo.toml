@@ -56,7 +56,7 @@ name = "callgrind_usage_cell"
 harness = false
 
 [workspace]
-members = ["abi-proc", "proc"]
+members = ["abi-proc", "proc", "fuzz"]
 
 [dependencies]
 ahash = "0.8.11"
