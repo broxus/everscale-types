@@ -5,8 +5,8 @@ use std::marker::PhantomData;
 use super::raw::*;
 use super::{
     build_dict_from_sorted_iter, dict_find_bound, dict_find_owned, dict_get, dict_get_owned,
-    dict_insert, dict_load_from_root, dict_remove_bound_owned, dict_split_by_prefix, DictBound,
-    DictKey, SetMode,
+    dict_insert, dict_load_from_root, dict_modify_from_sorted_iter, dict_remove_bound_owned,
+    dict_split_by_prefix, DictBound, DictKey, SetMode,
 };
 use crate::cell::*;
 use crate::dict::dict_remove_owned;
@@ -432,6 +432,52 @@ where
             _key: PhantomData,
             _value: PhantomData,
         })
+    }
+
+    /// Applies a sorted list of inserts/removes to the dictionary.
+    /// Use this when you have a large set of known changes.
+    ///
+    /// Uses custom extracts for values.
+    pub fn modify_with_sorted_iter<I>(&mut self, entries: I) -> Result<bool, Error>
+    where
+        I: IntoIterator<Item = (K, Option<V>)>,
+        K: Clone + Ord,
+    {
+        dict_modify_from_sorted_iter(
+            &mut self.root,
+            K::BITS,
+            entries,
+            |(key, _)| key.clone(),
+            |(_, value)| Ok(value),
+            Cell::empty_context(),
+        )
+    }
+
+    /// Applies a sorted list of inserts/removes to the dictionary.
+    /// Use this when you have a large set of known changes.
+    ///
+    /// Uses custom extracts for values.
+    pub fn modify_with_sorted_iter_ext<T, I, FK, FV>(
+        &mut self,
+        entries: I,
+        extract_key: FK,
+        extract_value: FV,
+        context: &dyn CellContext,
+    ) -> Result<bool, Error>
+    where
+        I: IntoIterator<Item = T>,
+        K: Ord,
+        for<'a> FK: FnMut(&'a T) -> K,
+        FV: FnMut(T) -> Result<Option<V>, Error>,
+    {
+        dict_modify_from_sorted_iter(
+            &mut self.root,
+            K::BITS,
+            entries,
+            extract_key,
+            extract_value,
+            context,
+        )
     }
 
     /// Sets the value associated with the key in the dictionary.
@@ -1239,7 +1285,7 @@ mod tests {
     fn dict_get_with_value_refs() -> anyhow::Result<()> {
         let mut dict = Dict::<u32, (Cell, Cell)>::new();
         for i in 0..10 {
-            if i != 5 {
+            if i == 5 {
                 continue;
             }
             dict.set(i, (Cell::empty_cell(), Cell::empty_cell()))?;

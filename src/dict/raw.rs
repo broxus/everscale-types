@@ -3,7 +3,8 @@ use std::collections::BTreeMap;
 use super::{
     build_dict_from_sorted_iter, dict_find_bound, dict_find_bound_owned, dict_find_owned, dict_get,
     dict_get_owned, dict_get_subdict, dict_insert, dict_load_from_root, dict_remove_bound_owned,
-    dict_remove_owned, dict_split_by_prefix, read_label, DictBound, DictOwnedEntry, SetMode,
+    dict_remove_owned, dict_split_by_prefix, read_label, DictBound, DictKey, DictOwnedEntry,
+    SetMode,
 };
 use crate::cell::*;
 use crate::error::Error;
@@ -119,9 +120,10 @@ impl<const N: u16> RawDict<N> {
     /// Builds a dictionary from a sorted collection.
     pub fn try_from_btree<K, V>(sorted: &BTreeMap<K, V>) -> Result<Self, Error>
     where
-        K: Store + Ord,
+        K: Store + DictKey + Ord,
         V: Store,
     {
+        assert_eq!(K::BITS, N);
         let root = ok!(build_dict_from_sorted_iter(
             sorted,
             N,
@@ -133,9 +135,10 @@ impl<const N: u16> RawDict<N> {
     /// Builds a dictionary from a sorted slice.
     pub fn try_from_sorted_slice<K, V>(sorted: &[(K, V)]) -> Result<Self, Error>
     where
-        K: Store + Ord,
+        K: Store + DictKey + Ord,
         V: Store,
     {
+        assert_eq!(K::BITS, N);
         let root = ok!(build_dict_from_sorted_iter(
             sorted.iter().map(|(k, v)| (k, v)),
             N,

@@ -54,6 +54,7 @@ where
                 Operation::Insert { value, .. } => Some(value),
             })
         },
+        ctx,
     )
     .unwrap();
 
