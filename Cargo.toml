@@ -22,6 +22,10 @@ name = "dict_from_slice"
 harness = false
 
 [[bench]]
+name = "dict_modify"
+harness = false
+
+[[bench]]
 name = "dict"
 harness = false
 
