@@ -828,9 +828,22 @@ macro_rules! impl_small_uints {
 
         impl crate::dict::DictKey for $ident {
             const BITS: u16 = $bits;
+        }
 
+        impl crate::dict::StoreDictKey for $ident {
             #[inline]
-            fn from_raw_data(d: &[u8; 128]) -> Option<Self> {
+            fn store_into_data(&self, builder: &mut CellDataBuilder) -> Result<(), Error> {
+                if !self.is_valid() {
+                    return Err(Error::IntOverflow);
+                }
+                builder.store_uint(self.0 as u64, Self::BITS)
+            }
+        }
+
+        impl crate::dict::LoadDictKey for $ident {
+            #[inline]
+            fn load_from_data(data: &CellDataBuilder) -> Option<Self> {
+                let d = data.raw_data();
                 Some($ident(u16::from_be_bytes([d[0], d[1]]) >> (16 - $bits)))
             }
         }

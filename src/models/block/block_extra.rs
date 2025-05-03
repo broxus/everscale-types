@@ -2,7 +2,7 @@
 use std::sync::OnceLock;
 
 use crate::cell::*;
-use crate::dict::{AugDict, AugDictExtra, Dict, DictKey};
+use crate::dict::{AugDict, AugDictExtra, Dict, DictKey, LoadDictKey, StoreDictKey};
 use crate::error::Error;
 use crate::models::config::{BlockchainConfig, ValidatorDescription};
 use crate::models::currency::CurrencyCollection;
@@ -330,8 +330,18 @@ pub struct ShardIdentFull {
 
 impl DictKey for ShardIdentFull {
     const BITS: u16 = 96;
+}
 
-    fn from_raw_data(raw_data: &[u8; 128]) -> Option<Self> {
+impl StoreDictKey for ShardIdentFull {
+    fn store_into_data(&self, data: &mut CellDataBuilder) -> Result<(), Error> {
+        ok!(data.store_u32(self.workchain as u32));
+        data.store_u64(self.prefix)
+    }
+}
+
+impl LoadDictKey for ShardIdentFull {
+    fn load_from_data(data: &CellDataBuilder) -> Option<Self> {
+        let raw_data = data.raw_data();
         let workchain = i32::from_be_bytes(raw_data[0..4].try_into().unwrap());
         let prefix = u64::from_be_bytes(raw_data[4..12].try_into().unwrap());
         Some(Self { workchain, prefix })

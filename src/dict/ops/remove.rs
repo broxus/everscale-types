@@ -164,7 +164,7 @@ pub fn dict_remove_bound_owned(
     let mut stack = Vec::<Segment>::new();
 
     let mut direction = None;
-    let mut key = CellBuilder::new();
+    let mut key = CellDataBuilder::new();
 
     // Try to find the required leaf
     let mut prev_key_bit_len = key_bit_len;

@@ -29,7 +29,7 @@ pub fn dict_find_owned(
     };
 
     let mut original_key_range = key.range();
-    let mut result_key = CellBuilder::new();
+    let mut result_key = CellDataBuilder::new();
 
     let mut data = root.as_ref();
     let mut stack = Vec::<Segment>::new();
@@ -219,7 +219,7 @@ pub fn dict_find_bound<'a: 'b, 'b, 'c: 'a>(
     bound: DictBound,
     signed: bool,
     context: &'c dyn CellContext,
-) -> Result<Option<(CellBuilder, CellSlice<'b>)>, Error> {
+) -> Result<Option<(CellDataBuilder, CellSlice<'b>)>, Error> {
     let mut data = match dict {
         Some(data) => ok!(context
             .load_dyn_cell(data.as_ref(), LoadMode::Full)
@@ -228,7 +228,7 @@ pub fn dict_find_bound<'a: 'b, 'b, 'c: 'a>(
     };
 
     let mut direction = None;
-    let mut key = CellBuilder::new();
+    let mut key = CellDataBuilder::new();
 
     // Try to find the required leaf
     loop {
@@ -272,7 +272,7 @@ pub fn dict_find_bound_owned(
     bound: DictBound,
     signed: bool,
     context: &dyn CellContext,
-) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
+) -> Result<Option<(CellDataBuilder, CellSliceParts)>, Error> {
     let root = match dict {
         Some(data) => ok!(context.load_cell(data.clone(), LoadMode::Full)),
         None => return Ok(None),
@@ -281,7 +281,7 @@ pub fn dict_find_bound_owned(
     let mut prev = None;
 
     let mut direction = None;
-    let mut key = CellBuilder::new();
+    let mut key = CellDataBuilder::new();
 
     // Try to find the required leaf
     loop {
@@ -338,7 +338,7 @@ pub fn aug_dict_find_by_extra<'a, A, S>(
     dict: Option<&'a Cell>,
     mut key_bit_len: u16,
     mut flow: S,
-) -> Result<Option<(CellBuilder, A, CellSlice<'a>)>, Error>
+) -> Result<Option<(CellDataBuilder, A, CellSlice<'a>)>, Error>
 where
     S: SearchByExtra<A>,
     A: Load<'a> + 'a,
@@ -426,7 +426,7 @@ where
         None => return Ok(None),
     };
 
-    let mut key_builder = CellBuilder::new();
+    let mut key_builder = CellDataBuilder::new();
 
     let mut next = ok!(preload_branch::<A>(data, key_bit_len));
     loop {

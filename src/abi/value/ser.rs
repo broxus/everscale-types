@@ -8,8 +8,8 @@ use crate::abi::{
     PlainAbiValue,
 };
 use crate::cell::{
-    Cell, CellBuilder, CellContext, CellSlice, CellTreeStats, Size, Store, MAX_BIT_LEN,
-    MAX_REF_COUNT,
+    Cell, CellBuilder, CellContext, CellDataBuilder, CellSlice, CellTreeStats, Size, Store,
+    MAX_BIT_LEN, MAX_REF_COUNT,
 };
 use crate::dict::{self, RawDict};
 use crate::error::Error;
@@ -494,7 +494,7 @@ impl AbiSerializer {
         let inline_value = fits_into_dict_leaf(32, value_ty.max_bits());
 
         let mut dict = RawDict::<32>::new();
-        let mut key_builder = CellBuilder::new();
+        let mut key_builder = CellDataBuilder::new();
         let mut serializer = self.begin_child();
         for (i, value) in values.iter().enumerate() {
             ok!(key_builder.store_u32(i as u32));
@@ -512,7 +512,7 @@ impl AbiSerializer {
 
             ok!(dict.set(key_builder.as_data_slice(), value));
 
-            ok!(key_builder.rewind(32));
+            key_builder.clear_bits();
         }
 
         let bits = 1 + if fixed_len { 1 } else { 32 };
@@ -566,7 +566,7 @@ impl AbiSerializer {
                 context,
             ));
 
-            ok!(key_builder.rewind(key_builder.size_bits()));
+            key_builder.clear_bits();
         }
 
         let target = self.require_builder(Size { bits: 1, refs: 1 });

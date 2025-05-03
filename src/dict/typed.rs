@@ -6,10 +6,10 @@ use super::raw::*;
 use super::{
     build_dict_from_sorted_iter, dict_find_bound, dict_find_owned, dict_get, dict_get_owned,
     dict_insert, dict_load_from_root, dict_modify_from_sorted_iter, dict_remove_bound_owned,
-    dict_split_by_prefix, DictBound, DictKey, SetMode,
+    dict_split_by_prefix, DictBound, DictKey, SetMode, StoreDictKey,
 };
 use crate::cell::*;
-use crate::dict::dict_remove_owned;
+use crate::dict::{dict_remove_owned, LoadDictKey};
 use crate::error::Error;
 use crate::util::*;
 
@@ -176,7 +176,7 @@ impl<K: DictKey, V> Dict<K, V> {
 
 impl<K, V> Dict<K, V>
 where
-    K: Store + DictKey,
+    K: StoreDictKey,
 {
     /// Returns `true` if the dictionary contains a value for the specified key.
     #[inline]
@@ -186,10 +186,10 @@ where
     {
         fn contains_key_impl<K>(root: &Option<Cell>, key: &K) -> Result<bool, Error>
         where
-            K: Store + DictKey,
+            K: StoreDictKey,
         {
-            let mut builder = CellBuilder::new();
-            ok!(key.store_into(&mut builder, Cell::empty_context()));
+            let mut builder = CellDataBuilder::new();
+            ok!(key.store_into_data(&mut builder));
             Ok(ok!(dict_get(
                 root.as_ref(),
                 K::BITS,
@@ -204,7 +204,7 @@ where
 
 impl<K, V> Dict<K, V>
 where
-    K: Store + DictKey,
+    K: StoreDictKey,
 {
     /// Returns the value corresponding to the key.
     #[inline]
@@ -218,12 +218,12 @@ where
             key: &'b K,
         ) -> Result<Option<V>, Error>
         where
-            K: Store + DictKey,
+            K: StoreDictKey,
             V: Load<'a>,
         {
             let Some(mut value) = ({
-                let mut builder = CellBuilder::new();
-                ok!(key.store_into(&mut builder, Cell::empty_context()));
+                let mut builder = CellDataBuilder::new();
+                ok!(key.store_into_data(&mut builder));
                 ok!(dict_get(
                     root.as_ref(),
                     K::BITS,
@@ -254,10 +254,10 @@ where
             key: &'b K,
         ) -> Result<Option<CellSlice<'a>>, Error>
         where
-            K: Store + DictKey,
+            K: StoreDictKey,
         {
-            let mut builder = CellBuilder::new();
-            ok!(key.store_into(&mut builder, Cell::empty_context()));
+            let mut builder = CellDataBuilder::new();
+            ok!(key.store_into_data(&mut builder));
             dict_get(
                 root.as_ref(),
                 K::BITS,
@@ -282,10 +282,10 @@ where
             key: &K,
         ) -> Result<Option<CellSliceParts>, Error>
         where
-            K: Store + DictKey,
+            K: StoreDictKey,
         {
-            let mut builder = CellBuilder::new();
-            ok!(key.store_into(&mut builder, Cell::empty_context()));
+            let mut builder = CellDataBuilder::new();
+            ok!(key.store_into_data(&mut builder));
             dict_get_owned(
                 root.as_ref(),
                 K::BITS,
@@ -332,7 +332,10 @@ where
     /// Use [`remove_bound_ext`] if you need to use a custom cell context.
     ///
     /// [`remove_bound_ext`]: RawDict::remove_bound_ext
-    pub fn remove_min_raw(&mut self, signed: bool) -> Result<Option<(K, CellSliceParts)>, Error> {
+    pub fn remove_min_raw(&mut self, signed: bool) -> Result<Option<(K, CellSliceParts)>, Error>
+    where
+        K: LoadDictKey,
+    {
         self.remove_bound_raw_ext(DictBound::Min, signed, Cell::empty_context())
     }
 
@@ -342,7 +345,10 @@ where
     /// Use [`remove_bound_ext`] if you need to use a custom cell context.
     ///
     /// [`remove_bound_ext`]: RawDict::remove_bound_ext
-    pub fn remove_max_raw(&mut self, signed: bool) -> Result<Option<(K, CellSliceParts)>, Error> {
+    pub fn remove_max_raw(&mut self, signed: bool) -> Result<Option<(K, CellSliceParts)>, Error>
+    where
+        K: LoadDictKey,
+    {
         self.remove_bound_raw_ext(DictBound::Max, signed, Cell::empty_context())
     }
 
@@ -356,7 +362,10 @@ where
         &mut self,
         bound: DictBound,
         signed: bool,
-    ) -> Result<Option<(K, CellSliceParts)>, Error> {
+    ) -> Result<Option<(K, CellSliceParts)>, Error>
+    where
+        K: LoadDictKey,
+    {
         self.remove_bound_raw_ext(bound, signed, Cell::empty_context())
     }
 
@@ -393,7 +402,7 @@ where
 
 impl<K, V> Dict<K, V>
 where
-    K: Store + DictKey,
+    K: StoreDictKey,
     V: Store,
 {
     /// Builds a dictionary from a sorted collection.
@@ -405,7 +414,6 @@ where
     {
         let root = ok!(build_dict_from_sorted_iter(
             sorted.iter().map(|(k, v)| (k.borrow(), v.borrow())),
-            K::BITS,
             Cell::empty_context()
         ));
         Ok(Self {
@@ -424,7 +432,6 @@ where
     {
         let root = ok!(build_dict_from_sorted_iter(
             sorted.iter().map(|(k, v)| (k.borrow(), v.borrow())),
-            K::BITS,
             Cell::empty_context()
         ));
         Ok(Self {
@@ -445,7 +452,6 @@ where
     {
         dict_modify_from_sorted_iter(
             &mut self.root,
-            K::BITS,
             entries,
             |(key, _)| key.clone(),
             |(_, value)| Ok(value),
@@ -470,14 +476,7 @@ where
         for<'a> FK: FnMut(&'a T) -> K,
         FV: FnMut(T) -> Result<Option<V>, Error>,
     {
-        dict_modify_from_sorted_iter(
-            &mut self.root,
-            K::BITS,
-            entries,
-            extract_key,
-            extract_value,
-            context,
-        )
+        dict_modify_from_sorted_iter(&mut self.root, entries, extract_key, extract_value, context)
     }
 
     /// Sets the value associated with the key in the dictionary.
@@ -524,7 +523,7 @@ where
 
 impl<K, V> Dict<K, V>
 where
-    K: Store + DictKey,
+    K: DictKey,
 {
     /// Gets an iterator over the entries of the dictionary, sorted by key.
     /// The iterator element type is `Result<(K, V)>`.
@@ -585,6 +584,7 @@ where
     pub fn get_next<Q>(&self, key: Q, signed: bool) -> Result<Option<(K, V)>, Error>
     where
         Q: Borrow<K>,
+        K: StoreDictKey + LoadDictKey,
         for<'a> V: Load<'a>,
     {
         self.find_ext(key, DictBound::Max, false, signed)
@@ -596,6 +596,7 @@ where
     pub fn get_prev<Q>(&self, key: Q, signed: bool) -> Result<Option<(K, V)>, Error>
     where
         Q: Borrow<K>,
+        K: StoreDictKey + LoadDictKey,
         for<'a> V: Load<'a>,
     {
         self.find_ext(key, DictBound::Min, false, signed)
@@ -607,6 +608,7 @@ where
     pub fn get_or_next<Q>(&self, key: Q, signed: bool) -> Result<Option<(K, V)>, Error>
     where
         Q: Borrow<K>,
+        K: StoreDictKey + LoadDictKey,
         for<'a> V: Load<'a>,
     {
         self.find_ext(key, DictBound::Max, true, signed)
@@ -618,6 +620,7 @@ where
     pub fn get_or_prev<Q>(&self, key: Q, signed: bool) -> Result<Option<(K, V)>, Error>
     where
         Q: Borrow<K>,
+        K: StoreDictKey + LoadDictKey,
         for<'a> V: Load<'a>,
     {
         self.find_ext(key, DictBound::Min, true, signed)
@@ -633,6 +636,7 @@ where
     ) -> Result<Option<(K, V)>, Error>
     where
         Q: Borrow<K>,
+        K: StoreDictKey + LoadDictKey,
         for<'a> V: Load<'a>,
     {
         fn find_impl<K, V>(
@@ -643,13 +647,13 @@ where
             signed: bool,
         ) -> Result<Option<(K, V)>, Error>
         where
-            K: DictKey + Store,
+            K: StoreDictKey + LoadDictKey,
             for<'a> V: Load<'a>,
         {
             let context = Cell::empty_context();
             let Some((key, parts)) = ({
-                let mut builder = CellBuilder::new();
-                ok!(key.store_into(&mut builder, context));
+                let mut builder = CellDataBuilder::new();
+                ok!(key.store_into_data(&mut builder));
                 // TODO: add `dict_find` with non-owned return type
                 ok!(dict_find_owned(
                     root.as_ref(),
@@ -665,7 +669,7 @@ where
             };
             let value = &mut ok!(CellSlice::apply(&parts));
 
-            match K::from_raw_data(key.raw_data()) {
+            match K::load_from_data(&key) {
                 Some(key) => Ok(Some((key, ok!(V::load_from(value))))),
                 None => Err(Error::CellUnderflow),
             }
@@ -694,6 +698,7 @@ where
     /// Returns the lowest key and a value corresponding to the key.
     pub fn get_min<'a>(&'a self, signed: bool) -> Result<Option<(K, V)>, Error>
     where
+        K: LoadDictKey,
         V: Load<'a>,
     {
         Ok(match ok!(self.get_bound_raw(DictBound::Min, signed)) {
@@ -705,6 +710,7 @@ where
     /// Returns the lowest key and a value corresponding to the key.
     pub fn get_max<'a>(&'a self, signed: bool) -> Result<Option<(K, V)>, Error>
     where
+        K: LoadDictKey,
         V: Load<'a>,
     {
         Ok(match ok!(self.get_bound_raw(DictBound::Max, signed)) {
@@ -718,7 +724,10 @@ where
         &self,
         bound: DictBound,
         signed: bool,
-    ) -> Result<Option<(K, CellSlice<'_>)>, Error> {
+    ) -> Result<Option<(K, CellSlice<'_>)>, Error>
+    where
+        K: LoadDictKey,
+    {
         let Some((key, value)) = ok!(dict_find_bound(
             self.root.as_ref(),
             K::BITS,
@@ -728,7 +737,7 @@ where
         )) else {
             return Ok(None);
         };
-        match K::from_raw_data(key.raw_data()) {
+        match K::load_from_data(&key) {
             Some(key) => Ok(Some((key, value))),
             None => Err(Error::CellUnderflow),
         }
@@ -743,7 +752,10 @@ where
         bound: DictBound,
         signed: bool,
         context: &dyn CellContext,
-    ) -> Result<Option<(K, CellSliceParts)>, Error> {
+    ) -> Result<Option<(K, CellSliceParts)>, Error>
+    where
+        K: LoadDictKey,
+    {
         let removed = ok!(dict_remove_bound_owned(
             &mut self.root,
             K::BITS,
@@ -752,7 +764,7 @@ where
             context
         ));
         Ok(match removed {
-            Some((key, value)) => match K::from_raw_data(key.raw_data()) {
+            Some((key, value)) => match K::load_from_data(&key) {
                 Some(key) => Some((key, value)),
                 None => return Err(Error::CellUnderflow),
             },
@@ -763,7 +775,7 @@ where
 
 impl<K, V> Dict<K, V>
 where
-    K: Store + DictKey,
+    K: StoreDictKey,
 {
     /// Removes the value associated with key in dictionary.
     /// Returns an optional removed value as cell slice parts.
@@ -784,10 +796,10 @@ where
             context: &dyn CellContext,
         ) -> Result<Option<CellSliceParts>, Error>
         where
-            K: Store + DictKey,
+            K: StoreDictKey,
         {
-            let mut builder = CellBuilder::new();
-            ok!(key.store_into(&mut builder, Cell::empty_context()));
+            let mut builder = CellDataBuilder::new();
+            ok!(key.store_into_data(&mut builder));
             dict_remove_owned(root, &mut builder.as_data_slice(), K::BITS, false, context)
         }
 
@@ -859,7 +871,7 @@ where
 
 impl<K, V> Dict<K, V>
 where
-    K: Store + DictKey,
+    K: StoreDictKey,
     V: Store,
 {
     /// Sets the value associated with the key in the dictionary.
@@ -912,13 +924,9 @@ where
         value: &V,
         mode: SetMode,
         context: &dyn CellContext,
-    ) -> Result<bool, Error>
-    where
-        K: Store + DictKey,
-        V: Store,
-    {
-        let mut key_builder = CellBuilder::new();
-        ok!(key.store_into(&mut key_builder, Cell::empty_context()));
+    ) -> Result<bool, Error> {
+        let mut key_builder = CellDataBuilder::new();
+        ok!(key.store_into_data(&mut key_builder));
         dict_insert(
             &mut self.root,
             &mut key_builder.as_data_slice(),
@@ -933,7 +941,7 @@ where
 #[cfg(feature = "serde")]
 impl<K, V> serde::Serialize for Dict<K, V>
 where
-    K: serde::Serialize + Store + DictKey,
+    K: serde::Serialize + LoadDictKey,
     for<'a> V: serde::Serialize + Load<'a>,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -961,7 +969,7 @@ where
 #[cfg(feature = "serde")]
 impl<'de, K, V> serde::Deserialize<'de> for Dict<K, V>
 where
-    K: serde::Deserialize<'de> + std::hash::Hash + Eq + Store + DictKey,
+    K: serde::Deserialize<'de> + std::hash::Hash + Eq + StoreDictKey,
     V: serde::Deserialize<'de> + Store,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -1037,7 +1045,7 @@ where
 
 impl<'a, K, V> Iterator for Iter<'a, K, V>
 where
-    K: DictKey,
+    K: LoadDictKey,
     V: Load<'a>,
 {
     type Item = Result<(K, V), Error>;
@@ -1045,7 +1053,7 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         Some(match self.inner.next()? {
             Ok((key, mut value)) => {
-                let err = if let Some(key) = K::from_raw_data(key.raw_data()) {
+                let err = if let Some(key) = K::load_from_data(&key) {
                     match V::load_from(&mut value) {
                         Ok(value) => return Some(Ok((key, value))),
                         Err(e) => e,
@@ -1101,7 +1109,7 @@ where
 
 impl<'a, K, V> Iterator for UnionIter<'a, K, V>
 where
-    K: DictKey,
+    K: LoadDictKey,
     V: Load<'a>,
 {
     type Item = Result<(K, Option<V>, Option<V>), Error>;
@@ -1121,7 +1129,7 @@ where
 
         Some(match self.inner.next()? {
             Ok((key, mut left_value, mut right_value)) => {
-                let err = if let Some(key) = K::from_raw_data(key.raw_data()) {
+                let err = if let Some(key) = K::load_from_data(&key) {
                     match (
                         load_opt_value(&mut left_value),
                         load_opt_value(&mut right_value),
@@ -1189,13 +1197,13 @@ where
 
 impl<K> Iterator for Keys<'_, K>
 where
-    K: DictKey,
+    K: LoadDictKey,
 {
     type Item = Result<K, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         Some(match self.inner.next()? {
-            Ok((key, _)) => match K::from_raw_data(key.raw_data()) {
+            Ok((key, _)) => match K::load_from_data(&key) {
                 Some(key) => Ok(key),
                 None => Err(self.inner.finish(Error::CellUnderflow)),
             },

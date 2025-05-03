@@ -472,8 +472,23 @@ impl<'a> Load<'a> for StdAddr {
 
 impl crate::dict::DictKey for StdAddr {
     const BITS: u16 = StdAddr::BITS_WITHOUT_ANYCAST;
+}
 
-    fn from_raw_data([first_byte, second_byte, data @ ..]: &[u8; 128]) -> Option<Self> {
+impl crate::dict::StoreDictKey for StdAddr {
+    fn store_into_data(&self, builder: &mut CellDataBuilder) -> Result<(), Error> {
+        if self.anycast.is_some() || !builder.has_capacity_bits(Self::BITS_WITHOUT_ANYCAST) {
+            return Err(Error::InvalidData);
+        }
+        ok!(builder.store_small_uint(0b100, 3)); // `0b10` (tag) | `0b0` ("none" for anycast)
+        ok!(builder.store_u8(self.workchain as u8));
+        builder.store_u256(&self.address)
+    }
+}
+
+impl crate::dict::LoadDictKey for StdAddr {
+    fn load_from_data(data: &CellDataBuilder) -> Option<Self> {
+        let [first_byte, second_byte, data @ ..] = data.raw_data();
+
         // 2 bits id, 1 bit maybe (None), 8 bits workchain, 256 bits address
 
         const PREFIX_BITS: u8 = 0b1000_0000;

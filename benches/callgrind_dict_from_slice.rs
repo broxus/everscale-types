@@ -9,7 +9,7 @@ use rand::{Rng, SeedableRng};
 fn build_dict_inserts<K, V>(num_elements: usize) -> Dict<K, V>
 where
     Standard: Distribution<K> + Distribution<V>,
-    K: Store + DictKey,
+    K: StoreDictKey,
     V: Store,
 {
     let mut rng = rand_xorshift::XorShiftRng::from_seed([0u8; 16]);
@@ -26,7 +26,7 @@ where
 fn build_dict_leaves<K, V>(num_elements: usize) -> Dict<K, V>
 where
     Standard: Distribution<K> + Distribution<V>,
-    K: Store + DictKey + Ord,
+    K: StoreDictKey + Ord,
     V: Store,
 {
     let mut rng = rand_xorshift::XorShiftRng::from_seed([0u8; 16]);

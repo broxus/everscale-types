@@ -1,5 +1,5 @@
 use crate::cell::*;
-use crate::dict::{make_leaf, make_leaf_with_extra, write_label, AugDictFn};
+use crate::dict::{make_leaf, make_leaf_with_extra, write_label, AugDictFn, StoreDictKey};
 use crate::error::Error;
 
 /// Builds a new dictionary from an iterator of sorted unique entries.
@@ -8,12 +8,11 @@ use crate::error::Error;
 /// insertions is too slow.
 pub fn build_dict_from_sorted_iter<K, V, I>(
     entries: I,
-    key_bit_len: u16,
     context: &dyn CellContext,
 ) -> Result<Option<Cell>, Error>
 where
     I: IntoIterator<Item = (K, V)>,
-    K: Store + Ord,
+    K: StoreDictKey + Ord,
     V: Store,
 {
     let mut stack = Vec::<MergeStackItem<V>>::new();
@@ -31,14 +30,15 @@ where
             }
         }
 
-        let mut prefix = CellBuilder::new();
-        ok!(key.store_into(&mut prefix, context));
+        let mut prefix = CellDataBuilder::new();
+        ok!(key.store_into_data(&mut prefix));
+        debug_assert_eq!(prefix.size_bits(), K::BITS);
         prev_key = Some(key);
 
         let lcp_len = ok!(MergeStackItem::reduce(
             &mut stack,
             prefix.as_data_slice(),
-            key_bit_len,
+            K::BITS,
             context
         ));
 
@@ -60,29 +60,29 @@ where
             left.prev_lcp_len() + 1
         };
 
-        result = ok!(left.merge(result, key_offset, key_bit_len, context));
+        result = ok!(left.merge(result, key_offset, K::BITS, context));
     }
 
-    result.build(key_bit_len, context).map(Some)
+    result.build(K::BITS, context).map(Some)
 }
 
 pub(crate) enum MergeStackItem<V> {
     /// Leaf value to be serialized.
     Leaf {
-        prefix: CellBuilder,
+        prefix: CellDataBuilder,
         value: V,
         prev_lcp_len: u16,
     },
     /// Complete node which can be used as is.
     Node {
-        prefix: CellBuilder,
+        prefix: CellDataBuilder,
         value: Cell,
         prev_lcp_len: u16,
     },
     /// A subtree with a prefix.
     /// Used when we need to use the sibling of the removed branch.
     DenormNode {
-        prefix: CellBuilder,
+        prefix: CellDataBuilder,
         cell: Cell,
         data: CellSliceRange,
         prev_lcp_len: u16,
@@ -283,25 +283,24 @@ impl<V: Store> MergeStackItem<V> {
 /// TODO: Merge with `build_dict_from_sorted_iter` using some kind of `DictBuilder` trait.
 pub fn build_aug_dict_from_sorted_iter<K, A, V, I>(
     entries: I,
-    key_bit_len: u16,
     comparator: AugDictFn,
     context: &dyn CellContext,
 ) -> Result<Option<Cell>, Error>
 where
     I: IntoIterator<Item = (K, A, V)>,
-    K: Store + Ord,
+    K: StoreDictKey + Ord,
     A: Store,
     V: Store,
 {
     enum StackItem<A, V> {
         Leaf {
-            prefix: CellBuilder,
+            prefix: CellDataBuilder,
             extra: A,
             value: V,
             prev_lcp_len: u16,
         },
         Node {
-            prefix: CellBuilder,
+            prefix: CellDataBuilder,
             extra_offset: u16,
             value: Cell,
             prev_lcp_len: u16,
@@ -492,8 +491,9 @@ where
             }
         }
 
-        let mut prefix = CellBuilder::new();
-        ok!(key.store_into(&mut prefix, context));
+        let mut prefix = CellDataBuilder::new();
+        ok!(key.store_into_data(&mut prefix));
+        debug_assert_eq!(prefix.size_bits(), K::BITS);
         prev_key = Some(key);
 
         let mut lcp_len = 0;
@@ -520,7 +520,7 @@ where
                     }
                     .max(lcp_len + 1);
 
-                    right = ok!(left.merge(right, key_offset, key_bit_len, comparator, context));
+                    right = ok!(left.merge(right, key_offset, K::BITS, comparator, context));
                 }
                 stack.push(right);
             }
@@ -545,8 +545,8 @@ where
             left.prev_lcp_len() + 1
         };
 
-        result = ok!(left.merge(result, key_offset, key_bit_len, comparator, context));
+        result = ok!(left.merge(result, key_offset, K::BITS, comparator, context));
     }
 
-    result.build(key_bit_len, context).map(Some)
+    result.build(K::BITS, context).map(Some)
 }

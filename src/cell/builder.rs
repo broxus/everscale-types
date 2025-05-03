@@ -176,29 +176,11 @@ impl_primitive_store! {
 }
 
 /// Builder for constructing cells with densely packed data.
+#[derive(Default, Clone)]
 pub struct CellBuilder {
-    data: [u8; 128],
-    bit_len: u16,
+    inner: CellDataBuilder,
     is_exotic: bool,
     references: ArrayVec<Cell, MAX_REF_COUNT>,
-}
-
-impl Default for CellBuilder {
-    #[inline]
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Clone for CellBuilder {
-    fn clone(&self) -> Self {
-        Self {
-            data: self.data,
-            bit_len: self.bit_len,
-            is_exotic: self.is_exotic,
-            references: self.references.clone(),
-        }
-    }
 }
 
 impl Eq for CellBuilder {}
@@ -206,21 +188,23 @@ impl Eq for CellBuilder {}
 impl PartialEq for CellBuilder {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
-        self.bit_len == other.bit_len
-            && self.data == other.data
+        self.is_exotic == other.is_exotic
+            && self.inner == other.inner
             && self.references.as_ref() == other.references.as_ref()
     }
 }
 
 impl Ord for CellBuilder {
     fn cmp(&self, other: &Self) -> Ordering {
-        match (self.bit_len, self.references.len()).cmp(&(other.bit_len, other.references.len())) {
+        match (self.inner.bit_len, self.references.len())
+            .cmp(&(other.inner.bit_len, other.references.len()))
+        {
             Ordering::Equal => {}
             ord => return ord,
         }
 
         // TODO: compare subslices of len {(bits + 7) / 8} ?
-        match self.data.cmp(&other.data) {
+        match self.inner.data.cmp(&other.inner.data) {
             Ordering::Equal => {}
             ord => return ord,
         }
@@ -255,42 +239,42 @@ impl std::fmt::Debug for CellBuilder {
         }
 
         f.debug_struct("CellBuilder")
-            .field("data", &Data(&self.display_data()))
-            .field("bit_len", &self.bit_len)
+            .field("data", &Data(&self.inner.display_data()))
+            .field("bit_len", &self.inner.bit_len)
             .field("is_exotic", &self.is_exotic)
             .field("references", &self.references.as_ref())
             .finish()
     }
 }
 
-macro_rules! impl_store_uint {
-    ($self:ident, $value:ident, bytes: $bytes:literal, bits: $bits:literal) => {
-        if $self.bit_len + $bits <= MAX_BIT_LEN {
-            let q = ($self.bit_len / 8) as usize;
-            let r = $self.bit_len % 8;
-            // SAFETY: q is in range 0..=127, r is in range 0..=7
-            unsafe {
-                let data_ptr = $self.data.as_mut_ptr().add(q);
-                debug_assert!(q + $bytes + usize::from(r > 0) <= 128);
-                if r == 0 {
-                    // Just append data
-                    let value = $value.to_be_bytes();
-                    std::ptr::copy_nonoverlapping(value.as_ptr(), data_ptr, $bytes);
-                } else {
-                    // Append high bits to the last byte
-                    *data_ptr |= ($value >> ($bits - 8 + r)) as u8;
-                    // Make shifted bytes
-                    let value: [u8; $bytes] = ($value << (8 - r)).to_be_bytes();
-                    // Write shifted bytes
-                    std::ptr::copy_nonoverlapping(value.as_ptr(), data_ptr.add(1), $bytes);
-                }
-            };
-            $self.bit_len += $bits;
-            Ok(())
-        } else {
-            Err(Error::CellOverflow)
-        }
-    };
+impl std::ops::Deref for CellBuilder {
+    type Target = CellDataBuilder;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl std::ops::DerefMut for CellBuilder {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+impl AsRef<CellDataBuilder> for CellBuilder {
+    #[inline]
+    fn as_ref(&self) -> &CellDataBuilder {
+        &self.inner
+    }
+}
+
+impl AsMut<CellDataBuilder> for CellBuilder {
+    #[inline]
+    fn as_mut(&mut self) -> &mut CellDataBuilder {
+        &mut self.inner
+    }
 }
 
 impl CellBuilder {
@@ -346,10 +330,461 @@ impl CellBuilder {
     /// Creates an empty cell builder.
     pub const fn new() -> Self {
         Self {
-            data: [0; 128],
-            bit_len: 0,
+            inner: CellDataBuilder::new(),
             is_exotic: false,
             references: ArrayVec::new(),
+        }
+    }
+
+    /// Tries to create a cell builder with the specified data.
+    ///
+    /// NOTE: if `bits` is greater than `bytes * 8`, pads the value with zeros (as high bits).
+    pub fn from_raw_data(value: &[u8], bits: u16) -> Result<Self, Error> {
+        Ok(Self {
+            inner: ok!(CellDataBuilder::from_raw_data(value, bits)),
+            is_exotic: false,
+            references: ArrayVec::new(),
+        })
+    }
+
+    /// Creates a cell builder from its inner parts.
+    #[inline]
+    pub fn from_parts(is_exotic: bool, data: CellDataBuilder, refs: CellRefsBuilder) -> Self {
+        Self {
+            inner: data,
+            is_exotic,
+            references: refs.0,
+        }
+    }
+
+    /// Splits cell builder into its inner parts.
+    #[inline]
+    pub fn into_parts(self) -> (bool, CellDataBuilder, CellRefsBuilder) {
+        (self.is_exotic, self.inner, CellRefsBuilder(self.references))
+    }
+
+    /// Returns a slice which contains builder data and references.
+    ///
+    /// NOTE: intermediate cell hash is undefined.
+    pub fn as_full_slice(&self) -> CellSlice<'_> {
+        CellSlice::new_allow_exotic(IntermediateFullCell::wrap(self))
+    }
+
+    /// Returns the stored cell size.
+    pub const fn size(&self) -> Size {
+        Size {
+            bits: self.inner.bit_len,
+            refs: self.references.len() as u8,
+        }
+    }
+
+    /// Returns child cell count.
+    #[inline(always)]
+    pub const fn size_refs(&self) -> u8 {
+        self.references.len() as u8
+    }
+
+    /// Returns the remaining capacity in bits and references.
+    pub const fn spare_capacity(&self) -> Size {
+        Size {
+            bits: self.inner.spare_capacity_bits(),
+            refs: self.spare_capacity_refs(),
+        }
+    }
+
+    /// Returns remaining references capacity.
+    #[inline]
+    pub const fn spare_capacity_refs(&self) -> u8 {
+        (MAX_REF_COUNT - self.references.len()) as u8
+    }
+
+    /// Returns true if there is enough remaining capacity to fit `bits` and `refs`.
+    #[inline]
+    pub const fn has_capacity(&self, bits: u16, refs: u8) -> bool {
+        self.inner.bit_len + bits <= MAX_BIT_LEN
+            && self.references.len() + refs as usize <= MAX_REF_COUNT
+    }
+
+    /// Returns whether this cell will be built as an exotic.
+    #[inline]
+    pub const fn is_exotic(&self) -> bool {
+        self.is_exotic
+    }
+
+    /// Marks this cell as exotic.
+    #[inline]
+    pub fn set_exotic(&mut self, is_exotic: bool) {
+        self.is_exotic = is_exotic;
+    }
+
+    /// Returns a slice of the child cells stored in the builder.
+    #[inline]
+    pub fn references(&self) -> &[Cell] {
+        self.references.as_ref()
+    }
+
+    /// Tries to store a child in the cell,
+    /// returning `false` if there is not enough remaining capacity.
+    pub fn store_reference(&mut self, cell: Cell) -> Result<(), Error> {
+        if self.references.len() < MAX_REF_COUNT {
+            // SAFETY: reference count is in the valid range
+            unsafe { self.references.push(cell) }
+            Ok(())
+        } else {
+            Err(Error::CellOverflow)
+        }
+    }
+
+    /// Sets children of the cell.
+    pub fn set_references(&mut self, refs: CellRefsBuilder) {
+        self.references = refs.0;
+    }
+
+    /// Tries to append a builder (its data and references),
+    /// returning `false` if there is not enough remaining capacity.
+    pub fn store_builder(&mut self, builder: &Self) -> Result<(), Error> {
+        if self.inner.bit_len + builder.inner.bit_len <= MAX_BIT_LEN
+            && self.references.len() + builder.references.len() <= MAX_REF_COUNT
+        {
+            ok!(self.store_raw(&builder.inner.data, builder.inner.bit_len));
+            for cell in builder.references.as_ref() {
+                ok!(self.store_reference(cell.clone()));
+            }
+            Ok(())
+        } else {
+            Err(Error::CellOverflow)
+        }
+    }
+
+    /// Tries to append a cell slice (its data and references),
+    /// returning `false` if there is not enough remaining capacity.
+    #[inline]
+    pub fn store_slice<'a, T>(&mut self, value: T) -> Result<(), Error>
+    where
+        T: AsRef<CellSlice<'a>>,
+    {
+        fn store_slice_impl(builder: &mut CellBuilder, value: &CellSlice<'_>) -> Result<(), Error> {
+            if builder.inner.bit_len + value.size_bits() <= MAX_BIT_LEN
+                && builder.references.len() + value.size_refs() as usize <= MAX_REF_COUNT
+            {
+                ok!(builder.store_slice_data(value));
+                for cell in value.references().cloned() {
+                    ok!(builder.store_reference(cell));
+                }
+                Ok(())
+            } else {
+                Err(Error::CellOverflow)
+            }
+        }
+        store_slice_impl(self, value.as_ref())
+    }
+
+    /// Tries to build a new cell using the specified cell context.
+    pub fn build_ext(mut self, context: &dyn CellContext) -> Result<Cell, Error> {
+        debug_assert!(self.inner.bit_len <= MAX_BIT_LEN);
+        debug_assert!(self.references.len() <= MAX_REF_COUNT);
+
+        #[cfg(feature = "stats")]
+        let mut stats = CellTreeStats {
+            bit_count: self.bit_len as u64,
+            cell_count: 1,
+        };
+
+        let mut children_mask = LevelMask::EMPTY;
+        for child in self.references.as_ref() {
+            let child = child.as_ref();
+            children_mask |= child.descriptor().level_mask();
+
+            #[cfg(feature = "stats")]
+            {
+                stats += child.stats();
+            }
+        }
+
+        let is_exotic = self.is_exotic;
+
+        let level_mask = 'mask: {
+            // NOTE: make only a brief check here, as it will raise a proper error in finalier
+            if is_exotic && self.inner.bit_len >= 8 {
+                if let Some(ty) = CellType::from_byte_exotic(self.data[0]) {
+                    match ty {
+                        CellType::PrunedBranch => break 'mask LevelMask::new(self.data[1]),
+                        CellType::MerkleProof | CellType::MerkleUpdate => {
+                            break 'mask children_mask.virtualize(1)
+                        }
+                        CellType::LibraryReference => break 'mask LevelMask::EMPTY,
+                        _ => {}
+                    };
+                }
+            }
+
+            children_mask
+        };
+
+        let d1 = CellDescriptor::compute_d1(level_mask, is_exotic, self.references.len() as u8);
+        let d2 = CellDescriptor::compute_d2(self.inner.bit_len);
+
+        let rem = self.inner.bit_len % 8;
+        let last_byte = (self.inner.bit_len / 8) as usize;
+        if rem > 0 {
+            // SAFETY: `last_byte` is in the valid range
+            let last_byte = unsafe { self.inner.data.get_unchecked_mut(last_byte) };
+
+            // x0000000 - rem=1, tag_mask=01000000, data_mask=11000000
+            // xx000000 - rem=2, tag_mask=00100000, data_mask=11100000
+            // xxx00000 - rem=3, tag_mask=00010000, data_mask=11110000
+            // xxxx0000 - rem=4, tag_mask=00001000, data_mask=11111000
+            // xxxxx000 - rem=5, tag_mask=00000100, data_mask=11111100
+            // xxxxxx00 - rem=6, tag_mask=00000010, data_mask=11111110
+            // xxxxxxx0 - rem=7, tag_mask=00000001, data_mask=11111111
+            let tag_mask: u8 = 1 << (7 - rem);
+            let data_mask = !(tag_mask - 1);
+
+            // xxxxyyyy & data_mask -> xxxxy000 | tag_mask -> xxxx1000
+            *last_byte = (*last_byte & data_mask) | tag_mask;
+        }
+
+        let byte_len = self.inner.bit_len.div_ceil(8);
+        let data = &self.inner.data[..std::cmp::min(byte_len as usize, 128)];
+
+        let cell_parts = CellParts {
+            #[cfg(feature = "stats")]
+            stats,
+            bit_len: self.inner.bit_len,
+            descriptor: CellDescriptor { d1, d2 },
+            children_mask,
+            references: self.references,
+            data,
+        };
+        context.finalize_cell(cell_parts)
+    }
+
+    /// Tries to build a new cell using the default cell context.
+    ///
+    /// See [`empty_context`]
+    ///
+    /// [`empty_context`]: fn@CellFamily::empty_context
+    pub fn build(self) -> Result<Cell, Error> {
+        self.build_ext(Cell::empty_context())
+    }
+}
+
+/// Helper struct to print the cell builder data.
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct DisplayCellBuilderData<'a>(&'a CellDataBuilder);
+
+impl std::fmt::Display for DisplayCellBuilderData<'_> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::LowerHex::fmt(self, f)
+    }
+}
+
+impl std::fmt::LowerHex for DisplayCellBuilderData<'_> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::LowerHex::fmt(&self.0.as_bitstring(), f)
+    }
+}
+
+impl std::fmt::UpperHex for DisplayCellBuilderData<'_> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::UpperHex::fmt(&self.0.as_bitstring(), f)
+    }
+}
+
+impl std::fmt::Binary for DisplayCellBuilderData<'_> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Binary::fmt(&self.0.as_bitstring(), f)
+    }
+}
+
+/// Generates a fully random builder with any type of child cells.
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for CellBuilder {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        match u.arbitrary::<CellType>()? {
+            CellType::Ordinary => {
+                let bit_len = u.int_in_range(0..=MAX_BIT_LEN)?;
+                let refs = u.int_in_range(0..=4)?;
+
+                let mut b = CellBuilder::new();
+                b.store_raw(u.bytes(bit_len.div_ceil(8) as _)?, bit_len)
+                    .unwrap();
+
+                let mut children = ArrayVec::<Cell, 4>::new();
+                for i in 0..refs as u8 {
+                    let cell = 'cell: {
+                        if i > 0 {
+                            // Allow to reuse cells.
+                            if let Some(i) = u.int_in_range(0..=i)?.checked_sub(1) {
+                                break 'cell children.get(i).cloned().unwrap();
+                            }
+                        }
+
+                        u.arbitrary::<Cell>()
+                            .and_then(crate::arbitrary::check_max_depth)?
+                    };
+
+                    b.store_reference(cell.clone()).unwrap();
+
+                    // SAFETY: `refs` is at most 4.
+                    unsafe { children.push(cell) };
+                }
+
+                Ok(b)
+            }
+            CellType::PrunedBranch => {
+                let level_mask = LevelMask::new(u.int_in_range(0b001..=0b111)?);
+
+                let mut b = CellBuilder::new();
+                b.set_exotic(true);
+                b.store_u16(u16::from_be_bytes([
+                    CellType::PrunedBranch.to_byte(),
+                    level_mask.to_byte(),
+                ]))
+                .unwrap();
+
+                let level_count = level_mask.level() as usize;
+
+                let hashes = 32 * level_count;
+                b.store_raw(u.bytes(hashes)?, hashes as u16 * 8).unwrap();
+
+                for _ in 0..level_count {
+                    b.store_u16(u.int_in_range(0..=(u16::MAX - 1))?).unwrap();
+                }
+
+                Ok(b)
+            }
+            CellType::LibraryReference => {
+                let hash = u.bytes(32)?;
+
+                let mut b = CellBuilder::new();
+                b.set_exotic(true);
+                b.store_u8(CellType::LibraryReference.to_byte()).unwrap();
+                b.store_raw(hash, 256).unwrap();
+                Ok(b)
+            }
+            CellType::MerkleProof => {
+                let mut b = CellBuilder::new();
+                u.arbitrary::<crate::merkle::MerkleProof>()?
+                    .store_into(&mut b, Cell::empty_context())
+                    .unwrap();
+                Ok(b)
+            }
+            CellType::MerkleUpdate => {
+                let mut b = CellBuilder::new();
+                u.arbitrary::<crate::merkle::MerkleUpdate>()?
+                    .store_into(&mut b, Cell::empty_context())
+                    .unwrap();
+                Ok(b)
+            }
+        }
+    }
+
+    fn size_hint(_: usize) -> (usize, Option<usize>) {
+        (3, None)
+    }
+}
+
+/// Builder for constructing cell data.
+#[derive(Clone)]
+pub struct CellDataBuilder {
+    data: [u8; 128],
+    bit_len: u16,
+}
+
+impl Default for CellDataBuilder {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Eq for CellDataBuilder {}
+impl PartialEq for CellDataBuilder {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.bit_len == other.bit_len && self.data == other.data
+    }
+}
+
+impl Ord for CellDataBuilder {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match self.bit_len.cmp(&other.bit_len) {
+            Ordering::Equal => {}
+            ord => return ord,
+        }
+
+        // TODO: compare subslices of len {(bits + 7) / 8} ?
+        self.data.cmp(&other.data)
+    }
+}
+
+impl PartialOrd for CellDataBuilder {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl std::fmt::Debug for CellDataBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        #[repr(transparent)]
+        struct Data<'a, T>(&'a T);
+
+        impl<T: std::fmt::Display> std::fmt::Debug for Data<'_, T> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                std::fmt::Display::fmt(self.0, f)
+            }
+        }
+
+        f.debug_struct("CellBuilder")
+            .field("data", &Data(&self.display_data()))
+            .field("bit_len", &self.bit_len)
+            .finish()
+    }
+}
+
+macro_rules! impl_store_uint {
+    ($self:ident, $value:ident, bytes: $bytes:literal, bits: $bits:literal) => {
+        if $self.bit_len + $bits <= MAX_BIT_LEN {
+            let q = ($self.bit_len / 8) as usize;
+            let r = $self.bit_len % 8;
+            // SAFETY: q is in range 0..=127, r is in range 0..=7
+            unsafe {
+                let data_ptr = $self.data.as_mut_ptr().add(q);
+                debug_assert!(q + $bytes + usize::from(r > 0) <= 128);
+                if r == 0 {
+                    // Just append data
+                    let value = $value.to_be_bytes();
+                    std::ptr::copy_nonoverlapping(value.as_ptr(), data_ptr, $bytes);
+                } else {
+                    // Append high bits to the last byte
+                    *data_ptr |= ($value >> ($bits - 8 + r)) as u8;
+                    // Make shifted bytes
+                    let value: [u8; $bytes] = ($value << (8 - r)).to_be_bytes();
+                    // Write shifted bytes
+                    std::ptr::copy_nonoverlapping(value.as_ptr(), data_ptr.add(1), $bytes);
+                }
+            };
+            $self.bit_len += $bits;
+            Ok(())
+        } else {
+            Err(Error::CellOverflow)
+        }
+    };
+}
+
+impl CellDataBuilder {
+    /// Creates an empty cell data builder.
+    pub const fn new() -> Self {
+        Self {
+            data: [0; 128],
+            bit_len: 0,
         }
     }
 
@@ -369,11 +804,20 @@ impl CellBuilder {
         CellSlice::new_allow_exotic(IntermediateDataCell::wrap(self))
     }
 
-    /// Returns a slice which contains builder data and references.
-    ///
-    /// NOTE: intermediate cell hash is undefined.
-    pub fn as_full_slice(&self) -> CellSlice<'_> {
-        CellSlice::new_allow_exotic(IntermediateFullCell::wrap(self))
+    /// Returns an object which will display data as a bitstring
+    /// with a termination bit.
+    #[inline]
+    pub fn display_data(&self) -> DisplayCellBuilderData<'_> {
+        DisplayCellBuilderData(self)
+    }
+
+    /// Returns cell data as a [`Bitstring`].
+    #[inline]
+    pub fn as_bitstring(&self) -> Bitstring<'_> {
+        Bitstring {
+            bytes: &self.data,
+            bit_len: self.bit_len,
+        }
     }
 
     /// Returns an underlying cell data.
@@ -382,32 +826,10 @@ impl CellBuilder {
         &self.data
     }
 
-    /// Returns the stored cell size.
-    pub const fn size(&self) -> Size {
-        Size {
-            bits: self.bit_len,
-            refs: self.references.len() as u8,
-        }
-    }
-
     /// Returns the data size of this cell in bits.
     #[inline]
     pub const fn size_bits(&self) -> u16 {
         self.bit_len
-    }
-
-    /// Returns child cell count.
-    #[inline(always)]
-    pub const fn size_refs(&self) -> u8 {
-        self.references.len() as u8
-    }
-
-    /// Returns the remaining capacity in bits and references.
-    pub const fn spare_capacity(&self) -> Size {
-        Size {
-            bits: self.spare_capacity_bits(),
-            refs: self.spare_capacity_refs(),
-        }
     }
 
     /// Returns remaining data capacity in bits.
@@ -416,32 +838,20 @@ impl CellBuilder {
         MAX_BIT_LEN - self.bit_len
     }
 
-    /// Returns remaining references capacity.
+    /// Returns true if there is enough remaining capacity to fit `bits`.
     #[inline]
-    pub const fn spare_capacity_refs(&self) -> u8 {
-        (MAX_REF_COUNT - self.references.len()) as u8
+    pub const fn has_capacity_bits(&self, bits: u16) -> bool {
+        self.bit_len + bits <= MAX_BIT_LEN
     }
 
-    /// Returns true if there is enough remaining capacity to fit `bits` and `refs`.
-    #[inline]
-    pub const fn has_capacity(&self, bits: u16, refs: u8) -> bool {
-        self.bit_len + bits <= MAX_BIT_LEN && self.references.len() + refs as usize <= MAX_REF_COUNT
-    }
-
-    /// Returns whether this cell will be built as an exotic.
-    #[inline]
-    pub const fn is_exotic(&self) -> bool {
-        self.is_exotic
-    }
-
-    /// Marks this cell as exotic.
-    #[inline]
-    pub fn set_exotic(&mut self, is_exotic: bool) {
-        self.is_exotic = is_exotic;
+    /// Clears all data bits and sets the size in bits to 0.
+    pub fn clear_bits(&mut self) {
+        self.data = [0; 128];
+        self.bit_len = 0;
     }
 
     /// Removes the specified amount of bits from the end of the data.
-    pub fn rewind(&mut self, mut bits: u16) -> Result<(), Error> {
+    pub fn rewind_bits(&mut self, mut bits: u16) -> Result<(), Error> {
         if bits == 0 {
             return Ok(());
         }
@@ -579,7 +989,7 @@ impl CellBuilder {
     where
         T: AsRef<[u8; 32]>,
     {
-        fn store_u256_impl(builder: &mut CellBuilder, value: &[u8; 32]) -> Result<(), Error> {
+        fn store_u256_impl(builder: &mut CellDataBuilder, value: &[u8; 32]) -> Result<(), Error> {
             if builder.bit_len + 256 <= MAX_BIT_LEN {
                 let q = (builder.bit_len / 8) as usize;
                 let r = builder.bit_len % 8;
@@ -745,7 +1155,10 @@ impl CellBuilder {
     where
         T: AsRef<DynCell>,
     {
-        fn store_cell_data_impl(builder: &mut CellBuilder, value: &DynCell) -> Result<(), Error> {
+        fn store_cell_data_impl(
+            builder: &mut CellDataBuilder,
+            value: &DynCell,
+        ) -> Result<(), Error> {
             store_raw(
                 &mut builder.data,
                 &mut builder.bit_len,
@@ -764,7 +1177,7 @@ impl CellBuilder {
         T: AsRef<CellSlice<'a>>,
     {
         fn store_slice_data_impl(
-            builder: &mut CellBuilder,
+            builder: &mut CellDataBuilder,
             value: &CellSlice<'_>,
         ) -> Result<(), Error> {
             let bits = value.size_bits();
@@ -897,295 +1310,6 @@ fn store_raw(
     }
 }
 
-impl CellBuilder {
-    /// Returns a slice of the child cells stored in the builder.
-    #[inline]
-    pub fn references(&self) -> &[Cell] {
-        self.references.as_ref()
-    }
-
-    /// Tries to store a child in the cell,
-    /// returning `false` if there is not enough remaining capacity.
-    pub fn store_reference(&mut self, cell: Cell) -> Result<(), Error> {
-        if self.references.len() < MAX_REF_COUNT {
-            // SAFETY: reference count is in the valid range
-            unsafe { self.references.push(cell) }
-            Ok(())
-        } else {
-            Err(Error::CellOverflow)
-        }
-    }
-
-    /// Sets children of the cell.
-    pub fn set_references(&mut self, refs: CellRefsBuilder) {
-        self.references = refs.0;
-    }
-
-    /// Tries to append a builder (its data and references),
-    /// returning `false` if there is not enough remaining capacity.
-    pub fn store_builder(&mut self, builder: &Self) -> Result<(), Error> {
-        if self.bit_len + builder.bit_len <= MAX_BIT_LEN
-            && self.references.len() + builder.references.len() <= MAX_REF_COUNT
-        {
-            ok!(self.store_raw(&builder.data, builder.bit_len));
-            for cell in builder.references.as_ref() {
-                ok!(self.store_reference(cell.clone()));
-            }
-            Ok(())
-        } else {
-            Err(Error::CellOverflow)
-        }
-    }
-
-    /// Tries to append a cell slice (its data and references),
-    /// returning `false` if there is not enough remaining capacity.
-    #[inline]
-    pub fn store_slice<'a, T>(&mut self, value: T) -> Result<(), Error>
-    where
-        T: AsRef<CellSlice<'a>>,
-    {
-        fn store_slice_impl(builder: &mut CellBuilder, value: &CellSlice<'_>) -> Result<(), Error> {
-            if builder.bit_len + value.size_bits() <= MAX_BIT_LEN
-                && builder.references.len() + value.size_refs() as usize <= MAX_REF_COUNT
-            {
-                ok!(builder.store_slice_data(value));
-                for cell in value.references().cloned() {
-                    ok!(builder.store_reference(cell));
-                }
-                Ok(())
-            } else {
-                Err(Error::CellOverflow)
-            }
-        }
-        store_slice_impl(self, value.as_ref())
-    }
-
-    /// Tries to build a new cell using the specified cell context.
-    pub fn build_ext(mut self, context: &dyn CellContext) -> Result<Cell, Error> {
-        debug_assert!(self.bit_len <= MAX_BIT_LEN);
-        debug_assert!(self.references.len() <= MAX_REF_COUNT);
-
-        #[cfg(feature = "stats")]
-        let mut stats = CellTreeStats {
-            bit_count: self.bit_len as u64,
-            cell_count: 1,
-        };
-
-        let mut children_mask = LevelMask::EMPTY;
-        for child in self.references.as_ref() {
-            let child = child.as_ref();
-            children_mask |= child.descriptor().level_mask();
-
-            #[cfg(feature = "stats")]
-            {
-                stats += child.stats();
-            }
-        }
-
-        let is_exotic = self.is_exotic;
-
-        let level_mask = 'mask: {
-            // NOTE: make only a brief check here, as it will raise a proper error in finalier
-            if is_exotic && self.bit_len >= 8 {
-                if let Some(ty) = CellType::from_byte_exotic(self.data[0]) {
-                    match ty {
-                        CellType::PrunedBranch => break 'mask LevelMask::new(self.data[1]),
-                        CellType::MerkleProof | CellType::MerkleUpdate => {
-                            break 'mask children_mask.virtualize(1)
-                        }
-                        CellType::LibraryReference => break 'mask LevelMask::EMPTY,
-                        _ => {}
-                    };
-                }
-            }
-
-            children_mask
-        };
-
-        let d1 = CellDescriptor::compute_d1(level_mask, is_exotic, self.references.len() as u8);
-        let d2 = CellDescriptor::compute_d2(self.bit_len);
-
-        let rem = self.bit_len % 8;
-        let last_byte = (self.bit_len / 8) as usize;
-        if rem > 0 {
-            // SAFETY: `last_byte` is in the valid range
-            let last_byte = unsafe { self.data.get_unchecked_mut(last_byte) };
-
-            // x0000000 - rem=1, tag_mask=01000000, data_mask=11000000
-            // xx000000 - rem=2, tag_mask=00100000, data_mask=11100000
-            // xxx00000 - rem=3, tag_mask=00010000, data_mask=11110000
-            // xxxx0000 - rem=4, tag_mask=00001000, data_mask=11111000
-            // xxxxx000 - rem=5, tag_mask=00000100, data_mask=11111100
-            // xxxxxx00 - rem=6, tag_mask=00000010, data_mask=11111110
-            // xxxxxxx0 - rem=7, tag_mask=00000001, data_mask=11111111
-            let tag_mask: u8 = 1 << (7 - rem);
-            let data_mask = !(tag_mask - 1);
-
-            // xxxxyyyy & data_mask -> xxxxy000 | tag_mask -> xxxx1000
-            *last_byte = (*last_byte & data_mask) | tag_mask;
-        }
-
-        let byte_len = self.bit_len.div_ceil(8);
-        let data = &self.data[..std::cmp::min(byte_len as usize, 128)];
-
-        let cell_parts = CellParts {
-            #[cfg(feature = "stats")]
-            stats,
-            bit_len: self.bit_len,
-            descriptor: CellDescriptor { d1, d2 },
-            children_mask,
-            references: self.references,
-            data,
-        };
-        context.finalize_cell(cell_parts)
-    }
-
-    /// Tries to build a new cell using the default cell context.
-    ///
-    /// See [`empty_context`]
-    ///
-    /// [`empty_context`]: fn@CellFamily::empty_context
-    pub fn build(self) -> Result<Cell, Error> {
-        self.build_ext(Cell::empty_context())
-    }
-
-    /// Returns an object which will display data as a bitstring
-    /// with a termination bit.
-    #[inline]
-    pub fn display_data(&self) -> DisplayCellBuilderData<'_> {
-        DisplayCellBuilderData(self)
-    }
-
-    #[inline]
-    fn as_bitstring(&self) -> Bitstring<'_> {
-        Bitstring {
-            bytes: &self.data,
-            bit_len: self.bit_len,
-        }
-    }
-}
-
-/// Helper struct to print the cell builder data.
-#[derive(Clone, Copy)]
-#[repr(transparent)]
-pub struct DisplayCellBuilderData<'a>(&'a CellBuilder);
-
-impl std::fmt::Display for DisplayCellBuilderData<'_> {
-    #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::LowerHex::fmt(self, f)
-    }
-}
-
-impl std::fmt::LowerHex for DisplayCellBuilderData<'_> {
-    #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::LowerHex::fmt(&self.0.as_bitstring(), f)
-    }
-}
-
-impl std::fmt::UpperHex for DisplayCellBuilderData<'_> {
-    #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::UpperHex::fmt(&self.0.as_bitstring(), f)
-    }
-}
-
-impl std::fmt::Binary for DisplayCellBuilderData<'_> {
-    #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Binary::fmt(&self.0.as_bitstring(), f)
-    }
-}
-
-/// Generates a fully random builder with any type of child cells.
-#[cfg(feature = "arbitrary")]
-impl<'a> arbitrary::Arbitrary<'a> for CellBuilder {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        match u.arbitrary::<CellType>()? {
-            CellType::Ordinary => {
-                let bit_len = u.int_in_range(0..=MAX_BIT_LEN)?;
-                let refs = u.int_in_range(0..=4)?;
-
-                let mut b = CellBuilder::new();
-                b.store_raw(u.bytes(bit_len.div_ceil(8) as _)?, bit_len)
-                    .unwrap();
-
-                let mut children = ArrayVec::<Cell, 4>::new();
-                for i in 0..refs as u8 {
-                    let cell = 'cell: {
-                        if i > 0 {
-                            // Allow to reuse cells.
-                            if let Some(i) = u.int_in_range(0..=i)?.checked_sub(1) {
-                                break 'cell children.get(i).cloned().unwrap();
-                            }
-                        }
-
-                        u.arbitrary::<Cell>()
-                            .and_then(crate::arbitrary::check_max_depth)?
-                    };
-
-                    b.store_reference(cell.clone()).unwrap();
-
-                    // SAFETY: `refs` is at most 4.
-                    unsafe { children.push(cell) };
-                }
-
-                Ok(b)
-            }
-            CellType::PrunedBranch => {
-                let level_mask = LevelMask::new(u.int_in_range(0b001..=0b111)?);
-
-                let mut b = CellBuilder::new();
-                b.set_exotic(true);
-                b.store_u16(u16::from_be_bytes([
-                    CellType::PrunedBranch.to_byte(),
-                    level_mask.to_byte(),
-                ]))
-                .unwrap();
-
-                let level_count = level_mask.level() as usize;
-
-                let hashes = 32 * level_count;
-                b.store_raw(u.bytes(hashes)?, hashes as u16 * 8).unwrap();
-
-                for _ in 0..level_count {
-                    b.store_u16(u.int_in_range(0..=(u16::MAX - 1))?).unwrap();
-                }
-
-                Ok(b)
-            }
-            CellType::LibraryReference => {
-                let hash = u.bytes(32)?;
-
-                let mut b = CellBuilder::new();
-                b.set_exotic(true);
-                b.store_u8(CellType::LibraryReference.to_byte()).unwrap();
-                b.store_raw(hash, 256).unwrap();
-                Ok(b)
-            }
-            CellType::MerkleProof => {
-                let mut b = CellBuilder::new();
-                u.arbitrary::<crate::merkle::MerkleProof>()?
-                    .store_into(&mut b, Cell::empty_context())
-                    .unwrap();
-                Ok(b)
-            }
-            CellType::MerkleUpdate => {
-                let mut b = CellBuilder::new();
-                u.arbitrary::<crate::merkle::MerkleUpdate>()?
-                    .store_into(&mut b, Cell::empty_context())
-                    .unwrap();
-                Ok(b)
-            }
-        }
-    }
-
-    fn size_hint(_: usize) -> (usize, Option<usize>) {
-        (3, None)
-    }
-}
-
 /// Builder for constructing cell references array.
 ///
 /// Can be used later for [`CellBuilder::set_references`].
@@ -1217,13 +1341,13 @@ impl CellRefsBuilder {
 }
 
 #[repr(transparent)]
-struct IntermediateDataCell(CellBuilder);
+struct IntermediateDataCell(CellDataBuilder);
 
 impl IntermediateDataCell {
     #[inline(always)]
-    const fn wrap(value: &CellBuilder) -> &Self {
+    const fn wrap(value: &CellDataBuilder) -> &Self {
         // SAFETY: IntermediateDataCell is #[repr(transparent)]
-        unsafe { &*(value as *const CellBuilder as *const Self) }
+        unsafe { &*(value as *const CellDataBuilder as *const Self) }
     }
 }
 
@@ -1395,7 +1519,7 @@ mod tests {
         a.store_u8(2).unwrap();
         assert!(a > b);
 
-        a.rewind(8).unwrap();
+        a.rewind_bits(8).unwrap();
         a.store_u8(1).unwrap();
         assert_eq!(a, b);
 
@@ -1420,7 +1544,7 @@ mod tests {
         assert_eq!(builder.size_bits(), 32);
         assert_eq!(builder.data[..4], 0xdeafbeaf_u32.to_be_bytes());
 
-        builder.rewind(5).unwrap();
+        builder.rewind_bits(5).unwrap();
         assert_eq!(builder.size_bits(), 27);
         assert_eq!(builder.data[..4], 0xdeafbea0_u32.to_be_bytes());
 
@@ -1429,14 +1553,14 @@ mod tests {
         assert_eq!(builder.data[..8], [
             0xde, 0xaf, 0xbe, 0xbb, 0xd5, 0xf7, 0xd5, 0xe0
         ]);
-        builder.rewind(32).unwrap();
+        builder.rewind_bits(32).unwrap();
         assert_eq!(builder.data[..8], [
             0xde, 0xaf, 0xbe, 0xa0, 0x00, 0x00, 0x00, 0x00
         ]);
 
-        assert_eq!(builder.rewind(32), Err(Error::CellUnderflow));
+        assert_eq!(builder.rewind_bits(32), Err(Error::CellUnderflow));
 
-        builder.rewind(27).unwrap();
+        builder.rewind_bits(27).unwrap();
         assert_eq!(builder.size_bits(), 0);
         assert_eq!(builder.data, [0u8; 128]);
 
@@ -1447,12 +1571,12 @@ mod tests {
         target[127] = 0xfe;
         assert_eq!(builder.data, target);
 
-        builder.rewind(3).unwrap();
+        builder.rewind_bits(3).unwrap();
         assert_eq!(builder.size_bits(), MAX_BIT_LEN - 3);
         target[127] = 0xf0;
         assert_eq!(builder.data, target);
 
-        builder.rewind(8).unwrap();
+        builder.rewind_bits(8).unwrap();
         assert_eq!(builder.size_bits(), MAX_BIT_LEN - 3 - 8);
         target[126] = 0xf0;
         target[127] = 0x00;

@@ -1,6 +1,6 @@
 #![no_main]
 use arbitrary::Arbitrary;
-use everscale_types::dict::{self, DictKey};
+use everscale_types::dict;
 use everscale_types::prelude::*;
 use libfuzzer_sys::fuzz_target;
 
@@ -8,26 +8,25 @@ fuzz_target!(|input: Input<1000, u32, u64>| compare_manual_vs_batched(input));
 
 fn compare_manual_vs_batched<const MAX_N: usize, K, V>(input: Input<MAX_N, K, V>)
 where
-    K: Store + DictKey + Ord + Copy,
+    K: StoreDictKey + Ord + Copy,
     V: Store,
 {
     let ctx = Cell::empty_context();
 
-    let initial =
-        dict::build_dict_from_sorted_iter(input.initial_items.into_iter(), K::BITS, ctx).unwrap();
+    let initial = dict::build_dict_from_sorted_iter(input.initial_items.into_iter(), ctx).unwrap();
 
     // Build manually
     let mut target = initial.clone();
     for op in &input.operations {
-        let mut b = CellBuilder::new();
+        let mut b = CellDataBuilder::new();
         match op {
             Operation::Remove { key } => {
-                key.store_into(&mut b, ctx).unwrap();
+                key.store_into_data(&mut b).unwrap();
                 dict::dict_remove_owned(&mut target, &mut b.as_data_slice(), K::BITS, false, ctx)
                     .unwrap();
             }
             Operation::Insert { key, value } => {
-                key.store_into(&mut b, ctx).unwrap();
+                key.store_into_data(&mut b).unwrap();
                 dict::dict_insert(
                     &mut target,
                     &mut b.as_data_slice(),
@@ -45,7 +44,6 @@ where
     let mut result = initial.clone();
     dict::dict_modify_from_sorted_iter(
         &mut result,
-        K::BITS,
         input.operations,
         |op| *op.key(),
         |op| {

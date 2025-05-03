@@ -35,46 +35,152 @@ mod ops {
 }
 
 /// Type which can be used as a dictionary key.
-pub trait DictKey: Sized {
+pub trait DictKey {
     /// Length in bits for a dictionary key.
     const BITS: u16;
+}
 
+impl<T: DictKey> DictKey for &T {
+    const BITS: u16 = T::BITS;
+}
+
+impl<T: DictKey> DictKey for &mut T {
+    const BITS: u16 = T::BITS;
+}
+
+/// Type which can be stored as a dict key.
+pub trait StoreDictKey: DictKey {
+    /// Stores key bits into a builder data.
+    fn store_into_data(&self, data: &mut CellDataBuilder) -> Result<(), Error>;
+}
+
+impl<T: StoreDictKey> StoreDictKey for &T {
+    #[inline]
+    fn store_into_data(&self, data: &mut CellDataBuilder) -> Result<(), Error> {
+        T::store_into_data(self, data)
+    }
+}
+
+/// Type which can be loaded as a dict key.
+pub trait LoadDictKey: DictKey + Sized {
     /// Creates a key from a raw builder data.
-    fn from_raw_data(raw_data: &[u8; 128]) -> Option<Self>;
+    fn load_from_data(data: &CellDataBuilder) -> Option<Self>;
 }
 
 macro_rules! impl_dict_key {
-    ($($ty:ty => $bits:literal => |$raw_data:ident| $expr:expr),*,) => {
-        $(impl DictKey for $ty {
+    ($($ty:ty => {
+        bits: $bits:literal,
+        store: |$this:ident, $builder:ident| $store_expr:expr,
+        load: |$raw_data:ident| $load_expr:expr$(,)?
+    }),*,) => {$(
+        impl DictKey for $ty {
             const BITS: u16 = $bits;
+        }
 
+        impl StoreDictKey for $ty {
             #[inline]
-            fn from_raw_data($raw_data: &[u8; 128]) -> Option<Self> {
-                Some($expr)
+            fn store_into_data(&self, $builder: &mut CellDataBuilder) -> Result<(), Error> {
+                let $this = self;
+                $store_expr
             }
-        })*
-    };
+        }
+
+        impl LoadDictKey for $ty {
+            #[inline]
+            fn load_from_data(b: &CellDataBuilder) -> Option<Self> {
+                let $raw_data = b.raw_data();
+                Some($load_expr)
+            }
+        }
+    )*};
 }
 
 impl_dict_key! {
-    bool => 1 => |d| d[0] & 0x80 != 0,
-    u8 => 8 => |d| d[0],
-    i8 => 8 => |d| d[0] as i8,
-    u16 => 16 => |d| u16::from_be_bytes([d[0], d[1]]),
-    i16 => 16 => |d| i16::from_be_bytes([d[0], d[1]]),
-    u32 => 32 => |d| u32::from_be_bytes(d[..4].try_into().unwrap()),
-    i32 => 32 => |d| i32::from_be_bytes(d[..4].try_into().unwrap()),
-    u64 => 64 => |d| u64::from_be_bytes(d[..8].try_into().unwrap()),
-    i64 => 64 => |d| i64::from_be_bytes(d[..8].try_into().unwrap()),
-    u128 => 128 => |d| u128::from_be_bytes(d[..16].try_into().unwrap()),
-    i128 => 128 => |d| i128::from_be_bytes(d[..16].try_into().unwrap()),
-    [u8; 16] => 128 => |d| d[..16].try_into().unwrap(),
-    [u8; 20] => 160 => |d| d[..20].try_into().unwrap(),
-    [u8; 32] => 256 => |d| d[..32].try_into().unwrap(),
-    HashBytes => 256 => |d| HashBytes(d[..32].try_into().unwrap()),
-     (u64, u32) => 96 => |d| {
-        (u64::from_be_bytes(d[..8].try_into().unwrap()), u32::from_be_bytes(d[8..12].try_into().unwrap()))
+    bool => {
+        bits: 1,
+        store: |x, b| b.store_bit(*x),
+        load: |d| d[0] & 0x80 != 0,
     },
+    u8 => {
+        bits: 8,
+        store: |x, b| b.store_u8(*x),
+        load: |d| d[0],
+    },
+    i8 => {
+        bits: 8,
+        store: |x, b| b.store_u8(*x as u8),
+        load: |d| d[0] as i8,
+    },
+    u16 => {
+        bits: 16,
+        store: |x, b| b.store_u16(*x),
+        load: |d| u16::from_be_bytes([d[0], d[1]]),
+    },
+    i16 => {
+        bits: 16,
+        store: |x, b| b.store_u16(*x as u16),
+        load: |d| i16::from_be_bytes([d[0], d[1]]),
+    },
+    u32 => {
+        bits: 32,
+        store: |x, b| b.store_u32(*x),
+        load: |d| u32::from_be_bytes(d[..4].try_into().unwrap()),
+    },
+    i32 => {
+        bits: 32,
+        store: |x, b| b.store_u32(*x as u32),
+        load: |d| i32::from_be_bytes(d[..4].try_into().unwrap()),
+    },
+    u64 => {
+        bits: 64,
+        store: |x, b| b.store_u64(*x),
+        load: |d| u64::from_be_bytes(d[..8].try_into().unwrap()),
+    },
+    i64 => {
+        bits: 64,
+        store: |x, b| b.store_u64(*x as u64),
+        load: |d| i64::from_be_bytes(d[..8].try_into().unwrap())
+    },
+    u128 => {
+        bits: 128,
+        store: |x, b| b.store_u128(*x),
+        load: |d| u128::from_be_bytes(d[..16].try_into().unwrap()),
+    },
+    i128 => {
+        bits: 128,
+        store: |x, b| b.store_u128(*x as u128),
+        load: |d| i128::from_be_bytes(d[..16].try_into().unwrap()),
+    },
+    [u8; 16] => {
+        bits: 128,
+        store: |x, b| b.store_raw(x, 128),
+        load: |d| d[..16].try_into().unwrap(),
+    },
+    [u8; 20] => {
+        bits: 160,
+        store: |x, b| b.store_raw(x, 160),
+        load: |d| d[..20].try_into().unwrap(),
+    },
+    [u8; 32] => {
+        bits: 256,
+        store: |x, b| b.store_raw(x, 256),
+        load: |d| d[..32].try_into().unwrap(),
+    },
+    HashBytes => {
+        bits: 256,
+        store: |x, b| b.store_u256(x),
+        load: |d| HashBytes(d[..32].try_into().unwrap()),
+    },
+     (u64, u32) => {
+        bits: 96,
+        store: |x, b| {
+            ok!(b.store_u64(x.0));
+            b.store_u32(x.1)
+        },
+        load: |d| {
+            (u64::from_be_bytes(d[..8].try_into().unwrap()), u32::from_be_bytes(d[8..12].try_into().unwrap()))
+        },
+     },
 }
 
 /// `AugDict` search control flow.
@@ -269,7 +375,7 @@ fn split_aug_edge(
 }
 
 /// Type alias for a pair of key and value as cell slice parts.
-pub type DictOwnedEntry = (CellBuilder, CellSliceParts);
+pub type DictOwnedEntry = (CellDataBuilder, CellSliceParts);
 
 /// Dictionary bound.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -705,7 +811,7 @@ mod tests {
             ],
         ] {
             let result =
-                build_dict_from_sorted_iter(entries.iter().copied(), 32, Cell::empty_context())
+                build_dict_from_sorted_iter(entries.iter().copied(), Cell::empty_context())
                     .unwrap();
 
             let mut dict = Dict::<u32, u32>::new();
@@ -733,7 +839,7 @@ mod tests {
             entries.sort_by_key(|(k, _)| *k);
 
             let built_from_dict =
-                build_dict_from_sorted_iter(entries.iter().copied(), 32, Cell::empty_context())
+                build_dict_from_sorted_iter(entries.iter().copied(), Cell::empty_context())
                     .unwrap();
 
             let mut dict = Dict::<u32, u32>::new();

@@ -6,7 +6,8 @@ use super::raw::*;
 use super::typed::*;
 use super::{
     aug_dict_find_by_extra, aug_dict_insert, aug_dict_remove_owned,
-    build_aug_dict_from_sorted_iter, read_label, DictKey, SearchByExtra, SetMode,
+    build_aug_dict_from_sorted_iter, read_label, DictKey, LoadDictKey, SearchByExtra, SetMode,
+    StoreDictKey,
 };
 use crate::cell::*;
 use crate::error::*;
@@ -253,7 +254,7 @@ impl<K, A, V> AugDict<K, A, V> {
 
 impl<K, A, V> AugDict<K, A, V>
 where
-    K: Store + DictKey,
+    K: StoreDictKey,
 {
     /// Returns `true` if the dictionary contains a value for the specified key.
     pub fn contains_key<Q>(&self, key: Q) -> Result<bool, Error>
@@ -266,7 +267,7 @@ where
 
 impl<K, A, V> AugDict<K, A, V>
 where
-    K: Store + DictKey,
+    K: StoreDictKey,
 {
     /// Returns the value corresponding to the key.
     pub fn get<'a: 'b, 'b, Q>(&'a self, key: Q) -> Result<Option<(A, V)>, Error>
@@ -280,7 +281,7 @@ where
 
 impl<K, A, V> AugDict<K, A, V>
 where
-    K: DictKey,
+    K: LoadDictKey,
 {
     /// Searches for an item using a predicate on extra values.
     ///
@@ -299,7 +300,7 @@ where
             return Ok(None);
         };
 
-        let Some(key) = K::from_raw_data(key.raw_data()) else {
+        let Some(key) = K::load_from_data(&key) else {
             return Err(Error::CellUnderflow);
         };
         let value = ok!(V::load_from(&mut value));
@@ -309,7 +310,7 @@ where
 
 impl<K, A, V> AugDict<K, A, V>
 where
-    K: Store + DictKey,
+    K: StoreDictKey,
     for<'a> A: AugDictExtra + Store + Load<'a>,
     V: Store,
 {
@@ -319,13 +320,12 @@ where
         Q: Borrow<K>,
         E: Borrow<A>,
         T: Borrow<V>,
-        K: Ord,
+        K: DictKey + Ord,
     {
         let root = ok!(build_aug_dict_from_sorted_iter(
             sorted
                 .iter()
                 .map(|(k, (a, v))| (k.borrow(), a.borrow(), v.borrow())),
-            K::BITS,
             A::comp_add,
             Cell::empty_context()
         ));
@@ -352,7 +352,6 @@ where
             sorted
                 .iter()
                 .map(|(k, a, v)| (k.borrow(), a.borrow(), v.borrow())),
-            K::BITS,
             A::comp_add,
             Cell::empty_context()
         ));
@@ -519,8 +518,8 @@ where
         mode: SetMode,
         context: &dyn CellContext,
     ) -> Result<bool, Error> {
-        let mut key_builder = CellBuilder::new();
-        ok!(key.store_into(&mut key_builder, Cell::empty_context()));
+        let mut key_builder = CellDataBuilder::new();
+        ok!(key.store_into_data(&mut key_builder));
         let inserted = ok!(aug_dict_insert(
             &mut self.dict.root,
             &mut key_builder.as_data_slice(),
@@ -544,8 +543,8 @@ where
         key: &K,
         context: &dyn CellContext,
     ) -> Result<Option<CellSliceParts>, Error> {
-        let mut key_builder = CellBuilder::new();
-        ok!(key.store_into(&mut key_builder, Cell::empty_context()));
+        let mut key_builder = CellDataBuilder::new();
+        ok!(key.store_into_data(&mut key_builder));
         let res = ok!(aug_dict_remove_owned(
             &mut self.dict.root,
             &mut key_builder.as_data_slice(),
@@ -719,7 +718,7 @@ where
 #[cfg(feature = "serde")]
 impl<K, A, V> serde::Serialize for AugDict<K, A, V>
 where
-    K: serde::Serialize + Store + DictKey,
+    K: serde::Serialize + LoadDictKey,
     for<'a> A: serde::Serialize + Store + Load<'a>,
     for<'a> V: serde::Serialize + Load<'a>,
 {
@@ -732,7 +731,7 @@ where
         #[derive(serde::Serialize)]
         struct AugDictHelper<'a, K, A, V>
         where
-            K: serde::Serialize + Store + DictKey,
+            K: serde::Serialize + LoadDictKey,
             A: serde::Serialize + Store + Load<'a>,
             V: serde::Serialize + Load<'a>,
         {
@@ -747,7 +746,7 @@ where
         ) -> Result<S::Ok, S::Error>
         where
             S: serde::Serializer,
-            K: serde::Serialize + Store + DictKey,
+            K: serde::Serialize + LoadDictKey,
             A: serde::Serialize + Store + Load<'a>,
             V: serde::Serialize + Load<'a>,
         {
@@ -819,7 +818,7 @@ where
 
 impl<'a, K, A, V> Iterator for AugIter<'a, K, A, V>
 where
-    K: DictKey,
+    K: LoadDictKey,
     (A, V): Load<'a>,
 {
     type Item = Result<(K, A, V), Error>;

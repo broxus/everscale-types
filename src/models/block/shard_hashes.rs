@@ -1,5 +1,5 @@
 use crate::cell::*;
-use crate::dict::{self, Dict, DictKey};
+use crate::dict::{self, Dict, LoadDictKey};
 use crate::error::Error;
 use crate::models::block::block_id::{BlockId, ShardIdent};
 use crate::models::currency::CurrencyCollection;
@@ -705,7 +705,7 @@ impl<'a> Iterator for ShardsTreeRawIter<'a> {
             self.shard_hashes_iter = Some(match self.dict_iter.next()? {
                 Ok((key, value)) => {
                     // Parse workchain id from the raw iterator
-                    let workchain = match i32::from_raw_data(key.raw_data()) {
+                    let workchain = match i32::load_from_data(&key) {
                         Some(workchain) => workchain,
                         None => return Some(Err(self.finish(Error::CellUnderflow))),
                     };

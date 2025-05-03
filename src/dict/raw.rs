@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use super::{
     build_dict_from_sorted_iter, dict_find_bound, dict_find_bound_owned, dict_find_owned, dict_get,
     dict_get_owned, dict_get_subdict, dict_insert, dict_load_from_root, dict_remove_bound_owned,
-    dict_remove_owned, dict_split_by_prefix, read_label, DictBound, DictKey, DictOwnedEntry,
-    SetMode,
+    dict_remove_owned, dict_split_by_prefix, read_label, DictBound, DictOwnedEntry, SetMode,
+    StoreDictKey,
 };
 use crate::cell::*;
 use crate::error::Error;
@@ -120,28 +120,23 @@ impl<const N: u16> RawDict<N> {
     /// Builds a dictionary from a sorted collection.
     pub fn try_from_btree<K, V>(sorted: &BTreeMap<K, V>) -> Result<Self, Error>
     where
-        K: Store + DictKey + Ord,
+        K: StoreDictKey + Ord,
         V: Store,
     {
         assert_eq!(K::BITS, N);
-        let root = ok!(build_dict_from_sorted_iter(
-            sorted,
-            N,
-            Cell::empty_context()
-        ));
+        let root = ok!(build_dict_from_sorted_iter(sorted, Cell::empty_context()));
         Ok(Self(root))
     }
 
     /// Builds a dictionary from a sorted slice.
     pub fn try_from_sorted_slice<K, V>(sorted: &[(K, V)]) -> Result<Self, Error>
     where
-        K: Store + DictKey + Ord,
+        K: StoreDictKey + Ord,
         V: Store,
     {
         assert_eq!(K::BITS, N);
         let root = ok!(build_dict_from_sorted_iter(
             sorted.iter().map(|(k, v)| (k, v)),
-            N,
             Cell::empty_context()
         ));
         Ok(Self(root))
@@ -198,7 +193,7 @@ impl<const N: u16> RawDict<N> {
         &self,
         key: CellSlice<'_>,
         signed: bool,
-    ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
+    ) -> Result<Option<(CellDataBuilder, CellSliceParts)>, Error> {
         dict_find_owned(
             self.0.as_ref(),
             N,
@@ -225,7 +220,7 @@ impl<const N: u16> RawDict<N> {
         &self,
         key: CellSlice<'_>,
         signed: bool,
-    ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
+    ) -> Result<Option<(CellDataBuilder, CellSliceParts)>, Error> {
         dict_find_owned(
             self.0.as_ref(),
             N,
@@ -243,7 +238,7 @@ impl<const N: u16> RawDict<N> {
         &self,
         key: CellSlice<'_>,
         signed: bool,
-    ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
+    ) -> Result<Option<(CellDataBuilder, CellSliceParts)>, Error> {
         dict_find_owned(
             self.0.as_ref(),
             N,
@@ -261,7 +256,7 @@ impl<const N: u16> RawDict<N> {
         &self,
         key: CellSlice<'_>,
         signed: bool,
-    ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
+    ) -> Result<Option<(CellDataBuilder, CellSliceParts)>, Error> {
         dict_find_owned(
             self.0.as_ref(),
             N,
@@ -290,7 +285,7 @@ impl<const N: u16> RawDict<N> {
     }
 
     /// Returns the lowest key and a value corresponding to the key.
-    pub fn get_min(&self, signed: bool) -> Result<Option<(CellBuilder, CellSlice<'_>)>, Error> {
+    pub fn get_min(&self, signed: bool) -> Result<Option<(CellDataBuilder, CellSlice<'_>)>, Error> {
         dict_find_bound(
             self.0.as_ref(),
             N,
@@ -301,7 +296,7 @@ impl<const N: u16> RawDict<N> {
     }
 
     /// Returns the largest key and a value corresponding to the key.
-    pub fn get_max(&self, signed: bool) -> Result<Option<(CellBuilder, CellSlice<'_>)>, Error> {
+    pub fn get_max(&self, signed: bool) -> Result<Option<(CellDataBuilder, CellSlice<'_>)>, Error> {
         dict_find_bound(
             self.0.as_ref(),
             N,
@@ -316,7 +311,7 @@ impl<const N: u16> RawDict<N> {
         &self,
         bound: DictBound,
         signed: bool,
-    ) -> Result<Option<(CellBuilder, CellSlice<'_>)>, Error> {
+    ) -> Result<Option<(CellDataBuilder, CellSlice<'_>)>, Error> {
         dict_find_bound(self.0.as_ref(), N, bound, signed, Cell::empty_context())
     }
 
@@ -326,7 +321,7 @@ impl<const N: u16> RawDict<N> {
         bound: DictBound,
         signed: bool,
         context: &'c dyn CellContext,
-    ) -> Result<Option<(CellBuilder, CellSlice<'a>)>, Error> {
+    ) -> Result<Option<(CellDataBuilder, CellSlice<'a>)>, Error> {
         dict_find_bound(self.0.as_ref(), N, bound, signed, context)
     }
 
@@ -334,7 +329,7 @@ impl<const N: u16> RawDict<N> {
     pub fn get_min_owned(
         &self,
         signed: bool,
-    ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
+    ) -> Result<Option<(CellDataBuilder, CellSliceParts)>, Error> {
         dict_find_bound_owned(
             self.0.as_ref(),
             N,
@@ -348,7 +343,7 @@ impl<const N: u16> RawDict<N> {
     pub fn get_max_owned(
         &self,
         signed: bool,
-    ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
+    ) -> Result<Option<(CellDataBuilder, CellSliceParts)>, Error> {
         dict_find_bound_owned(
             self.0.as_ref(),
             N,
@@ -363,7 +358,7 @@ impl<const N: u16> RawDict<N> {
         &self,
         bound: DictBound,
         signed: bool,
-    ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
+    ) -> Result<Option<(CellDataBuilder, CellSliceParts)>, Error> {
         dict_find_bound_owned(self.0.as_ref(), N, bound, signed, Cell::empty_context())
     }
 
@@ -373,7 +368,7 @@ impl<const N: u16> RawDict<N> {
         bound: DictBound,
         signed: bool,
         context: &dyn CellContext,
-    ) -> Result<Option<(CellBuilder, CellSliceParts)>, Error> {
+    ) -> Result<Option<(CellDataBuilder, CellSliceParts)>, Error> {
         dict_find_bound_owned(self.0.as_ref(), N, bound, signed, context)
     }
 
@@ -466,7 +461,7 @@ impl<const N: u16> RawDict<N> {
     }
 
     /// Gets an iterator over the entries of the dictionary, sorted by key.
-    /// The iterator element type is `Result<(CellBuilder, CellSlice)>`.
+    /// The iterator element type is `Result<(CellDataBuilder, CellSlice)>`.
     ///
     /// If the dictionary is invalid, finishes after the first invalid element,
     /// returning an error.
@@ -483,7 +478,7 @@ impl<const N: u16> RawDict<N> {
 
     /// Gets an iterator over the entries of two dictionaries, sorted by key.
     /// The iterator element type is
-    /// `Result<(CellBuilder, Option<CellSlice>, Option<CellSlice>)>`.
+    /// `Result<(CellDataBuilder, Option<CellSlice>, Option<CellSlice>)>`.
     /// Where the first element is the key, the second is the value from the first dictionary,
     /// and the third is the value from the second dictionary.
     ///
@@ -499,7 +494,7 @@ impl<const N: u16> RawDict<N> {
     }
 
     /// Gets an iterator over the owned entries of the dictionary, sorted by key.
-    /// The iterator element type is `Result<(CellBuilder, CellSliceParts)>`.
+    /// The iterator element type is `Result<(CellDataBuilder, CellSliceParts)>`.
     ///
     /// If the dictionary is invalid, finishes after the first invalid element,
     /// returning an error.
@@ -515,7 +510,7 @@ impl<const N: u16> RawDict<N> {
     }
 
     /// Gets an iterator over the keys of the dictionary, in sorted order.
-    /// The iterator element type is `Result<CellBuilder>`.
+    /// The iterator element type is `Result<CellDataBuilder>`.
     ///
     /// If the dictionary is invalid, finishes after the first invalid element,
     /// returning an error.
@@ -680,7 +675,7 @@ impl<'a> RawOwnedIter<'a> {
 }
 
 impl Iterator for RawOwnedIter<'_> {
-    type Item = Result<(CellBuilder, CellSliceParts), Error>;
+    type Item = Result<(CellDataBuilder, CellSliceParts), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.next_owned(self.root)
@@ -699,7 +694,7 @@ impl Iterator for RawOwnedIter<'_> {
 pub struct RawIter<'a> {
     segments: Vec<IterSegment<'a>>,
     status: IterStatus,
-    builder: Box<CellBuilder>,
+    builder: Box<CellDataBuilder>,
     reversed: bool,
     signed: bool,
 }
@@ -773,7 +768,7 @@ impl<'a> RawIter<'a> {
     pub fn next_owned(
         &mut self,
         root: &Option<Cell>,
-    ) -> Option<Result<(CellBuilder, CellSliceParts), Error>> {
+    ) -> Option<Result<(CellDataBuilder, CellSliceParts), Error>> {
         Some(match self.next()? {
             Ok((key, slice)) => {
                 let parent = match self.segments.last() {
@@ -816,7 +811,7 @@ impl<'a> RawIter<'a> {
 }
 
 impl<'a> Iterator for RawIter<'a> {
-    type Item = Result<(CellBuilder, CellSlice<'a>), Error>;
+    type Item = Result<(CellDataBuilder, CellSlice<'a>), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if unlikely(!self.status.is_valid()) {
@@ -832,8 +827,8 @@ impl<'a> Iterator for RawIter<'a> {
             reverse: bool,
             signed: bool,
             segments: &mut Vec<IterSegment<'a>>,
-            builder: &mut CellBuilder,
-        ) -> Result<Option<(CellBuilder, CellSlice<'a>)>, Error> {
+            builder: &mut CellDataBuilder,
+        ) -> Result<Option<(CellDataBuilder, CellSlice<'a>)>, Error> {
             #[allow(clippy::never_loop)]
             loop {
                 let mut to_rewind = 0;
@@ -859,7 +854,7 @@ impl<'a> Iterator for RawIter<'a> {
                         let data = ok!(segment.data.cell().get_reference_as_slice(next_bit as u8));
                         segment.data.skip_first(0, 1).ok();
 
-                        ok!(builder.rewind(to_rewind));
+                        ok!(builder.rewind_bits(to_rewind));
                         ok!(builder.store_bit(next_bit));
                         segments.push(IterSegment {
                             data,
@@ -893,7 +888,7 @@ impl<'a> Iterator for RawIter<'a> {
 
                         // Pop the current segment from the stack
                         segments.pop();
-                        ok!(builder.rewind(!segments.is_empty() as u16));
+                        ok!(builder.rewind_bits(!segments.is_empty() as u16));
 
                         Ok(Some((key, data)))
                     }
@@ -948,10 +943,10 @@ struct IterSegment<'a> {
 #[derive(Clone)]
 pub struct UnionRawIter<'a> {
     left: RawIter<'a>,
-    left_peeked: Option<Box<(CellBuilder, CellSlice<'a>)>>,
+    left_peeked: Option<Box<(CellDataBuilder, CellSlice<'a>)>>,
     left_finished: bool,
     right: RawIter<'a>,
-    right_peeked: Option<Box<(CellBuilder, CellSlice<'a>)>>,
+    right_peeked: Option<Box<(CellDataBuilder, CellSlice<'a>)>>,
     right_finished: bool,
 }
 
@@ -1018,8 +1013,8 @@ impl<'a> UnionRawIter<'a> {
     fn peek<'p>(
         iter: &mut RawIter<'a>,
         finished: &mut bool,
-        peeked: &'p mut Option<Box<(CellBuilder, CellSlice<'a>)>>,
-    ) -> Result<Option<&'p (CellBuilder, CellSlice<'a>)>, Error> {
+        peeked: &'p mut Option<Box<(CellDataBuilder, CellSlice<'a>)>>,
+    ) -> Result<Option<&'p (CellDataBuilder, CellSlice<'a>)>, Error> {
         if !*finished && peeked.is_none() {
             match iter.next() {
                 Some(Ok(next)) => {
@@ -1037,7 +1032,14 @@ impl<'a> UnionRawIter<'a> {
 }
 
 impl<'a> Iterator for UnionRawIter<'a> {
-    type Item = Result<(CellBuilder, Option<CellSlice<'a>>, Option<CellSlice<'a>>), Error>;
+    type Item = Result<
+        (
+            CellDataBuilder,
+            Option<CellSlice<'a>>,
+            Option<CellSlice<'a>>,
+        ),
+        Error,
+    >;
 
     fn next(&mut self) -> Option<Self::Item> {
         if unlikely(!self.left.status.is_valid() || !self.right.status.is_valid()) {
@@ -1191,7 +1193,7 @@ impl<'a> RawKeys<'a> {
 }
 
 impl Iterator for RawKeys<'_> {
-    type Item = Result<CellBuilder, Error>;
+    type Item = Result<CellDataBuilder, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.inner.next()? {
@@ -1511,10 +1513,9 @@ mod tests {
             for (i, item) in dict.iter().enumerate() {
                 total += 1;
                 let (key, value) = item?;
-                let key = key.build()?;
+                assert_eq!(key.size_bits(), 32);
                 assert_eq!(value.size_bits(), 1);
-                assert_eq!(key.bit_len(), 32);
-                let key = key.as_slice()?.load_u32()?;
+                let key = key.as_data_slice().load_u32()?;
                 assert_eq!(key, i as u32);
             }
             assert_eq!(total, i + 1);
@@ -1723,10 +1724,7 @@ mod tests {
             assert_eq!(key, rev_key);
             assert_eq!(value.lex_cmp(&rev_value), Ok(std::cmp::Ordering::Equal));
 
-            let key = {
-                let key_cell = key.build()?;
-                key_cell.as_slice()?.load_u32()?
-            };
+            let key = key.as_data_slice().load_u32()?;
             assert_eq!(key, i as u32);
         }
         assert!(rev_iter_items.next().is_none());
@@ -1741,10 +1739,7 @@ mod tests {
                 u32::load_from(&mut slice).unwrap();
             }
 
-            let key = {
-                let key_cell = key.build()?;
-                key_cell.as_slice()?.load_u32()?
-            };
+            let key = key.as_data_slice().load_u32()?;
             assert_eq!(key, i as u32);
             last = Some(key);
         }

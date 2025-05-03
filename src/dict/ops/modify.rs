@@ -1,11 +1,10 @@
 use crate::cell::*;
-use crate::dict::{build_dict_from_sorted_iter, read_label, MergeStackItem};
+use crate::dict::{build_dict_from_sorted_iter, read_label, MergeStackItem, StoreDictKey};
 use crate::error::Error;
 
 /// Modify a dict with a sorted list of inserts/removes.
 pub fn dict_modify_from_sorted_iter<K, V, T, I, FK, FV>(
     dict: &mut Option<Cell>,
-    key_bit_len: u16,
     entries: I,
     mut extract_key: FK,
     mut extract_value: FV,
@@ -13,7 +12,7 @@ pub fn dict_modify_from_sorted_iter<K, V, T, I, FK, FV>(
 ) -> Result<bool, Error>
 where
     I: IntoIterator<Item = T>,
-    K: Store + Ord,
+    K: StoreDictKey + Ord,
     V: Store,
     for<'a> FK: FnMut(&'a T) -> K,
     FV: FnMut(T) -> Result<Option<V>, Error>,
@@ -36,7 +35,6 @@ where
                     }
                 }
             }),
-            key_bit_len,
             context,
         );
         if let Some(e) = err {
@@ -47,7 +45,7 @@ where
     };
 
     // Fallback to the full merge.
-    let mut prev_key_builder = CellBuilder::new();
+    let mut prev_key_builder = CellDataBuilder::new();
 
     let mut iter_stack = Vec::<IterStackItem>::new();
     let mut res_stack = Vec::<MergeStackItem<V>>::new();
@@ -68,13 +66,10 @@ where
         }
 
         // Build key.
-        let mut key_builder = CellBuilder::new();
-        ok!(key.store_into(&mut key_builder, context));
+        let mut key_builder = CellDataBuilder::new();
+        ok!(key.store_into_data(&mut key_builder));
+        debug_assert_eq!(key_builder.size_bits(), K::BITS);
         prev_key = Some(key);
-
-        if key_builder.size_bits() != key_bit_len {
-            return Err(Error::InvalidData);
-        }
 
         let key = key_builder.as_data_slice();
 
@@ -103,10 +98,7 @@ where
         };
 
         // Update the previous key builder.
-        prev_key_builder
-            .rewind(prev_key_builder.size_bits())
-            .unwrap();
-        debug_assert_eq!(prev_key_builder.size_bits(), 0);
+        prev_key_builder.clear_bits();
         prev_key_builder.store_slice_data(key).unwrap();
 
         //
@@ -173,16 +165,16 @@ where
             left.prev_lcp_len() + 1
         };
 
-        result = ok!(left.merge(result, key_offset, key_bit_len, context));
+        result = ok!(left.merge(result, key_offset, K::BITS, context));
     }
 
-    *dict = Some(ok!(result.build(key_bit_len, context)));
+    *dict = Some(ok!(result.build(K::BITS, context)));
     Ok(true)
 }
 
 struct IterStackItem {
     /// Key bits before this node.
-    prefix: CellBuilder,
+    prefix: CellDataBuilder,
     /// Original cell with this node.
     cell: Cell,
     /// Cell slice range of the label.
@@ -210,7 +202,7 @@ impl IterStackItem {
     /// * `prefix` must contain all key bits before this node.
     /// * `key_bit_len` is a number of remaining key bits
     ///   (i.e. `prefix.size_bits() + key_bit_len == full_key_bit_len`).
-    fn load(prefix: CellBuilder, key_bit_len: u16, cell: Cell) -> Result<Self, Error> {
+    fn load(prefix: CellDataBuilder, key_bit_len: u16, cell: Cell) -> Result<Self, Error> {
         let mut data = ok!(cell.as_slice());
         let label = ok!(read_label(&mut data, key_bit_len));
         Ok(Self {
@@ -293,7 +285,7 @@ impl IterStackItem {
     ) -> Result<SeekState<'k>, Error> {
         debug_assert!(stack.is_empty());
         stack.push(ok!(IterStackItem::load(
-            CellBuilder::new(),
+            CellDataBuilder::new(),
             key.size_bits(),
             root
         )));
@@ -408,7 +400,7 @@ impl IterStackItem {
 
             // Load the next child.
             let mut prefix = item.prefix.clone();
-            ok!(prefix.store_slice(item.label()));
+            ok!(prefix.store_slice_data(item.label()));
             ok!(prefix.store_bit(child_index != 0));
             let item = ok!(IterStackItem::load(prefix, key.size_bits(), child));
 
@@ -429,7 +421,7 @@ impl<V: Store> MergeStackItem<V> {
     /// Prefix must contain the full item key.
     fn add_value(
         stack: &mut Vec<Self>,
-        key: CellBuilder,
+        key: CellDataBuilder,
         value: V,
         context: &dyn CellContext,
     ) -> Result<(), Error> {
@@ -453,7 +445,7 @@ impl<V: Store> MergeStackItem<V> {
     /// Prefix must contain the full item key.
     fn add_raw_leaf(
         stack: &mut Vec<Self>,
-        prefix: CellBuilder,
+        prefix: CellDataBuilder,
         value: Cell,
         data_offset_bits: u16,
         context: &dyn CellContext,
@@ -484,7 +476,7 @@ impl<V: Store> MergeStackItem<V> {
     /// Prefix must contain all key bits before the subtree label.
     fn add_flattened_subtree(
         res_stack: &mut Vec<Self>,
-        mut prefix: CellBuilder,
+        mut prefix: CellDataBuilder,
         key_bit_len: u16,
         value: Cell,
         context: &dyn CellContext,
@@ -518,7 +510,7 @@ impl<V: Store> MergeStackItem<V> {
     /// Prefix must contain all key bits before the subtree label.
     fn add_subtree(
         res_stack: &mut Vec<Self>,
-        prefix: CellBuilder,
+        prefix: CellDataBuilder,
         key_bit_len: u16,
         value: Cell,
         context: &dyn CellContext,
@@ -601,8 +593,7 @@ mod tests {
 
         dict_modify_from_sorted_iter(
             &mut dict.root,
-            32,
-            [(0, false), (3145983, true)],
+            [(0u32, false), (3145983, true)],
             |(key, _)| *key,
             |(key, add)| Ok(add.then_some(key)),
             Cell::empty_context(),

@@ -7,7 +7,7 @@ use rand::{Rng, SeedableRng};
 fn build_dict_impl<K, V>(id: impl Into<String>, sizes: &[usize], c: &mut Criterion)
 where
     Standard: Distribution<K> + Distribution<V>,
-    K: Copy + Store + DictKey + Ord,
+    K: Copy + StoreDictKey + Ord,
     V: Copy + Store,
 {
     let mut rng = rand_xorshift::XorShiftRng::from_seed([0u8; 16]);

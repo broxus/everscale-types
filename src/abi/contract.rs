@@ -11,7 +11,9 @@ use super::error::AbiError;
 use super::{AbiHeaderType, AbiType, AbiValue, AbiVersion, NamedAbiType, NamedAbiValue};
 use crate::abi::value::ser::AbiSerializer;
 use crate::abi::AbiHeader;
-use crate::cell::{Cell, CellBuilder, CellFamily, CellSlice, DynCell, HashBytes, Size, Store};
+use crate::cell::{
+    Cell, CellBuilder, CellDataBuilder, CellFamily, CellSlice, DynCell, HashBytes, Size, Store,
+};
 use crate::dict::RawDict;
 use crate::models::{
     ExtInMsgInfo, IntAddr, MsgInfo, OwnedMessage, OwnedRelaxedMessage, RelaxedIntMsgInfo,
@@ -75,7 +77,7 @@ impl Contract {
         }
 
         let context = Cell::empty_context();
-        let mut key_builder = CellBuilder::new();
+        let mut key_builder = CellDataBuilder::new();
 
         for token in tokens {
             let Some((key, ty)) = self.init_data.get(token.name.as_ref()) else {
@@ -91,7 +93,7 @@ impl Contract {
                 context,
             )?;
 
-            key_builder.rewind(64)?;
+            key_builder.clear_bits();
         }
 
         // Set public key if specified
@@ -126,7 +128,7 @@ impl Contract {
             .collect::<HashMap<_, _>>();
 
         let context = Cell::empty_context();
-        let mut key_builder = CellBuilder::new();
+        let mut key_builder = CellDataBuilder::new();
 
         // Write explicitly provided values
         for token in tokens {
@@ -143,7 +145,7 @@ impl Contract {
                 context,
             )?;
 
-            key_builder.rewind(64)?;
+            key_builder.clear_bits();
         }
 
         // Write remaining values with default values
@@ -158,7 +160,7 @@ impl Contract {
                 context,
             )?;
 
-            key_builder.rewind(64)?;
+            key_builder.clear_bits();
         }
 
         // Set public key
