@@ -5,9 +5,9 @@ use std::marker::PhantomData;
 use super::raw::*;
 use super::typed::*;
 use super::{
-    aug_dict_find_by_extra, aug_dict_insert, aug_dict_remove_owned,
-    build_aug_dict_from_sorted_iter, read_label, DictKey, LoadDictKey, SearchByExtra, SetMode,
-    StoreDictKey,
+    aug_dict_find_by_extra, aug_dict_insert, aug_dict_modify_from_sorted_iter,
+    aug_dict_remove_owned, build_aug_dict_from_sorted_iter, read_label, DictKey, LoadDictKey,
+    SearchByExtra, SetMode, StoreDictKey,
 };
 use crate::cell::*;
 use crate::error::*;
@@ -366,6 +366,56 @@ where
         Ok(result)
     }
 
+    /// Applies a sorted list of inserts/removes to the dictionary.
+    /// Use this when you have a large set of known changes.
+    ///
+    /// Uses custom extracts for values.
+    pub fn modify_with_sorted_iter<I>(&mut self, entries: I) -> Result<bool, Error>
+    where
+        I: IntoIterator<Item = (K, Option<(A, V)>)>,
+        K: Clone + Ord,
+    {
+        self.modify_with_sorted_iter_ext(
+            entries,
+            |(key, _)| key.clone(),
+            |(_, value)| Ok(value),
+            Cell::empty_context(),
+        )
+    }
+
+    /// Applies a sorted list of inserts/removes to the dictionary.
+    /// Use this when you have a large set of known changes.
+    ///
+    /// Uses custom extracts for values.
+    pub fn modify_with_sorted_iter_ext<T, I, FK, FV>(
+        &mut self,
+        entries: I,
+        extract_key: FK,
+        extract_value: FV,
+        context: &dyn CellContext,
+    ) -> Result<bool, Error>
+    where
+        I: IntoIterator<Item = T>,
+        K: Ord,
+        for<'a> FK: FnMut(&'a T) -> K,
+        FV: FnMut(T) -> Result<Option<(A, V)>, Error>,
+    {
+        let modified = ok!(aug_dict_modify_from_sorted_iter(
+            &mut self.dict.root,
+            entries,
+            extract_key,
+            extract_value,
+            A::comp_add,
+            context,
+        ));
+
+        if modified {
+            ok!(self.update_root_extra());
+        }
+
+        Ok(modified)
+    }
+
     /// Sets the augmented value associated with the key in the aug dictionary.
     ///
     /// Use [`set_ext`] if you need to use a custom cell context.
@@ -495,6 +545,15 @@ where
             }
             None => Ok(None),
         }
+    }
+
+    /// Removes the value associated with key in dictionary.
+    /// Returns an optional removed value as cell slice parts.
+    pub fn remove_raw<Q>(&mut self, key: Q) -> Result<Option<CellSliceParts>, Error>
+    where
+        Q: Borrow<K>,
+    {
+        self.remove_impl(key.borrow(), Cell::empty_context())
     }
 
     /// Removes the value associated with key in dictionary.
@@ -1061,6 +1120,27 @@ mod tests {
 
             assert_eq!(result, dict);
         }
+    }
+
+    #[test]
+    fn compare_sorted_res() -> anyhow::Result<()> {
+        let mut dict = AugDict::<u32, SomeValue, u64>::new();
+        dict.add(268445184, SomeValue(269488144), 18446744073693827088)?;
+        dict.add(4294934527, SomeValue(4294967295), 1224979098644774911)?;
+
+        let mut other = AugDict::<u32, SomeValue, u64>::try_from_sorted_slice(&[
+            (268445184, SomeValue(269488144), 18446744073693827088),
+            (4294934527, SomeValue(4294967295), 1224979098644774911),
+        ])?;
+        assert_eq!(other, dict);
+
+        other.remove(0)?;
+        assert_eq!(other, dict);
+
+        other.modify_with_sorted_iter([(0, None)])?;
+        assert_eq!(other, dict);
+
+        Ok(())
     }
 
     #[test]

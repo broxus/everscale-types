@@ -1,5 +1,11 @@
+use std::marker::PhantomData;
+
 use crate::cell::*;
-use crate::dict::{build_dict_from_sorted_iter, read_label, MergeStackItem, StoreDictKey};
+use crate::dict::{
+    build_aug_dict_from_sorted_iter, build_dict_from_sorted_iter, read_label, AugDictFn,
+    AugMergeStackItemMode, MergeStackItem, MergeStackItemMode, SimpleMergeStackItemMode,
+    StoreDictKey,
+};
 use crate::error::Error;
 
 /// Modify a dict with a sorted list of inserts/removes.
@@ -48,7 +54,7 @@ where
     let mut prev_key_builder = CellDataBuilder::new();
 
     let mut iter_stack = Vec::<IterStackItem>::new();
-    let mut res_stack = Vec::<MergeStackItem<V>>::new();
+    let mut res_stack = Vec::<MergeStackItem<V, SimpleMergeStackItemMode>>::new();
 
     let mut prev_key = None::<K>;
     for item in entries {
@@ -84,6 +90,7 @@ where
                 key,
                 before_remove,
                 &mut res_stack,
+                (),
                 context,
             ))
         } else {
@@ -93,6 +100,7 @@ where
                 key,
                 before_remove,
                 &mut res_stack,
+                (),
                 context,
             ))
         };
@@ -110,7 +118,7 @@ where
                 if ok!(remaining_key.lex_cmp(&iter.label())).is_gt()
                     && iter.state != IterStackItem::STATE_USED_FULL
                 {
-                    ok!(iter.add_subtrees(1, false, &mut res_stack, context));
+                    ok!(iter.add_subtrees(1, false, &mut res_stack, (), context));
                     iter.state = IterStackItem::STATE_USED_FULL;
                 }
 
@@ -119,6 +127,8 @@ where
                         &mut res_stack,
                         key_builder,
                         value,
+                        (),
+                        (),
                         context,
                     ));
                 }
@@ -133,6 +143,8 @@ where
                         &mut res_stack,
                         key_builder,
                         value,
+                        (),
+                        (),
                         context,
                     ));
                 } else {
@@ -150,25 +162,181 @@ where
     ok!(IterStackItem::seek_end(
         &mut iter_stack,
         &mut res_stack,
-        context
+        (),
+        context,
     ));
 
-    let Some(mut result) = res_stack.pop() else {
-        *dict = None;
-        return Ok(true);
+    *dict = ok!(MergeStackItem::finalize(res_stack, K::BITS, (), context));
+    Ok(true)
+}
+
+/// Modify a dict with a sorted list of inserts/removes.
+pub fn aug_dict_modify_from_sorted_iter<K, A, V, T, I, FK, FV>(
+    dict: &mut Option<Cell>,
+    entries: I,
+    mut extract_key: FK,
+    mut extract_value: FV,
+    comparator: AugDictFn,
+    context: &dyn CellContext,
+) -> Result<bool, Error>
+where
+    I: IntoIterator<Item = T>,
+    K: StoreDictKey + Ord,
+    A: Store,
+    V: Store,
+    for<'a> FK: FnMut(&'a T) -> K,
+    FV: FnMut(T) -> Result<Option<(A, V)>, Error>,
+{
+    let Some(root) = &*dict else {
+        // The simplest case when we just need to create a new dict from the sorted iter.
+        let mut err = None;
+        let res = build_aug_dict_from_sorted_iter(
+            entries.into_iter().flat_map(|entry| {
+                if err.is_some() {
+                    return None;
+                }
+                let key = extract_key(&entry);
+                match extract_value(entry) {
+                    Ok(Some((extra, value))) => Some((key, extra, value)),
+                    Ok(None) => None,
+                    Err(e) => {
+                        err = Some(e);
+                        None
+                    }
+                }
+            }),
+            comparator,
+            context,
+        );
+        if let Some(e) = err {
+            return Err(e);
+        }
+        *dict = ok!(res);
+        return Ok(dict.is_some());
     };
 
-    while let Some(left) = res_stack.pop() {
-        let key_offset = if res_stack.is_empty() {
-            0
+    // Fallback to the full merge.
+    let mut prev_key_builder = CellDataBuilder::new();
+
+    let mut iter_stack = Vec::<IterStackItem>::new();
+    let mut res_stack = Vec::<MergeStackItem<V, AugMergeStackItemMode<A>>>::new();
+
+    let mut prev_key = None::<K>;
+    for item in entries {
+        let is_first = prev_key.is_none();
+        let key = extract_key(&item);
+        if let Some(prev_key) = &prev_key {
+            match key.cmp(prev_key) {
+                // Skip duplicates
+                std::cmp::Ordering::Equal => continue,
+                // Allow only sorted entries
+                std::cmp::Ordering::Greater => {}
+                // Invalid data. TODO: Panic here?
+                std::cmp::Ordering::Less => return Err(Error::InvalidData),
+            }
+        }
+
+        // Build key.
+        let mut key_builder = CellDataBuilder::new();
+        ok!(key.store_into_data(&mut key_builder));
+        debug_assert_eq!(key_builder.size_bits(), K::BITS);
+        prev_key = Some(key);
+
+        let key = key_builder.as_data_slice();
+
+        let value = ok!(extract_value(item));
+        let before_remove = value.is_none();
+
+        // Update stack to contain a path to the `key`.
+        let seek_state = if is_first {
+            ok!(IterStackItem::seek_first(
+                &mut iter_stack,
+                root.clone(),
+                key,
+                before_remove,
+                &mut res_stack,
+                comparator,
+                context,
+            ))
         } else {
-            left.prev_lcp_len() + 1
+            ok!(IterStackItem::seek_next(
+                &mut iter_stack,
+                prev_key_builder.as_data_slice(),
+                key,
+                before_remove,
+                &mut res_stack,
+                comparator,
+                context,
+            ))
         };
 
-        result = ok!(left.merge(result, key_offset, K::BITS, context));
+        // Update the previous key builder.
+        prev_key_builder.clear_bits();
+        prev_key_builder.store_slice_data(key).unwrap();
+
+        //
+        let iter = iter_stack.last_mut().unwrap();
+        match (seek_state, value) {
+            // Add or remove value at fork.
+            (SeekState::NotFound { remaining_key }, value) => {
+                // Check if the new key is greater than the label in the current fork.
+                if ok!(remaining_key.lex_cmp(&iter.label())).is_gt()
+                    && iter.state != IterStackItem::STATE_USED_FULL
+                {
+                    ok!(iter.add_subtrees(1, false, &mut res_stack, comparator, context));
+                    iter.state = IterStackItem::STATE_USED_FULL;
+                }
+
+                if let Some((extra, value)) = value {
+                    ok!(MergeStackItem::add_value(
+                        &mut res_stack,
+                        key_builder,
+                        value,
+                        extra,
+                        comparator,
+                        context,
+                    ));
+                }
+            }
+            // Add or remove value at existing.
+            (SeekState::Found, value) => {
+                debug_assert_eq!(iter.remaining_key_bits, 0);
+
+                iter.state = IterStackItem::STATE_USED_FULL;
+                if let Some((extra, value)) = value {
+                    ok!(MergeStackItem::add_value(
+                        &mut res_stack,
+                        key_builder,
+                        value,
+                        extra,
+                        comparator,
+                        context,
+                    ));
+                } else {
+                    iter.flatten = true;
+                }
+            }
+        }
     }
 
-    *dict = Some(ok!(result.build(K::BITS, context)));
+    if prev_key.is_none() {
+        // Do nothing when the iterator was empty.
+        return Ok(false);
+    }
+
+    ok!(IterStackItem::seek_end(
+        &mut iter_stack,
+        &mut res_stack,
+        comparator,
+        context,
+    ));
+
+    *dict = ok!(MergeStackItem::finalize(
+        res_stack,
+        K::BITS,
+        comparator,
+        context
+    ));
     Ok(true)
 }
 
@@ -216,11 +384,12 @@ impl IterStackItem {
         })
     }
 
-    fn add_subtrees<V: Store>(
+    fn add_subtrees<V: Store, M: MergeStackItemMode>(
         &self,
         until: i8,
         flatten: bool,
-        res_stack: &mut Vec<MergeStackItem<V>>,
+        res_stack: &mut Vec<MergeStackItem<V, M>>,
+        comparator: M::ExtraComparator,
         context: &dyn CellContext,
     ) -> Result<(), Error> {
         if self.remaining_key_bits == 0 {
@@ -231,6 +400,7 @@ impl IterStackItem {
                 prefix,
                 self.cell.clone(),
                 self.data_offset_bits,
+                comparator,
                 context,
             );
         }
@@ -253,6 +423,7 @@ impl IterStackItem {
                     prefix,
                     remaining_key_len,
                     value,
+                    comparator,
                     context
                 ));
             } else {
@@ -261,6 +432,7 @@ impl IterStackItem {
                     prefix,
                     remaining_key_len,
                     value,
+                    comparator,
                     context
                 ));
             }
@@ -275,12 +447,13 @@ impl IterStackItem {
         }
     }
 
-    fn seek_first<'k, V: Store>(
+    fn seek_first<'k, V: Store, M: MergeStackItemMode>(
         stack: &mut Vec<Self>,
         root: Cell,
         key: CellSlice<'k>,
         before_remove: bool,
-        res_stack: &mut Vec<MergeStackItem<V>>,
+        res_stack: &mut Vec<MergeStackItem<V, M>>,
+        comparator: M::ExtraComparator,
         context: &dyn CellContext,
     ) -> Result<SeekState<'k>, Error> {
         debug_assert!(stack.is_empty());
@@ -289,15 +462,16 @@ impl IterStackItem {
             key.size_bits(),
             root
         )));
-        Self::do_seek(stack, key, before_remove, res_stack, context)
+        Self::do_seek(stack, key, before_remove, res_stack, comparator, context)
     }
 
-    fn seek_next<'k, V: Store>(
+    fn seek_next<'k, V: Store, M: MergeStackItemMode>(
         stack: &mut Vec<Self>,
         prev_key: CellSlice<'_>,
         mut key: CellSlice<'k>,
         before_remove: bool,
-        res_stack: &mut Vec<MergeStackItem<V>>,
+        res_stack: &mut Vec<MergeStackItem<V, M>>,
+        comparator: M::ExtraComparator,
         context: &dyn CellContext,
     ) -> Result<SeekState<'k>, Error> {
         debug_assert!(!stack.is_empty());
@@ -327,7 +501,7 @@ impl IterStackItem {
                 flatten |= item.flatten;
 
                 if item.state != Self::STATE_USED_FULL {
-                    ok!(item.add_subtrees(1, flatten, res_stack, context));
+                    ok!(item.add_subtrees(1, flatten, res_stack, comparator, context));
                 }
                 continue;
             }
@@ -341,12 +515,13 @@ impl IterStackItem {
         }
 
         // Seek for the rest.
-        Self::do_seek(stack, key, before_remove, res_stack, context)
+        Self::do_seek(stack, key, before_remove, res_stack, comparator, context)
     }
 
-    fn seek_end<V: Store>(
+    fn seek_end<V: Store, M: MergeStackItemMode>(
         stack: &mut Vec<Self>,
-        res_stack: &mut Vec<MergeStackItem<V>>,
+        res_stack: &mut Vec<MergeStackItem<V, M>>,
+        comparator: M::ExtraComparator,
         context: &dyn CellContext,
     ) -> Result<(), Error> {
         let mut flatten = false;
@@ -355,17 +530,18 @@ impl IterStackItem {
             // must also be flattened.
             flatten |= item.flatten;
             if item.state != Self::STATE_USED_FULL {
-                ok!(item.add_subtrees(1, flatten, res_stack, context));
+                ok!(item.add_subtrees(1, flatten, res_stack, comparator, context));
             }
         }
         Ok(())
     }
 
-    fn do_seek<'k, V: Store>(
+    fn do_seek<'k, V: Store, M: MergeStackItemMode>(
         stack: &mut Vec<Self>,
         mut key: CellSlice<'k>,
         before_remove: bool,
-        res_stack: &mut Vec<MergeStackItem<V>>,
+        res_stack: &mut Vec<MergeStackItem<V, M>>,
+        comparator: M::ExtraComparator,
         context: &dyn CellContext,
     ) -> Result<SeekState<'k>, Error> {
         loop {
@@ -392,7 +568,13 @@ impl IterStackItem {
             };
 
             // Add skipped subtrees.
-            ok!(item.add_subtrees(child_index - 1, before_remove, res_stack, context));
+            ok!(item.add_subtrees(
+                child_index - 1,
+                before_remove,
+                res_stack,
+                comparator,
+                context,
+            ));
 
             // Update the last visited segment state.
             debug_assert!(item.state < child_index);
@@ -415,7 +597,7 @@ enum SeekState<'k> {
     Found,
 }
 
-impl<V: Store> MergeStackItem<V> {
+impl<V: Store, M: MergeStackItemMode> MergeStackItem<V, M> {
     /// Adds a new item to the stack.
     ///
     /// Prefix must contain the full item key.
@@ -423,19 +605,24 @@ impl<V: Store> MergeStackItem<V> {
         stack: &mut Vec<Self>,
         key: CellDataBuilder,
         value: V,
+        extra: M::LeafExtra,
+        comparator: M::ExtraComparator,
         context: &dyn CellContext,
     ) -> Result<(), Error> {
         let lcp_len = ok!(Self::reduce(
             stack,
             key.as_data_slice(),
             key.size_bits(),
-            context
+            comparator,
+            context,
         ));
 
         stack.push(Self::Leaf {
             prefix: key,
             value,
+            extra,
             prev_lcp_len: lcp_len,
+            mode: PhantomData,
         });
         Ok(())
     }
@@ -448,6 +635,7 @@ impl<V: Store> MergeStackItem<V> {
         prefix: CellDataBuilder,
         value: Cell,
         data_offset_bits: u16,
+        comparator: M::ExtraComparator,
         context: &dyn CellContext,
     ) -> Result<(), Error> {
         let mut data = CellSliceRange::full(&value);
@@ -458,6 +646,7 @@ impl<V: Store> MergeStackItem<V> {
             stack,
             prefix.as_data_slice(),
             prefix.size_bits(),
+            comparator,
             context,
         ));
 
@@ -466,6 +655,7 @@ impl<V: Store> MergeStackItem<V> {
             data: data.range(),
             cell: value,
             prev_lcp_len: lcp_len,
+            mode: PhantomData,
         });
         Ok(())
     }
@@ -479,6 +669,7 @@ impl<V: Store> MergeStackItem<V> {
         mut prefix: CellDataBuilder,
         key_bit_len: u16,
         value: Cell,
+        comparator: M::ExtraComparator,
         context: &dyn CellContext,
     ) -> Result<(), Error> {
         let full_key_bit_len = prefix.size_bits() + key_bit_len;
@@ -493,6 +684,7 @@ impl<V: Store> MergeStackItem<V> {
             res_stack,
             prefix.as_data_slice(),
             full_key_bit_len,
+            comparator,
             context,
         ));
 
@@ -501,6 +693,7 @@ impl<V: Store> MergeStackItem<V> {
             data: data.range(),
             cell: value,
             prev_lcp_len: lcp_len,
+            mode: PhantomData,
         });
         Ok(())
     }
@@ -513,19 +706,25 @@ impl<V: Store> MergeStackItem<V> {
         prefix: CellDataBuilder,
         key_bit_len: u16,
         value: Cell,
+        comparator: M::ExtraComparator,
         context: &dyn CellContext,
     ) -> Result<(), Error> {
         let lcp_len = ok!(Self::reduce(
             res_stack,
             prefix.as_data_slice(),
             prefix.size_bits() + key_bit_len,
+            comparator,
             context,
         ));
+
+        let extra = ok!(M::read_node_extra(&value, key_bit_len));
 
         res_stack.push(Self::Node {
             prefix,
             value,
+            extra,
             prev_lcp_len: lcp_len,
+            mode: PhantomData,
         });
         Ok(())
     }

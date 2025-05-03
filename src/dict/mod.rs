@@ -14,14 +14,16 @@ mod raw;
 mod typed;
 
 mod ops {
-    pub(crate) use self::build::MergeStackItem;
     pub use self::build::{build_aug_dict_from_sorted_iter, build_dict_from_sorted_iter};
+    pub(crate) use self::build::{
+        AugMergeStackItemMode, MergeStackItem, MergeStackItemMode, SimpleMergeStackItemMode,
+    };
     pub use self::find::{
         aug_dict_find_by_extra, dict_find_bound, dict_find_bound_owned, dict_find_owned,
     };
     pub use self::get::{dict_get, dict_get_owned, dict_get_subdict};
     pub use self::insert::{aug_dict_insert, dict_insert, dict_insert_owned};
-    pub use self::modify::dict_modify_from_sorted_iter;
+    pub use self::modify::{aug_dict_modify_from_sorted_iter, dict_modify_from_sorted_iter};
     pub use self::remove::{aug_dict_remove_owned, dict_remove_bound_owned, dict_remove_owned};
     pub use self::split_merge::{dict_merge, dict_split_by_prefix};
 

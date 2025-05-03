@@ -26,6 +26,10 @@ name = "dict_modify"
 harness = false
 
 [[bench]]
+name = "dict_modify_aug"
+harness = false
+
+[[bench]]
 name = "dict"
 harness = false
 
