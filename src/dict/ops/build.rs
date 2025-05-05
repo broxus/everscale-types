@@ -8,6 +8,8 @@ use crate::error::Error;
 ///
 /// It is a preferred way to build a large `Dict` as doing lots of
 /// insertions is too slow.
+// TODO: Better handle signed keys since their `Ord` implementation
+// has a different ordering than thair bit representation.
 pub fn build_dict_from_sorted_iter<K, V, I>(
     entries: I,
     context: &dyn CellContext,
@@ -61,6 +63,8 @@ where
 ///
 /// It is a preferred way to build a large `Dict` as doing lots of
 /// insertions is too slow.
+// TODO: Better handle signed keys since their `Ord` implementation
+// has a different ordering than thair bit representation.
 pub fn build_aug_dict_from_sorted_iter<K, A, V, I>(
     entries: I,
     comparator: AugDictFn,
@@ -129,7 +133,7 @@ pub(crate) trait MergeStackItemMode {
 
     fn leaf_extra_offset(builder: &CellBuilder) -> Self::ExtraOffset;
     fn node_extra_offset(node_extra: Self::NodeExtra) -> Self::ExtraOffset;
-    fn denorm_node_extra_offset(builder: &CellBuilder, data: CellSliceRange) -> Self::ExtraOffset;
+    fn denorm_node_extra_offset(builder: &CellBuilder, is_leaf: bool) -> Self::ExtraOffset;
 
     fn merge_node(
         left_cell: Cell,
@@ -170,7 +174,7 @@ impl MergeStackItemMode for SimpleMergeStackItemMode {
     #[inline]
     fn node_extra_offset(_: Self::NodeExtra) -> Self::ExtraOffset {}
     #[inline]
-    fn denorm_node_extra_offset(_: &CellBuilder, _: CellSliceRange) -> Self::ExtraOffset {}
+    fn denorm_node_extra_offset(_: &CellBuilder, _: bool) -> Self::ExtraOffset {}
 
     #[inline]
     fn merge_node(
@@ -227,8 +231,8 @@ where
     }
 
     #[inline]
-    fn denorm_node_extra_offset(builder: &CellBuilder, data: CellSliceRange) -> Self::ExtraOffset {
-        (builder.size_bits(), data.offset_refs())
+    fn denorm_node_extra_offset(builder: &CellBuilder, is_leaf: bool) -> Self::ExtraOffset {
+        (builder.size_bits(), if is_leaf { 0 } else { 2 })
     }
 
     #[inline]
@@ -285,7 +289,8 @@ pub(crate) enum MergeStackItem<V, M: MergeStackItemMode> {
     DenormNode {
         prefix: CellDataBuilder,
         cell: Cell,
-        data: CellSliceRange,
+        after_label_offset: u16,
+        is_leaf: bool,
         prev_lcp_len: u16,
         mode: PhantomData<M>,
     },
@@ -364,9 +369,13 @@ impl<V: Store, M: MergeStackItemMode> MergeStackItem<V, M> {
             }
             Self::Node { value, .. } => Ok(value),
             Self::DenormNode {
-                prefix, cell, data, ..
+                prefix,
+                cell,
+                after_label_offset,
+                ..
             } => {
-                let data = data.apply_allow_exotic(&cell);
+                let mut data = ok!(cell.as_slice());
+                ok!(data.skip_first(after_label_offset, 0));
                 make_leaf(&prefix.as_data_slice(), key_bit_len, &data, context)
             }
         }
@@ -446,7 +455,11 @@ impl<V: Store, M: MergeStackItemMode> MergeStackItem<V, M> {
                 value
             }
             Self::DenormNode {
-                prefix, cell, data, ..
+                prefix,
+                cell,
+                after_label_offset,
+                is_leaf,
+                ..
             } => {
                 let mut prefix_slice = prefix.as_data_slice();
 
@@ -464,8 +477,11 @@ impl<V: Store, M: MergeStackItemMode> MergeStackItem<V, M> {
                 let value = {
                     let mut builder = CellBuilder::new();
                     ok!(write_label(&prefix_slice, leaf_key_bit_len, &mut builder));
-                    right_extra_offset = M::denorm_node_extra_offset(&builder, data);
-                    ok!(builder.store_slice(data.apply_allow_exotic(&cell)));
+                    right_extra_offset = M::denorm_node_extra_offset(&builder, is_leaf);
+
+                    let mut data = ok!(cell.as_slice());
+                    ok!(data.skip_first(after_label_offset, 0));
+                    ok!(builder.store_slice(data));
                     ok!(builder.build_ext(context))
                 };
 
@@ -498,15 +514,22 @@ impl<V: Store, M: MergeStackItemMode> MergeStackItem<V, M> {
                 value
             }
             Self::DenormNode {
-                prefix, cell, data, ..
+                prefix,
+                cell,
+                after_label_offset,
+                is_leaf,
+                ..
             } => {
                 let mut prefix_slice = prefix.as_data_slice();
                 ok!(prefix_slice.skip_first(split_at + 1, 0)); // TODO: Unwrap
 
                 let mut builder = CellBuilder::new();
                 ok!(write_label(&prefix_slice, leaf_key_bit_len, &mut builder));
-                left_extra_offset = M::denorm_node_extra_offset(&builder, data);
-                ok!(builder.store_slice(data.apply_allow_exotic(&cell)));
+                left_extra_offset = M::denorm_node_extra_offset(&builder, is_leaf);
+
+                let mut data = ok!(cell.as_slice());
+                ok!(data.skip_first(after_label_offset, 0));
+                ok!(builder.store_slice(data));
                 ok!(builder.build_ext(context))
             }
         };

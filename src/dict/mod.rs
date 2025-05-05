@@ -364,8 +364,8 @@ fn split_aug_edge(
 
     let left_slice = &mut ok!(left.as_slice());
     let right_slice = &mut ok!(right.as_slice());
-    ok!(read_label(left_slice, key.size_bits()));
-    ok!(read_label(right_slice, key.size_bits()));
+    ok!(skip_label_full(left_slice, key.size_bits()));
+    ok!(skip_label_full(right_slice, key.size_bits()));
 
     // Create fork edge
     let mut builder = CellBuilder::new();
@@ -497,8 +497,8 @@ fn rebuild_aug_dict_from_stack(
 
         let left_slice = &mut left.as_slice()?;
         let right_slice = &mut right.as_slice()?;
-        ok!(read_label(left_slice, child_key_bit_len));
-        ok!(read_label(right_slice, child_key_bit_len));
+        ok!(skip_label_full(left_slice, child_key_bit_len));
+        ok!(skip_label_full(right_slice, child_key_bit_len));
 
         let mut builder = CellBuilder::new();
         ok!(write_label(&last_label, last.key_bit_len, &mut builder));
@@ -509,6 +509,16 @@ fn rebuild_aug_dict_from_stack(
     }
 
     Ok(leaf)
+}
+
+fn skip_label_full(slice: &mut CellSlice<'_>, key_bit_len: u16) -> Result<(), Error> {
+    let label = ok!(read_label(slice, key_bit_len));
+    if label.size_bits() < key_bit_len {
+        // Cell is not a leaf so we need to skip 2 refs.
+        slice.skip_first(0, 2)
+    } else {
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy)]

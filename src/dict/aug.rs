@@ -895,6 +895,7 @@ mod tests {
     use anyhow::Context;
 
     use super::*;
+    use crate::boc::Boc;
 
     #[derive(Debug, Default, Load, Store, Eq, PartialEq)]
     struct OrCmp(bool);
@@ -932,6 +933,45 @@ mod tests {
         #[inline]
         fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> SomeValue {
             SomeValue(rand::distributions::Standard.sample(rng))
+        }
+    }
+
+    #[derive(Debug, Default, Load, Store, Eq, PartialEq)]
+    struct ValueWithCell(u32, Cell);
+
+    impl ValueWithCell {
+        fn new(num: u32, cell: u32) -> Self {
+            Self(num, CellBuilder::build_from(cell).unwrap())
+        }
+    }
+
+    impl AugDictExtra for ValueWithCell {
+        fn comp_add(
+            left: &mut CellSlice,
+            right: &mut CellSlice,
+            b: &mut CellBuilder,
+            ctx: &dyn CellContext,
+        ) -> Result<(), Error> {
+            // println!(
+            //     "LEFT EXTRA: {}",
+            //     Boc::encode_base64(CellBuilder::build_from(*left)?),
+            // );
+            // println!(
+            //     "RIGHT EXTRA: {}",
+            //     Boc::encode_base64(CellBuilder::build_from(*right)?),
+            // );
+
+            let left_num = left.load_u32()?;
+            let left_cell = left.load_reference_as_slice()?.load_u32()?;
+
+            let right_num = right.load_u32()?;
+            let right_cell = right.load_reference_as_slice()?.load_u32()?;
+
+            ValueWithCell::new(
+                left_num.saturating_add(right_num),
+                left_cell.saturating_add(right_cell),
+            )
+            .store_into(b, ctx)
         }
     }
 
@@ -1138,6 +1178,104 @@ mod tests {
         assert_eq!(other, dict);
 
         other.modify_with_sorted_iter([(0, None)])?;
+        assert_eq!(other, dict);
+
+        Ok(())
+    }
+
+    #[test]
+    fn modify_aug_with_cells() -> anyhow::Result<()> {
+        let mut dict = AugDict::<u32, ValueWithCell, u64>::new();
+        dict.add(
+            16729856,
+            ValueWithCell::new(1111, 123),
+            18381441879129409280,
+        )?;
+        dict.add(
+            3607101952,
+            ValueWithCell::new(2060965847, 234),
+            8851780914645041664,
+        )?;
+
+        let mut other = AugDict::<u32, ValueWithCell, u64>::try_from_sorted_slice(&[
+            (
+                16729856,
+                ValueWithCell::new(1111, 123),
+                18381441879129409280,
+            ),
+            (
+                3607101952,
+                ValueWithCell::new(2060965847, 234),
+                8851780914645041664,
+            ),
+        ])?;
+        assert_eq!(other, dict);
+
+        println!(
+            "INITIAL: {:?}",
+            dict.dict.root.as_ref().map(Boc::encode_base64),
+        );
+
+        dict.set(0, ValueWithCell::new(0, 0), 0)?;
+        println!(
+            "TARGET: {:?}",
+            dict.dict.root.as_ref().map(Boc::encode_base64),
+        );
+
+        other.modify_with_sorted_iter([(0, Some((ValueWithCell::new(0, 0), 0)))])?;
+        println!(
+            "RESULT: {:?}",
+            other.dict.root.as_ref().map(Boc::encode_base64),
+        );
+        assert_eq!(other, dict);
+
+        Ok(())
+    }
+
+    #[test]
+    fn modify_aug_with_cells_remove() -> anyhow::Result<()> {
+        let mut dict = AugDict::<u32, ValueWithCell, u64>::new();
+        dict.add(66024, ValueWithCell::new(0, 123), 4108413175295410176)?;
+        dict.add(
+            2575203966,
+            ValueWithCell::new(67108922, 234),
+            16710326059140383999,
+        )?;
+        dict.add(
+            3907577831,
+            ValueWithCell::new(3907578088, 345),
+            144121978453491944,
+        )?;
+
+        let mut other = AugDict::<u32, ValueWithCell, u64>::try_from_sorted_slice(&[
+            (66024, ValueWithCell::new(0, 123), 4108413175295410176),
+            (
+                2575203966,
+                ValueWithCell::new(67108922, 234),
+                16710326059140383999,
+            ),
+            (
+                3907577831,
+                ValueWithCell::new(3907578088, 345),
+                144121978453491944,
+            ),
+        ])?;
+        assert_eq!(other, dict);
+
+        println!(
+            "INITIAL: {:?}",
+            dict.dict.root.as_ref().map(Boc::encode_base64),
+        );
+
+        dict.remove(0)?;
+        dict.remove(71)?;
+        assert_eq!(other, dict);
+
+        other.modify_with_sorted_iter([(0, None), (71, None)])?;
+        println!(
+            "RESULT: {:?}",
+            other.dict.root.as_ref().map(Boc::encode_base64),
+        );
         assert_eq!(other, dict);
 
         Ok(())

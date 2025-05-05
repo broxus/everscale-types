@@ -9,6 +9,8 @@ use crate::dict::{
 use crate::error::Error;
 
 /// Modify a dict with a sorted list of inserts/removes.
+// TODO: Better handle signed keys since their `Ord` implementation
+// has a different ordering than thair bit representation.
 pub fn dict_modify_from_sorted_iter<K, V, T, I, FK, FV>(
     dict: &mut Option<Cell>,
     entries: I,
@@ -171,6 +173,8 @@ where
 }
 
 /// Modify a dict with a sorted list of inserts/removes.
+// TODO: Better handle signed keys since their `Ord` implementation
+// has a different ordering than thair bit representation.
 pub fn aug_dict_modify_from_sorted_iter<K, A, V, T, I, FK, FV>(
     dict: &mut Option<Cell>,
     entries: I,
@@ -356,7 +360,7 @@ struct IterStackItem {
     /// Whether children of this node must be merged with this node.
     flatten: bool,
     /// Simplified cell slice range with only data offset.
-    data_offset_bits: u16,
+    after_label_offset: u16,
     /// Number of bits after the label of this node (not including the split bit).
     remaining_key_bits: u16,
 }
@@ -375,7 +379,7 @@ impl IterStackItem {
         let label = ok!(read_label(&mut data, key_bit_len));
         Ok(Self {
             prefix,
-            data_offset_bits: data.offset_bits(),
+            after_label_offset: data.offset_bits(),
             remaining_key_bits: key_bit_len - label.size_bits(),
             label: Label::new(cell.as_ref(), label),
             cell,
@@ -399,7 +403,7 @@ impl IterStackItem {
                 res_stack,
                 prefix,
                 self.cell.clone(),
-                self.data_offset_bits,
+                self.after_label_offset,
                 comparator,
                 context,
             );
@@ -634,14 +638,10 @@ impl<V: Store, M: MergeStackItemMode> MergeStackItem<V, M> {
         stack: &mut Vec<Self>,
         prefix: CellDataBuilder,
         value: Cell,
-        data_offset_bits: u16,
+        after_label_offset: u16,
         comparator: M::ExtraComparator,
         context: &dyn CellContext,
     ) -> Result<(), Error> {
-        let mut data = CellSliceRange::full(&value);
-        ok!(data.skip_first(data_offset_bits, 0));
-        let data = data.apply_allow_exotic(&value);
-
         let lcp_len = ok!(Self::reduce(
             stack,
             prefix.as_data_slice(),
@@ -652,8 +652,9 @@ impl<V: Store, M: MergeStackItemMode> MergeStackItem<V, M> {
 
         stack.push(Self::DenormNode {
             prefix,
-            data: data.range(),
             cell: value,
+            after_label_offset,
+            is_leaf: true,
             prev_lcp_len: lcp_len,
             mode: PhantomData,
         });
@@ -678,6 +679,7 @@ impl<V: Store, M: MergeStackItemMode> MergeStackItem<V, M> {
 
         // Load label from the subtree root and append it to the prefix.
         let label = ok!(read_label(&mut data, key_bit_len));
+        let is_leaf = label.size_bits() == key_bit_len;
         ok!(prefix.store_slice_data(label));
 
         let lcp_len = ok!(Self::reduce(
@@ -690,8 +692,9 @@ impl<V: Store, M: MergeStackItemMode> MergeStackItem<V, M> {
 
         res_stack.push(Self::DenormNode {
             prefix,
-            data: data.range(),
+            after_label_offset: data.offset_bits(),
             cell: value,
+            is_leaf,
             prev_lcp_len: lcp_len,
             mode: PhantomData,
         });

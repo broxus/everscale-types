@@ -69,3 +69,9 @@ name = "dict_modify_aug"
 path = "fuzz_targets/dict_modify_aug.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "dict_modify_aug_with_cells"
+path = "fuzz_targets/dict_modify_aug_with_cells.rs"
+test = false
+doc = false
