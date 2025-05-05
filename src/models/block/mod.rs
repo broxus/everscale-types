@@ -8,9 +8,9 @@ pub use self::block_id::*;
 pub use self::block_proof::*;
 pub use self::shard_hashes::*;
 use crate::cell::*;
+use crate::dict::RawIter;
 #[allow(unused)]
-use crate::dict::{Dict, RawValues};
-use crate::dict::{DictKey, RawIter};
+use crate::dict::{Dict, LoadDictKey, RawValues};
 use crate::error::Error;
 use crate::merkle::MerkleUpdate;
 use crate::models::currency::CurrencyCollection;
@@ -758,7 +758,7 @@ impl Iterator for StateDataUpdateIter<'_> {
     fn next(&mut self) -> Option<Self::Item> {
         match self.inner.next()? {
             Ok((key, mut value)) => {
-                let key = u64::from_raw_data(key.raw_data())?;
+                let key = u64::load_from_data(&key)?;
                 let e = match value.load_reference() {
                     Ok(cell) => match cell.parse_exotic::<MerkleUpdate>() {
                         Ok(merkle_update) => return Some(Ok((key, merkle_update))),
