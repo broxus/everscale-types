@@ -277,6 +277,17 @@ impl AsMut<CellDataBuilder> for CellBuilder {
     }
 }
 
+impl From<CellDataBuilder> for CellBuilder {
+    #[inline]
+    fn from(inner: CellDataBuilder) -> Self {
+        Self {
+            inner,
+            is_exotic: false,
+            references: ArrayVec::new(),
+        }
+    }
+}
+
 impl CellBuilder {
     /// Builds a new cell from the specified data using the default cell context.
     #[inline]
