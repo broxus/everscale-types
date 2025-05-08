@@ -114,12 +114,12 @@ models = ["dep:everscale-crypto", "dep:tl-proto"]
 blake3 = ["dep:blake3"]
 rayon = ["dep:rayon", "blake3?/rayon"]
 arbitrary = ["dep:arbitrary"]
+bigint = ["dep:num-bigint", "dep:num-traits"]
 abi = [
     "dep:anyhow",
     "dep:bytes",
     "dep:ed25519-dalek",
-    "dep:num-bigint",
-    "dep:num-traits",
+    "bigint",
     "dep:serde",
     "models",
     "dep:everscale-types-abi-proc",

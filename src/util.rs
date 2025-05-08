@@ -4,6 +4,61 @@ use std::mem::MaybeUninit;
 
 use crate::error::Error;
 
+/// Extension trait for [`BigInt`] or [`BigUint`].
+///
+/// [`BigInt`]: num_bigint::BigInt
+/// [`BigUint`]: num_bigint::BigUint
+#[cfg(feature = "bigint")]
+pub trait BigIntExt {
+    /// Determines the fewest bits necessary to serialize self
+    /// as an optionally signed integer.
+    fn bitsize(&self, signed: bool) -> u16;
+
+    /// Returns `true` if this number sign aligns with the `signed`.
+    fn has_correct_sign(&self, signed: bool) -> bool;
+}
+
+#[cfg(feature = "bigint")]
+impl BigIntExt for num_bigint::BigInt {
+    fn bitsize(&self, signed: bool) -> u16 {
+        let mut bits = self.bits() as u16;
+        if signed {
+            match self.sign() {
+                num_bigint::Sign::NoSign => bits,
+                num_bigint::Sign::Plus => bits + 1,
+                num_bigint::Sign::Minus => {
+                    // Check if `int` magnitude is not a power of 2
+                    let mut digits = self.iter_u64_digits().rev();
+                    if let Some(hi) = digits.next() {
+                        if !hi.is_power_of_two() || !digits.all(|digit| digit == 0) {
+                            bits += 1;
+                        }
+                    }
+                    bits
+                }
+            }
+        } else {
+            bits
+        }
+    }
+
+    fn has_correct_sign(&self, signed: bool) -> bool {
+        signed || self.sign() != num_bigint::Sign::Minus
+    }
+}
+
+#[cfg(feature = "bigint")]
+impl BigIntExt for num_bigint::BigUint {
+    fn bitsize(&self, signed: bool) -> u16 {
+        let bits = self.bits() as u16;
+        bits + (signed && bits != 0) as u16
+    }
+
+    fn has_correct_sign(&self, _: bool) -> bool {
+        true
+    }
+}
+
 /// Brings [unlikely](core::intrinsics::unlikely) to stable rust.
 #[inline(always)]
 pub(crate) const fn unlikely(b: bool) -> bool {

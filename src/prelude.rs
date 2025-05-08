@@ -9,3 +9,5 @@ pub use crate::cell::{
     LoadCell, Size, Store, UsageTree, UsageTreeMode, WeakCell,
 };
 pub use crate::dict::{AugDict, Dict, DictKey, LoadDictKey, RawDict, StoreDictKey};
+#[cfg(feature = "bigint")]
+pub use crate::util::BigIntExt;

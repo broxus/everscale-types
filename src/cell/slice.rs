@@ -1568,6 +1568,79 @@ impl<'a> CellSlice<'a> {
         res
     }
 
+    /// Loads `bits`-width int from the slice.
+    #[cfg(feature = "bigint")]
+    pub fn load_bigint(&mut self, bits: u16, signed: bool) -> Result<num_bigint::BigInt, Error> {
+        use num_bigint::{BigInt, Sign};
+
+        match bits {
+            0 => Ok(BigInt::ZERO),
+            1..=64 if !signed => self.load_uint(bits).map(BigInt::from),
+            1..=64 => self.load_uint(bits).map(|mut int| {
+                if bits < 64 {
+                    // Clone sign bit into all high bits
+                    int |= ((int >> (bits - 1)) * u64::MAX) << (bits - 1);
+                }
+                BigInt::from(int as i64)
+            }),
+            65.. => {
+                let rem = bits % 8;
+                let mut buffer = [0u8; 128];
+                self.load_raw(&mut buffer, bits).map(|buffer| {
+                    let mut int = if signed {
+                        BigInt::from_signed_bytes_be(buffer)
+                    } else {
+                        BigInt::from_bytes_be(Sign::Plus, buffer)
+                    };
+                    if bits % 8 != 0 {
+                        int >>= 8 - rem;
+                    }
+                    int
+                })
+            }
+        }
+    }
+
+    /// Loads `bits`-width int from the slice.
+    #[cfg(feature = "bigint")]
+    pub fn load_biguint(&mut self, bits: u16) -> Result<num_bigint::BigUint, Error> {
+        use num_bigint::BigUint;
+
+        match bits {
+            0 => Ok(BigUint::ZERO),
+            1..=64 => self.load_uint(bits).map(BigUint::from),
+            65.. => {
+                let rem = bits % 8;
+                let mut buffer = [0u8; 128];
+                self.load_raw(&mut buffer, bits).map(|buffer| {
+                    let mut int = BigUint::from_bytes_be(buffer);
+                    if bits % 8 != 0 {
+                        int >>= 8 - rem;
+                    }
+                    int
+                })
+            }
+        }
+    }
+
+    /// Loads variable length int from the slice.
+    #[cfg(feature = "bigint")]
+    pub fn load_var_bigint(
+        &mut self,
+        len_bits: u16,
+        signed: bool,
+    ) -> Result<num_bigint::BigInt, Error> {
+        let len = self.load_uint(len_bits)? as u16;
+        self.load_bigint(len * 8, signed)
+    }
+
+    /// Loads variable length unsigned int from the slice.
+    #[cfg(feature = "bigint")]
+    pub fn load_var_biguint(&mut self, len_bits: u16) -> Result<num_bigint::BigUint, Error> {
+        let len = self.load_uint(len_bits)? as u16;
+        self.load_biguint(len * 8)
+    }
+
     /// Reads the specified number of bits to the target starting from the `offset`.
     pub fn get_raw<'b>(
         &'_ self,

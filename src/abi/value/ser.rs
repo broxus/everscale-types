@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::num::NonZeroU8;
 
-use num_bigint::{BigUint, Sign};
+use num_bigint::{BigInt, BigUint, Sign};
 
 use crate::abi::{
     AbiHeader, AbiHeaderType, AbiType, AbiValue, AbiVersion, NamedAbiValue, PlainAbiType,
@@ -357,8 +357,8 @@ impl AbiSerializer {
         c: &dyn CellContext,
     ) -> Result<(), Error> {
         match value {
-            AbiValue::Uint(n, value) => self.write_int(*n, Sign::Plus, value),
-            AbiValue::Int(n, value) => self.write_int(*n, value.sign(), value.magnitude()),
+            AbiValue::Uint(n, value) => self.write_uint(*n, value),
+            AbiValue::Int(n, value) => self.write_int(*n, value),
             AbiValue::VarUint(n, value) => self.write_varint(*n, Sign::Plus, value),
             AbiValue::VarInt(n, value) => self.write_varint(*n, value.sign(), value.magnitude()),
             AbiValue::Bool(value) => self.write_bool(*value),
@@ -387,9 +387,14 @@ impl AbiSerializer {
         Ok(())
     }
 
-    fn write_int(&mut self, bits: u16, sign: Sign, value: &BigUint) -> Result<(), Error> {
+    fn write_uint(&mut self, bits: u16, value: &BigUint) -> Result<(), Error> {
         let target = self.require_builder(Size { bits, refs: 0 });
-        write_int(bits, sign, value, target)
+        target.store_biguint(value, bits, false)
+    }
+
+    fn write_int(&mut self, bits: u16, value: &BigInt) -> Result<(), Error> {
+        let target = self.require_builder(Size { bits, refs: 0 });
+        target.store_bigint(value, bits, true)
     }
 
     fn write_varint(&mut self, size: NonZeroU8, sign: Sign, value: &BigUint) -> Result<(), Error> {
@@ -706,8 +711,8 @@ impl Store for InlineOrRef<'_> {
 impl Store for PlainAbiValue {
     fn store_into(&self, builder: &mut CellBuilder, f: &dyn CellContext) -> Result<(), Error> {
         match self {
-            Self::Uint(bits, value) => write_int(*bits, Sign::Plus, value, builder),
-            Self::Int(bits, value) => write_int(*bits, value.sign(), value.magnitude(), builder),
+            Self::Uint(bits, value) => builder.store_biguint(value, *bits, false),
+            Self::Int(bits, value) => builder.store_bigint(value, *bits, true),
             Self::Bool(bit) => builder.store_bit(*bit),
             Self::Address(address) => address.store_into(builder, f),
         }
@@ -717,46 +722,6 @@ impl Store for PlainAbiValue {
 impl AbiVersion {
     fn use_max_size(&self) -> bool {
         self >= &Self::V2_2
-    }
-}
-
-fn write_int(
-    bits: u16,
-    sign: Sign,
-    value: &BigUint,
-    target: &mut CellBuilder,
-) -> Result<(), Error> {
-    if value.bits() > bits as u64 {
-        return Err(Error::IntOverflow);
-    }
-
-    let is_negative = sign == Sign::Minus;
-    let bytes = to_signed_bytes_be(is_negative, value);
-    let value_bits = (bytes.len() * 8) as u16;
-
-    if bytes.is_empty() {
-        target.store_zeros(bits)
-    } else if bits > value_bits {
-        let diff = bits - value_bits;
-        ok!(if is_negative {
-            target.store_ones(diff)
-        } else {
-            target.store_zeros(diff)
-        });
-        target.store_raw(&bytes, value_bits)
-    } else {
-        let bits_offset = value_bits - bits;
-        let bytes_offset = (bits_offset / 8) as usize;
-        let rem = bits_offset % 8;
-
-        let (left, right) = bytes.split_at(bytes_offset + 1);
-        if let Some(left) = left.last() {
-            ok!(target.store_small_uint(*left << rem, 8 - rem));
-        }
-        if !right.is_empty() {
-            ok!(target.store_raw(right, (right.len() * 8) as u16));
-        }
-        Ok(())
     }
 }
 

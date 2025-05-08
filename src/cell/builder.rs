@@ -1151,6 +1151,155 @@ impl CellDataBuilder {
         }
     }
 
+    /// Stores `bits`-width [`BigInt`] to the builder.
+    #[cfg(feature = "bigint")]
+    pub fn store_bigint(
+        &mut self,
+        x: &num_bigint::BigInt,
+        bits: u16,
+        signed: bool,
+    ) -> Result<(), Error> {
+        use crate::util::BigIntExt;
+
+        let int_bits = x.bitsize(signed);
+        if int_bits > bits {
+            return Err(Error::IntOverflow);
+        }
+        self.store_bigint_truncate(x, bits, signed)
+    }
+
+    /// Stores `bits`-width [`BigInt`] to the builder.
+    /// `x` bit size is ignored and only low `bits` of it are written.
+    #[cfg(feature = "bigint")]
+    pub fn store_bigint_truncate(
+        &mut self,
+        x: &num_bigint::BigInt,
+        bits: u16,
+        signed: bool,
+    ) -> Result<(), Error> {
+        use std::borrow::Cow;
+
+        use num_traits::ToPrimitive;
+
+        match x.to_u64() {
+            Some(value) => self.store_uint(value, bits),
+            None => {
+                let int = if bits % 8 != 0 {
+                    let align = 8 - bits % 8;
+                    Cow::Owned(x.clone() << align)
+                } else {
+                    Cow::Borrowed(x)
+                };
+
+                let minimal_bytes = bits.div_ceil(8) as usize;
+
+                let (prefix, mut bytes) = if signed {
+                    let bytes = int.to_signed_bytes_le();
+                    (
+                        bytes
+                            .last()
+                            .map(|first| (first >> 7) * 255)
+                            .unwrap_or_default(),
+                        bytes,
+                    )
+                } else {
+                    (0, int.to_bytes_le().1)
+                };
+                bytes.resize(minimal_bytes, prefix);
+                bytes.reverse();
+
+                self.store_raw(&bytes, bits)
+            }
+        }
+    }
+
+    /// Stores `bits`-width [`BigUint`] to the builder.
+    #[cfg(feature = "bigint")]
+    pub fn store_biguint(
+        &mut self,
+        x: &num_bigint::BigUint,
+        bits: u16,
+        signed: bool,
+    ) -> Result<(), Error> {
+        use crate::util::BigIntExt;
+
+        let int_bits = x.bitsize(signed);
+        if int_bits > bits {
+            return Err(Error::IntOverflow);
+        }
+        self.store_biguint_truncate(x, bits)
+    }
+
+    /// Stores `bits`-width [`BigUint`] to the builder.
+    /// `x` bit size is ignored and only low `bits` of it are written.
+    #[cfg(feature = "bigint")]
+    pub fn store_biguint_truncate(
+        &mut self,
+        x: &num_bigint::BigUint,
+        bits: u16,
+    ) -> Result<(), Error> {
+        use std::borrow::Cow;
+
+        use num_traits::ToPrimitive;
+
+        match x.to_u64() {
+            Some(value) => self.store_uint(value, bits),
+            None => {
+                let int = if bits % 8 != 0 {
+                    let align = 8 - bits % 8;
+                    Cow::Owned(x.clone() << align)
+                } else {
+                    Cow::Borrowed(x)
+                };
+
+                let minimal_bytes = bits.div_ceil(8) as usize;
+
+                let mut bytes = int.to_bytes_le();
+                bytes.resize(minimal_bytes, 0);
+                bytes.reverse();
+
+                self.store_raw(&bytes, bits)
+            }
+        }
+    }
+
+    /// Loads variable length [`BigInt`] to the builder.
+    #[cfg(feature = "bigint")]
+    pub fn store_var_bigint(
+        &mut self,
+        x: &num_bigint::BigInt,
+        len_bits: u16,
+        signed: bool,
+    ) -> Result<(), Error> {
+        use crate::util::BigIntExt;
+
+        let bits = x.bitsize(signed);
+        let bytes = bits.div_ceil(8);
+        if bytes >= (1 << len_bits) {
+            return Err(Error::IntOverflow);
+        }
+
+        ok!(self.store_small_uint(bytes as u8, len_bits));
+        self.store_bigint_truncate(x, bytes * 8, signed)
+    }
+
+    /// Loads variable length [`BigInt`] to the builder.
+    #[cfg(feature = "bigint")]
+    pub fn store_var_biguint(
+        &mut self,
+        x: &num_bigint::BigUint,
+        len_bits: u16,
+    ) -> Result<(), Error> {
+        let bits = x.bits() as u16;
+        let bytes = bits.div_ceil(8);
+        if bytes >= (1 << len_bits) {
+            return Err(Error::IntOverflow);
+        }
+
+        ok!(self.store_small_uint(bytes as u8, len_bits));
+        self.store_biguint_truncate(x, bytes * 8)
+    }
+
     /// Tries to store bytes in the cell (but only the specified number of bits),
     /// returning `false` if there is not enough remaining capacity.
     ///
