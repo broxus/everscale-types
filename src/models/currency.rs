@@ -212,16 +212,25 @@ impl ExtraCurrencyCollection {
     }
 
     /// Returns `true` if the dictionary contains no elements.
+    #[inline]
     pub const fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
     /// Returns a reference to the underlying dictionary.
+    #[inline]
     pub const fn as_dict(&self) -> &Dict<u32, VarUint248> {
         &self.0
     }
 
+    /// Returns the underlying dictionary.
+    #[inline]
+    pub fn into_dict(self) -> Dict<u32, VarUint248> {
+        self.0
+    }
+
     /// Returns a mutable reference to the underlying dictionary.
+    #[inline]
     pub fn as_dict_mut(&mut self) -> &mut Dict<u32, VarUint248> {
         &mut self.0
     }
@@ -371,6 +380,13 @@ impl From<Dict<u32, VarUint248>> for ExtraCurrencyCollection {
     #[inline]
     fn from(value: Dict<u32, VarUint248>) -> Self {
         Self(value)
+    }
+}
+
+impl From<ExtraCurrencyCollection> for Dict<u32, VarUint248> {
+    #[inline]
+    fn from(value: ExtraCurrencyCollection) -> Self {
+        value.0
     }
 }
 
