@@ -74,6 +74,22 @@ macro_rules! impl_ops {
             }
         }
 
+        #[cfg(feature = "bigint")]
+        impl From<$ident> for num_bigint::BigInt {
+            #[inline]
+            fn from(value: $ident) -> Self {
+                Self::from(value.0)
+            }
+        }
+
+        #[cfg(feature = "bigint")]
+        impl From<$ident> for num_bigint::BigUint {
+            #[inline]
+            fn from(value: $ident) -> Self {
+                Self::from(value.0)
+            }
+        }
+
         impl std::str::FromStr for $ident {
             type Err = ParseIntError;
 
@@ -938,6 +954,22 @@ impl SplitDepth {
     #[inline]
     pub const fn into_bit_len(self) -> u16 {
         self.0.get() as u16
+    }
+}
+
+#[cfg(feature = "bigint")]
+impl From<SplitDepth> for num_bigint::BigInt {
+    #[inline]
+    fn from(value: SplitDepth) -> Self {
+        Self::from(value.0.get())
+    }
+}
+
+#[cfg(feature = "bigint")]
+impl From<SplitDepth> for num_bigint::BigUint {
+    #[inline]
+    fn from(value: SplitDepth) -> Self {
+        Self::from(value.0.get())
     }
 }
 

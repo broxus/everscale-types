@@ -256,6 +256,29 @@ macro_rules! impl_from {
 
 impl_from! { u8, u16, u32, u64, u128, usize }
 
+#[cfg(feature = "bigint")]
+impl From<VarUint248> for num_bigint::BigInt {
+    #[inline]
+    fn from(value: VarUint248) -> Self {
+        num_bigint::BigUint::from(value).into()
+    }
+}
+
+#[cfg(feature = "bigint")]
+impl From<VarUint248> for num_bigint::BigUint {
+    fn from(value: VarUint248) -> Self {
+        let (high, low) = value.into_words();
+        if high == 0 {
+            return Self::from(low);
+        }
+
+        let mut res = Self::from(high);
+        res <<= 128;
+        res += low;
+        res
+    }
+}
+
 impl ExactSize for VarUint248 {
     #[inline]
     fn exact_size(&self) -> Size {
