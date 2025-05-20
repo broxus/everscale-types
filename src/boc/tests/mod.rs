@@ -25,6 +25,21 @@ fn boc_with_crc() {
     ));
 }
 
+#[test]
+fn big_block() -> anyhow::Result<()> {
+    use crate::models::*;
+    let data = include_bytes!("../../../benches/data/fat.block");
+    let cell = Boc::decode(data)?;
+    println!("FIRST {}", cell.repr_hash());
+   
+    let bytes = Boc::encode(cell.as_ref());
+    let cell = Boc::decode(&bytes)?;
+    println!("SECOND {}", cell.repr_hash());
+    
+    
+    Ok(())
+}
+
 #[cfg(feature = "serde")]
 #[allow(unused)]
 #[derive(::serde::Serialize)]

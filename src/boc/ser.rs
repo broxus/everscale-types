@@ -1,13 +1,58 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::BuildHasher;
-
 use super::BocTag;
 use crate::cell::{CellDescriptor, DynCell, HashBytes};
 
+thread_local! {
+    static MAP_USED: RefCell<bool> = RefCell::new(false);
+    static REV_INDICES: RefCell<HashMap<HashBytes, u32, ahash::RandomState>> =
+        RefCell::new(HashMap::with_capacity_and_hasher(10000, ahash::RandomState::default()));
+}
+
+enum RevIndicesSource<'a, S: BuildHasher + Default> {
+    Slf(HashMap<&'a HashBytes, u32, S>),
+    ThreadLocal,
+}
+
+impl<'a, S: BuildHasher + Default> RevIndicesSource<'a, S> {
+    pub fn get(&self, hash: &'a HashBytes) -> Option<u32> {
+        match self {
+            RevIndicesSource::Slf(rev_indices) => {
+                rev_indices.get(hash).copied()
+            },
+            RevIndicesSource::ThreadLocal => {
+                REV_INDICES.with_borrow(|rev_indices| rev_indices.get(hash).copied())
+            },
+        }
+    }
+
+    pub fn insert(&mut self, hash_bytes: &'a HashBytes, revs: u32) -> Option<u32> {
+
+        match self {
+            RevIndicesSource::Slf(indices) => {
+                indices.insert(hash_bytes, revs)
+            },
+            RevIndicesSource::ThreadLocal => {
+                REV_INDICES.with_borrow_mut(|rev_indices| {
+                    rev_indices.insert(*hash_bytes, revs)
+                })
+            },
+        }
+    }
+
+    pub fn contains_key(&self, hash: &'a HashBytes) -> bool {
+        match self {
+            RevIndicesSource::Slf(indices) => indices.contains_key(hash),
+            RevIndicesSource::ThreadLocal => REV_INDICES.with_borrow(|rev_indices| rev_indices.contains_key(hash)),
+        }
+    }
+}
+
 /// Intermediate BOC serializer state.
-pub struct BocHeader<'a, S = ahash::RandomState> {
+pub struct BocHeader<'a, S: BuildHasher + Default> {
     root_rev_indices: Vec<u32>,
-    rev_indices: HashMap<&'a HashBytes, u32, S>,
+    rev_indices_source: RevIndicesSource<'a, S>,
     rev_cells: Vec<&'a DynCell>,
     total_data_size: u64,
     reference_count: u64,
@@ -21,7 +66,7 @@ impl<S: BuildHasher + Default> Default for BocHeader<'_, S> {
     fn default() -> Self {
         Self {
             root_rev_indices: Default::default(),
-            rev_indices: Default::default(),
+            rev_indices_source: RevIndicesSource::Slf(Default::default()),
             rev_cells: Default::default(),
             total_data_size: 0,
             reference_count: 0,
@@ -32,13 +77,36 @@ impl<S: BuildHasher + Default> Default for BocHeader<'_, S> {
     }
 }
 
+impl<S> Drop for BocHeader<'_, S> where S: BuildHasher + Default {
+    fn drop(&mut self) {
+        if let RevIndicesSource::ThreadLocal = self.rev_indices_source {
+            REV_INDICES.with_borrow_mut(|rev_indices| {
+                rev_indices.clear()
+            });
+
+            MAP_USED.with_borrow_mut(|map_used| {
+                *map_used = false;
+            })
+        }
+    }
+}
+
 impl<'a, S> BocHeader<'a, S>
-where
-    S: BuildHasher + Default,
+where S: BuildHasher + Default
 {
     /// Creates an intermediate BOC serializer state with a single root.
     pub fn with_root(root: &'a DynCell) -> Self {
+        let index_source = MAP_USED.with_borrow_mut (|map_used| {
+            if *map_used {
+                RevIndicesSource::Slf(Default::default())
+            } else {
+                *map_used = true;
+                RevIndicesSource::ThreadLocal
+            }
+        });
+
         let mut res = Self::default();
+        res.rev_indices_source = index_source;
         res.add_root(root);
         res
     }
@@ -47,9 +115,19 @@ where
     /// Reserves space for the specified number of cells.
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
+        let index_source = MAP_USED.with_borrow_mut (|map_used| {
+            if *map_used {
+                RevIndicesSource::Slf(Default::default())
+            } else {
+                *map_used = true;
+                RevIndicesSource::ThreadLocal
+            }
+        });
+
         Self {
             root_rev_indices: Default::default(),
-            rev_indices: HashMap::with_capacity_and_hasher(capacity, S::default()),
+            rev_indices_source: index_source,
+            //rev_indices: HashMap::with_capacity_and_hasher(capacity, S::default()),
             rev_cells: Vec::with_capacity(capacity),
             total_data_size: 0,
             reference_count: 0,
@@ -68,14 +146,18 @@ where
     }
 }
 
-impl<'a, S> BocHeader<'a, S>
-where
-    S: BuildHasher,
-{
+impl<'a, S: BuildHasher + Default> BocHeader<'a, S> {
     /// Clears the header, removing all cells. Keeps the allocated memory for reuse.
     pub fn clear(&mut self) {
+
+        match self.rev_indices_source {
+            RevIndicesSource::Slf(ref mut rev_indices) => rev_indices.clear(),
+            RevIndicesSource::ThreadLocal => {
+                REV_INDICES.with_borrow_mut(|rev_indices| rev_indices.clear())
+            }
+        }
+
         self.root_rev_indices.clear();
-        self.rev_indices.clear();
         self.rev_cells.clear();
         self.total_data_size = 0;
         self.reference_count = 0;
@@ -289,11 +371,11 @@ where
             }
             target.extend_from_slice(cell.data());
             for child in cell.references() {
-                if let Some(rev_index) = self.rev_indices.get(child.repr_hash()) {
-                    let rev_index = self.cell_count - *rev_index - 1;
+                if let Some(rev_index) = self.rev_indices_source.get(child.repr_hash()) {
+                    let rev_index = self.cell_count - rev_index - 1;
                     target.extend_from_slice(&rev_index.to_be_bytes()[4 - ref_size..]);
                 } else {
-                    debug_assert!(false, "child not found");
+                    debug_assert!(false, "child {} not found", child.repr_hash());
                 }
             }
         }
@@ -313,8 +395,8 @@ where
     fn fill(&mut self, root: &'a DynCell) -> u32 {
         const SAFE_DEPTH: u16 = 128;
 
-        if let Some(index) = self.rev_indices.get(root.repr_hash()) {
-            return *index;
+        if let Some(index) = self.rev_indices_source.get(root.repr_hash()) {
+            return index;
         }
 
         let repr_depth = root.repr_depth();
@@ -330,12 +412,12 @@ where
 
     fn fill_recursive(&mut self, cell: &'a DynCell) {
         for child in cell.references() {
-            if !self.rev_indices.contains_key(child.repr_hash()) {
+            if !self.rev_indices_source.contains_key(child.repr_hash()) {
                 self.fill_recursive(child);
             }
         }
 
-        self.rev_indices.insert(cell.repr_hash(), self.cell_count);
+        self.rev_indices_source.insert(cell.repr_hash(), self.cell_count);
         self.rev_cells.push(cell);
 
         let descriptor = cell.descriptor();
@@ -353,13 +435,13 @@ where
 
         while let Some(children) = stack.last_mut() {
             if let Some(cell) = children.next() {
-                if !self.rev_indices.contains_key(cell.repr_hash()) {
+                if !self.rev_indices_source.contains_key(cell.repr_hash()) {
                     stack.push(cell.references());
                 }
             } else {
                 let cell = children.cell();
 
-                self.rev_indices.insert(cell.repr_hash(), self.cell_count);
+                self.rev_indices_source.insert(cell.repr_hash(), self.cell_count);
                 self.rev_cells.push(cell);
 
                 let descriptor = cell.descriptor();

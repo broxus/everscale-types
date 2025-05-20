@@ -63,6 +63,10 @@ harness = false
 name = "callgrind_usage_cell"
 harness = false
 
+[[bench]]
+name = "fat_block"
+harness = false
+
 [workspace]
 members = ["abi-proc", "proc", "fuzz"]
 
@@ -80,6 +84,7 @@ everscale-crypto = { version = "0.3", features = ["tl-proto"], optional = true }
 hex = "0.4"
 num-bigint = { version = "0.4", optional = true }
 num-traits = { version = "0.2", optional = true }
+parking_lot = "0.12.3"
 rand = { version = "0.8", optional = true }
 rayon = { version = "1.10", optional = true }
 scc = { version = "2.1", optional = true }
