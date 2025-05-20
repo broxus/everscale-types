@@ -63,6 +63,10 @@ harness = false
 name = "callgrind_usage_cell"
 harness = false
 
+[[bench]]
+name = "big_cell"
+harness = false
+
 [workspace]
 members = ["abi-proc", "proc", "fuzz"]
 

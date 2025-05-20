@@ -354,7 +354,7 @@ impl<'a> Load<'a> for AccountState {
 }
 
 /// Deployed account state.
-#[derive(Debug, Clone, Eq, PartialEq, Store, Load)]
+#[derive(Debug, Clone, Default, Eq, PartialEq, Store, Load)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StateInit {
     /// Optional split depth for large smart contracts.
@@ -369,18 +369,6 @@ pub struct StateInit {
     pub data: Option<Cell>,
     /// Libraries used in smart-contract.
     pub libraries: Dict<HashBytes, SimpleLib>,
-}
-
-impl Default for StateInit {
-    fn default() -> Self {
-        Self {
-            split_depth: None,
-            special: None,
-            code: None,
-            data: None,
-            libraries: Dict::new(),
-        }
-    }
 }
 
 impl StateInit {

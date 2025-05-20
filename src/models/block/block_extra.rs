@@ -204,7 +204,7 @@ pub type InMsgDescr = AugDict<HashBytes, ImportFees, InMsg>;
 pub type OutMsgDescr = AugDict<HashBytes, CurrencyCollection, OutMsg>;
 
 /// Additional content for masterchain blocks.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct McBlockExtra {
     /// A tree of the most recent descriptions for all currently existing shards
@@ -220,19 +220,6 @@ pub struct McBlockExtra {
     pub mint_msg: Option<Lazy<InMsg>>,
     /// Blockchain config (if the block is a key block).
     pub config: Option<BlockchainConfig>,
-}
-
-impl Default for McBlockExtra {
-    fn default() -> Self {
-        Self {
-            shards: ShardHashes::default(),
-            fees: ShardFees::new(),
-            prev_block_signatures: Dict::new(),
-            recover_create_msg: None,
-            mint_msg: None,
-            config: None,
-        }
-    }
 }
 
 impl McBlockExtra {

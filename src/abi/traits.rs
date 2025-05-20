@@ -651,6 +651,7 @@ impl IntoAbi for str {
     }
 
     #[inline]
+    #[allow(dead_code)]
     fn into_abi(self) -> AbiValue
     where
         for<'a> str: Sized,
@@ -674,6 +675,7 @@ impl<T: WithAbiType + IntoAbi> IntoAbi for [T] {
     }
 
     #[inline]
+    #[allow(dead_code)]
     fn into_abi(self) -> AbiValue
     where
         for<'a> [T]: Sized,

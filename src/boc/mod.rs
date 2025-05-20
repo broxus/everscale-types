@@ -144,6 +144,31 @@ impl Boc {
         encode_impl(cell.as_ref())
     }
 
+    /// Encodes the specified cell tree as BOC using preallocated revs cache.
+    pub fn encode_with_cache<T>(
+        cell: T,
+        cache: &mut ser::BocHeaderCache<ahash::RandomState>,
+    ) -> Vec<u8>
+    where
+        T: AsRef<DynCell>,
+    {
+        fn encode_impl(
+            cell: &DynCell,
+            cache: &mut ser::BocHeaderCache<ahash::RandomState>,
+        ) -> Vec<u8> {
+            let mut result = Vec::new();
+            let header = ser::BocHeader::<ahash::RandomState>::with_root_and_cache(
+                cell,
+                std::mem::take(cache),
+            );
+            header.encode(&mut result);
+            *cache = header.into_cache();
+
+            result
+        }
+        encode_impl(cell.as_ref(), cache)
+    }
+
     /// Encodes the specified cell tree as BOC.
     ///
     /// Uses `rayon` under the hood to parallelize encoding.

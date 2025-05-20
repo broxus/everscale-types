@@ -324,20 +324,12 @@ impl CellSliceRange {
 
     /// Returns the number of remaining bits of data in the slice.
     pub const fn size_bits(&self) -> u16 {
-        if self.bits_start > self.bits_end {
-            0
-        } else {
-            self.bits_end - self.bits_start
-        }
+        self.bits_end.saturating_sub(self.bits_start)
     }
 
     /// Returns the number of remaining references in the slice.
     pub const fn size_refs(&self) -> u8 {
-        if self.refs_start > self.refs_end {
-            0
-        } else {
-            self.refs_end - self.refs_start
-        }
+        self.refs_end.saturating_sub(self.refs_start)
     }
 
     /// Returns whether there are no data bits and refs left.
