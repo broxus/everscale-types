@@ -28,6 +28,16 @@ impl<S: BuildHasher + Default> BocHeaderCache<S> {
             rev_cells: Vec::with_capacity(capacity),
         }
     }
+
+    /// Capacity of the underlying `rev_indices` cache.
+    pub fn rev_indices_capacity(&self) -> usize {
+        self.rev_indices.capacity()
+    }
+
+    /// Capacity of the underlying `rev_cells` cache.
+    pub fn rev_cells_capacity(&self) -> usize {
+        self.rev_cells.capacity()
+    }
 }
 
 /// Intermediate BOC serializer state.

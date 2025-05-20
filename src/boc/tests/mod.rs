@@ -19,7 +19,7 @@ fn big_cell() -> anyhow::Result<()> {
             b.build().unwrap()
         }
     }
-    
+
     let first = make_big_tree(10, &mut 0, 100000);
 
     let mut cache = ser::BocHeaderCache::<ahash::RandomState>::default();
