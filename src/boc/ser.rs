@@ -4,6 +4,32 @@ use std::hash::BuildHasher;
 use super::BocTag;
 use crate::cell::{CellDescriptor, DynCell, HashBytes};
 
+/// Preallocated BOC header indices cache.
+pub struct BocHeaderCache<S> {
+    rev_indices: HashMap<&'static HashBytes, u32, S>,
+    rev_cells: Vec<&'static DynCell>,
+}
+
+impl<S: BuildHasher + Default> Default for BocHeaderCache<S> {
+    #[inline]
+    fn default() -> Self {
+        Self {
+            rev_indices: Default::default(),
+            rev_cells: Default::default(),
+        }
+    }
+}
+
+impl<S: BuildHasher + Default> BocHeaderCache<S> {
+    /// Creates an empty preallocated revs cache of specified capacity.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            rev_indices: HashMap::with_capacity_and_hasher(capacity, Default::default()),
+            rev_cells: Vec::with_capacity(capacity),
+        }
+    }
+}
+
 /// Intermediate BOC serializer state.
 pub struct BocHeader<'a, S = ahash::RandomState> {
     root_rev_indices: Vec<u32>,
@@ -72,6 +98,59 @@ impl<'a, S> BocHeader<'a, S>
 where
     S: BuildHasher,
 {
+    /// Creates an intermediate BOC serializer state with a single root and preallocated revs cache.
+    pub fn with_root_and_cache(root: &'a DynCell, cache: BocHeaderCache<S>) -> Self {
+        debug_assert!(cache.rev_cells.is_empty());
+        debug_assert!(cache.rev_indices.is_empty());
+
+        let mut res = BocHeader::<'_, S> {
+            // SAFETY: `rev_indices` is guaranteed to be empty so that
+            // there is no difference in a key type lifetime.
+            rev_indices: unsafe {
+                std::mem::transmute::<
+                    HashMap<&'static HashBytes, u32, S>,
+                    HashMap<&'a HashBytes, u32, S>,
+                >(cache.rev_indices)
+            },
+            // SAFETY: `rev_cells` is guaranteed to be empty so that
+            // there is no difference in a value type lifetime.
+            rev_cells: unsafe {
+                std::mem::transmute::<Vec<&'static DynCell>, Vec<&'a DynCell>>(cache.rev_cells)
+            },
+            root_rev_indices: Default::default(),
+            total_data_size: 0,
+            reference_count: 0,
+            cell_count: 0,
+            without_hashes: false,
+
+            include_crc: false,
+        };
+        res.add_root(root);
+        res
+    }
+
+    /// Transforms BocHeader into reusable revs cache.
+    pub fn into_cache(mut self) -> BocHeaderCache<S> {
+        self.rev_indices.clear();
+        self.rev_cells.clear();
+
+        BocHeaderCache {
+            // SAFETY: `rev_indices` is guaranteed to be empty so that
+            // there is no difference in a key type lifetime.
+            rev_indices: unsafe {
+                std::mem::transmute::<
+                    HashMap<&'a HashBytes, u32, S>,
+                    HashMap<&'static HashBytes, u32, S>,
+                >(self.rev_indices)
+            },
+            // SAFETY: `rev_cells` is guaranteed to be empty so that
+            // there is no difference in a value type lifetime.
+            rev_cells: unsafe {
+                std::mem::transmute::<Vec<&'a DynCell>, Vec<&'static DynCell>>(self.rev_cells)
+            },
+        }
+    }
+
     /// Clears the header, removing all cells. Keeps the allocated memory for reuse.
     pub fn clear(&mut self) {
         self.root_rev_indices.clear();
