@@ -25,7 +25,9 @@ mod ops {
     pub use self::insert::{aug_dict_insert, dict_insert, dict_insert_owned};
     pub use self::modify::{aug_dict_modify_from_sorted_iter, dict_modify_from_sorted_iter};
     pub use self::remove::{aug_dict_remove_owned, dict_remove_bound_owned, dict_remove_owned};
-    pub use self::split_merge::{dict_merge, dict_split_by_prefix};
+    pub use self::split_merge::{
+        dict_merge, dict_split_by_prefix, sibling_aug_dict_merge, sibling_dict_merge,
+    };
 
     mod build;
     mod find;
