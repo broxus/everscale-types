@@ -6,8 +6,8 @@ use super::raw::*;
 use super::typed::*;
 use super::{
     aug_dict_find_by_extra, aug_dict_insert, aug_dict_modify_from_sorted_iter,
-    aug_dict_remove_owned, build_aug_dict_from_sorted_iter, read_label, DictKey, LoadDictKey,
-    SearchByExtra, SetMode, StoreDictKey,
+    aug_dict_remove_owned, build_aug_dict_from_sorted_iter, read_label, sibling_aug_dict_merge,
+    DictKey, LoadDictKey, SearchByExtra, SetMode, StoreDictKey,
 };
 use crate::cell::*;
 use crate::error::*;
@@ -660,6 +660,36 @@ where
         ok!(right.update_root_extra());
 
         Ok((left, right))
+    }
+
+    /// Merge dictionary with its sibling
+    pub fn merge_with_sibling(&self, sibling: &AugDict<K, A, V>) -> Result<Self, Error>
+    where
+        for<'a> V: Load<'a> + 'static,
+    {
+        let mut dict = self.merge_with_sibling_ext(sibling, Cell::empty_context())?;
+        dict.update_root_extra()?;
+        Ok(dict)
+    }
+
+    /// Merge dictionary with its sibling
+    pub fn merge_with_sibling_ext(
+        &self,
+        sibling: &AugDict<K, A, V>,
+        context: &dyn CellContext,
+    ) -> Result<Self, Error>
+    where
+        for<'a> V: Load<'a> + 'static,
+    {
+        let merged = sibling_aug_dict_merge(
+            self.dict().root(),
+            sibling.dict.root(),
+            K::BITS,
+            A::comp_add,
+            context,
+        )?;
+        let dict = AugDict::load_from_root_ext(&mut merged.as_slice_allow_exotic(), context)?;
+        Ok(dict)
     }
 }
 

@@ -6,7 +6,7 @@ use super::raw::*;
 use super::{
     build_dict_from_sorted_iter, dict_find_bound, dict_find_owned, dict_get, dict_get_owned,
     dict_insert, dict_load_from_root, dict_modify_from_sorted_iter, dict_remove_bound_owned,
-    dict_split_by_prefix, DictBound, DictKey, SetMode, StoreDictKey,
+    dict_split_by_prefix, sibling_dict_merge, DictBound, DictKey, SetMode, StoreDictKey,
 };
 use crate::cell::*;
 use crate::dict::{dict_remove_owned, LoadDictKey};
@@ -397,6 +397,29 @@ where
             context
         ));
         Ok((Self::from_raw(left), Self::from_raw(right)))
+    }
+
+    /// Merge dictionary with its sibling
+    pub fn merge_with_sibling(&self, sibling: &Dict<K, V>) -> Result<Self, Error>
+    where
+        for<'a> V: Load<'a> + 'static,
+    {
+        let dict = self.merge_with_sibling_ext(sibling, Cell::empty_context())?;
+        Ok(dict)
+    }
+
+    /// Merge dictionary with its sibling
+    pub fn merge_with_sibling_ext(
+        &self,
+        sibling: &Dict<K, V>,
+        context: &dyn CellContext,
+    ) -> Result<Self, Error>
+    where
+        for<'a> V: Load<'a> + 'static,
+    {
+        let merged = sibling_dict_merge(self.root(), sibling.root(), K::BITS, context)?;
+        let dict = Dict::load_from_root_ext(&mut merged.as_slice_allow_exotic(), context)?;
+        Ok(dict)
     }
 }
 
