@@ -400,25 +400,22 @@ where
     }
 
     /// Merge dictionary with its sibling
-    pub fn merge_with_sibling(&self, sibling: &Dict<K, V>) -> Result<Self, Error>
+    pub fn merge_with_right_sibling(&self, sibling: &Dict<K, V>) -> Result<Self, Error>
     where
         for<'a> V: Load<'a> + 'static,
     {
-        let dict = self.merge_with_sibling_ext(sibling, Cell::empty_context())?;
+        let dict = self.merge_with_right_sibling_ext(sibling, Cell::empty_context())?;
         Ok(dict)
     }
 
     /// Merge dictionary with its sibling
-    pub fn merge_with_sibling_ext(
+    pub fn merge_with_right_sibling_ext(
         &self,
         sibling: &Dict<K, V>,
         context: &dyn CellContext,
-    ) -> Result<Self, Error>
-    where
-        for<'a> V: Load<'a> + 'static,
-    {
-        let merged = sibling_dict_merge(self.root(), sibling.root(), K::BITS, context)?;
-        let dict = Dict::load_from_root_ext(&mut merged.as_slice_allow_exotic(), context)?;
+    ) -> Result<Self, Error> {
+        let res = sibling_dict_merge(self.root(), sibling.root(), K::BITS, context)?;
+        let dict = Dict::from_raw(res);
         Ok(dict)
     }
 }
@@ -1835,6 +1832,29 @@ mod tests {
             (-3, Some(-3), None),
             (-4, Some(-4), None),
         ]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn split_merge_test() -> anyhow::Result<()> {
+        let mut dict = Dict::<u32, u32>::new();
+
+        dict.add(1, 1)?;
+        dict.add(2, 2)?;
+        dict.add(3, 3)?;
+        dict.add(u32::MAX - 2, 4)?;
+        dict.add(u32::MAX - 1, 5)?;
+        dict.add(u32::MAX, 6)?;
+
+        let (d1, d2) = dict.split()?;
+        let merged = d1.merge_with_right_sibling(&d2)?;
+
+        for i in merged.iter() {
+            let _ = i?;
+        }
+
+        assert_eq!(dict, merged);
 
         Ok(())
     }
