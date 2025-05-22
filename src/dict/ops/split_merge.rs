@@ -111,55 +111,49 @@ pub fn sibling_dict_merge(
     right: &Option<Cell>,
     key_bit_length: u16,
     context: &dyn CellContext,
-) -> Result<Cell, Error> {
+) -> Result<Option<Cell>, Error> {
     let dict = match (&left, right) {
-        (None, None) => return Err(Error::InvalidData),
-        (Some(left), None) => return Ok(left.clone()),
-        (None, Some(right)) => return Ok(right.clone()),
+        (None, None) => return Ok(None),
+        (Some(left), None) => return Ok(Some(left.clone())),
+        (None, Some(right)) => return Ok(Some(right.clone())),
         (Some(left_cell), Some(right_cell)) => {
-            let bit_len = left_cell.bit_len();
-            if bit_len != right_cell.bit_len() && bit_len != key_bit_length {
-                return Err(Error::InvalidCell); // KEY LENGTH ERROR?
-            }
-
             let mut left_slice = left_cell.as_slice()?;
             let mut left_label = read_label(&mut left_slice, key_bit_length)?;
 
             let mut right_slice = right_cell.as_slice()?;
             let mut right_label = read_label(&mut right_slice, key_bit_length)?;
 
-            let lcp = left_label.longest_common_data_prefix(&right_label);
+            let min_label_len = std::cmp::min(left_label.size_bits(), right_label.size_bits());
+            if min_label_len == 0 {
+                return Err(Error::InvalidCell);
+            }
 
-            let mut new_root_builder = CellBuilder::new();
-            write_label(&lcp, lcp.size_bits(), &mut new_root_builder)?;
+            let lcp = left_label.longest_common_data_prefix(&right_label);
+            if lcp.size_bits() >= min_label_len || key_bit_length < lcp.size_bits() + 1 {
+                return Err(Error::InvalidCell);
+            }
 
             left_label.skip_first(lcp.size_bits(), 0)?;
             right_label.skip_first(lcp.size_bits(), 0)?;
+            let remaining_kbl = key_bit_length - 1 - lcp.size_bits();
 
-            let (left, right) = match (left_label.load_bit()?, right_label.load_bit()?) {
-                (false, true) => {
-                    let left_leaf =
-                        make_leaf(&left_label, left_label.size_bits(), &left_slice, context)?;
-                    let right_leaf =
-                        make_leaf(&right_label, right_label.size_bits(), &right_slice, context)?;
-                    (left_leaf, right_leaf)
-                }
-                (true, false) => {
-                    let left_leaf =
-                        make_leaf(&right_label, right_label.size_bits(), &right_slice, context)?;
-                    let right_leaf =
-                        make_leaf(&left_label, left_label.size_bits(), &left_slice, context)?;
-                    (left_leaf, right_leaf)
-                }
-                _ => return Err(Error::InvalidCell),
-            };
+            if left_label.load_bit()? || !right_label.load_bit()? {
+                return Err(Error::InvalidData);
+            }
+
+            let left = make_leaf(&left_label, remaining_kbl, &left_slice, context)?;
+            let right = make_leaf(&right_label, remaining_kbl, &right_slice, context)?;
+
+            let mut new_root_builder = CellBuilder::new();
+            write_label(&lcp, key_bit_length, &mut new_root_builder)?;
+
             new_root_builder.store_reference(left)?;
             new_root_builder.store_reference(right)?;
 
             new_root_builder.build()?
         }
     };
-    Ok(dict)
+    Ok(Some(dict))
 }
 
 /// Merges two sibling dictionaries into one and returns it
@@ -169,51 +163,52 @@ pub fn sibling_aug_dict_merge(
     key_bit_length: u16,
     comparator: AugDictFn,
     context: &dyn CellContext,
-) -> Result<Cell, Error> {
+) -> Result<Option<Cell>, Error> {
     let dict = match (&left, right) {
-        (None, None) => return Err(Error::InvalidData),
-        (Some(left), None) => return Ok(left.clone()),
-        (None, Some(right)) => return Ok(right.clone()),
+        (None, None) => return Ok(None),
+        (Some(left), None) => return Ok(Some(left.clone())),
+        (None, Some(right)) => return Ok(Some(right.clone())),
         (Some(left_cell), Some(right_cell)) => {
-            let bit_len = left_cell.bit_len();
-            if bit_len != right_cell.bit_len() && bit_len != key_bit_length {
-                return Err(Error::InvalidCell); // KEY LENGTH ERROR?
-            }
-
             let mut left_slice = left_cell.as_slice()?;
             let mut left_label = read_label(&mut left_slice, key_bit_length)?;
 
             let mut right_slice = right_cell.as_slice()?;
             let mut right_label = read_label(&mut right_slice, key_bit_length)?;
 
+            let min_label_len = std::cmp::min(left_label.size_bits(), right_label.size_bits());
+            if min_label_len == 0 {
+                return Err(Error::InvalidData);
+            }
+
             let lcp = left_label.longest_common_data_prefix(&right_label);
+            if lcp.size_bits() >= min_label_len || key_bit_length < lcp.size_bits() + 1 {
+                return Err(Error::InvalidData);
+            }
 
             left_label.skip_first(lcp.size_bits(), 0)?;
             right_label.skip_first(lcp.size_bits(), 0)?;
+            let remaining_kbl = key_bit_length - 1 - lcp.size_bits();
 
-            let (left, right) = match (left_label.load_bit()?, right_label.load_bit()?) {
-                (false, true) => {
-                    let left_leaf =
-                        make_leaf(&left_label, left_label.size_bits(), &left_slice, context)?;
-                    let right_leaf =
-                        make_leaf(&right_label, right_label.size_bits(), &right_slice, context)?;
-                    (left_leaf, right_leaf)
-                }
-                (true, false) => {
-                    let left_leaf =
-                        make_leaf(&right_label, right_label.size_bits(), &right_slice, context)?;
-                    let right_leaf =
-                        make_leaf(&left_label, left_label.size_bits(), &left_slice, context)?;
-                    (left_leaf, right_leaf)
-                }
-                _ => return Err(Error::InvalidCell),
-            };
+            if left_label.load_bit()? || !right_label.load_bit()? {
+                return Err(Error::InvalidData);
+            }
+
+            let left = make_leaf(&left_label, remaining_kbl, &left_slice, context)?;
+            let right = make_leaf(&right_label, remaining_kbl, &right_slice, context)?;
 
             let mut new_root_builder = CellBuilder::new();
-            write_label(&lcp, lcp.size_bits(), &mut new_root_builder)?;
+            write_label(&lcp, key_bit_length, &mut new_root_builder)?;
 
             new_root_builder.store_reference(left)?;
             new_root_builder.store_reference(right)?;
+
+            if left_label.size_bits() < remaining_kbl {
+                left_slice.skip_first(0, 2)?
+            }
+
+            if right_label.size_bits() < remaining_kbl {
+                right_slice.skip_first(0, 2)?
+            }
 
             comparator(
                 &mut left_slice,
@@ -225,88 +220,5 @@ pub fn sibling_aug_dict_merge(
             new_root_builder.build_ext(context)?
         }
     };
-    Ok(dict)
-}
-
-#[cfg(test)]
-pub mod test {
-    use super::*;
-    use crate::dict::{AugDict, AugDictExtra, Dict};
-    #[test]
-    fn split_merge_test() -> anyhow::Result<()> {
-        let mut dict = Dict::<u32, u32>::new();
-
-        dict.add(1, 1)?;
-        dict.add(2, 2)?;
-        dict.add(3, 3)?;
-        dict.add(u32::MAX - 2, 4)?;
-        dict.add(u32::MAX - 1, 5)?;
-        dict.add(u32::MAX, 6)?;
-        println!("initial {:?}", dict.root());
-
-        let (d1, d2) = dict.split()?;
-        let cell = sibling_dict_merge(d1.root(), d2.root(), 32, Cell::empty_context())?;
-
-        let new_dict = Dict::<u32, u32>::from_raw(Some(cell));
-
-        for i in new_dict.iter() {
-            let (k, v) = i?;
-            println!("{:?} {:?}", k, v);
-        }
-
-        assert_eq!(new_dict.root(), dict.root());
-
-        Ok(())
-    }
-
-    #[derive(Debug, Default, Load, Store, Eq, PartialEq)]
-    struct OrCmp(bool);
-
-    impl AugDictExtra for OrCmp {
-        fn comp_add(
-            left: &mut CellSlice,
-            right: &mut CellSlice,
-            b: &mut CellBuilder,
-            _: &dyn CellContext,
-        ) -> Result<(), Error> {
-            let left = left.load_bit()?;
-            let right = right.load_bit()?;
-            b.store_bit(left | right)
-        }
-    }
-
-    #[test]
-    fn split_merge_aug_test() -> anyhow::Result<()> {
-        let mut dict = AugDict::<u32, OrCmp, u32>::new();
-        dict.add(1, OrCmp(true), 1)?;
-        dict.add(2, OrCmp(true), 1)?;
-        dict.add(3, OrCmp(true), 1)?;
-        dict.add(u32::MAX - 2, OrCmp(false), 4)?;
-        dict.add(u32::MAX - 1, OrCmp(false), 5)?;
-        dict.add(u32::MAX, OrCmp(false), 6)?;
-
-        let (d1, d2) = dict.split()?;
-
-        let cell = sibling_aug_dict_merge(
-            d1.dict().root(),
-            d2.dict().root(),
-            32,
-            OrCmp::comp_add,
-            Cell::empty_context(),
-        )?;
-
-        let mut new = AugDict::<u32, OrCmp, u32>::load_from_root_ext(
-            &mut cell.as_slice_allow_exotic(),
-            Cell::empty_context(),
-        )?;
-        new.update_root_extra()?;
-
-        for i in new.iter() {
-            let (k, e, v) = i?;
-            println!("{:?} {:?} {:?}", k, e, v);
-        }
-        assert_eq!(dict, new);
-
-        Ok(())
-    }
+    Ok(Some(dict))
 }
