@@ -5,9 +5,9 @@ use std::marker::PhantomData;
 use super::raw::*;
 use super::typed::*;
 use super::{
-    aug_dict_find_by_extra, aug_dict_insert, aug_dict_modify_from_sorted_iter,
-    aug_dict_remove_owned, build_aug_dict_from_sorted_iter, read_label, sibling_aug_dict_merge,
-    DictKey, LoadDictKey, SearchByExtra, SetMode, StoreDictKey,
+    aug_dict_find_by_extra, aug_dict_insert, aug_dict_merge_siblings,
+    aug_dict_modify_from_sorted_iter, aug_dict_remove_owned, build_aug_dict_from_sorted_iter,
+    read_label, DictKey, LoadDictKey, SearchByExtra, SetMode, StoreDictKey,
 };
 use crate::cell::*;
 use crate::error::*;
@@ -662,25 +662,25 @@ where
         Ok((left, right))
     }
 
-    /// Merge dictionary with its sibling
-    pub fn merge_with_right_sibling(&self, sibling: &AugDict<K, A, V>) -> Result<Self, Error> {
-        let dict = self.merge_with_right_sibling_ext(sibling, Cell::empty_context())?;
+    /// Merge dictionary with its right sibling.
+    pub fn merge_with_right_sibling(&self, right: &AugDict<K, A, V>) -> Result<Self, Error> {
+        let dict = self.merge_with_right_sibling_ext(right, Cell::empty_context())?;
         Ok(dict)
     }
 
     /// Merge dictionary with its sibling
     pub fn merge_with_right_sibling_ext(
         &self,
-        sibling: &AugDict<K, A, V>,
+        right: &AugDict<K, A, V>,
         context: &dyn CellContext,
     ) -> Result<Self, Error> {
-        let merged = sibling_aug_dict_merge(
+        let merged = ok!(aug_dict_merge_siblings(
             self.dict().root(),
-            sibling.dict().root(),
+            right.dict().root(),
             K::BITS,
             A::comp_add,
             context,
-        )?;
+        ));
 
         let mut res = Self {
             dict: Dict::from_raw(merged),
@@ -688,7 +688,7 @@ where
             _key: PhantomData,
             _value: PhantomData,
         };
-        res.update_root_extra()?;
+        ok!(res.update_root_extra());
 
         Ok(res)
     }
