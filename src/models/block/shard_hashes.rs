@@ -11,6 +11,21 @@ use crate::util::*;
 pub struct ShardHashes(Dict<i32, Cell>);
 
 impl ShardHashes {
+    /// Wraps the shards dictionay.
+    pub const fn from_dict(dict: Dict<i32, Cell>) -> Self {
+        Self(dict)
+    }
+
+    /// Returns the underlying dictionay.
+    pub fn as_dict(&self) -> &Dict<i32, Cell> {
+        &self.0
+    }
+
+    /// Returns the underlying dictionay.
+    pub fn into_dict(self) -> Dict<i32, Cell> {
+        self.0
+    }
+
     /// Tries to construct a [`ShardHashes`] from an iterator over the shards.
     /// The iterator must contain a list of all shards for each workchain.
     pub fn from_shards<'a, I>(iter: I) -> Result<Self, Error>
