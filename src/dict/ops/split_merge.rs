@@ -66,6 +66,76 @@ pub fn dict_split_by_prefix(
     Ok((Some(left_branch), Some(right_branch)))
 }
 
+/// Splits one dictionary by the key prefix.
+/// Returns raw branches of the split dictionary.
+pub fn dict_split_raw(
+    dict: Option<&'_ Cell>,
+    key_bit_len: u16,
+    context: &dyn CellContext,
+) -> Result<PartialSplitDict, Error> {
+    if key_bit_len == 0 {
+        return Ok(PartialSplitDict {
+            remaining_bit_len: 0,
+            left_branch: None,
+            right_branch: None,
+        });
+    }
+
+    let mut remaining_data = match dict {
+        Some(data) => ok!(context
+            .load_dyn_cell(data.as_ref(), LoadMode::Full)
+            .and_then(CellSlice::new)),
+        None => {
+            return Ok(PartialSplitDict {
+                remaining_bit_len: key_bit_len,
+                left_branch: None,
+                right_branch: None,
+            })
+        }
+    };
+
+    let root_label = ok!(read_label(&mut remaining_data, key_bit_len));
+    let subdict_bit_len = if root_label.is_data_empty() {
+        match key_bit_len.checked_sub(1) {
+            Some(bit_len) => bit_len,
+            None => return Err(Error::CellUnderflow),
+        }
+    } else {
+        let mut left = dict.cloned();
+        let mut right = None;
+        if ok!(root_label.get_bit(0)) {
+            std::mem::swap(&mut left, &mut right);
+        }
+        return Ok(PartialSplitDict {
+            remaining_bit_len: key_bit_len,
+            left_branch: left,
+            right_branch: right,
+        });
+    };
+
+    let left_branch =
+        ok!(context.load_cell(ok!(remaining_data.load_reference_cloned()), LoadMode::Full));
+    let right_branch =
+        ok!(context.load_cell(ok!(remaining_data.load_reference_cloned()), LoadMode::Full));
+
+    Ok(PartialSplitDict {
+        remaining_bit_len: subdict_bit_len,
+        left_branch: Some(left_branch),
+        right_branch: Some(right_branch),
+    })
+}
+
+/// Raw split dict
+#[derive(Debug, Clone)]
+pub struct PartialSplitDict {
+    /// Remaining dict key bit length
+    pub remaining_bit_len: u16,
+    /// Left raw branch
+    pub left_branch: Option<Cell>,
+    /// Right raw branch
+    pub right_branch: Option<Cell>,
+}
+
 /// Merges two dictionaries into one (left)
 ///
 /// TODO: Optimize

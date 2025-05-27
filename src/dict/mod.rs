@@ -27,6 +27,7 @@ mod ops {
     pub use self::remove::{aug_dict_remove_owned, dict_remove_bound_owned, dict_remove_owned};
     pub use self::split_merge::{
         aug_dict_merge_siblings, dict_merge, dict_merge_siblings, dict_split_by_prefix,
+        dict_split_raw, PartialSplitDict,
     };
 
     mod build;
