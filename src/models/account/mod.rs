@@ -16,8 +16,6 @@ pub struct StorageUsed {
     pub cells: VarUint56,
     /// The total number of bits in unique cells.
     pub bits: VarUint56,
-    /// The number of public libraries in the state.
-    pub public_cells: VarUint56,
 }
 
 impl StorageUsed {
@@ -25,7 +23,6 @@ impl StorageUsed {
     pub const ZERO: Self = Self {
         cells: VarUint56::ZERO,
         bits: VarUint56::ZERO,
-        public_cells: VarUint56::ZERO,
     };
 
     /// Computes a total storage usage stats.
@@ -49,7 +46,6 @@ impl StorageUsed {
         let res = Self {
             cells: VarUint56::new(res.cell_count),
             bits: VarUint56::new(res.bit_count),
-            public_cells: Default::default(),
         };
 
         if res.cells.is_valid() || !res.bits.is_valid() {
@@ -79,6 +75,41 @@ impl StorageUsedShort {
     };
 }
 
+/// Storage state extra
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub enum StorageExtra {
+    /// Storage extra is not present.
+    #[default]
+    None,
+    /// Storage extra is present.
+    DictHash(HashBytes),
+}
+
+impl Store for StorageExtra {
+    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
+        match self {
+            StorageExtra::None => builder.store_zeros(3)?,
+            StorageExtra::DictHash(dict_hash) => {
+                builder.store_small_uint(1, 3)?;
+                builder.store_u256(dict_hash)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<'a> Load<'a> for StorageExtra {
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
+        match slice.load_small_uint(3)? {
+            0b000 => Ok(Self::None),
+            0b001 => Ok(Self::DictHash(slice.load_u256()?)),
+            _ => Err(Error::InvalidTag),
+        }
+    }
+}
+
 /// Storage profile of an account.
 #[derive(Debug, Default, Clone, Eq, PartialEq, Store, Load)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -86,6 +117,8 @@ impl StorageUsedShort {
 pub struct StorageInfo {
     /// Amount of unique cells and bits which account state occupies.
     pub used: StorageUsed,
+    /// Storage extra
+    pub storage_extra: StorageExtra,
     /// Unix timestamp of the last storage phase.
     pub last_paid: u32,
     /// Account debt for storing its state.
