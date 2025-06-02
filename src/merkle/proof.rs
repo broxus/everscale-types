@@ -681,46 +681,41 @@ where
                     let child_repr_hash = child.repr_hash();
 
                     if par_cells.contains(child_repr_hash) {
-                        println!("SPAWN MERKLE BUILD");
-
                         let last_merkle_depth = last.merkle_depth;
 
-                        s.spawn(move |_| {
-                            let mut stack = Vec::with_capacity(child.repr_depth() as usize);
+                        // s.spawn(move |_| {
+                        let mut stack = Vec::with_capacity(child.repr_depth() as usize);
 
-                            // Fetch child descriptor
-                            let child_descriptor = child.descriptor();
+                        // Fetch child descriptor
+                        let child_descriptor = child.descriptor();
 
-                            // Add merkle offset to the current merkle depth
-                            let merkle_depth =
-                                last_merkle_depth + child_descriptor.is_merkle() as u8;
+                        // Add merkle offset to the current merkle depth
+                        let merkle_depth = last_merkle_depth + child_descriptor.is_merkle() as u8;
 
-                            stack.push(Node {
-                                references: child.references(),
-                                descriptor: child_descriptor,
-                                merkle_depth,
-                                children: CellRefsBuilder::default(),
-                            });
+                        stack.push(Node {
+                            references: child.references(),
+                            descriptor: child_descriptor,
+                            merkle_depth,
+                            children: CellRefsBuilder::default(),
+                        });
 
-                            while let Some(last) = stack.last_mut() {
-                                if let Some(child) = last.references.next() {
-                                    // Process children if they are left
-                                    if let Some(last) =
-                                        process_cell(child, last, self).expect("todo")
-                                    {
-                                        stack.push(last);
-                                        continue;
-                                    }
-                                } else if let Some(last) = stack.pop() {
-                                    // Build a new cell if there are no child nodes left to process
-                                    let proof_cell = build_cell(last, self).expect("todo");
+                        while let Some(last) = stack.last_mut() {
+                            if let Some(child) = last.references.next() {
+                                // Process children if they are left
+                                if let Some(last) = process_cell(child, last, self).expect("todo") {
+                                    stack.push(last);
+                                    continue;
+                                }
+                            } else if let Some(last) = stack.pop() {
+                                // Build a new cell if there are no child nodes left to process
+                                let proof_cell = build_cell(last, self).expect("todo");
 
-                                    if let Some(last) = stack.last_mut() {
-                                        _ = last.children.store_reference(proof_cell);
-                                    }
+                                if let Some(last) = stack.last_mut() {
+                                    _ = last.children.store_reference(proof_cell);
                                 }
                             }
-                        });
+                        }
+                        // });
                     } else if let Some(last) = process_cell(child, last, self)? {
                         stack.push(last);
                         continue;
