@@ -1475,7 +1475,7 @@ fn store_raw(
 /// Can be used later for [`CellBuilder::set_references`].
 #[derive(Default)]
 #[repr(transparent)]
-pub struct CellRefsBuilder(ArrayVec<Cell, MAX_REF_COUNT>);
+pub struct CellRefsBuilder(pub(crate) ArrayVec<Cell, MAX_REF_COUNT>);
 
 impl CellRefsBuilder {
     /// Tries to store a child in the cell,
