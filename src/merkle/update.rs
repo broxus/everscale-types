@@ -1,5 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::hash::BuildHasher;
+
+use dashmap::DashMap;
 
 use super::{make_pruned_branch, FilterAction, MerkleFilter, MerkleProofBuilder};
 use crate::cell::*;
@@ -137,7 +139,7 @@ impl MerkleUpdate {
     /// using old cells determined by filter.
     pub fn create<'a, F>(old: &'a DynCell, new: &'a DynCell, f: F) -> MerkleUpdateBuilder<'a, F>
     where
-        F: MerkleFilter + 'a,
+        F: MerkleFilter + Send + Sync + 'a,
     {
         MerkleUpdateBuilder::new(old, new, f)
     }
@@ -467,7 +469,7 @@ pub struct MerkleUpdateBuilder<'a, F> {
 
 impl<'a, F> MerkleUpdateBuilder<'a, F>
 where
-    F: MerkleFilter,
+    F: MerkleFilter + Send + Sync,
 {
     /// Creates a new Merkle update between the specified cells,
     /// using old cells determined by filter.
@@ -480,7 +482,10 @@ where
     }
 
     /// Builds a Merkle update using the specified cell context.
-    pub fn build_ext(self, context: &dyn CellContext) -> Result<MerkleUpdate, Error> {
+    pub fn build_ext(
+        self,
+        context: &(dyn CellContext + Send + Sync),
+    ) -> Result<MerkleUpdate, Error> {
         BuilderImpl {
             old: self.old,
             new: self.new,
@@ -489,29 +494,49 @@ where
         }
         .build()
     }
+
+    /// TODO
+    pub fn par_build_ext(
+        self,
+        context: &(dyn CellContext + Send + Sync),
+        par_cells: ahash::HashSet<HashBytes>,
+    ) -> Result<MerkleUpdate, Error> {
+        BuilderImpl {
+            old: self.old,
+            new: self.new,
+            filter: &self.filter,
+            context,
+        }
+        .par_build(par_cells)
+    }
 }
 
 impl<F> MerkleUpdateBuilder<'_, F>
 where
-    F: MerkleFilter,
+    F: MerkleFilter + Send + Sync,
 {
     /// Builds a Merkle update using an empty cell context.
     pub fn build(self) -> Result<MerkleUpdate, Error> {
         self.build_ext(Cell::empty_context())
+    }
+
+    /// TODO
+    pub fn par_build(self, par_cells: ahash::HashSet<HashBytes>) -> Result<MerkleUpdate, Error> {
+        self.par_build_ext(Cell::empty_context(), par_cells)
     }
 }
 
 struct BuilderImpl<'a, 'b, 'c: 'a> {
     old: &'a DynCell,
     new: &'a DynCell,
-    filter: &'b dyn MerkleFilter,
-    context: &'c dyn CellContext,
+    filter: &'b (dyn MerkleFilter + Send + Sync),
+    context: &'c (dyn CellContext + Send + Sync),
 }
 
 impl<'a: 'b, 'b, 'c: 'a> BuilderImpl<'a, 'b, 'c> {
     fn build(self) -> Result<MerkleUpdate, Error> {
         struct Resolver<'a, S> {
-            pruned_branches: HashMap<&'a HashBytes, bool, S>,
+            pruned_branches: DashMap<&'a HashBytes, bool, S>,
             visited: HashSet<&'a HashBytes, S>,
             filter: &'a dyn MerkleFilter,
             changed_cells: HashSet<&'a HashBytes, S>,
@@ -519,7 +544,7 @@ impl<'a: 'b, 'b, 'c: 'a> BuilderImpl<'a, 'b, 'c> {
 
         impl<'a, S> Resolver<'a, S>
         where
-            S: BuildHasher,
+            S: BuildHasher + Clone,
         {
             fn fill(&mut self, cell: &'a DynCell, mut skip_filter: bool) -> bool {
                 let repr_hash = cell.repr_hash();
@@ -531,10 +556,14 @@ impl<'a: 'b, 'b, 'c: 'a> BuilderImpl<'a, 'b, 'c> {
                 self.visited.insert(repr_hash);
 
                 let is_pruned = match self.pruned_branches.get_mut(repr_hash) {
-                    Some(true) => return false,
-                    Some(visited) => {
-                        *visited = true;
-                        true
+                    Some(mut res) => {
+                        let visited = res.value_mut();
+                        if *visited {
+                            false
+                        } else {
+                            *visited = true;
+                            true
+                        }
                     }
                     None => false,
                 };
@@ -569,7 +598,7 @@ impl<'a: 'b, 'b, 'c: 'a> BuilderImpl<'a, 'b, 'c> {
 
         struct InvertedFilter<F>(F);
 
-        impl<F: MerkleFilter> MerkleFilter for InvertedFilter<F> {
+        impl<F: MerkleFilter + Send + Sync> MerkleFilter for InvertedFilter<F> {
             #[inline]
             fn check(&self, cell: &HashBytes) -> FilterAction {
                 if self.0.check(cell) == FilterAction::Skip {
@@ -609,6 +638,143 @@ impl<'a: 'b, 'b, 'c: 'a> BuilderImpl<'a, 'b, 'c> {
             .track_pruned_branches()
             .allow_different_root(true)
             .build_raw_ext(self.context)
+        };
+
+        // Prepare cell diff resolver
+        let mut resolver = Resolver {
+            pruned_branches,
+            visited: Default::default(),
+            filter: self.filter,
+            changed_cells: Default::default(),
+        };
+
+        // Find all changed cells in the old cell tree
+        if resolver.fill(self.old, false) {
+            resolver.changed_cells.insert(old_hash);
+        }
+
+        // Create Merkle proof cell which contains only changed cells
+        let old = ok! {
+            MerkleProofBuilder::<_>::new(self.old, resolver.changed_cells)
+                .allow_different_root(true)
+                .build_raw_ext(self.context)
+        };
+
+        // Done
+        Ok(MerkleUpdate {
+            old_hash: *old_hash,
+            new_hash: *new_hash,
+            old_depth,
+            new_depth,
+            old,
+            new,
+        })
+    }
+
+    fn par_build(self, par_cells: ahash::HashSet<HashBytes>) -> Result<MerkleUpdate, Error> {
+        struct Resolver<'a, S> {
+            pruned_branches: DashMap<&'a HashBytes, bool, S>,
+            visited: HashSet<&'a HashBytes, S>,
+            filter: &'a dyn MerkleFilter,
+            changed_cells: HashSet<&'a HashBytes, S>,
+        }
+
+        impl<'a, S> Resolver<'a, S>
+        where
+            S: BuildHasher + Clone,
+        {
+            fn fill(&mut self, cell: &'a DynCell, mut skip_filter: bool) -> bool {
+                let repr_hash = cell.repr_hash();
+
+                // Skip visited cells
+                if self.visited.contains(repr_hash) {
+                    return false;
+                }
+                self.visited.insert(repr_hash);
+
+                let is_pruned = match self.pruned_branches.get_mut(repr_hash) {
+                    Some(mut res) => {
+                        let visited = res.value_mut();
+                        if *visited {
+                            false
+                        } else {
+                            *visited = true;
+                            true
+                        }
+                    }
+                    None => false,
+                };
+
+                let process_children = if skip_filter {
+                    true
+                } else {
+                    match self.filter.check(repr_hash) {
+                        FilterAction::Skip => false,
+                        FilterAction::Include => true,
+                        FilterAction::IncludeSubtree => {
+                            skip_filter = true;
+                            true
+                        }
+                    }
+                };
+
+                let mut result = false;
+                if process_children {
+                    for child in cell.references() {
+                        result |= self.fill(child, skip_filter);
+                    }
+
+                    if result {
+                        self.changed_cells.insert(repr_hash);
+                    }
+                }
+
+                result | is_pruned
+            }
+        }
+
+        struct InvertedFilter<F>(F);
+
+        impl<F: MerkleFilter + Send + Sync> MerkleFilter for InvertedFilter<F> {
+            #[inline]
+            fn check(&self, cell: &HashBytes) -> FilterAction {
+                if self.0.check(cell) == FilterAction::Skip {
+                    // TODO: check if FilterAction::IncludeSubtree is correct,
+                    // because it is more optimal to just include the new subtree
+                    FilterAction::Include
+                } else {
+                    FilterAction::Skip
+                }
+            }
+        }
+
+        let old_hash = self.old.repr_hash();
+        let old_depth = self.old.repr_depth();
+        let new_hash = self.new.repr_hash();
+        let new_depth = self.new.repr_depth();
+
+        // Handle the simplest case with empty Merkle update
+        if old_hash == new_hash {
+            let pruned = ok!(make_pruned_branch(self.old, 0, self.context));
+            return Ok(MerkleUpdate {
+                old_hash: *old_hash,
+                new_hash: *old_hash,
+                old_depth,
+                new_depth: old_depth,
+                old: pruned.clone(),
+                new: pruned,
+            });
+        }
+
+        // Create Merkle proof cell which contains only new cells
+        let (new, pruned_branches) = ok! {
+            MerkleProofBuilder::<_>::new(
+                self.new,
+                InvertedFilter(self.filter)
+            )
+            .track_pruned_branches()
+            .allow_different_root(true)
+            .par_build_raw_ext(self.context, &par_cells)
         };
 
         // Prepare cell diff resolver
