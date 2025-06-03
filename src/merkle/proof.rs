@@ -430,7 +430,7 @@ where
 struct BuilderImpl<'a, 'b, 'c: 'a, S = ahash::RandomState> {
     root: &'a DynCell,
     filter: &'b (dyn MerkleFilter + Send + Sync),
-    cells: DashMap<&'a HashBytes, Cell, S>,
+    cells: DashMap<HashBytes, Cell, S>,
     pruned_branches: Option<&'b DashMap<&'a HashBytes, bool, S>>,
     context: &'c (dyn CellContext + Send + Sync),
     allow_different_root: bool,
@@ -539,7 +539,7 @@ where
                 let proof_cell = ok!(builder.build_ext(self.context));
 
                 // Save this cell as processed cell
-                self.cells.insert(cell.repr_hash(), proof_cell.clone());
+                self.cells.insert(*cell.repr_hash(), proof_cell.clone());
 
                 match stack.last_mut() {
                     // Append this cell to the ancestor
@@ -566,9 +566,9 @@ where
             children: CellRefsBuilder,
         }
 
-        fn build_cell<'a, S>(
+        fn build_cell<'a, 'b, S>(
             last: Node<'a>,
-            ctx_builder: &BuilderImpl<'a, '_, '_, S>,
+            ctx_builder: &BuilderImpl<'b, '_, '_, S>,
         ) -> Result<Cell, Error>
         where
             S: BuildHasher + Default + Clone + Send + Sync,
@@ -585,7 +585,7 @@ where
             // Save this cell as processed cell
             ctx_builder
                 .cells
-                .insert(cell.repr_hash(), proof_cell.clone());
+                .insert(*cell.repr_hash(), proof_cell.clone());
 
             Ok(proof_cell)
         }
@@ -661,9 +661,9 @@ where
             return Err(Error::EmptyProof);
         }
 
-        let mut new_cell = None;
+        let par_buffer = DashMap::with_capacity(par_cells.len());
 
-        rayon::scope(|s| {
+        let mut stack = rayon::scope(|s| {
             let mut stack = Vec::with_capacity(self.root.repr_depth() as usize);
 
             // Push root node
@@ -683,62 +683,91 @@ where
                     if par_cells.contains(child_repr_hash) {
                         let last_merkle_depth = last.merkle_depth;
 
-                        // s.spawn(move |_| {
-                        let mut stack = Vec::with_capacity(child.repr_depth() as usize);
+                        let index = stack.len() - 1;
+                        let buffer = &par_buffer;
+                        s.spawn(move |_| {
+                            let mut stack = Vec::with_capacity(child.repr_depth() as usize);
 
-                        // Fetch child descriptor
-                        let child_descriptor = child.descriptor();
+                            // Fetch child descriptor
+                            let child_descriptor = child.descriptor();
 
-                        // Add merkle offset to the current merkle depth
-                        let merkle_depth = last_merkle_depth + child_descriptor.is_merkle() as u8;
+                            // Add merkle offset to the current merkle depth
+                            let merkle_depth =
+                                last_merkle_depth + child_descriptor.is_merkle() as u8;
 
-                        stack.push(Node {
-                            references: child.references(),
-                            descriptor: child_descriptor,
-                            merkle_depth,
-                            children: CellRefsBuilder::default(),
-                        });
+                            stack.push(Node {
+                                references: child.references(),
+                                descriptor: child_descriptor,
+                                merkle_depth,
+                                children: CellRefsBuilder::default(),
+                            });
 
-                        while let Some(last) = stack.last_mut() {
-                            if let Some(child) = last.references.next() {
-                                // Process children if they are left
-                                if let Some(last) = process_cell(child, last, self).expect("todo") {
-                                    stack.push(last);
-                                    continue;
-                                }
-                            } else if let Some(last) = stack.pop() {
-                                // Build a new cell if there are no child nodes left to process
-                                let proof_cell = build_cell(last, self).expect("todo");
+                            while let Some(last) = stack.last_mut() {
+                                if let Some(child) = last.references.next() {
+                                    // Process children if they are left
+                                    if let Some(last) =
+                                        process_cell(child, last, self).expect("todo")
+                                    {
+                                        stack.push(last);
+                                        continue;
+                                    }
+                                } else if let Some(last) = stack.pop() {
+                                    // Build a new cell if there are no child nodes left to process
+                                    let proof_cell = build_cell(last, self).expect("todo");
 
-                                if let Some(last) = stack.last_mut() {
-                                    _ = last.children.store_reference(proof_cell);
+                                    match stack.last_mut() {
+                                        // Append this cell to the ancestor
+                                        Some(last) => {
+                                            _ = last.children.store_reference(proof_cell);
+                                        }
+                                        // Or return it as a result (for the root node)
+                                        None => {
+                                            buffer.insert(index, proof_cell);
+                                        }
+                                    }
                                 }
                             }
-                        }
-                        // });
+                        });
                     } else if let Some(last) = process_cell(child, last, self)? {
                         stack.push(last);
                         continue;
                     }
-                } else if let Some(last) = stack.pop() {
-                    // Build a new cell if there are no child nodes left to process
-                    let proof_cell = build_cell(last, self)?;
-
-                    match stack.last_mut() {
-                        // Append this cell to the ancestor
-                        Some(last) => {
-                            _ = last.children.store_reference(proof_cell);
-                        }
-                        // Or return it as a result (for the root node)
-                        None => new_cell = Some(proof_cell),
-                    }
                 }
             }
 
-            Ok(())
+            Ok(stack)
         })?;
 
-        new_cell.ok_or(Error::EmptyProof)
+        let mut results: Vec<_> = par_buffer.into_iter().collect();
+        results.sort_by_key(|(idx, _)| *idx);
+
+        for (k, v) in results.iter() {
+            stack.insert(
+                *k,
+                Node {
+                    references: v.references(),
+                    descriptor: v.descriptor(),
+                    merkle_depth: 0,
+                    children: Default::default(),
+                },
+            );
+        }
+
+        while let Some(last) = stack.pop() {
+            // Build a new cell if there are no child nodes left to process
+            let proof_cell = build_cell(last, self)?;
+
+            match stack.last_mut() {
+                // Append this cell to the ancestor
+                Some(last) => {
+                    _ = last.children.store_reference(proof_cell);
+                }
+                // Or return it as a result (for the root node)
+                None => return Ok(proof_cell),
+            }
+        }
+
+        Err(Error::EmptyProof)
     }
 }
 
