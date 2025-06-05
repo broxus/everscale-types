@@ -1,11 +1,12 @@
-use std::hash::BuildHasher;
-
 use dashmap::DashMap;
+use std::hash::BuildHasher;
+use std::sync::mpsc;
 
-use super::{make_pruned_branch, FilterAction, MerkleFilter};
 use crate::cell::*;
 use crate::error::Error;
 use crate::util::unlikely;
+
+use super::{make_pruned_branch, FilterAction, MerkleFilter};
 
 /// Non-owning parsed Merkle proof representation.
 ///
@@ -474,6 +475,7 @@ where
                     // Process children if they are left
 
                     let child_repr_hash = child.repr_hash();
+
                     let child = if let Some(child) = self.cells.get(child_repr_hash) {
                         // Reused processed cells
                         ParCell::Ordinary(child.clone())
@@ -501,7 +503,7 @@ where
                                 ));
 
                                 // Insert pruned branch for the current cell
-                                if let Some(pruned_branch) = &mut self.pruned_branches {
+                                if let Some(pruned_branch) = self.pruned_branches {
                                     pruned_branch.insert(child_repr_hash, false);
                                 }
 
@@ -510,17 +512,158 @@ where
                             }
                             // All other cells will be included in a different branch
                             _ => {
-                                // Add merkle offset to the current merkle depth
-                                let merkle_depth = last.merkle_depth + descriptor.is_merkle() as u8;
+                                if child.repr_depth() < 5 {
+                                    // Add merkle offset to the current merkle depth
+                                    let merkle_depth =
+                                        last.merkle_depth + descriptor.is_merkle() as u8;
 
-                                // Push child node and start processing its references
-                                stack.push(Node {
-                                    references: child.references(),
-                                    descriptor,
-                                    merkle_depth,
-                                    children: ParCellRefsBuilder::default(),
-                                });
-                                continue;
+                                    // Push child node and start processing its references
+                                    stack.push(Node {
+                                        references: child.references(),
+                                        descriptor,
+                                        merkle_depth,
+                                        children: ParCellRefsBuilder::default(),
+                                    });
+
+                                    continue;
+                                } else {
+                                    let last_merkle_depth = last.merkle_depth;
+
+                                    let (tx, rx) = mpsc::channel();
+
+                                    let context = self.context;
+                                    let ctx_filter = self.filter;
+                                    let ctx_cells = &self.cells;
+                                    let ctx_pruned_branches = &self.pruned_branches;
+                                    let ctx_prune_big_cells = &self.prune_big_cells;
+
+                                    struct Node<'a> {
+                                        references: RefsIter<'a>,
+                                        descriptor: CellDescriptor,
+                                        merkle_depth: u8,
+                                        children: CellRefsBuilder,
+                                    }
+
+                                    s.spawn(move |_| {
+                                        let mut stack =
+                                            Vec::with_capacity(child.repr_depth() as usize);
+
+                                        // Fetch child descriptor
+                                        let child_descriptor = child.descriptor();
+
+                                        // Add merkle offset to the current merkle depth
+                                        let merkle_depth =
+                                            last_merkle_depth + child_descriptor.is_merkle() as u8;
+
+                                        stack.push(Node {
+                                            references: child.references(),
+                                            descriptor: child_descriptor,
+                                            merkle_depth,
+                                            children: CellRefsBuilder::default(),
+                                        });
+
+                                        while let Some(last) = stack.last_mut() {
+                                            if let Some(child) = last.references.next() {
+                                                // Process children if they are left
+
+                                                let child_repr_hash = child.repr_hash();
+                                                let child = if let Some(child) =
+                                                    ctx_cells.get(child_repr_hash)
+                                                {
+                                                    // Reused processed cells
+                                                    child.clone()
+                                                } else {
+                                                    // Fetch child descriptor
+                                                    let descriptor = child.descriptor();
+
+                                                    // Check if child is in a tree
+                                                    match ctx_filter.check(child_repr_hash) {
+                                                        // Included subtrees are used as is
+                                                        FilterAction::IncludeSubtree => last
+                                                            .references
+                                                            .peek_prev_cloned()
+                                                            .expect("mut not fail"),
+                                                        // Replace all skipped subtrees with pruned branch cells
+                                                        FilterAction::Skip
+                                                            if descriptor.reference_count() > 0
+                                                                || *ctx_prune_big_cells
+                                                                    && child.bit_len()
+                                                                        > PRUNED_BITS_THRESHOLD =>
+                                                        {
+                                                            // Create pruned branch
+                                                            let child = make_pruned_branch_cold(
+                                                                child,
+                                                                last.merkle_depth,
+                                                                context,
+                                                            )
+                                                            .unwrap();
+
+                                                            // Insert pruned branch for the current cell
+                                                            if let Some(pruned_branch) =
+                                                                ctx_pruned_branches
+                                                            {
+                                                                pruned_branch
+                                                                    .insert(child_repr_hash, false);
+                                                            }
+
+                                                            // Use new pruned branch as a child
+                                                            child
+                                                        }
+                                                        // All other cells will be included in a different branch
+                                                        _ => {
+                                                            // Add merkle offset to the current merkle depth
+                                                            let merkle_depth = last.merkle_depth
+                                                                + descriptor.is_merkle() as u8;
+
+                                                            // Push child node and start processing its references
+                                                            stack.push(Node {
+                                                                references: child.references(),
+                                                                descriptor,
+                                                                merkle_depth,
+                                                                children: CellRefsBuilder::default(
+                                                                ),
+                                                            });
+
+                                                            continue;
+                                                        }
+                                                    }
+                                                };
+
+                                                // Add child to the references builder
+                                                _ = last.children.store_reference(child);
+                                            } else if let Some(last) = stack.pop() {
+                                                // Build a new cell if there are no child nodes left to process
+
+                                                let cell = last.references.cell();
+
+                                                // Build the cell
+                                                let mut builder = CellBuilder::new();
+                                                builder.set_exotic(last.descriptor.is_exotic());
+                                                _ = builder.store_cell_data(cell);
+                                                builder.set_references(last.children);
+                                                let proof_cell =
+                                                    builder.build_ext(context).unwrap();
+
+                                                // Save this cell as processed cell
+                                                ctx_cells
+                                                    .insert(*cell.repr_hash(), proof_cell.clone());
+
+                                                match stack.last_mut() {
+                                                    // Append this cell to the ancestor
+                                                    Some(last) => {
+                                                        _ = last
+                                                            .children
+                                                            .store_reference(proof_cell);
+                                                    }
+                                                    // Or return it as a result (for the root node)
+                                                    None => tx.send(proof_cell).unwrap(),
+                                                }
+                                            }
+                                        }
+                                    });
+
+                                    ParCell::Channel(rx)
+                                }
                             }
                         }
                     };
@@ -552,6 +695,7 @@ where
 
                         let cell = ParCellParts {
                             data: builder,
+                            is_exotic: last.descriptor.is_exotic(),
                             refs: last.children.0,
                         };
 
@@ -573,13 +717,37 @@ where
             Err(Error::EmptyProof)
         })?;
 
-        match root_cell {
-            ParCell::Ordinary(cell) => {
-                println!("{}", cell.repr_hash().to_string());
-                Ok(cell)
+        fn traverse(
+            node: &ParCell,
+            context: &(dyn CellContext + Send + Sync),
+        ) -> Result<Cell, Error> {
+            match node {
+                ParCell::Ordinary(cell) => Ok(cell.clone()),
+                ParCell::Channel(rx) => {
+                    let cell = rx.recv().unwrap();
+                    Ok(cell)
+                }
+                ParCell::Partial(node) => {
+                    let mut refs_builder = CellRefsBuilder::default();
+
+                    for child in node.refs.as_ref() {
+                        let cell = traverse(child, context)?;
+                        refs_builder.store_reference(cell)?;
+                    }
+
+                    let cell_builder =
+                        CellBuilder::from_parts(node.is_exotic, node.data.clone(), refs_builder);
+
+                    let cell = cell_builder.build_ext(context)?;
+                    Ok(cell)
+                }
             }
-            ParCell::Partial(_) => todo!(),
-            ParCell::Channel(_) => todo!(),
+        }
+
+        match root_cell {
+            ParCell::Ordinary(cell) => Ok(cell),
+            ParCell::Channel(rx) => Ok(rx.recv().unwrap()),
+            ParCell::Partial(cell_parts) => traverse(&ParCell::Partial(cell_parts), self.context),
         }
     }
 

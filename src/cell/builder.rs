@@ -1472,8 +1472,11 @@ fn store_raw(
 
 /// TODO
 pub enum ParCell {
+    /// TODO
     Ordinary(Cell),
+    /// TODO
     Partial(Box<ParCellParts>),
+    /// TODO
     Channel(std::sync::mpsc::Receiver<Cell>),
 }
 
@@ -1481,6 +1484,8 @@ pub enum ParCell {
 pub struct ParCellParts {
     /// TODO
     pub data: CellDataBuilder,
+    /// TODO
+    pub is_exotic: bool,
     /// TODO
     pub refs: ArrayVec<ParCell, MAX_REF_COUNT>,
 }
@@ -1503,7 +1508,7 @@ impl ParCellRefsBuilder {
         }
     }
 
-    ///
+    /// TODO
     pub fn children(&self) -> Result<CellRefsBuilder, Error> {
         let mut builder = CellRefsBuilder::default();
 
