@@ -512,7 +512,7 @@ where
                             }
                             // All other cells will be included in a different branch
                             _ => {
-                                if child.repr_depth() < 5 {
+                                if child.repr_depth() < 10 {
                                     // Add merkle offset to the current merkle depth
                                     let merkle_depth =
                                         last.merkle_depth + descriptor.is_merkle() as u8;
