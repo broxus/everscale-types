@@ -1470,6 +1470,74 @@ fn store_raw(
     }
 }
 
+/// TODO
+pub enum ParCell {
+    Ordinary(Cell),
+    Partial(Box<ParCellParts>),
+    Channel(std::sync::mpsc::Receiver<Cell>),
+}
+
+/// TODO
+pub struct ParCellParts {
+    /// TODO
+    pub data: CellDataBuilder,
+    /// TODO
+    pub refs: ArrayVec<ParCell, MAX_REF_COUNT>,
+}
+
+/// TODO
+#[derive(Default)]
+#[repr(transparent)]
+pub struct ParCellRefsBuilder(pub ArrayVec<ParCell, MAX_REF_COUNT>);
+
+impl ParCellRefsBuilder {
+    /// Tries to store a child in the cell,
+    /// returning `false` if there is not enough remaining capacity.
+    pub fn store_reference(&mut self, cell: ParCell) -> Result<(), Error> {
+        if self.0.len() < MAX_REF_COUNT {
+            // SAFETY: reference count is in the valid range
+            unsafe { self.0.push(cell) }
+            Ok(())
+        } else {
+            Err(Error::CellOverflow)
+        }
+    }
+
+    ///
+    pub fn children(&self) -> Result<CellRefsBuilder, Error> {
+        let mut builder = CellRefsBuilder::default();
+
+        for cell in self.0.as_ref() {
+            match cell {
+                ParCell::Ordinary(cell) => {
+                    builder.store_reference(cell.clone())?;
+                }
+                ParCell::Partial(_) | ParCell::Channel(_) => {
+                    return Err(Error::InvalidData);
+                }
+            }
+        }
+
+        Ok(builder)
+    }
+
+    /// TODO
+    pub fn iter(&self) -> impl Iterator<Item = &ParCell> {
+        self.0.as_ref().iter()
+    }
+
+    /// TODO
+    pub fn is_ordinary(&self) -> bool {
+        for cell in self.0.as_ref().iter() {
+            if let ParCell::Channel(_) | ParCell::Partial(_) = cell {
+                return false;
+            }
+        }
+
+        true
+    }
+}
+
 /// Builder for constructing cell references array.
 ///
 /// Can be used later for [`CellBuilder::set_references`].
@@ -1710,13 +1778,15 @@ mod tests {
 
         builder.store_u32(0xdeafbeaf).unwrap();
         assert_eq!(builder.size_bits(), 32 + 27);
-        assert_eq!(builder.data[..8], [
-            0xde, 0xaf, 0xbe, 0xbb, 0xd5, 0xf7, 0xd5, 0xe0
-        ]);
+        assert_eq!(
+            builder.data[..8],
+            [0xde, 0xaf, 0xbe, 0xbb, 0xd5, 0xf7, 0xd5, 0xe0]
+        );
         builder.rewind_bits(32).unwrap();
-        assert_eq!(builder.data[..8], [
-            0xde, 0xaf, 0xbe, 0xa0, 0x00, 0x00, 0x00, 0x00
-        ]);
+        assert_eq!(
+            builder.data[..8],
+            [0xde, 0xaf, 0xbe, 0xa0, 0x00, 0x00, 0x00, 0x00]
+        );
 
         assert_eq!(builder.rewind_bits(32), Err(Error::CellUnderflow));
 

@@ -448,7 +448,7 @@ where
             references: RefsIter<'a>,
             descriptor: CellDescriptor,
             merkle_depth: u8,
-            children: CellRefsBuilder,
+            children: ParCellRefsBuilder,
         }
 
         if !self.allow_different_root
@@ -457,103 +457,130 @@ where
             return Err(Error::EmptyProof);
         }
 
-        let mut stack = Vec::with_capacity(self.root.repr_depth() as usize);
+        let root_cell = rayon::scope(|s| {
+            let mut stack = Vec::with_capacity(self.root.repr_depth() as usize);
 
-        // Push root node
-        let root_descriptor = self.root.descriptor();
-        stack.push(Node {
-            references: self.root.references(),
-            descriptor: root_descriptor,
-            merkle_depth: root_descriptor.is_merkle() as u8,
-            children: CellRefsBuilder::default(),
-        });
+            // Push root node
+            let root_descriptor = self.root.descriptor();
+            stack.push(Node {
+                references: self.root.references(),
+                descriptor: root_descriptor,
+                merkle_depth: root_descriptor.is_merkle() as u8,
+                children: ParCellRefsBuilder::default(),
+            });
 
-        while let Some(last) = stack.last_mut() {
-            if let Some(child) = last.references.next() {
-                // Process children if they are left
+            while let Some(last) = stack.last_mut() {
+                if let Some(child) = last.references.next() {
+                    // Process children if they are left
 
-                let child_repr_hash = child.repr_hash();
-                let child = if let Some(child) = self.cells.get(child_repr_hash) {
-                    // Reused processed cells
-                    child.clone()
-                } else {
-                    // Fetch child descriptor
-                    let descriptor = child.descriptor();
+                    let child_repr_hash = child.repr_hash();
+                    let child = if let Some(child) = self.cells.get(child_repr_hash) {
+                        // Reused processed cells
+                        ParCell::Ordinary(child.clone())
+                    } else {
+                        // Fetch child descriptor
+                        let descriptor = child.descriptor();
 
-                    // Check if child is in a tree
-                    match self.filter.check(child_repr_hash) {
-                        // Included subtrees are used as is
-                        FilterAction::IncludeSubtree => {
-                            last.references.peek_prev_cloned().expect("mut not fail")
-                        }
-                        // Replace all skipped subtrees with pruned branch cells
-                        FilterAction::Skip
-                            if descriptor.reference_count() > 0
-                                || self.prune_big_cells
-                                    && child.bit_len() > PRUNED_BITS_THRESHOLD =>
-                        {
-                            // Create pruned branch
-                            let child = ok!(make_pruned_branch_cold(
-                                child,
-                                last.merkle_depth,
-                                self.context
-                            ));
+                        // Check if child is in a tree
+                        match self.filter.check(child_repr_hash) {
+                            // Included subtrees are used as is
+                            FilterAction::IncludeSubtree => ParCell::Ordinary(
+                                last.references.peek_prev_cloned().expect("mut not fail"),
+                            ),
+                            // Replace all skipped subtrees with pruned branch cells
+                            FilterAction::Skip
+                                if descriptor.reference_count() > 0
+                                    || self.prune_big_cells
+                                        && child.bit_len() > PRUNED_BITS_THRESHOLD =>
+                            {
+                                // Create pruned branch
+                                let child = ok!(make_pruned_branch_cold(
+                                    child,
+                                    last.merkle_depth,
+                                    self.context
+                                ));
 
-                            // Insert pruned branch for the current cell
-                            if let Some(pruned_branch) = &mut self.pruned_branches {
-                                pruned_branch.insert(child_repr_hash, false);
+                                // Insert pruned branch for the current cell
+                                if let Some(pruned_branch) = &mut self.pruned_branches {
+                                    pruned_branch.insert(child_repr_hash, false);
+                                }
+
+                                // Use new pruned branch as a child
+                                ParCell::Ordinary(child)
                             }
+                            // All other cells will be included in a different branch
+                            _ => {
+                                // Add merkle offset to the current merkle depth
+                                let merkle_depth = last.merkle_depth + descriptor.is_merkle() as u8;
 
-                            // Use new pruned branch as a child
-                            child
+                                // Push child node and start processing its references
+                                stack.push(Node {
+                                    references: child.references(),
+                                    descriptor,
+                                    merkle_depth,
+                                    children: ParCellRefsBuilder::default(),
+                                });
+                                continue;
+                            }
                         }
-                        // All other cells will be included in a different branch
-                        _ => {
-                            // Add merkle offset to the current merkle depth
-                            let merkle_depth = last.merkle_depth + descriptor.is_merkle() as u8;
+                    };
 
-                            // Push child node and start processing its references
-                            stack.push(Node {
-                                references: child.references(),
-                                descriptor,
-                                merkle_depth,
-                                children: CellRefsBuilder::default(),
-                            });
-                            continue;
+                    // Add child to the references builder
+                    _ = last.children.store_reference(child);
+                } else if let Some(last) = stack.pop() {
+                    // Build a new ParCell if there are no child nodes left to process
+
+                    let cell = last.references.cell();
+
+                    // Build the cell
+                    let mut builder = CellDataBuilder::new();
+                    builder.store_cell_data(cell)?;
+
+                    let proof_cell = if last.children.is_ordinary() {
+                        // Build ordinary cell
+                        let mut builder = CellBuilder::new();
+                        builder.set_exotic(last.descriptor.is_exotic());
+                        _ = builder.store_cell_data(cell);
+                        builder.set_references(last.children.children()?);
+                        let proof_cell = ok!(builder.build_ext(self.context));
+
+                        ParCell::Ordinary(proof_cell)
+                    } else {
+                        // Build the cell
+                        let mut builder = CellDataBuilder::new();
+                        builder.store_cell_data(cell)?;
+
+                        let cell = ParCellParts {
+                            data: builder,
+                            refs: last.children.0,
+                        };
+
+                        ParCell::Partial(Box::new(cell))
+                    };
+
+                    match stack.last_mut() {
+                        // Append this cell to the ancestor
+                        Some(last) => {
+                            _ = last.children.store_reference(proof_cell);
                         }
+                        // Or return it as a result (for the root node)
+                        None => return Ok(proof_cell),
                     }
-                };
-
-                // Add child to the references builder
-                _ = last.children.store_reference(child);
-            } else if let Some(last) = stack.pop() {
-                // Build a new cell if there are no child nodes left to process
-
-                let cell = last.references.cell();
-
-                // Build the cell
-                let mut builder = CellBuilder::new();
-                builder.set_exotic(last.descriptor.is_exotic());
-                _ = builder.store_cell_data(cell);
-                builder.set_references(last.children);
-                let proof_cell = ok!(builder.build_ext(self.context));
-
-                // Save this cell as processed cell
-                self.cells.insert(*cell.repr_hash(), proof_cell.clone());
-
-                match stack.last_mut() {
-                    // Append this cell to the ancestor
-                    Some(last) => {
-                        _ = last.children.store_reference(proof_cell);
-                    }
-                    // Or return it as a result (for the root node)
-                    None => return Ok(proof_cell),
                 }
             }
-        }
 
-        // Something is wrong if we are here
-        Err(Error::EmptyProof)
+            // Something is wrong if we are here
+            Err(Error::EmptyProof)
+        })?;
+
+        match root_cell {
+            ParCell::Ordinary(cell) => {
+                println!("{}", cell.repr_hash().to_string());
+                Ok(cell)
+            }
+            ParCell::Partial(_) => todo!(),
+            ParCell::Channel(_) => todo!(),
+        }
     }
 
     // fn par_build(&self, par_cells: &ahash::HashSet<HashBytes>) -> Result<Cell, Error> {

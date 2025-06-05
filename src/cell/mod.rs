@@ -6,7 +6,8 @@ use std::str::FromStr;
 pub use everscale_types_proc::{Load, Store};
 
 pub use self::builder::{
-    CellBuilder, CellDataBuilder, CellRefsBuilder, DisplayCellBuilderData, Store,
+    CellBuilder, CellDataBuilder, CellRefsBuilder, DisplayCellBuilderData, ParCell, ParCellParts,
+    ParCellRefsBuilder, Store,
 };
 pub use self::cell_context::{CellContext, CellParts, LoadMode};
 #[cfg(not(feature = "sync"))]
