@@ -1527,11 +1527,6 @@ impl ParCellRefsBuilder {
     }
 
     /// TODO
-    pub fn iter(&self) -> impl Iterator<Item = &ParCell> {
-        self.0.as_ref().iter()
-    }
-
-    /// TODO
     pub fn is_ordinary(&self) -> bool {
         for cell in self.0.as_ref().iter() {
             if let ParCell::Channel(_) | ParCell::Partial(_) = cell {
@@ -1548,7 +1543,7 @@ impl ParCellRefsBuilder {
 /// Can be used later for [`CellBuilder::set_references`].
 #[derive(Default)]
 #[repr(transparent)]
-pub struct CellRefsBuilder(ArrayVec<Cell, MAX_REF_COUNT>);
+pub struct CellRefsBuilder(pub ArrayVec<Cell, MAX_REF_COUNT>);
 
 impl CellRefsBuilder {
     /// Tries to store a child in the cell,

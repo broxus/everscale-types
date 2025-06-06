@@ -499,7 +499,8 @@ where
     pub fn par_build_ext(
         self,
         context: &(dyn CellContext + Send + Sync),
-        par_cells: ahash::HashSet<HashBytes>,
+        new_cells: ahash::HashSet<HashBytes>,
+        old_cells: ahash::HashSet<HashBytes>,
     ) -> Result<MerkleUpdate, Error> {
         BuilderImpl {
             old: self.old,
@@ -507,7 +508,7 @@ where
             filter: &self.filter,
             context,
         }
-        .par_build(par_cells)
+        .par_build(new_cells, old_cells)
     }
 }
 
@@ -521,8 +522,12 @@ where
     }
 
     /// TODO
-    pub fn par_build(self, par_cells: ahash::HashSet<HashBytes>) -> Result<MerkleUpdate, Error> {
-        self.par_build_ext(Cell::empty_context(), par_cells)
+    pub fn par_build(
+        self,
+        new_cells: ahash::HashSet<HashBytes>,
+        old_cells: ahash::HashSet<HashBytes>,
+    ) -> Result<MerkleUpdate, Error> {
+        self.par_build_ext(Cell::empty_context(), new_cells, old_cells)
     }
 }
 
@@ -671,7 +676,11 @@ impl<'a: 'b, 'b, 'c: 'a> BuilderImpl<'a, 'b, 'c> {
         })
     }
 
-    fn par_build(self, par_cells: ahash::HashSet<HashBytes>) -> Result<MerkleUpdate, Error> {
+    fn par_build(
+        self,
+        new_cells: ahash::HashSet<HashBytes>,
+        old_cells: ahash::HashSet<HashBytes>,
+    ) -> Result<MerkleUpdate, Error> {
         struct Resolver<'a, S> {
             pruned_branches: DashMap<&'a HashBytes, bool, S>,
             visited: HashSet<&'a HashBytes, S>,
@@ -774,7 +783,7 @@ impl<'a: 'b, 'b, 'c: 'a> BuilderImpl<'a, 'b, 'c> {
             )
             .track_pruned_branches()
             .allow_different_root(true)
-            .par_build_raw_ext(self.context, &par_cells)
+            .par_build_raw_ext(self.context, &new_cells)
         };
 
         // Prepare cell diff resolver
@@ -794,7 +803,7 @@ impl<'a: 'b, 'b, 'c: 'a> BuilderImpl<'a, 'b, 'c> {
         let old = ok! {
             MerkleProofBuilder::<_>::new(self.old, resolver.changed_cells)
                 .allow_different_root(true)
-                .build_raw_ext(self.context)
+                .par_build_raw_ext(self.context, &old_cells)
         };
 
         // Done
