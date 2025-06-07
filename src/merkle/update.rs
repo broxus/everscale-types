@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::hash::BuildHasher;
 
-use dashmap::DashMap;
+use dashmap::{DashMap, DashSet};
 
 use super::{make_pruned_branch, FilterAction, MerkleFilter, MerkleProofBuilder};
 use crate::cell::*;
@@ -495,8 +495,8 @@ where
         .build()
     }
 
-    /// TODO
-    pub fn par_build_ext(
+    /// Multithreaded build a Merkle update using the specified cell context.
+    pub fn mt_build_ext(
         self,
         context: &(dyn CellContext + Send + Sync),
         new_cells: ahash::HashSet<HashBytes>,
@@ -527,7 +527,7 @@ where
         new_cells: ahash::HashSet<HashBytes>,
         old_cells: ahash::HashSet<HashBytes>,
     ) -> Result<MerkleUpdate, Error> {
-        self.par_build_ext(Cell::empty_context(), new_cells, old_cells)
+        self.mt_build_ext(Cell::empty_context(), new_cells, old_cells)
     }
 }
 
@@ -683,62 +683,87 @@ impl<'a: 'b, 'b, 'c: 'a> BuilderImpl<'a, 'b, 'c> {
     ) -> Result<MerkleUpdate, Error> {
         struct Resolver<'a, S> {
             pruned_branches: DashMap<&'a HashBytes, bool, S>,
-            visited: HashSet<&'a HashBytes, S>,
+            changed_cells: DashSet<&'a HashBytes, S>,
+            visited: DashSet<&'a HashBytes, S>,
             filter: &'a dyn MerkleFilter,
-            changed_cells: HashSet<&'a HashBytes, S>,
         }
 
         impl<'a, S> Resolver<'a, S>
         where
             S: BuildHasher + Clone,
         {
-            fn fill(&mut self, cell: &'a DynCell, mut skip_filter: bool) -> bool {
-                let repr_hash = cell.repr_hash();
-
-                // Skip visited cells
-                if self.visited.contains(repr_hash) {
-                    return false;
+            fn resolve(&self, cell: &'a DynCell, skip_filter: bool) {
+                struct Node<'a> {
+                    references: RefsIter<'a>,
+                    skip_filter: bool,
+                    has_changes: bool,
                 }
-                self.visited.insert(repr_hash);
 
-                let is_pruned = match self.pruned_branches.get_mut(repr_hash) {
-                    Some(mut res) => {
-                        let visited = res.value_mut();
-                        if *visited {
-                            false
+                let mut stack = Vec::with_capacity(cell.repr_depth() as usize);
+                stack.push(Node {
+                    references: cell.references(),
+                    skip_filter,
+                    has_changes: false,
+                });
+
+                while let Some(last) = stack.last_mut() {
+                    if let Some(child) = last.references.next() {
+                        let repr_hash = child.repr_hash();
+
+                        // Skip visited cells
+                        if self.visited.contains(repr_hash) {
+                            continue;
+                        }
+                        self.visited.insert(repr_hash);
+
+                        let is_pruned = match self.pruned_branches.get_mut(repr_hash) {
+                            Some(mut res) => {
+                                let visited = res.value_mut();
+                                if *visited {
+                                    false
+                                } else {
+                                    *visited = true;
+                                    true
+                                }
+                            }
+                            None => false,
+                        };
+
+                        let process_children = if skip_filter {
+                            true
                         } else {
-                            *visited = true;
-                            true
+                            match self.filter.check(repr_hash) {
+                                FilterAction::Skip => false,
+                                FilterAction::Include => true,
+                                FilterAction::IncludeSubtree => {
+                                    last.skip_filter = true;
+                                    true
+                                }
+                            }
+                        };
+
+                        if process_children {
+                            stack.push(Node {
+                                references: child.references(),
+                                skip_filter,
+                                has_changes: false,
+                            });
+
+                            continue;
                         }
-                    }
-                    None => false,
-                };
 
-                let process_children = if skip_filter {
-                    true
-                } else {
-                    match self.filter.check(repr_hash) {
-                        FilterAction::Skip => false,
-                        FilterAction::Include => true,
-                        FilterAction::IncludeSubtree => {
-                            skip_filter = true;
-                            true
+                        last.has_changes |= is_pruned;
+                    } else if let Some(last) = stack.pop() {
+                        if last.has_changes {
+                            let cell = last.references.cell();
+                            self.changed_cells.insert(cell.repr_hash());
                         }
-                    }
-                };
 
-                let mut result = false;
-                if process_children {
-                    for child in cell.references() {
-                        result |= self.fill(child, skip_filter);
-                    }
-
-                    if result {
-                        self.changed_cells.insert(repr_hash);
+                        if let Some(parent) = stack.last_mut() {
+                            parent.has_changes |= last.has_changes;
+                        }
                     }
                 }
-
-                result | is_pruned
             }
         }
 
@@ -787,7 +812,7 @@ impl<'a: 'b, 'b, 'c: 'a> BuilderImpl<'a, 'b, 'c> {
         };
 
         // Prepare cell diff resolver
-        let mut resolver = Resolver {
+        let resolver = Resolver {
             pruned_branches,
             visited: Default::default(),
             filter: self.filter,
@@ -795,9 +820,7 @@ impl<'a: 'b, 'b, 'c: 'a> BuilderImpl<'a, 'b, 'c> {
         };
 
         // Find all changed cells in the old cell tree
-        if resolver.fill(self.old, false) {
-            resolver.changed_cells.insert(old_hash);
-        }
+        resolver.resolve(self.old, false);
 
         // Create Merkle proof cell which contains only changed cells
         let old = ok! {

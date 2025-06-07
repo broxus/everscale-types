@@ -653,7 +653,7 @@ where
                     // Add child to the references builder
                     last.children.store_reference(child)?;
                 } else if let Some(last) = stack.pop() {
-                    // Build a new ParCell if there are no child nodes left to process
+                    // Build a new ExtCell if there are no child nodes left to process
 
                     let cell = last.references.cell();
 
@@ -916,9 +916,9 @@ struct ExtCellParts {
 /// Builder for constructing `ExtCell` references array.
 #[derive(Default)]
 #[repr(transparent)]
-struct ParCellRefsBuilder(ArrayVec<ExtCell, MAX_REF_COUNT>);
+struct ExtCellRefsBuilder(ArrayVec<ExtCell, MAX_REF_COUNT>);
 
-impl ParCellRefsBuilder {
+impl ExtCellRefsBuilder {
     /// Tries to store a child in the cell,
     /// returning `false` if there is not enough remaining capacity.
     pub fn store_reference(&mut self, cell: ExtCell) -> Result<(), Error> {
@@ -934,7 +934,7 @@ impl ParCellRefsBuilder {
 
 enum ChildrenBuilder {
     Ordinary(CellRefsBuilder),
-    Extended(ParCellRefsBuilder),
+    Extended(ExtCellRefsBuilder),
 }
 
 impl ChildrenBuilder {
@@ -951,7 +951,7 @@ impl ChildrenBuilder {
             }
 
             (ExtCell::Partial(_) | ExtCell::Channel(_), ChildrenBuilder::Ordinary(refs)) => {
-                let mut new_builder = ParCellRefsBuilder::default();
+                let mut new_builder = ExtCellRefsBuilder::default();
 
                 for cell in refs.0.as_ref() {
                     new_builder.store_reference(ExtCell::Ordinary(cell.clone()))?;
