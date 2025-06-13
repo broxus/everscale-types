@@ -1,6 +1,8 @@
-use std::collections::HashMap;
-use std::hash::BuildHasher;
+#[cfg(all(feature = "rayon", feature = "sync"))]
+use std::sync::Arc;
 
+#[cfg(all(feature = "rayon", feature = "sync"))]
+use super::promise::Promise;
 use super::{make_pruned_branch, FilterAction, MerkleFilter};
 use crate::cell::*;
 use crate::error::Error;
@@ -295,7 +297,7 @@ where
 
     /// Builds a Merkle proof child cell using the specified cell context.
     pub fn build_raw_ext(self, context: &dyn CellContext) -> Result<Cell, Error> {
-        BuilderImpl::<ahash::RandomState> {
+        BuilderImpl {
             root: self.root,
             filter: &self.filter,
             cells: Default::default(),
@@ -306,15 +308,58 @@ where
         }
         .build()
     }
-}
 
-impl<F> MerkleProofBuilder<'_, F>
-where
-    F: MerkleFilter,
-{
     /// Builds a Merkle proof using an empty cell context.
     pub fn build(self) -> Result<MerkleProof, Error> {
         self.build_ext(Cell::empty_context())
+    }
+}
+
+#[cfg(all(feature = "rayon", feature = "sync"))]
+impl<'a, F> MerkleProofBuilder<'a, F>
+where
+    F: MerkleFilter + Send + Sync,
+{
+    /// Multithread build of a Merkle proof using the specified cell context
+    /// and a set of cells which to handle in parallel.
+    pub fn par_build_ext(
+        self,
+        context: &(dyn CellContext + Send + Sync),
+        split_at: ahash::HashSet<HashBytes>,
+    ) -> Result<MerkleProof, Error> {
+        let root = self.root;
+        let cell = ok!(self.par_build_raw_ext(context, split_at));
+        Ok(MerkleProof {
+            hash: *root.repr_hash(),
+            depth: root.repr_depth(),
+            cell,
+        })
+    }
+
+    /// Multithread build of a Merkle proof root using the specified cell context
+    /// and a set of cells which to handle in parallel.
+    pub fn par_build_raw_ext(
+        self,
+        context: &(dyn CellContext + Send + Sync),
+        split_at: ahash::HashSet<HashBytes>,
+    ) -> Result<Cell, Error> {
+        ParBuilderImpl {
+            root: self.root,
+            filter: &self.filter,
+            cells: Default::default(),
+            pruned_branches: None,
+            context,
+            split_at,
+            allow_different_root: self.allow_different_root,
+            prune_big_cells: self.prune_big_cells,
+        }
+        .build()
+    }
+
+    /// Multithread build of a Merkle proof using the default cell context
+    /// and a set of cells which to handle in parallel.
+    pub fn par_build(self, split_at: ahash::HashSet<HashBytes>) -> Result<MerkleProof, Error> {
+        self.par_build_ext(Cell::empty_context(), split_at)
     }
 }
 
@@ -349,7 +394,7 @@ where
     pub fn build_raw_ext<'c: 'a>(
         self,
         context: &'c dyn CellContext,
-    ) -> Result<(Cell, ahash::HashMap<&'a HashBytes, bool>), Error> {
+    ) -> Result<(Cell, ahash::HashSet<&'a HashBytes>), Error> {
         let mut pruned_branches = Default::default();
         let mut builder = BuilderImpl {
             root: self.root,
@@ -365,23 +410,45 @@ where
     }
 }
 
-struct BuilderImpl<'a, 'b, 'c: 'a, S = ahash::RandomState> {
+#[cfg(all(feature = "rayon", feature = "sync"))]
+impl<'a, F> MerkleProofExtBuilder<'a, F>
+where
+    F: MerkleFilter + Send + Sync,
+{
+    /// Multithreaded build a Merkle proof child cell using the specified cell context.
+    pub fn par_build_raw_ext<'c: 'a>(
+        self,
+        context: &'c (dyn CellContext + Send + Sync),
+        split_at: ahash::HashSet<HashBytes>,
+    ) -> Result<(Cell, scc::HashSet<&'a HashBytes, ahash::RandomState>), Error> {
+        let pruned_branches = Default::default();
+        let builder = ParBuilderImpl {
+            root: self.root,
+            filter: &self.filter,
+            cells: Default::default(),
+            pruned_branches: Some(&pruned_branches),
+            context,
+            split_at,
+            allow_different_root: self.allow_different_root,
+            prune_big_cells: self.prune_big_cells,
+        };
+        let cell = ok!(builder.build());
+        Ok((cell, pruned_branches))
+    }
+}
+
+struct BuilderImpl<'a, 'b, 'c: 'a> {
     root: &'a DynCell,
     filter: &'b dyn MerkleFilter,
-    cells: HashMap<&'a HashBytes, Cell, S>,
-    pruned_branches: Option<&'b mut HashMap<&'a HashBytes, bool, S>>,
+    cells: ahash::HashMap<&'a HashBytes, Cell>,
+    pruned_branches: Option<&'b mut ahash::HashSet<&'a HashBytes>>,
     context: &'c dyn CellContext,
     allow_different_root: bool,
     prune_big_cells: bool,
 }
 
-impl<S> BuilderImpl<'_, '_, '_, S>
-where
-    S: BuildHasher + Default,
-{
+impl BuilderImpl<'_, '_, '_> {
     fn build(&mut self) -> Result<Cell, Error> {
-        const PRUNED_BITS_THRESHOLD: u16 = 288;
-
         struct Node<'a> {
             references: RefsIter<'a>,
             descriptor: CellDescriptor,
@@ -395,7 +462,7 @@ where
             return Err(Error::EmptyProof);
         }
 
-        let mut stack = Vec::with_capacity(self.root.repr_depth() as usize);
+        let mut stack = Vec::with_capacity((self.root.repr_depth() as usize).min(MAX_OK_DEPTH));
 
         // Push root node
         let root_descriptor = self.root.descriptor();
@@ -439,7 +506,7 @@ where
 
                             // Insert pruned branch for the current cell
                             if let Some(pruned_branch) = &mut self.pruned_branches {
-                                pruned_branch.insert(child_repr_hash, false);
+                                pruned_branch.insert(child_repr_hash);
                             }
 
                             // Use new pruned branch as a child
@@ -495,6 +562,264 @@ where
     }
 }
 
+#[cfg(all(feature = "rayon", feature = "sync"))]
+struct ParBuilderImpl<'a, 'b, 'c: 'a> {
+    root: &'a DynCell,
+    filter: &'b (dyn MerkleFilter + Send + Sync),
+    cells: scc::HashMap<&'a HashBytes, ExtCell, ahash::RandomState>,
+    pruned_branches: Option<&'b scc::HashSet<&'a HashBytes, ahash::RandomState>>,
+    context: &'c (dyn CellContext + Send + Sync),
+    split_at: ahash::HashSet<HashBytes>,
+    allow_different_root: bool,
+    prune_big_cells: bool,
+}
+
+#[cfg(all(feature = "rayon", feature = "sync"))]
+impl<'a> ParBuilderImpl<'a, '_, '_> {
+    fn build(&self) -> Result<Cell, Error> {
+        fn finalize(
+            mut cell: ExtCell,
+            context: &(dyn CellContext + Send + Sync),
+        ) -> Result<Cell, Error> {
+            loop {
+                match cell {
+                    ExtCell::Ordinary(cell) => return Ok(cell),
+                    ExtCell::Partial(parts) => {
+                        let parts = Arc::unwrap_or_clone(parts);
+
+                        let mut refs = CellRefsBuilder::default();
+                        for child in parts.refs {
+                            let cell = finalize(child, context)?;
+                            refs.store_reference(cell)?;
+                        }
+
+                        return CellBuilder::from_parts(parts.is_exotic, parts.data.clone(), refs)
+                            .build_ext(context);
+                    }
+                    ExtCell::Deferred(promise) => {
+                        cell = ok!(promise.wait_cloned());
+                    }
+                }
+            }
+        }
+
+        if !self.allow_different_root
+            && self.filter.check(self.root.repr_hash()) == FilterAction::Skip
+        {
+            return Err(Error::EmptyProof);
+        }
+
+        let mut root_cell = rayon::scope(|scope| self.build_impl(self.root, 0, Some(scope)))?;
+        loop {
+            match root_cell {
+                ExtCell::Ordinary(cell) => break Ok(cell),
+                root_cell @ ExtCell::Partial(_) => break finalize(root_cell, self.context),
+                ExtCell::Deferred(rx) => {
+                    root_cell = ok!(rx.wait_cloned());
+                }
+            }
+        }
+    }
+
+    fn build_impl<'scope>(
+        &'scope self,
+        child: &'a DynCell,
+        parent_merkle_depth: u8,
+        scope: Option<&rayon::Scope<'scope>>,
+    ) -> Result<ExtCell, Error> {
+        struct Node<'a> {
+            references: RefsIter<'a>,
+            descriptor: CellDescriptor,
+            merkle_depth: u8,
+            children: ChildrenBuilder,
+        }
+
+        enum ChildrenBuilder {
+            Ordinary(CellRefsBuilder),
+            Extended(Vec<ExtCell>),
+        }
+
+        impl ChildrenBuilder {
+            fn store_reference(&mut self, cell: ExtCell) -> Result<(), Error> {
+                match (&mut *self, cell) {
+                    (Self::Ordinary(builder), ExtCell::Ordinary(cell)) => {
+                        builder.store_reference(cell)
+                    }
+                    (Self::Ordinary(builder), cell) => {
+                        let capacity = builder.len() + 1;
+                        let Self::Ordinary(builder) =
+                            std::mem::replace(self, Self::Extended(Vec::with_capacity(capacity)))
+                        else {
+                            // SAFETY: We have just checked the `self` discriminant.
+                            unsafe { std::hint::unreachable_unchecked() }
+                        };
+
+                        let Self::Extended(ext_builder) = self else {
+                            // SAFETY: We have just updated the `self` with this value.
+                            unsafe { std::hint::unreachable_unchecked() }
+                        };
+
+                        for cell in builder {
+                            ext_builder.push(ExtCell::Ordinary(cell.clone()));
+                        }
+                        ext_builder.push(cell);
+                        Ok(())
+                    }
+                    (Self::Extended(builder), cell) => {
+                        builder.push(cell);
+                        Ok(())
+                    }
+                }
+            }
+        }
+
+        let mut stack = Vec::with_capacity((child.repr_depth() as usize).min(MAX_OK_DEPTH));
+
+        // Push root node
+        let root_descriptor = child.descriptor();
+        stack.push(Node {
+            references: child.references(),
+            descriptor: root_descriptor,
+            merkle_depth: parent_merkle_depth + root_descriptor.is_merkle() as u8,
+            children: ChildrenBuilder::Ordinary(Default::default()),
+        });
+
+        'outer: while let Some(last) = stack.last_mut() {
+            if let Some(child) = last.references.next() {
+                // Process children if they are left
+                let child_repr_hash = child.repr_hash();
+
+                let child = if let Some(child) = self.cells.get(child_repr_hash) {
+                    // Reused processed cells
+                    child.clone()
+                } else {
+                    // Fetch child descriptor
+                    let descriptor = child.descriptor();
+
+                    // Check if child is in a tree
+                    match self.filter.check(child_repr_hash) {
+                        // Included subtrees are used as is
+                        FilterAction::IncludeSubtree => ExtCell::Ordinary(
+                            last.references.peek_prev_cloned().expect("mut not fail"),
+                        ),
+                        // Replace all skipped subtrees with pruned branch cells
+                        FilterAction::Skip
+                            if descriptor.reference_count() > 0
+                                || self.prune_big_cells
+                                    && child.bit_len() > PRUNED_BITS_THRESHOLD =>
+                        {
+                            // Create pruned branch
+                            let child = ok!(make_pruned_branch_cold(
+                                child,
+                                last.merkle_depth,
+                                self.context
+                            ));
+
+                            // Insert pruned branch for the current cell
+                            if let Some(pruned_branch) = self.pruned_branches {
+                                pruned_branch.insert(child_repr_hash).ok();
+                            }
+
+                            // Use new pruned branch as a child
+                            ExtCell::Ordinary(child)
+                        }
+                        // All other cells will be included in a different branch
+                        _ => 'cell: {
+                            if let Some(scope) = scope {
+                                if unlikely(self.split_at.contains(child_repr_hash)) {
+                                    let promise = Promise::new();
+                                    let parent_merkle_depth = last.merkle_depth;
+                                    scope.spawn({
+                                        let promise = promise.clone();
+                                        move |_| {
+                                            let cell =
+                                                self.build_impl(child, parent_merkle_depth, None);
+                                            promise.set(cell);
+                                        }
+                                    });
+                                    break 'cell ExtCell::Deferred(promise);
+                                }
+                            }
+
+                            // Add merkle offset to the current merkle depth
+                            let merkle_depth = last.merkle_depth + descriptor.is_merkle() as u8;
+
+                            // Push child node and start processing its references
+                            stack.push(Node {
+                                references: child.references(),
+                                descriptor,
+                                merkle_depth,
+                                children: ChildrenBuilder::Ordinary(Default::default()),
+                            });
+                            continue 'outer;
+                        }
+                    }
+                };
+
+                // Add child to the references builder
+                last.children.store_reference(child)?;
+            } else if let Some(last) = stack.pop() {
+                // Build a new ExtCell if there are no child nodes left to process
+
+                let cell = last.references.cell();
+
+                // Build the cell
+                let proof_cell = match last.children {
+                    ChildrenBuilder::Ordinary(children) => {
+                        let mut builder = CellBuilder::new();
+                        builder.set_exotic(last.descriptor.is_exotic());
+                        _ = builder.store_cell_data(cell);
+                        builder.set_references(children);
+                        let proof_cell = ok!(builder.build_ext(self.context));
+
+                        ExtCell::Ordinary(proof_cell)
+                    }
+                    ChildrenBuilder::Extended(refs) => {
+                        let mut builder = CellDataBuilder::new();
+                        builder.store_cell_data(cell)?;
+                        ExtCell::Partial(Arc::new(CellParts {
+                            data: builder,
+                            is_exotic: last.descriptor.is_exotic(),
+                            refs,
+                        }))
+                    }
+                };
+
+                // Save this cell as processed cell
+                self.cells.insert(cell.repr_hash(), proof_cell.clone()).ok();
+
+                match stack.last_mut() {
+                    // Append this cell to the ancestor
+                    Some(last) => {
+                        last.children.store_reference(proof_cell)?;
+                    }
+                    // Or return it as a result (for the root node)
+                    None => return Ok(proof_cell),
+                }
+            }
+        }
+
+        // Something is wrong if we are here
+        Err(Error::EmptyProof)
+    }
+}
+
+#[cfg(all(feature = "rayon", feature = "sync"))]
+#[derive(Clone)]
+enum ExtCell {
+    Ordinary(Cell),
+    Partial(Arc<CellParts>),
+    Deferred(Promise<Result<ExtCell, Error>>),
+}
+
+#[cfg(all(feature = "rayon", feature = "sync"))]
+#[derive(Clone)]
+struct CellParts {
+    data: CellDataBuilder,
+    is_exotic: bool,
+    refs: Vec<ExtCell>,
+}
+
 #[cold]
 fn make_pruned_branch_cold(
     cell: &DynCell,
@@ -503,3 +828,6 @@ fn make_pruned_branch_cold(
 ) -> Result<Cell, Error> {
     make_pruned_branch(cell, merkle_depth, context)
 }
+
+const PRUNED_BITS_THRESHOLD: u16 = 288;
+const MAX_OK_DEPTH: usize = 128;
