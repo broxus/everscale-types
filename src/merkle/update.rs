@@ -1,17 +1,9 @@
-use std::collections::{HashMap, HashSet};
-use std::hash::BuildHasher;
-
-#[cfg(feature = "rayon")]
-use dashmap::{DashMap, DashSet};
-
+#[cfg(all(feature = "rayon", feature = "sync"))]
+use super::promise::Promise;
 use super::{make_pruned_branch, FilterAction, MerkleFilter, MerkleProofBuilder};
 use crate::cell::*;
 use crate::error::Error;
-#[cfg(feature = "rayon")]
-use crate::merkle::utils::CondVar;
 use crate::util::unlikely;
-#[cfg(feature = "rayon")]
-use crate::util::ArrayVec;
 
 /// Parsed Merkle update representation.
 ///
@@ -496,47 +488,38 @@ where
         }
         .build()
     }
-}
 
-#[cfg(feature = "rayon")]
-impl<'a, F> MerkleUpdateBuilder<'a, F>
-where
-    F: MerkleFilter + Send + Sync,
-{
-    /// Multithreaded build a Merkle update using the specified cell context.
-    pub fn rayon_build_ext(
-        self,
-        old_split_at: ahash::HashSet<HashBytes>,
-        new_split_at: ahash::HashSet<HashBytes>,
-        context: &(dyn CellContext + Send + Sync),
-    ) -> Result<MerkleUpdate, Error> {
-        RayonBuilderImpl {
-            old: self.old,
-            new: self.new,
-            filter: &self.filter,
-            context,
-        }
-        .rayon_build(old_split_at, new_split_at)
-    }
-}
-
-impl<F> MerkleUpdateBuilder<'_, F>
-where
-    F: MerkleFilter,
-{
     /// Builds a Merkle update using an empty cell context.
     pub fn build(self) -> Result<MerkleUpdate, Error> {
         self.build_ext(Cell::empty_context())
     }
 }
 
-#[cfg(feature = "rayon")]
-impl<F> MerkleUpdateBuilder<'_, F>
+#[cfg(all(feature = "rayon", feature = "sync"))]
+impl<'a, F> MerkleUpdateBuilder<'a, F>
 where
     F: MerkleFilter + Send + Sync,
 {
-    /// Multithreaded build a Merkle update using an empty cell context.
-    pub fn rayon_build(
+    /// Multithread build of a Merkle update using the specified cell context
+    /// and sets of cells which to handle in parallel.
+    pub fn rayon_build_ext(
+        self,
+        old_split_at: ahash::HashSet<HashBytes>,
+        new_split_at: ahash::HashSet<HashBytes>,
+        context: &(dyn CellContext + Send + Sync),
+    ) -> Result<MerkleUpdate, Error> {
+        ParBuilderImpl {
+            old: self.old,
+            new: self.new,
+            filter: &self.filter,
+            context,
+        }
+        .build(old_split_at, new_split_at)
+    }
+
+    /// Multithread build of a Merkle update using the default cell context
+    /// and sets of cells which to handle in parallel.
+    pub fn par_build(
         self,
         old_split_at: ahash::HashSet<HashBytes>,
         new_split_at: ahash::HashSet<HashBytes>,
@@ -554,17 +537,14 @@ struct BuilderImpl<'a, 'b, 'c: 'a> {
 
 impl<'a: 'b, 'b, 'c: 'a> BuilderImpl<'a, 'b, 'c> {
     fn build(self) -> Result<MerkleUpdate, Error> {
-        struct Resolver<'a, S> {
-            pruned_branches: HashMap<&'a HashBytes, bool, S>,
-            visited: HashSet<&'a HashBytes, S>,
+        struct Resolver<'a> {
+            pruned_branches: ahash::HashSet<&'a HashBytes>,
+            visited: ahash::HashSet<&'a HashBytes>,
             filter: &'a dyn MerkleFilter,
-            changed_cells: HashSet<&'a HashBytes, S>,
+            changed_cells: ahash::HashSet<&'a HashBytes>,
         }
 
-        impl<'a, S> Resolver<'a, S>
-        where
-            S: BuildHasher,
-        {
+        impl<'a> Resolver<'a> {
             fn fill(&mut self, cell: &'a DynCell, mut skip_filter: bool) -> bool {
                 let repr_hash = cell.repr_hash();
 
@@ -574,15 +554,7 @@ impl<'a: 'b, 'b, 'c: 'a> BuilderImpl<'a, 'b, 'c> {
                 }
                 self.visited.insert(repr_hash);
 
-                let is_pruned = match self.pruned_branches.get_mut(repr_hash) {
-                    Some(true) => return false,
-                    Some(visited) => {
-                        *visited = true;
-                        true
-                    }
-                    None => false,
-                };
-
+                let is_pruned = self.pruned_branches.contains(repr_hash);
                 let process_children = if skip_filter {
                     true
                 } else {
@@ -655,22 +627,26 @@ impl<'a: 'b, 'b, 'c: 'a> BuilderImpl<'a, 'b, 'c> {
             .build_raw_ext(self.context)
         };
 
-        // Prepare cell diff resolver
-        let mut resolver = Resolver {
-            pruned_branches,
-            visited: Default::default(),
-            filter: self.filter,
-            changed_cells: Default::default(),
-        };
+        let changed_cells = {
+            // Prepare cell diff resolver
+            let mut resolver = Resolver {
+                pruned_branches,
+                visited: Default::default(),
+                filter: self.filter,
+                changed_cells: Default::default(),
+            };
 
-        // Find all changed cells in the old cell tree
-        if resolver.fill(self.old, false) {
-            resolver.changed_cells.insert(old_hash);
-        }
+            // Find all changed cells in the old cell tree
+            if resolver.fill(self.old, false) {
+                resolver.changed_cells.insert(old_hash);
+            }
+
+            resolver.changed_cells
+        };
 
         // Create Merkle proof cell which contains only changed cells
         let old = ok! {
-            MerkleProofBuilder::<_>::new(self.old, resolver.changed_cells)
+            MerkleProofBuilder::<_>::new(self.old, changed_cells)
                 .allow_different_root(true)
                 .build_raw_ext(self.context)
         };
@@ -687,290 +663,195 @@ impl<'a: 'b, 'b, 'c: 'a> BuilderImpl<'a, 'b, 'c> {
     }
 }
 
-#[cfg(feature = "rayon")]
-struct RayonBuilderImpl<'a, 'b, 'c: 'a> {
+#[cfg(all(feature = "rayon", feature = "sync"))]
+struct ParBuilderImpl<'a, 'b, 'c: 'a> {
     old: &'a DynCell,
     new: &'a DynCell,
     filter: &'b (dyn MerkleFilter + Send + Sync),
     context: &'c (dyn CellContext + Send + Sync),
 }
 
-#[cfg(feature = "rayon")]
-impl<'a: 'b, 'b, 'c: 'a> RayonBuilderImpl<'a, 'b, 'c> {
-    fn rayon_build(
+#[cfg(all(feature = "rayon", feature = "sync"))]
+impl<'a: 'b, 'b, 'c: 'a> ParBuilderImpl<'a, 'b, 'c> {
+    fn build(
         self,
         old_split_at: ahash::HashSet<HashBytes>,
         new_split_at: ahash::HashSet<HashBytes>,
     ) -> Result<MerkleUpdate, Error> {
-        struct Resolver<'a, S> {
-            pruned_branches: DashMap<&'a HashBytes, bool, S>,
-            changed_cells: DashSet<&'a HashBytes, S>,
-            visited: DashSet<&'a HashBytes, S>,
+        enum CheckResult<'a> {
+            Immediate(bool),
+            Parts {
+                hash: &'a HashBytes,
+                items: Vec<CheckResult<'a>>,
+                is_pruned: bool,
+            },
+            Deferred(Promise<bool>),
+        }
+
+        struct Resolver<'a> {
+            pruned_branches: scc::HashSet<&'a HashBytes, ahash::RandomState>,
+            changed_cells: scc::HashSet<&'a HashBytes, ahash::RandomState>,
+            deferred: scc::HashMap<&'a HashBytes, Promise<bool>, ahash::RandomState>,
             filter: &'a (dyn MerkleFilter + Send + Sync),
         }
 
-        impl<'a, S> Resolver<'a, S>
-        where
-            S: BuildHasher + Clone + Send + Sync,
-        {
-            fn run(
-                &self,
-                cell: &'a DynCell,
-                split_at: &ahash::HashSet<HashBytes>,
-            ) -> Result<(), Error> {
-                struct Node<'a> {
-                    references: RefsIter<'a>,
-                    is_pruned: bool,
-                    skip_filter: bool,
-                    children: ChildrenBuilder<'a>,
-                }
-
-                let cell_status = rayon::scope(|scope| {
-                    let root_is_pruned = match self.pruned_branches.get_mut(cell.repr_hash()) {
-                        Some(mut res) => {
-                            let visited = res.value_mut();
-                            if *visited {
-                                false
-                            } else {
-                                *visited = true;
-                                true
-                            }
-                        }
-                        None => false,
-                    };
-
-                    let mut stack = Vec::with_capacity(cell.repr_depth() as usize);
-                    stack.push(Node {
-                        references: cell.references(),
-                        is_pruned: root_is_pruned,
-                        skip_filter: false,
-                        children: ChildrenBuilder::default(),
-                    });
-
-                    while let Some(last) = stack.last_mut() {
-                        if let Some(child) = last.references.next() {
-                            let repr_hash = child.repr_hash();
-
-                            // Skip visited cells
-                            if self.visited.contains(repr_hash) {
-                                continue;
-                            }
-                            self.visited.insert(repr_hash);
-
-                            let cell_status = if split_at.contains(child.repr_hash()) {
-                                let cv = self.spawn(child, last.skip_filter, scope);
-                                ExtCell::Channel(cv)
-                            } else {
-                                let is_pruned = self.pruned_branches.contains_key(repr_hash);
-
-                                let mut child_skip_filter = last.skip_filter;
-                                let process_children = if child_skip_filter {
-                                    true
-                                } else {
-                                    match self.filter.check(repr_hash) {
-                                        FilterAction::Skip => false,
-                                        FilterAction::Include => true,
-                                        FilterAction::IncludeSubtree => {
-                                            child_skip_filter = true;
-                                            true
-                                        }
-                                    }
-                                };
-
-                                if process_children {
-                                    stack.push(Node {
-                                        is_pruned,
-                                        references: child.references(),
-                                        skip_filter: child_skip_filter,
-                                        children: ChildrenBuilder::default(),
-                                    });
-
-                                    continue;
-                                } else {
-                                    ExtCell::Ordinary(CellStatus {
-                                        hash: repr_hash,
-                                        has_changed: is_pruned,
-                                    })
-                                }
-                            };
-
-                            // Add child to the references builder
-                            last.children.store_reference(cell_status)?;
-                        } else if let Some(last) = stack.pop() {
-                            let repr_hash = last.references.cell().repr_hash();
-
-                            let cell_status = match last.children {
-                                ChildrenBuilder::Ordinary(children) => {
-                                    let mut has_changed = false;
-                                    for child in children.0.as_ref() {
-                                        has_changed |= child.has_changed;
-                                    }
-
-                                    if has_changed {
-                                        self.changed_cells.insert(repr_hash);
-                                    }
-
-                                    ExtCell::Ordinary(CellStatus {
-                                        hash: repr_hash,
-                                        has_changed: has_changed | last.is_pruned,
-                                    })
-                                }
-                                ChildrenBuilder::Extended(children) => {
-                                    ExtCell::Partial(Box::new(CellPart {
-                                        hash: repr_hash,
-                                        is_pruned: last.is_pruned,
-                                        refs: children.0,
-                                    }))
-                                }
-                            };
-
-                            match stack.last_mut() {
-                                // Append this cell status to the ancestor
-                                Some(last) => {
-                                    last.children.store_reference(cell_status)?;
-                                }
-                                // Or return it as a result (for the root node)
-                                None => return Ok(cell_status),
-                            }
-                        }
+        impl<'a> Resolver<'a> {
+            fn fill<'s>(&self, cell: &'a DynCell, split_at: &'s ahash::HashSet<HashBytes>) -> bool {
+                let result = rayon::scope(|scope| {
+                    SubResolver {
+                        resolver: self,
+                        split_at,
+                        visited: Default::default(),
                     }
-
-                    // Something is wrong if we are here
-                    Err(Error::EmptyProof)
-                })?;
-
-                fn resolve<'a, S>(
-                    cell_status: &ExtCell<'a>,
-                    changed_cells: &DashSet<&'a HashBytes, S>,
-                ) -> Result<CellStatus<'a>, Error>
-                where
-                    S: BuildHasher + Clone + Send + Sync,
-                {
-                    match cell_status {
-                        ExtCell::Ordinary(cell_data) => Ok(*cell_data),
-                        ExtCell::Channel(rx) => rx.wait().map_err(|_| Error::Cancelled),
-                        ExtCell::Partial(parts) => {
-                            let mut children_changed = false;
-                            for child in parts.refs.as_ref() {
-                                let cell_data = resolve(child, changed_cells)?;
-                                children_changed |= cell_data.has_changed;
-                            }
-
-                            if children_changed {
-                                changed_cells.insert(parts.hash);
-                            }
-
-                            Ok(CellStatus {
-                                hash: parts.hash,
-                                has_changed: parts.is_pruned | children_changed,
-                            })
-                        }
-                    }
-                }
-
-                let cell_data = match cell_status {
-                    ExtCell::Ordinary(cell) => cell,
-                    ExtCell::Channel(rx) => rx.wait()?,
-                    ExtCell::Partial(cell_parts) => {
-                        resolve(&ExtCell::Partial(cell_parts), &self.changed_cells)?
-                    }
-                };
-
-                if cell_data.has_changed {
-                    self.changed_cells.insert(cell_data.hash);
-                }
-
-                Ok(())
+                    .fill_impl(cell, false, Some(scope))
+                });
+                self.finalize(result)
             }
 
-            fn spawn<'scope>(
-                &'scope self,
-                cell: &'a DynCell,
-                root_skip_filter: bool,
-                scope: &rayon::Scope<'scope>,
-            ) -> CondVar<CellStatus<'a>> {
-                fn fill<'a, S>(
-                    cell: &'a DynCell,
-                    mut skip_filter: bool,
-                    pruned_branches: &DashMap<&'a HashBytes, bool, S>,
-                    changed_cells: &DashSet<&'a HashBytes, S>,
-                    visited: &DashSet<&'a HashBytes, ahash::RandomState>,
-                    filter: &'a (dyn MerkleFilter + Send + Sync),
-                ) -> bool
-                where
-                    S: BuildHasher + Clone + Send + Sync,
-                {
-                    let repr_hash = cell.repr_hash();
-
-                    // Skip visited cells
-                    if visited.contains(repr_hash) {
-                        return false;
-                    }
-                    visited.insert(repr_hash);
-
-                    let is_pruned = pruned_branches.contains_key(repr_hash);
-
-                    let process_children = if skip_filter {
-                        true
-                    } else {
-                        match filter.check(repr_hash) {
-                            FilterAction::Skip => false,
-                            FilterAction::Include => true,
-                            FilterAction::IncludeSubtree => {
-                                skip_filter = true;
-                                true
-                            }
-                        }
-                    };
-
-                    let mut result = false;
-                    if process_children {
-                        for child in cell.references() {
-                            result |= fill(
-                                child,
-                                skip_filter,
-                                pruned_branches,
-                                changed_cells,
-                                visited,
-                                filter,
-                            );
+            fn finalize(&self, result: CheckResult<'a>) -> bool {
+                match result {
+                    CheckResult::Immediate(result) => result,
+                    CheckResult::Parts {
+                        hash,
+                        items,
+                        is_pruned,
+                    } => {
+                        let mut result = false;
+                        for item in items {
+                            result |= self.finalize(item);
                         }
 
                         if result {
-                            changed_cells.insert(repr_hash);
+                            self.changed_cells.insert(hash).ok();
+                        }
+
+                        result | is_pruned
+                    }
+                    CheckResult::Deferred(promise) => promise.wait_cloned(),
+                }
+            }
+        }
+
+        struct SubResolver<'a, 's, 'r> {
+            resolver: &'r Resolver<'a>,
+            split_at: &'s ahash::HashSet<HashBytes>,
+            visited: ahash::HashSet<&'a HashBytes>,
+        }
+
+        impl<'a, 's, 'r> SubResolver<'a, 's, 'r> {
+            fn fill_impl<'scope>(
+                &mut self,
+                cell: &'a DynCell,
+                mut skip_filter: bool,
+                scope: Option<&rayon::Scope<'scope>>,
+            ) -> CheckResult<'a>
+            where
+                'a: 'scope,
+                's: 'scope,
+                'r: 'scope,
+            {
+                let repr_hash = cell.repr_hash();
+
+                // Skip visited cells
+                if self.visited.contains(repr_hash) {
+                    return CheckResult::Immediate(false);
+                }
+                self.visited.insert(repr_hash);
+
+                let is_pruned = self.resolver.pruned_branches.contains(repr_hash);
+                let process_children = if skip_filter {
+                    true
+                } else {
+                    match self.resolver.filter.check(repr_hash) {
+                        FilterAction::Skip => false,
+                        FilterAction::Include => true,
+                        FilterAction::IncludeSubtree => {
+                            skip_filter = true;
+                            true
+                        }
+                    }
+                };
+
+                if !process_children {
+                    return CheckResult::Immediate(is_pruned);
+                }
+
+                if let Some(scope) = scope {
+                    if unlikely(self.split_at.contains(repr_hash)) {
+                        let entry = match self.resolver.deferred.entry(repr_hash) {
+                            scc::hash_map::Entry::Occupied(entry) => {
+                                return CheckResult::Deferred(entry.get().clone())
+                            }
+                            scc::hash_map::Entry::Vacant(entry) => entry,
+                        };
+
+                        let promise = Promise::new();
+                        scope.spawn({
+                            let promise = promise.clone();
+                            let resolver = self.resolver;
+                            let split_at = self.split_at;
+                            move |_| {
+                                let CheckResult::Immediate(changed) = SubResolver {
+                                    resolver,
+                                    split_at,
+                                    visited: Default::default(),
+                                }
+                                .process_children_impl(cell, skip_filter, is_pruned, None) else {
+                                    unreachable!("deferred tasks will not spawn");
+                                };
+                                promise.set(changed)
+                            }
+                        });
+                        return CheckResult::Deferred(entry.insert_entry(promise).get().clone());
+                    }
+                }
+
+                self.process_children_impl(cell, skip_filter, is_pruned, scope)
+            }
+
+            #[inline]
+            fn process_children_impl<'scope>(
+                &mut self,
+                cell: &'a DynCell,
+                skip_filter: bool,
+                is_pruned: bool,
+                scope: Option<&rayon::Scope<'scope>>,
+            ) -> CheckResult<'a>
+            where
+                'a: 'scope,
+                's: 'scope,
+                'r: 'scope,
+            {
+                let cell_hash = cell.repr_hash();
+                let mut children = cell.references();
+
+                let mut items = 'immediate: {
+                    let mut result = false;
+                    for child in children.by_ref() {
+                        match self.fill_impl(child, skip_filter, scope) {
+                            CheckResult::Immediate(res) => {
+                                result |= res;
+                            }
+                            res => break 'immediate vec![CheckResult::Immediate(result), res],
                         }
                     }
 
-                    result | is_pruned
+                    if result {
+                        self.resolver.changed_cells.insert(cell_hash).ok();
+                    }
+
+                    return CheckResult::Immediate(result | is_pruned);
+                };
+
+                for child in children {
+                    items.push(self.fill_impl(child, skip_filter, scope));
                 }
 
-                let condvar = CondVar::new();
-                let tx = condvar.clone();
-
-                let filter = self.filter;
-                let changed_cells = &self.changed_cells;
-                let pruned_branches = &self.pruned_branches;
-
-                scope.spawn(move |_| {
-                    let visited = DashSet::default();
-
-                    let result = fill(
-                        cell,
-                        root_skip_filter,
-                        pruned_branches,
-                        changed_cells,
-                        &visited,
-                        filter,
-                    );
-
-                    tx.send(CellStatus {
-                        hash: cell.repr_hash(),
-                        has_changed: result,
-                    })
-                    .expect("failed to send proof_cell");
-                });
-
-                condvar
+                CheckResult::Parts {
+                    hash: cell_hash,
+                    items,
+                    is_pruned,
+                }
             }
         }
 
@@ -1015,25 +896,31 @@ impl<'a: 'b, 'b, 'c: 'a> RayonBuilderImpl<'a, 'b, 'c> {
             )
             .track_pruned_branches()
             .allow_different_root(true)
-            .rayon_build_raw_ext(self.context, new_split_at)
+            .par_build_raw_ext(self.context, new_split_at)
         };
 
-        // Prepare cell diff resolver
-        let resolver = Resolver {
-            pruned_branches,
-            visited: Default::default(),
-            filter: self.filter,
-            changed_cells: Default::default(),
-        };
+        // Prepare cell diff resolver and find all changed cells in the old cell tree.
+        let changed_cells = {
+            let resolver = Resolver {
+                pruned_branches,
+                deferred: Default::default(),
+                changed_cells: Default::default(),
+                filter: self.filter,
+            };
 
-        // Find all changed cells in the old cell tree
-        resolver.run(self.old, &old_split_at)?;
+            // Find all changed cells in the old cell tree
+            if resolver.fill(self.old, &old_split_at) {
+                resolver.changed_cells.insert(old_hash).ok();
+            }
+
+            resolver.changed_cells
+        };
 
         // Create Merkle proof cell which contains only changed cells
         let old = ok! {
-            MerkleProofBuilder::<_>::new(self.old, resolver.changed_cells)
+            MerkleProofBuilder::<_>::new(self.old, changed_cells)
                 .allow_different_root(true)
-                .rayon_build_raw_ext(self.context, old_split_at)
+                .par_build_raw_ext(self.context, old_split_at)
         };
 
         // Done
@@ -1045,105 +932,6 @@ impl<'a: 'b, 'b, 'c: 'a> RayonBuilderImpl<'a, 'b, 'c> {
             old,
             new,
         })
-    }
-}
-
-#[cfg(feature = "rayon")]
-#[derive(Copy, Clone)]
-struct CellStatus<'a> {
-    hash: &'a HashBytes,
-    has_changed: bool,
-}
-
-#[cfg(feature = "rayon")]
-enum ExtCell<'a> {
-    Ordinary(CellStatus<'a>),
-    Partial(Box<CellPart<'a>>),
-    Channel(CondVar<CellStatus<'a>>),
-}
-
-#[cfg(feature = "rayon")]
-struct CellPart<'a> {
-    hash: &'a HashBytes,
-    is_pruned: bool,
-    refs: ArrayVec<ExtCell<'a>, MAX_REF_COUNT>,
-}
-
-#[cfg(feature = "rayon")]
-#[derive(Default)]
-#[repr(transparent)]
-struct ExtRefsBuilder<'a>(ArrayVec<ExtCell<'a>, MAX_REF_COUNT>);
-
-#[cfg(feature = "rayon")]
-impl<'a> ExtRefsBuilder<'a> {
-    fn store_reference(&mut self, status: ExtCell<'a>) -> Result<(), Error> {
-        if self.0.len() < MAX_REF_COUNT {
-            unsafe { self.0.push(status) }
-            Ok(())
-        } else {
-            Err(Error::CellOverflow)
-        }
-    }
-}
-
-#[cfg(feature = "rayon")]
-#[derive(Default)]
-#[repr(transparent)]
-struct RefsBuilder<'a>(ArrayVec<CellStatus<'a>, MAX_REF_COUNT>);
-
-#[cfg(feature = "rayon")]
-impl<'a> RefsBuilder<'a> {
-    fn store_reference(&mut self, data: CellStatus<'a>) -> Result<(), Error> {
-        if self.0.len() < MAX_REF_COUNT {
-            unsafe { self.0.push(data) }
-            Ok(())
-        } else {
-            Err(Error::CellOverflow)
-        }
-    }
-}
-
-#[cfg(feature = "rayon")]
-enum ChildrenBuilder<'a> {
-    Ordinary(RefsBuilder<'a>),
-    Extended(ExtRefsBuilder<'a>),
-}
-
-#[cfg(feature = "rayon")]
-impl<'a> ChildrenBuilder<'a> {
-    fn store_reference(&mut self, status: ExtCell<'a>) -> Result<(), Error> {
-        match (&status, &mut *self) {
-            (ExtCell::Ordinary(cell_data), ChildrenBuilder::Ordinary(builder)) => {
-                builder.store_reference(*cell_data)?;
-            }
-            (ExtCell::Ordinary(_), ChildrenBuilder::Extended(builder)) => {
-                builder.store_reference(status)?;
-            }
-            (ExtCell::Partial(_) | ExtCell::Channel(_), ChildrenBuilder::Extended(builder)) => {
-                builder.store_reference(status)?;
-            }
-
-            (ExtCell::Partial(_) | ExtCell::Channel(_), ChildrenBuilder::Ordinary(refs)) => {
-                let mut new_builder = ExtRefsBuilder::default();
-
-                for cell_data in refs.0.as_ref() {
-                    new_builder.store_reference(ExtCell::Ordinary(*cell_data))?;
-                }
-
-                new_builder.store_reference(status)?;
-
-                *self = ChildrenBuilder::Extended(new_builder);
-            }
-        }
-
-        Ok(())
-    }
-}
-
-#[cfg(feature = "rayon")]
-impl<'a> Default for ChildrenBuilder<'a> {
-    fn default() -> Self {
-        Self::Ordinary(Default::default())
     }
 }
 

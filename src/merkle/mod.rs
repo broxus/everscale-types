@@ -3,20 +3,16 @@
 use std::collections::HashSet;
 use std::hash::BuildHasher;
 
-#[cfg(feature = "rayon")]
-use dashmap::DashSet;
-
 pub use self::proof::{MerkleProof, MerkleProofBuilder, MerkleProofExtBuilder, MerkleProofRef};
 pub use self::pruned_branch::make_pruned_branch;
 pub use self::update::{MerkleUpdate, MerkleUpdateBuilder};
 use crate::cell::{HashBytes, UsageTree, UsageTreeWithSubtrees};
 
+#[cfg(all(feature = "rayon", feature = "sync"))]
+mod promise;
 mod proof;
 mod pruned_branch;
 mod update;
-
-#[cfg(feature = "rayon")]
-mod utils;
 
 #[cfg(test)]
 mod tests;
@@ -98,9 +94,20 @@ impl<S: BuildHasher> MerkleFilter for HashSet<&HashBytes, S> {
 }
 
 #[cfg(feature = "rayon")]
-impl<S: BuildHasher + Clone> MerkleFilter for DashSet<&HashBytes, S> {
+impl<S: BuildHasher + Clone> MerkleFilter for scc::HashSet<&'_ HashBytes, S> {
     fn check(&self, cell: &HashBytes) -> FilterAction {
-        if DashSet::contains(self, cell) {
+        if scc::HashSet::contains(self, cell) {
+            FilterAction::Include
+        } else {
+            FilterAction::Skip
+        }
+    }
+}
+
+#[cfg(feature = "rayon")]
+impl<S: BuildHasher + Clone> MerkleFilter for scc::HashSet<HashBytes, S> {
+    fn check(&self, cell: &HashBytes) -> FilterAction {
+        if scc::HashSet::contains(self, cell) {
             FilterAction::Include
         } else {
             FilterAction::Skip

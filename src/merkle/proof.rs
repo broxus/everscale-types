@@ -1,17 +1,12 @@
-use std::collections::HashMap;
-use std::hash::BuildHasher;
+#[cfg(all(feature = "rayon", feature = "sync"))]
+use std::sync::Arc;
 
-#[cfg(feature = "rayon")]
-use dashmap::DashMap;
-
+#[cfg(all(feature = "rayon", feature = "sync"))]
+use super::promise::Promise;
 use super::{make_pruned_branch, FilterAction, MerkleFilter};
 use crate::cell::*;
 use crate::error::Error;
-#[cfg(feature = "rayon")]
-use crate::merkle::utils::CondVar;
 use crate::util::unlikely;
-#[cfg(feature = "rayon")]
-use crate::util::ArrayVec;
 
 /// Non-owning parsed Merkle proof representation.
 ///
@@ -302,7 +297,7 @@ where
 
     /// Builds a Merkle proof child cell using the specified cell context.
     pub fn build_raw_ext(self, context: &dyn CellContext) -> Result<Cell, Error> {
-        BuilderImpl::<ahash::RandomState> {
+        BuilderImpl {
             root: self.root,
             filter: &self.filter,
             cells: Default::default(),
@@ -313,22 +308,27 @@ where
         }
         .build()
     }
+
+    /// Builds a Merkle proof using an empty cell context.
+    pub fn build(self) -> Result<MerkleProof, Error> {
+        self.build_ext(Cell::empty_context())
+    }
 }
 
-#[cfg(feature = "rayon")]
+#[cfg(all(feature = "rayon", feature = "sync"))]
 impl<'a, F> MerkleProofBuilder<'a, F>
 where
     F: MerkleFilter + Send + Sync,
 {
-    /// Multithread build a Merkle proof using the specified cell context
-    /// and set of cells which handle in parallel.
-    pub fn rayon_build_ext(
+    /// Multithread build of a Merkle proof using the specified cell context
+    /// and a set of cells which to handle in parallel.
+    pub fn par_build_ext(
         self,
         context: &(dyn CellContext + Send + Sync),
         split_at: ahash::HashSet<HashBytes>,
     ) -> Result<MerkleProof, Error> {
         let root = self.root;
-        let cell = ok!(self.rayon_build_raw_ext(context, split_at));
+        let cell = ok!(self.par_build_raw_ext(context, split_at));
         Ok(MerkleProof {
             hash: *root.repr_hash(),
             depth: root.repr_depth(),
@@ -336,13 +336,14 @@ where
         })
     }
 
-    /// Multithread build a Merkle proof child cell using the specified cell context.
-    pub fn rayon_build_raw_ext(
+    /// Multithread build of a Merkle proof root using the specified cell context
+    /// and a set of cells which to handle in parallel.
+    pub fn par_build_raw_ext(
         self,
         context: &(dyn CellContext + Send + Sync),
         split_at: ahash::HashSet<HashBytes>,
     ) -> Result<Cell, Error> {
-        RayonBuilderImpl::<ahash::RandomState> {
+        ParBuilderImpl {
             root: self.root,
             filter: &self.filter,
             cells: Default::default(),
@@ -354,27 +355,11 @@ where
         }
         .build()
     }
-}
 
-impl<F> MerkleProofBuilder<'_, F>
-where
-    F: MerkleFilter,
-{
-    /// Builds a Merkle proof using an empty cell context.
-    pub fn build(self) -> Result<MerkleProof, Error> {
-        self.build_ext(Cell::empty_context())
-    }
-}
-
-#[cfg(feature = "rayon")]
-impl<F> MerkleProofBuilder<'_, F>
-where
-    F: MerkleFilter + Send + Sync,
-{
-    /// Multithreaded build a Merkle proof using an empty cell context.
-    #[cfg(feature = "rayon")]
-    pub fn rayon_build(self, split_at: ahash::HashSet<HashBytes>) -> Result<MerkleProof, Error> {
-        self.rayon_build_ext(Cell::empty_context(), split_at)
+    /// Multithread build of a Merkle proof using the default cell context
+    /// and a set of cells which to handle in parallel.
+    pub fn par_build(self, split_at: ahash::HashSet<HashBytes>) -> Result<MerkleProof, Error> {
+        self.par_build_ext(Cell::empty_context(), split_at)
     }
 }
 
@@ -409,7 +394,7 @@ where
     pub fn build_raw_ext<'c: 'a>(
         self,
         context: &'c dyn CellContext,
-    ) -> Result<(Cell, ahash::HashMap<&'a HashBytes, bool>), Error> {
+    ) -> Result<(Cell, ahash::HashSet<&'a HashBytes>), Error> {
         let mut pruned_branches = Default::default();
         let mut builder = BuilderImpl {
             root: self.root,
@@ -425,19 +410,19 @@ where
     }
 }
 
+#[cfg(all(feature = "rayon", feature = "sync"))]
 impl<'a, F> MerkleProofExtBuilder<'a, F>
 where
     F: MerkleFilter + Send + Sync,
 {
     /// Multithreaded build a Merkle proof child cell using the specified cell context.
-    #[cfg(feature = "rayon")]
-    pub fn rayon_build_raw_ext<'c: 'a>(
+    pub fn par_build_raw_ext<'c: 'a>(
         self,
         context: &'c (dyn CellContext + Send + Sync),
         split_at: ahash::HashSet<HashBytes>,
-    ) -> Result<(Cell, DashMap<&'a HashBytes, bool>), Error> {
+    ) -> Result<(Cell, scc::HashSet<&'a HashBytes, ahash::RandomState>), Error> {
         let pruned_branches = Default::default();
-        let builder = RayonBuilderImpl {
+        let builder = ParBuilderImpl {
             root: self.root,
             filter: &self.filter,
             cells: Default::default(),
@@ -452,23 +437,18 @@ where
     }
 }
 
-struct BuilderImpl<'a, 'b, 'c: 'a, S = ahash::RandomState> {
+struct BuilderImpl<'a, 'b, 'c: 'a> {
     root: &'a DynCell,
     filter: &'b dyn MerkleFilter,
-    cells: HashMap<&'a HashBytes, Cell, S>,
-    pruned_branches: Option<&'b mut HashMap<&'a HashBytes, bool, S>>,
+    cells: ahash::HashMap<&'a HashBytes, Cell>,
+    pruned_branches: Option<&'b mut ahash::HashSet<&'a HashBytes>>,
     context: &'c dyn CellContext,
     allow_different_root: bool,
     prune_big_cells: bool,
 }
 
-impl<S> BuilderImpl<'_, '_, '_, S>
-where
-    S: BuildHasher + Default,
-{
+impl BuilderImpl<'_, '_, '_> {
     fn build(&mut self) -> Result<Cell, Error> {
-        const PRUNED_BITS_THRESHOLD: u16 = 288;
-
         struct Node<'a> {
             references: RefsIter<'a>,
             descriptor: CellDescriptor,
@@ -482,7 +462,7 @@ where
             return Err(Error::EmptyProof);
         }
 
-        let mut stack = Vec::with_capacity(self.root.repr_depth() as usize);
+        let mut stack = Vec::with_capacity((self.root.repr_depth() as usize).min(MAX_OK_DEPTH));
 
         // Push root node
         let root_descriptor = self.root.descriptor();
@@ -526,7 +506,7 @@ where
 
                             // Insert pruned branch for the current cell
                             if let Some(pruned_branch) = &mut self.pruned_branches {
-                                pruned_branch.insert(child_repr_hash, false);
+                                pruned_branch.insert(child_repr_hash);
                             }
 
                             // Use new pruned branch as a child
@@ -582,31 +562,45 @@ where
     }
 }
 
-#[cfg(feature = "rayon")]
-struct RayonBuilderImpl<'a, 'b, 'c: 'a, S = ahash::RandomState> {
+#[cfg(all(feature = "rayon", feature = "sync"))]
+struct ParBuilderImpl<'a, 'b, 'c: 'a> {
     root: &'a DynCell,
     filter: &'b (dyn MerkleFilter + Send + Sync),
-    cells: DashMap<&'a HashBytes, Cell, S>,
-    pruned_branches: Option<&'b DashMap<&'a HashBytes, bool, S>>,
+    cells: scc::HashMap<&'a HashBytes, ExtCell, ahash::RandomState>,
+    pruned_branches: Option<&'b scc::HashSet<&'a HashBytes, ahash::RandomState>>,
     context: &'c (dyn CellContext + Send + Sync),
     split_at: ahash::HashSet<HashBytes>,
     allow_different_root: bool,
     prune_big_cells: bool,
 }
 
-#[cfg(feature = "rayon")]
-impl<'a, S> RayonBuilderImpl<'a, '_, '_, S>
-where
-    S: BuildHasher + Default + Clone + Send + Sync,
-{
-    const PRUNED_BITS_THRESHOLD: u16 = 288;
-
+#[cfg(all(feature = "rayon", feature = "sync"))]
+impl<'a> ParBuilderImpl<'a, '_, '_> {
     fn build(&self) -> Result<Cell, Error> {
-        struct Node<'a> {
-            references: RefsIter<'a>,
-            descriptor: CellDescriptor,
-            merkle_depth: u8,
-            children: ChildrenBuilder,
+        fn finalize(
+            mut cell: ExtCell,
+            context: &(dyn CellContext + Send + Sync),
+        ) -> Result<Cell, Error> {
+            loop {
+                match cell {
+                    ExtCell::Ordinary(cell) => return Ok(cell),
+                    ExtCell::Partial(parts) => {
+                        let parts = Arc::unwrap_or_clone(parts);
+
+                        let mut refs = CellRefsBuilder::default();
+                        for child in parts.refs {
+                            let cell = finalize(child, context)?;
+                            refs.store_reference(cell)?;
+                        }
+
+                        return CellBuilder::from_parts(parts.is_exotic, parts.data.clone(), refs)
+                            .build_ext(context);
+                    }
+                    ExtCell::Deferred(promise) => {
+                        cell = ok!(promise.wait_cloned());
+                    }
+                }
+            }
         }
 
         if !self.allow_different_root
@@ -615,288 +609,215 @@ where
             return Err(Error::EmptyProof);
         }
 
-        let root_cell = rayon::scope(|scope| {
-            let mut stack = Vec::with_capacity(self.root.repr_depth() as usize);
-
-            // Push root node
-            let root_descriptor = self.root.descriptor();
-            stack.push(Node {
-                references: self.root.references(),
-                descriptor: root_descriptor,
-                merkle_depth: root_descriptor.is_merkle() as u8,
-                children: Default::default(),
-            });
-
-            while let Some(last) = stack.last_mut() {
-                if let Some(child) = last.references.next() {
-                    // Process children if they are left
-                    let child_repr_hash = child.repr_hash();
-
-                    let child = if let Some(child) = self.cells.get(child_repr_hash) {
-                        // Reused processed cells
-                        ExtCell::Ordinary(child.clone())
-                    } else {
-                        // Fetch child descriptor
-                        let descriptor = child.descriptor();
-
-                        // Check if child is in a tree
-                        match self.filter.check(child_repr_hash) {
-                            // Included subtrees are used as is
-                            FilterAction::IncludeSubtree => ExtCell::Ordinary(
-                                last.references.peek_prev_cloned().expect("mut not fail"),
-                            ),
-                            // Replace all skipped subtrees with pruned branch cells
-                            FilterAction::Skip
-                                if descriptor.reference_count() > 0
-                                    || self.prune_big_cells
-                                        && child.bit_len() > Self::PRUNED_BITS_THRESHOLD =>
-                            {
-                                // Create pruned branch
-                                let child = ok!(make_pruned_branch_cold(
-                                    child,
-                                    last.merkle_depth,
-                                    self.context
-                                ));
-
-                                // Insert pruned branch for the current cell
-                                if let Some(pruned_branch) = self.pruned_branches {
-                                    pruned_branch.insert(child_repr_hash, false);
-                                }
-
-                                // Use new pruned branch as a child
-                                ExtCell::Ordinary(child)
-                            }
-                            // All other cells will be included in a different branch
-                            _ => {
-                                if !self.split_at.contains(child_repr_hash) {
-                                    // Add merkle offset to the current merkle depth
-                                    let merkle_depth =
-                                        last.merkle_depth + descriptor.is_merkle() as u8;
-
-                                    // Push child node and start processing its references
-                                    stack.push(Node {
-                                        references: child.references(),
-                                        descriptor,
-                                        merkle_depth,
-                                        children: Default::default(),
-                                    });
-
-                                    continue;
-                                } else {
-                                    let cv =
-                                        self.spawn_build_subtree(child, last.merkle_depth, scope);
-
-                                    ExtCell::Channel(cv)
-                                }
-                            }
-                        }
-                    };
-
-                    // Add child to the references builder
-                    last.children.store_reference(child)?;
-                } else if let Some(last) = stack.pop() {
-                    // Build a new ExtCell if there are no child nodes left to process
-
-                    let cell = last.references.cell();
-
-                    // Build the cell
-                    let mut builder = CellDataBuilder::new();
-                    builder.store_cell_data(cell)?;
-
-                    let proof_cell = match last.children {
-                        ChildrenBuilder::Ordinary(children) => {
-                            let mut builder = CellBuilder::new();
-                            builder.set_exotic(last.descriptor.is_exotic());
-                            _ = builder.store_cell_data(cell);
-                            builder.set_references(children);
-                            let proof_cell = ok!(builder.build_ext(self.context));
-
-                            ExtCell::Ordinary(proof_cell)
-                        }
-                        ChildrenBuilder::Extended(children) => {
-                            let mut builder = CellDataBuilder::new();
-                            builder.store_cell_data(cell)?;
-
-                            let cell = CellPart {
-                                data: builder,
-                                is_exotic: last.descriptor.is_exotic(),
-                                refs: children.0,
-                            };
-
-                            ExtCell::Partial(Box::new(cell))
-                        }
-                    };
-
-                    match stack.last_mut() {
-                        // Append this cell to the ancestor
-                        Some(last) => {
-                            last.children.store_reference(proof_cell)?;
-                        }
-                        // Or return it as a result (for the root node)
-                        None => return Ok(proof_cell),
-                    }
+        let mut root_cell = rayon::scope(|scope| self.build_impl(self.root, 0, Some(scope)))?;
+        loop {
+            match root_cell {
+                ExtCell::Ordinary(cell) => break Ok(cell),
+                root_cell @ ExtCell::Partial(_) => break finalize(root_cell, self.context),
+                ExtCell::Deferred(rx) => {
+                    root_cell = ok!(rx.wait_cloned());
                 }
             }
-
-            // Something is wrong if we are here
-            Err(Error::EmptyProof)
-        })?;
-
-        fn resolve(
-            cell: &ExtCell,
-            context: &(dyn CellContext + Send + Sync),
-        ) -> Result<Cell, Error> {
-            match cell {
-                ExtCell::Ordinary(cell) => Ok(cell.clone()),
-                ExtCell::Channel(rx) => rx.wait().map_err(|_| Error::Cancelled),
-                ExtCell::Partial(node) => {
-                    let mut refs_builder = CellRefsBuilder::default();
-
-                    for child in node.refs.as_ref() {
-                        let cell = resolve(child, context)?;
-                        refs_builder.store_reference(cell)?;
-                    }
-
-                    let cell_builder =
-                        CellBuilder::from_parts(node.is_exotic, node.data.clone(), refs_builder);
-
-                    let cell = cell_builder.build_ext(context)?;
-                    Ok(cell)
-                }
-            }
-        }
-
-        match root_cell {
-            ExtCell::Ordinary(cell) => Ok(cell),
-            ExtCell::Channel(rx) => Ok(rx.wait()?),
-            ExtCell::Partial(cell_parts) => resolve(&ExtCell::Partial(cell_parts), self.context),
         }
     }
 
-    fn spawn_build_subtree<'scope>(
+    fn build_impl<'scope>(
         &'scope self,
         child: &'a DynCell,
         parent_merkle_depth: u8,
-        scope: &rayon::Scope<'scope>,
-    ) -> CondVar<Cell> {
-        let condvar = CondVar::new();
-        let tx = condvar.clone();
+        scope: Option<&rayon::Scope<'scope>>,
+    ) -> Result<ExtCell, Error> {
+        struct Node<'a> {
+            references: RefsIter<'a>,
+            descriptor: CellDescriptor,
+            merkle_depth: u8,
+            children: ChildrenBuilder,
+        }
 
-        let cells = &self.cells;
-        let filter = self.filter;
-        let context = self.context;
-        let pruned_branches = self.pruned_branches;
-        let prune_big_cells = self.prune_big_cells;
+        enum ChildrenBuilder {
+            Ordinary(CellRefsBuilder),
+            Extended(Vec<ExtCell>),
+        }
 
-        scope.spawn(move |_| {
-            struct Node<'a> {
-                references: RefsIter<'a>,
-                descriptor: CellDescriptor,
-                merkle_depth: u8,
-                children: CellRefsBuilder,
-            }
+        impl ChildrenBuilder {
+            fn store_reference(&mut self, cell: ExtCell) -> Result<(), Error> {
+                match (&mut *self, cell) {
+                    (Self::Ordinary(builder), ExtCell::Ordinary(cell)) => {
+                        builder.store_reference(cell)
+                    }
+                    (Self::Ordinary(builder), cell) => {
+                        let capacity = builder.len() + 1;
+                        let Self::Ordinary(builder) =
+                            std::mem::replace(self, Self::Extended(Vec::with_capacity(capacity)))
+                        else {
+                            // SAFETY: We have just checked the `self` discriminant.
+                            unsafe { std::hint::unreachable_unchecked() }
+                        };
 
-            let mut stack = Vec::with_capacity(child.repr_depth() as usize);
+                        let Self::Extended(ext_builder) = self else {
+                            // SAFETY: We have just updated the `self` with this value.
+                            unsafe { std::hint::unreachable_unchecked() }
+                        };
 
-            // Fetch child descriptor
-            let child_descriptor = child.descriptor();
-
-            // Add merkle offset to the current merkle depth
-            let merkle_depth = parent_merkle_depth + child_descriptor.is_merkle() as u8;
-
-            stack.push(Node {
-                references: child.references(),
-                descriptor: child_descriptor,
-                merkle_depth,
-                children: CellRefsBuilder::default(),
-            });
-
-            while let Some(last) = stack.last_mut() {
-                if let Some(child) = last.references.next() {
-                    // Process children if they are left
-
-                    let child_repr_hash = child.repr_hash();
-                    let child = if let Some(child) = cells.get(child_repr_hash) {
-                        // Reused processed cells
-                        child.clone()
-                    } else {
-                        // Fetch child descriptor
-                        let descriptor = child.descriptor();
-
-                        // Check if child is in a tree
-                        match filter.check(child_repr_hash) {
-                            // Included subtrees are used as is
-                            FilterAction::IncludeSubtree => {
-                                last.references.peek_prev_cloned().expect("mut not fail")
-                            }
-                            // Replace all skipped subtrees with pruned branch cells
-                            FilterAction::Skip
-                                if descriptor.reference_count() > 0
-                                    || prune_big_cells
-                                        && child.bit_len() > Self::PRUNED_BITS_THRESHOLD =>
-                            {
-                                // Create pruned branch
-                                let child =
-                                    make_pruned_branch_cold(child, last.merkle_depth, context)
-                                        .expect("failed to create pruned branch");
-
-                                // Insert pruned branch for the current cell
-                                if let Some(pruned_branch) = pruned_branches {
-                                    pruned_branch.insert(child_repr_hash, false);
-                                }
-
-                                // Use new pruned branch as a child
-                                child
-                            }
-                            // All other cells will be included in a different branch
-                            _ => {
-                                // Add merkle offset to the current merkle depth
-                                let merkle_depth = last.merkle_depth + descriptor.is_merkle() as u8;
-
-                                // Push child node and start processing its references
-                                stack.push(Node {
-                                    references: child.references(),
-                                    descriptor,
-                                    merkle_depth,
-                                    children: CellRefsBuilder::default(),
-                                });
-
-                                continue;
-                            }
+                        for cell in builder {
+                            ext_builder.push(ExtCell::Ordinary(cell.clone()));
                         }
-                    };
-
-                    // Add child to the references builder
-                    _ = last.children.store_reference(child);
-                } else if let Some(last) = stack.pop() {
-                    // Build a new cell if there are no child nodes left to process
-
-                    let cell = last.references.cell();
-
-                    // Build the cell
-                    let mut builder = CellBuilder::new();
-                    builder.set_exotic(last.descriptor.is_exotic());
-                    _ = builder.store_cell_data(cell);
-                    builder.set_references(last.children);
-                    let proof_cell = builder.build_ext(context).expect("failed to build ExtCell");
-
-                    // Save this cell as processed cell
-                    cells.insert(cell.repr_hash(), proof_cell.clone());
-
-                    match stack.last_mut() {
-                        // Append this cell to the ancestor
-                        Some(last) => {
-                            _ = last.children.store_reference(proof_cell);
-                        }
-                        // Or return it as a result (for the root node)
-                        None => tx.send(proof_cell).expect("failed to send proof_cell"),
+                        ext_builder.push(cell);
+                        Ok(())
+                    }
+                    (Self::Extended(builder), cell) => {
+                        builder.push(cell);
+                        Ok(())
                     }
                 }
             }
+        }
+
+        let mut stack = Vec::with_capacity((child.repr_depth() as usize).min(MAX_OK_DEPTH));
+
+        // Push root node
+        let root_descriptor = child.descriptor();
+        stack.push(Node {
+            references: child.references(),
+            descriptor: root_descriptor,
+            merkle_depth: parent_merkle_depth + root_descriptor.is_merkle() as u8,
+            children: ChildrenBuilder::Ordinary(Default::default()),
         });
 
-        condvar
+        'outer: while let Some(last) = stack.last_mut() {
+            if let Some(child) = last.references.next() {
+                // Process children if they are left
+                let child_repr_hash = child.repr_hash();
+
+                let child = if let Some(child) = self.cells.get(child_repr_hash) {
+                    // Reused processed cells
+                    child.clone()
+                } else {
+                    // Fetch child descriptor
+                    let descriptor = child.descriptor();
+
+                    // Check if child is in a tree
+                    match self.filter.check(child_repr_hash) {
+                        // Included subtrees are used as is
+                        FilterAction::IncludeSubtree => ExtCell::Ordinary(
+                            last.references.peek_prev_cloned().expect("mut not fail"),
+                        ),
+                        // Replace all skipped subtrees with pruned branch cells
+                        FilterAction::Skip
+                            if descriptor.reference_count() > 0
+                                || self.prune_big_cells
+                                    && child.bit_len() > PRUNED_BITS_THRESHOLD =>
+                        {
+                            // Create pruned branch
+                            let child = ok!(make_pruned_branch_cold(
+                                child,
+                                last.merkle_depth,
+                                self.context
+                            ));
+
+                            // Insert pruned branch for the current cell
+                            if let Some(pruned_branch) = self.pruned_branches {
+                                pruned_branch.insert(child_repr_hash).ok();
+                            }
+
+                            // Use new pruned branch as a child
+                            ExtCell::Ordinary(child)
+                        }
+                        // All other cells will be included in a different branch
+                        _ => 'cell: {
+                            if let Some(scope) = scope {
+                                if unlikely(self.split_at.contains(child_repr_hash)) {
+                                    let promise = Promise::new();
+                                    let parent_merkle_depth = last.merkle_depth;
+                                    scope.spawn({
+                                        let promise = promise.clone();
+                                        move |_| {
+                                            let cell =
+                                                self.build_impl(child, parent_merkle_depth, None);
+                                            promise.set(cell);
+                                        }
+                                    });
+                                    break 'cell ExtCell::Deferred(promise);
+                                }
+                            }
+
+                            // Add merkle offset to the current merkle depth
+                            let merkle_depth = last.merkle_depth + descriptor.is_merkle() as u8;
+
+                            // Push child node and start processing its references
+                            stack.push(Node {
+                                references: child.references(),
+                                descriptor,
+                                merkle_depth,
+                                children: ChildrenBuilder::Ordinary(Default::default()),
+                            });
+                            continue 'outer;
+                        }
+                    }
+                };
+
+                // Add child to the references builder
+                last.children.store_reference(child)?;
+            } else if let Some(last) = stack.pop() {
+                // Build a new ExtCell if there are no child nodes left to process
+
+                let cell = last.references.cell();
+
+                // Build the cell
+                let proof_cell = match last.children {
+                    ChildrenBuilder::Ordinary(children) => {
+                        let mut builder = CellBuilder::new();
+                        builder.set_exotic(last.descriptor.is_exotic());
+                        _ = builder.store_cell_data(cell);
+                        builder.set_references(children);
+                        let proof_cell = ok!(builder.build_ext(self.context));
+
+                        ExtCell::Ordinary(proof_cell)
+                    }
+                    ChildrenBuilder::Extended(refs) => {
+                        let mut builder = CellDataBuilder::new();
+                        builder.store_cell_data(cell)?;
+                        ExtCell::Partial(Arc::new(CellParts {
+                            data: builder,
+                            is_exotic: last.descriptor.is_exotic(),
+                            refs,
+                        }))
+                    }
+                };
+
+                // Save this cell as processed cell
+                self.cells.insert(cell.repr_hash(), proof_cell.clone()).ok();
+
+                match stack.last_mut() {
+                    // Append this cell to the ancestor
+                    Some(last) => {
+                        last.children.store_reference(proof_cell)?;
+                    }
+                    // Or return it as a result (for the root node)
+                    None => return Ok(proof_cell),
+                }
+            }
+        }
+
+        // Something is wrong if we are here
+        Err(Error::EmptyProof)
     }
+}
+
+#[cfg(all(feature = "rayon", feature = "sync"))]
+#[derive(Clone)]
+enum ExtCell {
+    Ordinary(Cell),
+    Partial(Arc<CellParts>),
+    Deferred(Promise<Result<ExtCell, Error>>),
+}
+
+#[cfg(all(feature = "rayon", feature = "sync"))]
+#[derive(Clone)]
+struct CellParts {
+    data: CellDataBuilder,
+    is_exotic: bool,
+    refs: Vec<ExtCell>,
 }
 
 #[cold]
@@ -908,81 +829,5 @@ fn make_pruned_branch_cold(
     make_pruned_branch(cell, merkle_depth, context)
 }
 
-#[cfg(feature = "rayon")]
-enum ExtCell {
-    Ordinary(Cell),
-    Partial(Box<CellPart>),
-    Channel(CondVar<Cell>),
-}
-
-#[cfg(feature = "rayon")]
-struct CellPart {
-    pub data: CellDataBuilder,
-    pub is_exotic: bool,
-    pub refs: ArrayVec<ExtCell, MAX_REF_COUNT>,
-}
-
-/// Builder for constructing `ExtCell` references array.
-#[cfg(feature = "rayon")]
-#[derive(Default)]
-#[repr(transparent)]
-struct ExtCellRefsBuilder(ArrayVec<ExtCell, MAX_REF_COUNT>);
-
-#[cfg(feature = "rayon")]
-impl ExtCellRefsBuilder {
-    /// Tries to store a child in the cell,
-    /// returning `false` if there is not enough remaining capacity.
-    pub fn store_reference(&mut self, cell: ExtCell) -> Result<(), Error> {
-        if self.0.len() < MAX_REF_COUNT {
-            // SAFETY: reference count is in the valid range
-            unsafe { self.0.push(cell) }
-            Ok(())
-        } else {
-            Err(Error::CellOverflow)
-        }
-    }
-}
-
-#[cfg(feature = "rayon")]
-enum ChildrenBuilder {
-    Ordinary(CellRefsBuilder),
-    Extended(ExtCellRefsBuilder),
-}
-
-#[cfg(feature = "rayon")]
-impl ChildrenBuilder {
-    fn store_reference(&mut self, raw_cell: ExtCell) -> Result<(), Error> {
-        match (&raw_cell, &mut *self) {
-            (ExtCell::Ordinary(cell), ChildrenBuilder::Ordinary(builder)) => {
-                builder.store_reference(cell.clone())?;
-            }
-            (ExtCell::Ordinary(_), ChildrenBuilder::Extended(builder)) => {
-                builder.store_reference(raw_cell)?;
-            }
-            (ExtCell::Partial(_) | ExtCell::Channel(_), ChildrenBuilder::Extended(builder)) => {
-                builder.store_reference(raw_cell)?;
-            }
-
-            (ExtCell::Partial(_) | ExtCell::Channel(_), ChildrenBuilder::Ordinary(refs)) => {
-                let mut new_builder = ExtCellRefsBuilder::default();
-
-                for cell in refs.0.as_ref() {
-                    new_builder.store_reference(ExtCell::Ordinary(cell.clone()))?;
-                }
-
-                new_builder.store_reference(raw_cell)?;
-
-                *self = ChildrenBuilder::Extended(new_builder);
-            }
-        }
-
-        Ok(())
-    }
-}
-
-#[cfg(feature = "rayon")]
-impl Default for ChildrenBuilder {
-    fn default() -> Self {
-        Self::Ordinary(Default::default())
-    }
-}
+const PRUNED_BITS_THRESHOLD: u16 = 288;
+const MAX_OK_DEPTH: usize = 128;

@@ -12,7 +12,7 @@ use crate::cell::{
     Size, MAX_BIT_LEN, MAX_REF_COUNT,
 };
 use crate::error::Error;
-use crate::util::{ArrayVec, Bitstring};
+use crate::util::{ArrayVec, ArrayVecIntoIter, Bitstring};
 
 /// A data structure that can be serialized into cells.
 pub trait Store {
@@ -1475,7 +1475,7 @@ fn store_raw(
 /// Can be used later for [`CellBuilder::set_references`].
 #[derive(Default)]
 #[repr(transparent)]
-pub struct CellRefsBuilder(pub(crate) ArrayVec<Cell, MAX_REF_COUNT>);
+pub struct CellRefsBuilder(ArrayVec<Cell, MAX_REF_COUNT>);
 
 impl CellRefsBuilder {
     /// Tries to store a child in the cell,
@@ -1497,6 +1497,43 @@ impl CellRefsBuilder {
             result |= child.as_ref().level_mask();
         }
         result
+    }
+
+    /// Returns the number of references in the builder, also referred to as its ‘length’.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Returns true if the builder contains no references.
+    #[inline]
+    pub const fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Returns an iterator over stored reverences.
+    pub fn iter(&self) -> std::slice::Iter<'_, Cell> {
+        self.0.as_ref().iter()
+    }
+}
+
+impl IntoIterator for CellRefsBuilder {
+    type Item = Cell;
+    type IntoIter = ArrayVecIntoIter<Cell, MAX_REF_COUNT>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a CellRefsBuilder {
+    type Item = &'a Cell;
+    type IntoIter = std::slice::Iter<'a, Cell>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.as_ref().iter()
     }
 }
 

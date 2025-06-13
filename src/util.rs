@@ -256,6 +256,62 @@ impl<T, const N: usize> Drop for ArrayVec<T, N> {
     }
 }
 
+impl<T, const N: usize> IntoIterator for ArrayVec<T, N> {
+    type Item = T;
+    type IntoIter = ArrayVecIntoIter<T, N>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        let this = std::mem::ManuallyDrop::new(self);
+        ArrayVecIntoIter {
+            // SAFETY: inner still exists.
+            inner: unsafe { std::ptr::read(&this.inner) },
+            offset: 0,
+            len: this.len as usize,
+        }
+    }
+}
+
+/// An [`IntoIterator`] wrapper for an [`ArrayVec`].
+pub struct ArrayVecIntoIter<T, const N: usize> {
+    inner: [MaybeUninit<T>; N],
+    offset: usize,
+    len: usize,
+}
+
+impl<T, const N: usize> Iterator for ArrayVecIntoIter<T, N> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.offset >= self.len {
+            return None;
+        }
+
+        // SAFETY: len items were initialized.
+        let item = unsafe { self.inner.get_unchecked(self.offset).assume_init_read() };
+        self.offset += 1;
+
+        Some(item)
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len - self.offset;
+        (len, Some(len))
+    }
+}
+
+impl<T, const N: usize> Drop for ArrayVecIntoIter<T, N> {
+    fn drop(&mut self) {
+        debug_assert!(self.offset <= self.len && self.len <= N);
+
+        let references_ptr = self.inner.as_mut_ptr() as *mut T;
+        for i in self.offset..self.len {
+            // SAFETY: len items were initialized
+            unsafe { std::ptr::drop_in_place(references_ptr.add(i)) };
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum IterStatus {
     /// Iterator is still valid.
