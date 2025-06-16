@@ -539,7 +539,7 @@ impl<'a: 'b, 'b, 'c: 'a> BuilderImpl<'a, 'b, 'c> {
     fn build(self) -> Result<MerkleUpdate, Error> {
         struct Resolver<'a> {
             pruned_branches: ahash::HashSet<&'a HashBytes>,
-            visited: ahash::HashSet<&'a HashBytes>,
+            visited: ahash::HashMap<&'a HashBytes, bool>,
             filter: &'a dyn MerkleFilter,
             changed_cells: ahash::HashSet<&'a HashBytes>,
         }
@@ -549,10 +549,9 @@ impl<'a: 'b, 'b, 'c: 'a> BuilderImpl<'a, 'b, 'c> {
                 let repr_hash = cell.repr_hash();
 
                 // Skip visited cells
-                if self.visited.contains(repr_hash) {
-                    return false;
+                if let Some(&result) = self.visited.get(repr_hash) {
+                    return result;
                 }
-                self.visited.insert(repr_hash);
 
                 let is_pruned = self.pruned_branches.contains(repr_hash);
                 let process_children = if skip_filter {
@@ -579,7 +578,11 @@ impl<'a: 'b, 'b, 'c: 'a> BuilderImpl<'a, 'b, 'c> {
                     }
                 }
 
-                result | is_pruned
+                result |= is_pruned;
+
+                self.visited.insert(repr_hash, result);
+
+                result
             }
         }
 
@@ -735,7 +738,7 @@ impl<'a: 'b, 'b, 'c: 'a> ParBuilderImpl<'a, 'b, 'c> {
         struct SubResolver<'a, 's, 'r> {
             resolver: &'r Resolver<'a>,
             split_at: &'s ahash::HashSet<HashBytes>,
-            visited: ahash::HashSet<&'a HashBytes>,
+            visited: ahash::HashMap<&'a HashBytes, bool>,
         }
 
         impl<'a, 's, 'r> SubResolver<'a, 's, 'r> {
@@ -753,10 +756,9 @@ impl<'a: 'b, 'b, 'c: 'a> ParBuilderImpl<'a, 'b, 'c> {
                 let repr_hash = cell.repr_hash();
 
                 // Skip visited cells
-                if self.visited.contains(repr_hash) {
-                    return CheckResult::Immediate(false);
+                if let Some(&result) = self.visited.get(repr_hash) {
+                    return CheckResult::Immediate(result);
                 }
-                self.visited.insert(repr_hash);
 
                 let is_pruned = self.resolver.pruned_branches.contains(repr_hash);
                 let process_children = if skip_filter {
@@ -773,6 +775,7 @@ impl<'a: 'b, 'b, 'c: 'a> ParBuilderImpl<'a, 'b, 'c> {
                 };
 
                 if !process_children {
+                    self.visited.insert(repr_hash, is_pruned);
                     return CheckResult::Immediate(is_pruned);
                 }
 
@@ -806,7 +809,14 @@ impl<'a: 'b, 'b, 'c: 'a> ParBuilderImpl<'a, 'b, 'c> {
                     }
                 }
 
-                self.process_children_impl(cell, skip_filter, is_pruned, scope)
+                let result = self.process_children_impl(cell, skip_filter, is_pruned, scope);
+
+                // Mark as visited only finished cells
+                if let CheckResult::Immediate(has_changed) = result {
+                    self.visited.insert(repr_hash, has_changed);
+                }
+
+                result
             }
 
             #[inline]
