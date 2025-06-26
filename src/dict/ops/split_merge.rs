@@ -1,5 +1,5 @@
 use crate::cell::*;
-use crate::dict::{dict_insert, make_leaf, read_label, write_label, AugDictFn, RawIter, SetMode};
+use crate::dict::{AugDictFn, RawIter, SetMode, dict_insert, make_leaf, read_label, write_label};
 use crate::error::Error;
 
 /// Splits one dictionary by the key prefix
@@ -90,7 +90,7 @@ pub fn dict_split_raw(
                 remaining_bit_len: key_bit_len,
                 left_branch: None,
                 right_branch: None,
-            })
+            });
         }
     };
 

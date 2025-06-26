@@ -1,7 +1,7 @@
 use crate::cell::*;
 use crate::dict::{
-    read_label, rebuild_aug_dict_from_stack, rebuild_dict_from_stack, write_label_parts, AugDictFn,
-    Branch, DictBound, DictOwnedEntry, Segment,
+    AugDictFn, Branch, DictBound, DictOwnedEntry, Segment, read_label, rebuild_aug_dict_from_stack,
+    rebuild_dict_from_stack, write_label_parts,
 };
 use crate::error::Error;
 

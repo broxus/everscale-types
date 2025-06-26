@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
-use syn::punctuated::Punctuated;
 use syn::Token;
+use syn::punctuated::Punctuated;
 
 use super::attr;
 use super::ctxt::*;

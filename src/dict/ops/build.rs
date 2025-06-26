@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use crate::cell::*;
-use crate::dict::{make_leaf, read_label, write_label, AugDictFn, StoreDictKey};
+use crate::dict::{AugDictFn, StoreDictKey, make_leaf, read_label, write_label};
 use crate::error::Error;
 
 /// Builds a new dictionary from an iterator of sorted unique entries.

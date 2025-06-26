@@ -1,10 +1,10 @@
 #![no_main]
 use arbitrary::Arbitrary;
+use libfuzzer_sys::fuzz_target;
 use tycho_types::cell::Lazy;
 use tycho_types::dict::AugDictExtra;
 use tycho_types::error::Error;
 use tycho_types::prelude::*;
-use libfuzzer_sys::fuzz_target;
 
 use self::common::AugInput;
 

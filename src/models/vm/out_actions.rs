@@ -28,7 +28,7 @@ impl Iterator for OutActionsRevIter<'_> {
                     None
                 } else {
                     Some(Err(Error::InvalidData))
-                }
+                };
             }
         };
 
@@ -368,7 +368,7 @@ impl<'a> arbitrary::Arbitrary<'a> for OutAction {
     fn try_size_hint(
         depth: usize,
     ) -> arbitrary::Result<(usize, Option<usize>), arbitrary::MaxRecursionReached> {
-        use arbitrary::{size_hint, Arbitrary};
+        use arbitrary::{Arbitrary, size_hint};
 
         Ok(size_hint::and(
             (1, Some(1)),

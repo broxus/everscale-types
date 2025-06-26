@@ -271,7 +271,7 @@ impl StdAddr {
         s: &str,
         format: StdAddrFormat,
     ) -> Result<(Self, Base64StdAddrFlags), ParseAddrError> {
-        use base64::prelude::{Engine as _, BASE64_STANDARD, BASE64_URL_SAFE};
+        use base64::prelude::{BASE64_STANDARD, BASE64_URL_SAFE, Engine as _};
 
         match s.len() {
             0 => Err(ParseAddrError::Empty),
@@ -696,7 +696,7 @@ pub struct DisplayBase64StdAddr<'a> {
 #[cfg(feature = "base64")]
 impl std::fmt::Display for DisplayBase64StdAddr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use base64::prelude::{Engine as _, BASE64_STANDARD, BASE64_URL_SAFE};
+        use base64::prelude::{BASE64_STANDARD, BASE64_URL_SAFE, Engine as _};
 
         let mut buffer = [0u8; 36];
         buffer[0] = (0x51 - (self.flags.bounceable as i32) * 0x40

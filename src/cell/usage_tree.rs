@@ -1,6 +1,6 @@
-use super::cell_impl::VirtualCellWrapper;
 #[cfg(feature = "stats")]
 use super::CellTreeStats;
+use super::cell_impl::VirtualCellWrapper;
 use super::{Cell, CellDescriptor, CellImpl, CellInner, DynCell, HashBytes};
 use crate::util::TryAsMut;
 

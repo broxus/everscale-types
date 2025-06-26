@@ -124,11 +124,7 @@ impl VarUint248 {
         }
 
         let res = Self::from_words(hi, lo);
-        if res.is_valid() {
-            res
-        } else {
-            Self::MAX
-        }
+        if res.is_valid() { res } else { Self::MAX }
     }
 
     /// Saturating integer multiplication. Computes `self * rhs`,
@@ -154,11 +150,7 @@ impl VarUint248 {
         }
 
         let res = Self::from_words(hi, lo);
-        if res.is_valid() {
-            Some(res)
-        } else {
-            None
-        }
+        if res.is_valid() { Some(res) } else { None }
     }
 
     /// Checked integer subtraction. Computes `self - rhs`,
@@ -174,11 +166,7 @@ impl VarUint248 {
         }
 
         let res = Self::from_words(hi, lo);
-        if res.is_valid() {
-            Some(res)
-        } else {
-            None
-        }
+        if res.is_valid() { Some(res) } else { None }
     }
 
     /// Checked integer multiplication. Computes `self * rhs`,

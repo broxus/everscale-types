@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 use std::hint::black_box;
 
+use iai_callgrind::{library_benchmark, library_benchmark_group, main};
 use tycho_types::cell::RefsIter;
 use tycho_types::prelude::*;
-use iai_callgrind::{library_benchmark, library_benchmark_group, main};
 
 const BOC: &str = "te6ccgECCAEAAWQAAnPP9noJKCEBL3oZerOiIcNghuL96V3wIcuYOWQdvNC+2fqCEIJDQAAAAAAAAAAAAAAAAZa8xB6QABNAAgEAUO3QlUyMI4dEepUMw3Ou6oSqq8+1lyHkjOGFK6DAn6TXAAAAAAAAAAABFP8A9KQT9LzyyAsDAgEgBwQC5vJx1wEBwADyeoMI1xjtRNCDB9cB1ws/yPgozxYjzxbJ+QADcdcBAcMAmoMH1wFRE7ry4GTegEDXAYAg1wGAINcBVBZ1+RDyqPgju/J5Zr74I4EHCKCBA+ioUiC8sfJ0AiCCEEzuZGy64w8ByMv/yz/J7VQGBQA+ghAWnj4Ruo4R+AACkyDXSpd41wHUAvsA6NGTMvI84gCYMALXTND6QIMG1wFx1wF41wHXTPgAcIAQBKoCFLHIywVQBc8WUAP6AstpItAhzzEh10mghAm5mDNwAcsAWM8WlzBxAcsAEsziyQH7AAAE0jA=";
 

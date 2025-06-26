@@ -1,14 +1,14 @@
 use std::collections::BTreeMap;
 
 use super::{
-    build_dict_from_sorted_iter, dict_find_bound, dict_find_bound_owned, dict_find_owned, dict_get,
-    dict_get_owned, dict_get_subdict, dict_insert, dict_load_from_root, dict_remove_bound_owned,
-    dict_remove_owned, dict_split_by_prefix, read_label, DictBound, DictOwnedEntry, SetMode,
-    StoreDictKey,
+    DictBound, DictOwnedEntry, SetMode, StoreDictKey, build_dict_from_sorted_iter, dict_find_bound,
+    dict_find_bound_owned, dict_find_owned, dict_get, dict_get_owned, dict_get_subdict,
+    dict_insert, dict_load_from_root, dict_remove_bound_owned, dict_remove_owned,
+    dict_split_by_prefix, read_label,
 };
 use crate::cell::*;
 use crate::error::Error;
-use crate::util::{unlikely, IterStatus};
+use crate::util::{IterStatus, unlikely};
 
 /// Dictionary with fixed length keys (where `N` is a number of bits in each key).
 ///
@@ -1102,11 +1102,7 @@ impl<'a> Iterator for UnionRawIter<'a> {
                         Err(e) => return Some(Err(self.finish(e))),
                     };
 
-                    if reversed {
-                        cmp.reverse()
-                    } else {
-                        cmp
-                    }
+                    if reversed { cmp.reverse() } else { cmp }
                 };
 
                 match cmp {
@@ -1531,9 +1527,11 @@ mod tests {
         //
         dict.replace(build_cell(|b| b.store_u32(123)).as_slice()?, false)
             .unwrap();
-        assert!(!dict
-            .contains_key(build_cell(|b| b.store_u32(123)).as_slice()?)
-            .unwrap());
+        assert!(
+            !dict
+                .contains_key(build_cell(|b| b.store_u32(123)).as_slice()?)
+                .unwrap()
+        );
 
         //
         dict.set(build_cell(|b| b.store_u32(123)).as_slice()?, false)
@@ -1680,8 +1678,9 @@ mod tests {
 
     #[test]
     fn dict_get() -> anyhow::Result<()> {
-        let boc =
-            Boc::decode_base64("te6ccgECOwEAASoAAQHAAQIBIBACAgEgAwMCASAEBAIBIAUFAgEgBgYCASAHBwIBIAgIAgEgCQkCASAoCgIBIAsZAgEgDBsCASArDQIBIA4fAgEgLQ8CASAuIQIBIBERAgEgEhICASATEwIBIBQUAgEgFRUCASAWFgIBIBcXAgEgKBgCASAaGQIBIBsbAgEgHRsCASAcHAIBIB8fAgEgKx4CASAiHwIBICAgAgEgISECASAlJQIBIC0jAgEgLiQCASAvJQIBIDMmAgFiNicCAUg4OAIBICkpAgEgKioCASArKwIBICwsAgEgLS0CASAuLgIBIC8vAgEgMzACAWI2MQIBIDcyAAnWAAAmbwIBIDQ0AgEgNTUCASA2NgIBIDc3AgEgODgCASA5OQIBIDo6AAnQAAAmbw==")?;
+        let boc = Boc::decode_base64(
+            "te6ccgECOwEAASoAAQHAAQIBIBACAgEgAwMCASAEBAIBIAUFAgEgBgYCASAHBwIBIAgIAgEgCQkCASAoCgIBIAsZAgEgDBsCASArDQIBIA4fAgEgLQ8CASAuIQIBIBERAgEgEhICASATEwIBIBQUAgEgFRUCASAWFgIBIBcXAgEgKBgCASAaGQIBIBsbAgEgHRsCASAcHAIBIB8fAgEgKx4CASAiHwIBICAgAgEgISECASAlJQIBIC0jAgEgLiQCASAvJQIBIDMmAgFiNicCAUg4OAIBICkpAgEgKioCASArKwIBICwsAgEgLS0CASAuLgIBIC8vAgEgMzACAWI2MQIBIDcyAAnWAAAmbwIBIDQ0AgEgNTUCASA2NgIBIDc3AgEgODgCASA5OQIBIDo6AAnQAAAmbw==",
+        )?;
 
         // println!("BOC: {}", boc.display_tree());
 
@@ -1707,7 +1706,9 @@ mod tests {
 
     #[test]
     fn dict_iter() -> anyhow::Result<()> {
-        let boc = Boc::decode_base64("te6ccgEBFAEAeAABAcABAgPOQAUCAgHUBAMACQAAAI3gAAkAAACjoAIBIA0GAgEgCgcCASAJCAAJAAAAciAACQAAAIfgAgEgDAsACQAAAFZgAAkAAABsIAIBIBEOAgEgEA8ACQAAADqgAAkAAABQYAIBIBMSAAkAAAAe4AAJAAAAv2A=")?;
+        let boc = Boc::decode_base64(
+            "te6ccgEBFAEAeAABAcABAgPOQAUCAgHUBAMACQAAAI3gAAkAAACjoAIBIA0GAgEgCgcCASAJCAAJAAAAciAACQAAAIfgAgEgDAsACQAAAFZgAAkAAABsIAIBIBEOAgEgEA8ACQAAADqgAAkAAABQYAIBIBMSAAkAAAAe4AAJAAAAv2A=",
+        )?;
         let dict = boc.parse::<RawDict<32>>()?;
 
         let size = dict.values().count();

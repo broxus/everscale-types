@@ -1,8 +1,8 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use tycho_types::cell::*;
-use tycho_types::dict::*;
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use rand9::distr::{Distribution, StandardUniform};
 use rand9::{Rng, SeedableRng};
+use tycho_types::cell::*;
+use tycho_types::dict::*;
 
 fn build_dict_impl<K, V>(id: BenchmarkId, num_elements: usize, c: &mut Criterion)
 where

@@ -1,8 +1,8 @@
 use crate::cell::*;
 use crate::dict::{AugDict, AugDictExtra};
 use crate::error::*;
-use crate::models::currency::CurrencyCollection;
 use crate::models::ShardAccount;
+use crate::models::currency::CurrencyCollection;
 
 /// A dictionary of account states.
 pub type ShardAccounts = AugDict<HashBytes, DepthBalanceInfo, ShardAccount>;

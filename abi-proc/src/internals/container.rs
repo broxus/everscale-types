@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use syn::punctuated::Pair;
 use syn::visit::Visit;
-use syn::{visit, DataStruct, Fields};
+use syn::{DataStruct, Fields, visit};
 
 use crate::internals::context::Ctxt;
 pub struct Container<'a> {

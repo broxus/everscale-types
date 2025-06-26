@@ -131,7 +131,7 @@ impl<'de> Deserialize<'de> for NamedAbiType {
                     (Some(_), None) => {
                         return Err(ParseNamedAbiTypeError::ExpectedComponents {
                             ty: value.ty.into(),
-                        })
+                        });
                     }
                     (None, Some(_)) => {
                         return Err(ParseNamedAbiTypeError::UnexpectedComponents {

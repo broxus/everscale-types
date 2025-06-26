@@ -1,5 +1,5 @@
 use crate::cell::*;
-use crate::dict::{make_leaf, read_label, split_edge, Branch};
+use crate::dict::{Branch, make_leaf, read_label, split_edge};
 use crate::error::Error;
 
 /// Returns a `CellSlice` of the value corresponding to the key.

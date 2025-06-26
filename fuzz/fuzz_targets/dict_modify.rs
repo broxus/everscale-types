@@ -1,8 +1,8 @@
 #![no_main]
 use arbitrary::Arbitrary;
+use libfuzzer_sys::fuzz_target;
 use tycho_types::dict;
 use tycho_types::prelude::*;
-use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|input: Input<1000, u32, u64>| compare_manual_vs_batched(input));
 

@@ -2,9 +2,8 @@ use std::marker::PhantomData;
 
 use crate::cell::*;
 use crate::dict::{
-    build_aug_dict_from_sorted_iter, build_dict_from_sorted_iter, read_label, AugDictFn,
-    AugMergeStackItemMode, MergeStackItem, MergeStackItemMode, SimpleMergeStackItemMode,
-    StoreDictKey,
+    AugDictFn, AugMergeStackItemMode, MergeStackItem, MergeStackItemMode, SimpleMergeStackItemMode,
+    StoreDictKey, build_aug_dict_from_sorted_iter, build_dict_from_sorted_iter, read_label,
 };
 use crate::error::Error;
 

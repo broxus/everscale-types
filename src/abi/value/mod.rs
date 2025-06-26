@@ -594,7 +594,7 @@ impl std::fmt::Display for DisplayValueType<'_> {
             AbiValue::String(_) => "string",
             AbiValue::Token(_) => "gram",
             AbiValue::Tuple(items) => {
-                return std::fmt::Display::fmt(&DisplayTupleValueType(items), f)
+                return std::fmt::Display::fmt(&DisplayTupleValueType(items), f);
             }
             AbiValue::Array(ty, _) => return write!(f, "{ty}[]"),
             AbiValue::FixedArray(ty, items) => return write!(f, "{ty}[{}]", items.len()),

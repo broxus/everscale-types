@@ -1,10 +1,10 @@
 use std::hint::black_box;
 
-use tycho_types::cell::*;
-use tycho_types::dict::*;
 use iai_callgrind::{library_benchmark, library_benchmark_group, main};
 use rand9::distr::{Distribution, StandardUniform};
 use rand9::{Rng, SeedableRng};
+use tycho_types::cell::*;
+use tycho_types::dict::*;
 
 fn build_dict<K, V>(num_elements: usize) -> Dict<K, V>
 where

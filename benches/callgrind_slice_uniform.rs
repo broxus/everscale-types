@@ -1,7 +1,7 @@
 use std::hint::black_box;
 
-use tycho_types::prelude::*;
 use iai_callgrind::{library_benchmark, library_benchmark_group, main};
+use tycho_types::prelude::*;
 
 #[library_benchmark]
 #[bench::small(2)]

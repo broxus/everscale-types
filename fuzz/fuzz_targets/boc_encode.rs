@@ -1,6 +1,6 @@
 #![no_main]
-use tycho_types::prelude::{Boc, Cell};
 use libfuzzer_sys::fuzz_target;
+use tycho_types::prelude::{Boc, Cell};
 
 fuzz_target!(|cell: Cell| {
     _ = Boc::encode(cell);

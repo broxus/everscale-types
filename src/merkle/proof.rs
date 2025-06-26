@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 #[cfg(all(feature = "rayon", feature = "sync"))]
 use super::promise::Promise;
-use super::{make_pruned_branch, FilterAction, MerkleFilter};
+use super::{FilterAction, MerkleFilter, make_pruned_branch};
 use crate::cell::*;
 use crate::error::Error;
 use crate::util::unlikely;

@@ -1,6 +1,6 @@
 #[cfg(all(feature = "rayon", feature = "sync"))]
 use super::promise::Promise;
-use super::{make_pruned_branch, FilterAction, MerkleFilter, MerkleProofBuilder};
+use super::{FilterAction, MerkleFilter, MerkleProofBuilder, make_pruned_branch};
 use crate::cell::*;
 use crate::error::Error;
 use crate::util::unlikely;
@@ -783,7 +783,7 @@ impl<'a: 'b, 'b, 'c: 'a> ParBuilderImpl<'a, 'b, 'c> {
                     if unlikely(self.split_at.contains(repr_hash)) {
                         let entry = match self.resolver.deferred.entry(repr_hash) {
                             scc::hash_map::Entry::Occupied(entry) => {
-                                return CheckResult::Deferred(entry.get().clone())
+                                return CheckResult::Deferred(entry.get().clone());
                             }
                             scc::hash_map::Entry::Vacant(entry) => entry,
                         };

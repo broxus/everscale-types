@@ -1,4 +1,4 @@
-use quote::{format_ident, ToTokens};
+use quote::{ToTokens, format_ident};
 use syn::{Attribute, Error, Ident, LitStr, Path};
 
 use crate::internals::context::Ctxt;

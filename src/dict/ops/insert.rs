@@ -1,7 +1,7 @@
 use crate::cell::*;
 use crate::dict::{
-    make_leaf, make_leaf_with_extra, read_label, rebuild_aug_dict_from_stack,
-    rebuild_dict_from_stack, split_aug_edge, split_edge, AugDictFn, Branch, Segment, SetMode,
+    AugDictFn, Branch, Segment, SetMode, make_leaf, make_leaf_with_extra, read_label,
+    rebuild_aug_dict_from_stack, rebuild_dict_from_stack, split_aug_edge, split_edge,
 };
 use crate::error::Error;
 

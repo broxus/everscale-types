@@ -9,7 +9,7 @@ use super::CellTreeStats;
 use crate::cell::cell_context::{CellContext, CellParts};
 use crate::cell::{
     Cell, CellDescriptor, CellImpl, CellInner, CellSlice, CellType, DynCell, HashBytes, LevelMask,
-    Size, MAX_BIT_LEN, MAX_REF_COUNT,
+    MAX_BIT_LEN, MAX_REF_COUNT, Size,
 };
 use crate::error::Error;
 use crate::util::{ArrayVec, ArrayVecIntoIter, Bitstring};
@@ -18,7 +18,7 @@ use crate::util::{ArrayVec, ArrayVecIntoIter, Bitstring};
 pub trait Store {
     /// Tries to store itself into the cell builder.
     fn store_into(&self, builder: &mut CellBuilder, context: &dyn CellContext)
-        -> Result<(), Error>;
+    -> Result<(), Error>;
 }
 
 impl<T: Store + ?Sized> Store for &T {
@@ -521,7 +521,7 @@ impl CellBuilder {
                     match ty {
                         CellType::PrunedBranch => break 'mask LevelMask::new(self.data[1]),
                         CellType::MerkleProof | CellType::MerkleUpdate => {
-                            break 'mask children_mask.virtualize(1)
+                            break 'mask children_mask.virtualize(1);
                         }
                         CellType::LibraryReference => break 'mask LevelMask::EMPTY,
                         _ => {}

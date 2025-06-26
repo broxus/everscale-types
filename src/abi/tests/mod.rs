@@ -311,11 +311,13 @@ fn test_abi_derivation() {
 
     let abi_value_manual = AbiValue::Tuple(vec![
         AbiValue::String(String::from("aaa")).named("kek"),
-        AbiValue::Tuple(vec![AbiValue::Tuple(vec![
-            AbiValue::String(String::from("bbb")).named("value0"),
-            AbiValue::String(String::from("ccc")).named("value1"),
+        AbiValue::Tuple(vec![
+            AbiValue::Tuple(vec![
+                AbiValue::String(String::from("bbb")).named("value0"),
+                AbiValue::String(String::from("ccc")).named("value1"),
+            ])
+            .named("inner_first"),
         ])
-        .named("inner_first")])
         .named("lol"),
         AbiValue::Array(Arc::from(AbiType::Uint(64)), vec![
             AbiValue::uint(64, 1u64),

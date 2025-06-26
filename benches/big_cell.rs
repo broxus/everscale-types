@@ -1,9 +1,9 @@
 use std::cell::RefCell;
 use std::hint::black_box;
 
-use criterion::{criterion_group, criterion_main, Criterion};
-use tycho_types::boc::ser::BocHeaderCache;
+use criterion::{Criterion, criterion_group, criterion_main};
 use tycho_types::boc::Boc;
+use tycho_types::boc::ser::BocHeaderCache;
 use tycho_types::cell::{Cell, CellBuilder};
 
 thread_local! {

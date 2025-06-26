@@ -8,8 +8,8 @@ use crate::abi::{
     PlainAbiValue,
 };
 use crate::cell::{
-    Cell, CellBuilder, CellContext, CellDataBuilder, CellSlice, CellTreeStats, Size, Store,
-    MAX_BIT_LEN, MAX_REF_COUNT,
+    Cell, CellBuilder, CellContext, CellDataBuilder, CellSlice, CellTreeStats, MAX_BIT_LEN,
+    MAX_REF_COUNT, Size, Store,
 };
 use crate::dict::{self, RawDict};
 use crate::error::Error;

@@ -1,8 +1,8 @@
 use std::hint::black_box;
 
+use iai_callgrind::{library_benchmark, library_benchmark_group, main};
 use tycho_types::boc::Boc;
 use tycho_types::cell::Cell;
-use iai_callgrind::{library_benchmark, library_benchmark_group, main};
 
 #[macro_export]
 macro_rules! decl_boc_benches {

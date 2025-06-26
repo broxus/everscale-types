@@ -5,7 +5,7 @@ use syn::Fields;
 use crate::internals::container;
 use crate::internals::container::Container;
 use crate::internals::context::Ctxt;
-use crate::internals::field::{extract_field_attributes, FieldAttributes, StructField};
+use crate::internals::field::{FieldAttributes, StructField, extract_field_attributes};
 
 pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Error>> {
     let ctx = Ctxt::new();

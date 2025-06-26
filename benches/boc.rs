@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use tycho_types::boc::Boc;
 
 fn deserialize_boc(id: BenchmarkId, boc: &'static [u8], c: &mut Criterion) {

@@ -1,7 +1,7 @@
 use std::ops::ControlFlow;
 
 use crate::cell::*;
-use crate::dict::{read_label, Branch, DictBound, DictOwnedEntry, SearchByExtra, Segment};
+use crate::dict::{Branch, DictBound, DictOwnedEntry, SearchByExtra, Segment, read_label};
 use crate::error::Error;
 
 /// Returns cell slice parts of the value corresponding to the key.
