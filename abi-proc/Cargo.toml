@@ -1,10 +1,10 @@
 [package]
-name = "everscale-types-abi-proc"
-description = "Proc-macro abi helpers for everscale-types"
+name = "tycho-types-abi-proc"
+description = "Proc-macro abi helpers for tycho-types"
 authors = ["Stanislav Eliseev <s.eliseev@dexpa.io"]
-repository = "https://github.com/broxus/everscale-types"
-version = "0.1.0"
-edition = "2021"
+repository = "https://github.com/broxus/tycho-types"
+version = "0.2.0"
+edition = "2024"
 include = ["src/**/*.rs", "../LICENSE-*", "../README.md"]
 license = "MIT OR Apache-2.0"
 

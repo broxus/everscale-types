@@ -1,14 +1,14 @@
 use std::hint::black_box;
 
-use everscale_types::cell::*;
-use everscale_types::dict::*;
 use iai_callgrind::{library_benchmark, library_benchmark_group, main};
-use rand::distributions::{Distribution, Standard};
-use rand::{Rng, SeedableRng};
+use rand9::distr::{Distribution, StandardUniform};
+use rand9::{Rng, SeedableRng};
+use tycho_types::cell::*;
+use tycho_types::dict::*;
 
 fn build_dict_inserts<K, V>(num_elements: usize) -> Dict<K, V>
 where
-    Standard: Distribution<K> + Distribution<V>,
+    StandardUniform: Distribution<K> + Distribution<V>,
     K: StoreDictKey,
     V: Store,
 {
@@ -16,8 +16,8 @@ where
 
     let mut result = Dict::<K, V>::new();
     for _ in 0..num_elements {
-        let key = rng.gen::<K>();
-        let value = rng.gen::<V>();
+        let key = rng.random::<K>();
+        let value = rng.random::<V>();
         result.add(key, value).unwrap();
     }
     result
@@ -25,14 +25,14 @@ where
 
 fn build_dict_leaves<K, V>(num_elements: usize) -> Dict<K, V>
 where
-    Standard: Distribution<K> + Distribution<V>,
+    StandardUniform: Distribution<K> + Distribution<V>,
     K: StoreDictKey + Ord,
     V: Store,
 {
     let mut rng = rand_xorshift::XorShiftRng::from_seed([0u8; 16]);
 
     let mut values = (0..num_elements)
-        .map(|_| (rng.gen::<K>(), rng.gen::<V>()))
+        .map(|_| (rng.random::<K>(), rng.random::<V>()))
         .collect::<Vec<_>>();
     values.sort_by(|(l, _), (r, _)| l.cmp(r));
 

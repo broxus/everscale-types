@@ -1,14 +1,14 @@
 use std::hint::black_box;
 
-use everscale_types::cell::*;
-use everscale_types::dict::*;
+use tycho_types::cell::*;
+use tycho_types::dict::*;
 use iai_callgrind::{library_benchmark, library_benchmark_group, main};
-use rand::distributions::{Distribution, Standard};
-use rand::{Rng, SeedableRng};
+use rand9::distr::{Distribution, StandardUniform};
+use rand9::{Rng, SeedableRng};
 
 fn build_dict<K, V>(num_elements: usize) -> Dict<K, V>
 where
-    Standard: Distribution<K> + Distribution<V>,
+    StandardUniform: Distribution<K> + Distribution<V>,
     K: StoreDictKey,
     V: Store,
 {
@@ -16,8 +16,8 @@ where
 
     let mut result = Dict::<K, V>::new();
     for _ in 0..num_elements {
-        let key = rng.gen::<K>();
-        let value = rng.gen::<V>();
+        let key = rng.random::<K>();
+        let value = rng.random::<V>();
         result.set(key, value).unwrap();
     }
     result

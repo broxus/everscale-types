@@ -1,11 +1,11 @@
 [package]
-name = "everscale-types"
-description = "A set of primitive types and utilities for the Everscale blockchain."
+name = "tycho-types"
+description = "A set of primitive types and utilities for the Tycho node."
 authors = ["Ivan Kalinin <i.kalinin@dexpa.io>"]
-repository = "https://github.com/broxus/everscale-types"
-version = "0.1.2"
-edition = "2021"
-rust-version = "1.77"
+repository = "https://github.com/broxus/tycho-types"
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.85"
 include = ["src/**/*.rs", "benches/**/*.rs", "LICENSE-*", "README.md"]
 license = "MIT OR Apache-2.0"
 
@@ -80,11 +80,12 @@ blake3 = { version = "1.5", optional = true }
 bytes = { version = "1.4", optional = true }
 crc32c = "0.6.8"
 ed25519-dalek = { version = "2.1.1", optional = true }
-everscale-crypto = { version = "0.3", features = ["tl-proto"], optional = true }
+tycho-crypto = { version = "0.4", features = ["tl-proto"], optional = true }
 hex = "0.4"
 num-bigint = { version = "0.4", optional = true }
 num-traits = { version = "0.2", optional = true }
-rand = { version = "0.8", optional = true }
+rand8 = { package = "rand", version = "0.8", optional = true }
+rand9 = { package = "rand", version = "0.9", optional = true }
 rayon = { version = "1.10", optional = true }
 scc = { version = "2.1", optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
@@ -94,29 +95,31 @@ thiserror = "2.0"
 tl-proto = { version = "0.5.3", optional = true }
 typeid = "1.0"
 
-everscale-types-proc = { version = "=0.1.5", path = "proc" }
-everscale-types-abi-proc = { version = "=0.1.0", path = "abi-proc", optional = true }
+tycho-types-proc = { version = "=0.2.0", path = "proc" }
+tycho-types-abi-proc = { version = "=0.2.0", path = "abi-proc", optional = true }
 
 [dev-dependencies]
 anyhow = "1.0"
 base64 = "0.22"
 criterion = "0.5"
-rand = "0.8"
-rand_xorshift = "0.3"
+rand_xorshift = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 iai-callgrind = "0.14"
 paste = "1.0.15"
+
+tycho-types = { path = "./", features = ["rand9"] }
 
 [features]
 default = ["base64", "serde", "models", "sync"]
 sync = ["dep:scc"]
 stats = []
 serde = ["dep:serde", "base64"]
-rand = ["dep:rand"]
-models = ["dep:everscale-crypto", "dep:tl-proto"]
+rand8 = ["dep:rand8"]
+rand9 = ["dep:rand9"]
+models = ["dep:tycho-crypto", "dep:tl-proto"]
 blake3 = ["dep:blake3"]
-rayon = ["dep:rayon", "blake3?/rayon"]
+rayon = ["sync", "dep:rayon", "blake3?/rayon"]
 arbitrary = ["dep:arbitrary"]
 bigint = ["dep:num-bigint", "dep:num-traits"]
 abi = [
@@ -126,7 +129,7 @@ abi = [
     "bigint",
     "dep:serde",
     "models",
-    "dep:everscale-types-abi-proc",
+    "dep:tycho-types-abi-proc",
 ]
 tycho = []
 
@@ -141,7 +144,7 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.sha2]
 opt-level = 3
-[profile.dev.package.everscale-crypto]
+[profile.dev.package.tycho-crypto]
 opt-level = 3
 [profile.dev.package.curve25519-dalek]
 opt-level = 3

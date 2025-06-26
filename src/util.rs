@@ -78,16 +78,18 @@ pub(crate) const fn unlikely(b: bool) -> bool {
 /// - size must be in range 1..=4.
 /// - data must be at least `size` bytes long.
 pub(crate) unsafe fn read_be_u32_fast(data_ptr: *const u8, size: usize) -> u32 {
-    match size {
-        1 => *data_ptr as u32,
-        2 => u16::from_be_bytes(*(data_ptr as *const [u8; 2])) as u32,
-        3 => {
-            let mut bytes = [0u8; 4];
-            std::ptr::copy_nonoverlapping(data_ptr, bytes.as_mut_ptr().add(1), 3);
-            u32::from_be_bytes(bytes)
+    unsafe {
+        match size {
+            1 => *data_ptr as u32,
+            2 => u16::from_be_bytes(*(data_ptr as *const [u8; 2])) as u32,
+            3 => {
+                let mut bytes = [0u8; 4];
+                std::ptr::copy_nonoverlapping(data_ptr, bytes.as_mut_ptr().add(1), 3);
+                u32::from_be_bytes(bytes)
+            }
+            4 => u32::from_be_bytes(*(data_ptr as *const [u8; 4])),
+            _ => std::hint::unreachable_unchecked(),
         }
-        4 => u32::from_be_bytes(*(data_ptr as *const [u8; 4])),
-        _ => std::hint::unreachable_unchecked(),
     }
 }
 
@@ -99,14 +101,16 @@ pub(crate) unsafe fn read_be_u32_fast(data_ptr: *const u8, size: usize) -> u32 {
 /// - size must be in range 1..=8.
 /// - data must be at least `size` bytes long.
 pub(crate) unsafe fn read_be_u64_fast(data_ptr: *const u8, size: usize) -> u64 {
-    match size {
-        1..=4 => read_be_u32_fast(data_ptr, size) as u64,
-        5..=8 => {
-            let mut bytes = [0u8; 8];
-            std::ptr::copy_nonoverlapping(data_ptr, bytes.as_mut_ptr().add(8 - size), size);
-            u64::from_be_bytes(bytes)
+    unsafe {
+        match size {
+            1..=4 => read_be_u32_fast(data_ptr, size) as u64,
+            5..=8 => {
+                let mut bytes = [0u8; 8];
+                std::ptr::copy_nonoverlapping(data_ptr, bytes.as_mut_ptr().add(8 - size), size);
+                u64::from_be_bytes(bytes)
+            }
+            _ => std::hint::unreachable_unchecked(),
         }
-        _ => std::hint::unreachable_unchecked(),
     }
 }
 
@@ -188,10 +192,12 @@ impl<T, const N: usize> ArrayVec<T, N> {
     /// - The length of this vector is less than `N`.
     #[inline]
     pub unsafe fn push(&mut self, item: T) {
-        debug_assert!((self.len as usize) < N);
+        unsafe {
+            debug_assert!((self.len as usize) < N);
 
-        *self.inner.get_unchecked_mut(self.len as usize) = MaybeUninit::new(item);
-        self.len += 1;
+            *self.inner.get_unchecked_mut(self.len as usize) = MaybeUninit::new(item);
+            self.len += 1;
+        }
     }
 
     /// Returns a reference to an element.
@@ -213,8 +219,10 @@ impl<T, const N: usize> ArrayVec<T, N> {
     /// `len` initialized items in the returned array.
     #[inline]
     pub unsafe fn into_inner(self) -> [MaybeUninit<T>; N] {
-        let this = std::mem::ManuallyDrop::new(self);
-        std::ptr::read(&this.inner)
+        unsafe {
+            let this = std::mem::ManuallyDrop::new(self);
+            std::ptr::read(&this.inner)
+        }
     }
 }
 

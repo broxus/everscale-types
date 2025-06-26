@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use everscale_types::prelude::*;
+use tycho_types::prelude::*;
 
 fn test_uniform(c: &mut Criterion) {
     let cells = (0..=32)

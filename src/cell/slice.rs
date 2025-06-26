@@ -1,4 +1,4 @@
-use std::num::{NonZeroU16, NonZeroU32, NonZeroU8};
+use std::num::{NonZeroU8, NonZeroU16, NonZeroU32};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -7,7 +7,7 @@ use crate::cell::{
     Cell, CellTreeStats, CellType, DynCell, HashBytes, LevelMask, RefsIter, Size, StorageStat,
 };
 use crate::error::Error;
-use crate::util::{unlikely, Bitstring};
+use crate::util::{Bitstring, unlikely};
 
 /// A data structure that can be deserialized from the full cell.
 pub trait LoadCell<'a>: Sized {
@@ -593,7 +593,7 @@ impl<'a> CellSlice<'a> {
     /// # Examples
     ///
     /// ```
-    /// # use everscale_types::prelude::{Cell, CellFamily, CellBuilder};
+    /// # use tycho_types::prelude::{Cell, CellFamily, CellBuilder};
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// // Cell with empty data
     /// let empty_cell = Cell::empty_cell();
@@ -617,7 +617,7 @@ impl<'a> CellSlice<'a> {
     /// # Examples
     ///
     /// ```
-    /// # use everscale_types::prelude::{Cell, CellFamily, CellBuilder};
+    /// # use tycho_types::prelude::{Cell, CellFamily, CellBuilder};
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// // Cell without references
     /// let empty_cell = Cell::empty_cell();
@@ -661,7 +661,7 @@ impl<'a> CellSlice<'a> {
     /// # Examples
     ///
     /// ```
-    /// # use everscale_types::prelude::CellBuilder;
+    /// # use tycho_types::prelude::CellBuilder;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let cell = {
     ///     let mut builder = CellBuilder::new();
@@ -683,7 +683,7 @@ impl<'a> CellSlice<'a> {
     /// # Examples
     ///
     /// ```
-    /// # use everscale_types::prelude::{Cell, CellFamily, CellBuilder};
+    /// # use tycho_types::prelude::{Cell, CellFamily, CellBuilder};
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let cell = {
     ///     let mut builder = CellBuilder::new();
@@ -706,7 +706,7 @@ impl<'a> CellSlice<'a> {
     /// # Examples
     ///
     /// ```
-    /// # use everscale_types::prelude::{Cell, CellBuilder, CellFamily};
+    /// # use tycho_types::prelude::{Cell, CellBuilder, CellFamily};
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let cell = {
     ///     let mut builder = CellBuilder::new();
@@ -720,6 +720,7 @@ impl<'a> CellSlice<'a> {
     /// assert!(slice.has_remaining(10, 2));
     /// assert!(!slice.has_remaining(500, 2)); // too many bits
     /// assert!(!slice.has_remaining(0, 4)); // too many refs
+    /// //
     /// # Ok(()) }
     /// ```
     #[inline]
@@ -875,7 +876,7 @@ impl<'a> CellSlice<'a> {
     /// # Examples
     ///
     /// ```
-    /// # use everscale_types::prelude::CellBuilder;
+    /// # use tycho_types::prelude::CellBuilder;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let cell = {
     ///     let mut builder = CellBuilder::new();
@@ -918,7 +919,7 @@ impl<'a> CellSlice<'a> {
     /// # Examples
     ///
     /// ```
-    /// # use everscale_types::prelude::CellBuilder;
+    /// # use tycho_types::prelude::CellBuilder;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let cell = {
     ///     let mut builder = CellBuilder::new();
@@ -1069,7 +1070,7 @@ impl<'a> CellSlice<'a> {
     /// # Examples
     ///
     /// ```
-    /// # use everscale_types::prelude::{Cell, CellFamily, CellBuilder};
+    /// # use tycho_types::prelude::{Cell, CellFamily, CellBuilder};
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// // Uniform cell consisting of only 0s
     /// let uniform_cell = {
@@ -1987,134 +1988,138 @@ unsafe fn bits_memscan(data: &[u8], mut offset: u16, bit_count: u16, cmp_to: boo
         addr & (std::mem::align_of::<u64>() - 1) == 0
     }
 
-    if bit_count == 0 {
-        return 0;
-    }
-    debug_assert!((offset + bit_count + 7) as usize / 8 <= data.len());
+    unsafe {
+        if bit_count == 0 {
+            return 0;
+        }
+        debug_assert!((offset + bit_count + 7) as usize / 8 <= data.len());
 
-    let xor_value = cmp_to as u8 * u8::MAX;
+        let xor_value = cmp_to as u8 * u8::MAX;
 
-    // Apply offset to byte level
-    let mut ptr = data.as_ptr().add(offset as usize >> 3);
-    offset &= 0b111;
+        // Apply offset to byte level
+        let mut ptr = data.as_ptr().add(offset as usize >> 3);
+        offset &= 0b111;
 
-    let mut rem = bit_count;
-    if offset > 0 {
-        // NOTE: `offset` is in range 1..=7
-        let v = (*ptr ^ xor_value) << offset;
-        let c = v.leading_zeros() as u16;
-        let l = 8 - offset;
-        if c < l || bit_count <= l {
-            return c.min(bit_count);
+        let mut rem = bit_count;
+        if offset > 0 {
+            // NOTE: `offset` is in range 1..=7
+            let v = (*ptr ^ xor_value) << offset;
+            let c = v.leading_zeros() as u16;
+            let l = 8 - offset;
+            if c < l || bit_count <= l {
+                return c.min(bit_count);
+            }
+
+            ptr = ptr.add(1);
+            rem -= l;
         }
 
-        ptr = ptr.add(1);
-        rem -= l;
-    }
+        while rem >= 8 && !is_aligned_to_u64(ptr) {
+            let v = *ptr ^ xor_value;
+            if v > 0 {
+                return bit_count - rem + v.leading_zeros() as u16;
+            }
 
-    while rem >= 8 && !is_aligned_to_u64(ptr) {
-        let v = *ptr ^ xor_value;
-        if v > 0 {
-            return bit_count - rem + v.leading_zeros() as u16;
+            ptr = ptr.add(1);
+            rem -= 8;
         }
 
-        ptr = ptr.add(1);
-        rem -= 8;
-    }
+        let xor_value_l = cmp_to as u64 * u64::MAX;
+        while rem >= 64 {
+            #[cfg(target_endian = "little")]
+            let z = { (*ptr.cast::<u64>()).swap_bytes() ^ xor_value_l };
+            #[cfg(not(target_endian = "little"))]
+            let z = { *ptr.cast::<u64>() ^ xor_value_l };
 
-    let xor_value_l = cmp_to as u64 * u64::MAX;
-    while rem >= 64 {
-        #[cfg(target_endian = "little")]
-        let z = { (*ptr.cast::<u64>()).swap_bytes() ^ xor_value_l };
-        #[cfg(not(target_endian = "little"))]
-        let z = { *ptr.cast::<u64>() ^ xor_value_l };
+            if z > 0 {
+                return bit_count - rem + z.leading_zeros() as u16;
+            }
 
-        if z > 0 {
-            return bit_count - rem + z.leading_zeros() as u16;
+            ptr = ptr.add(8);
+            rem -= 64;
         }
 
-        ptr = ptr.add(8);
-        rem -= 64;
-    }
+        while rem >= 8 {
+            let v = *ptr ^ xor_value;
+            if v > 0 {
+                return bit_count - rem + v.leading_zeros() as u16;
+            }
 
-    while rem >= 8 {
-        let v = *ptr ^ xor_value;
-        if v > 0 {
-            return bit_count - rem + v.leading_zeros() as u16;
+            ptr = ptr.add(1);
+            rem -= 8;
         }
 
-        ptr = ptr.add(1);
-        rem -= 8;
-    }
-
-    if rem > 0 {
-        let v = *ptr ^ xor_value;
-        let c = v.leading_zeros() as u16;
-        if c < rem {
-            return bit_count - rem + c;
+        if rem > 0 {
+            let v = *ptr ^ xor_value;
+            let c = v.leading_zeros() as u16;
+            if c < rem {
+                return bit_count - rem + c;
+            }
         }
-    }
 
-    bit_count
+        bit_count
+    }
 }
 
 // # Safety
 /// The following must be true:
 /// - (offset + bit_count + 7) / 8 <= data.len()
 unsafe fn bits_memscan_rev(data: &[u8], mut offset: u16, mut bit_count: u16, cmp_to: bool) -> u16 {
-    if bit_count == 0 {
-        return 0;
-    }
-    debug_assert!((offset + bit_count + 7) as usize / 8 <= data.len());
-
-    let xor_value = cmp_to as u8 * u8::MAX;
-    let mut ptr = data.as_ptr().add((offset + bit_count) as usize >> 3);
-    offset = (offset + bit_count) & 0b111;
-
-    let mut res = offset;
-    if offset > 0 {
-        let v = (*ptr >> (8 - offset)) ^ xor_value;
-        let c = v.trailing_zeros() as u16;
-        if c < offset || res >= bit_count {
-            return c.min(bit_count);
+    unsafe {
+        if bit_count == 0 {
+            return 0;
         }
-        bit_count -= res;
-    }
+        debug_assert!((offset + bit_count + 7) as usize / 8 <= data.len());
 
-    let xor_value_l = cmp_to as u32 * u32::MAX;
-    while bit_count >= 32 {
-        ptr = ptr.sub(4);
+        let xor_value = cmp_to as u8 * u8::MAX;
+        let mut ptr = data.as_ptr().add((offset + bit_count) as usize >> 3);
+        offset = (offset + bit_count) & 0b111;
 
-        #[cfg(target_endian = "little")]
-        let v = { ptr.cast::<u32>().read_unaligned().swap_bytes() ^ xor_value_l };
-        #[cfg(not(target_endian = "little"))]
-        let v = { ptr.cast::<u32>().read_unaligned() ^ xor_value_l };
-
-        if v > 0 {
-            return res + v.trailing_zeros() as u16;
+        let mut res = offset;
+        if offset > 0 {
+            let v = (*ptr >> (8 - offset)) ^ xor_value;
+            let c = v.trailing_zeros() as u16;
+            if c < offset || res >= bit_count {
+                return c.min(bit_count);
+            }
+            bit_count -= res;
         }
 
-        res += 32;
-        bit_count -= 32;
-    }
+        let xor_value_l = cmp_to as u32 * u32::MAX;
+        while bit_count >= 32 {
+            ptr = ptr.sub(4);
 
-    while bit_count >= 8 {
-        ptr = ptr.sub(1);
-        let v = *ptr ^ xor_value;
-        if v > 0 {
-            return res + v.trailing_zeros() as u16;
+            #[cfg(target_endian = "little")]
+            let v = { ptr.cast::<u32>().read_unaligned().swap_bytes() ^ xor_value_l };
+            #[cfg(not(target_endian = "little"))]
+            let v = { ptr.cast::<u32>().read_unaligned() ^ xor_value_l };
+
+            if v > 0 {
+                return res + v.trailing_zeros() as u16;
+            }
+
+            res += 32;
+            bit_count -= 32;
         }
 
-        res += 8;
-        bit_count -= 8;
-    }
+        while bit_count >= 8 {
+            ptr = ptr.sub(1);
+            let v = *ptr ^ xor_value;
+            if v > 0 {
+                return res + v.trailing_zeros() as u16;
+            }
 
-    if bit_count > 0 {
-        ptr = ptr.sub(1);
-        let v = *ptr ^ xor_value;
-        res + std::cmp::min(v.trailing_zeros() as u16, bit_count)
-    } else {
-        res
+            res += 8;
+            bit_count -= 8;
+        }
+
+        if bit_count > 0 {
+            ptr = ptr.sub(1);
+            let v = *ptr ^ xor_value;
+            res + std::cmp::min(v.trailing_zeros() as u16, bit_count)
+        } else {
+            res
+        }
     }
 }
 
@@ -2257,7 +2262,9 @@ mod tests {
 
         assert_eq!(unaligned.lex_cmp(&aligned)?, std::cmp::Ordering::Equal);
 
-        let prefix = Boc::decode_base64("te6ccgEBAwEAjgACB4HQAsACAQCBvwFNima9rQU2tAaEHK+4fSc/aaYcTkT20uyfZuGbZjVMAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAIAgb8RUsb7kteM/ARjNwkzPPYoytZRb4Ic9epNxxLMl/2h7AAAAAAAAAAAAAAAAAAAAADMzMzMzMzMzMzMzMzMzMzO")?;
+        let prefix = Boc::decode_base64(
+            "te6ccgEBAwEAjgACB4HQAsACAQCBvwFNima9rQU2tAaEHK+4fSc/aaYcTkT20uyfZuGbZjVMAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAIAgb8RUsb7kteM/ARjNwkzPPYoytZRb4Ic9epNxxLMl/2h7AAAAAAAAAAAAAAAAAAAAADMzMzMzMzMzMzMzMzMzMzO",
+        )?;
         let prefix = {
             let mut prefix = prefix.as_slice()?;
             prefix.skip_first(11, 0)?;

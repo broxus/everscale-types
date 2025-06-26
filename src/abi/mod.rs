@@ -3,7 +3,7 @@
 use std::hash::{BuildHasher, Hash};
 use std::str::FromStr;
 
-pub use everscale_types_abi_proc::{FromAbi, IntoAbi, WithAbiType};
+pub use tycho_types_abi_proc::{FromAbi, IntoAbi, WithAbiType};
 
 pub use self::contract::{
     Contract, Event, EventBuilder, ExternalInput, Function, FunctionBuilder, UnsignedBody,

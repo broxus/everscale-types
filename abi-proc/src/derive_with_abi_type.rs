@@ -20,7 +20,7 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Erro
     let generics = container::with_bound(
         &container.data.fields,
         &container.generics,
-        &syn::parse_quote!(::everscale_types::abi::WithAbiType),
+        &syn::parse_quote!(::tycho_types::abi::WithAbiType),
     );
 
     let ident = &input.ident;
@@ -31,9 +31,9 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Erro
     };
 
     let token_stream = quote! {
-        impl #impl_generics ::everscale_types::abi::WithAbiType for #ident #ty_generics #where_clause {
-            fn abi_type() -> ::everscale_types::abi::AbiType {
-                ::everscale_types::abi::AbiType::Tuple(::std::sync::Arc::from(#abi_values))
+        impl #impl_generics ::tycho_types::abi::WithAbiType for #ident #ty_generics #where_clause {
+            fn abi_type() -> ::tycho_types::abi::AbiType {
+                ::tycho_types::abi::AbiType::Tuple(::std::sync::Arc::from(#abi_values))
             }
         }
     };
@@ -78,7 +78,7 @@ fn construct_with_abi_type_inner(
     } else if let Some(path) = &attrs.mod_handler {
         quote! { #path::abi_type }
     } else {
-        quote! { <#ty as ::everscale_types::abi::WithAbiType>::abi_type }
+        quote! { <#ty as ::tycho_types::abi::WithAbiType>::abi_type }
     };
 
     quote! { #extractor().named(#name) }

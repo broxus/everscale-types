@@ -1,9 +1,9 @@
 [package]
-name = "everscale-types-fuzz"
+name = "tycho-types-fuzz"
 version = "0.0.0"
 authors = ["Automatically generated"]
 publish = false
-edition = "2021"
+edition = "2024"
 
 [package.metadata]
 cargo-fuzz = true
@@ -12,7 +12,7 @@ cargo-fuzz = true
 arbitrary = { version = "1.4", features = ["derive"] }
 libfuzzer-sys = "0.4"
 
-[dependencies.everscale-types]
+[dependencies.tycho-types]
 path = ".."
 features = ["base64", "arbitrary"]
 

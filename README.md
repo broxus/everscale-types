@@ -1,68 +1,56 @@
-# Everscale types &emsp; [![crates-io-batch]][crates-io-link] [![docs-badge]][docs-url] [![rust-version-badge]][rust-version-link] [![workflow-badge]][workflow-link]
+# tycho-types &emsp; [![crates-io-batch]][crates-io-link] [![docs-badge]][docs-url] [![rust-version-badge]][rust-version-link] [![workflow-badge]][workflow-link]
 
-[crates-io-batch]: https://img.shields.io/crates/v/everscale-types.svg
-
-[crates-io-link]: https://crates.io/crates/everscale-types
-
-[docs-badge]: https://docs.rs/everscale-types/badge.svg
-
-[docs-url]: https://docs.rs/everscale-types
-
-[rust-version-badge]: https://img.shields.io/badge/rustc-1.65+-lightgray.svg
-
-[rust-version-link]: https://blog.rust-lang.org/2022/11/03/Rust-1.65.0.html
-
-[workflow-badge]: https://img.shields.io/github/actions/workflow/status/broxus/everscale-types/master.yml?branch=master
-
-[workflow-link]: https://github.com/broxus/everscale-types/actions?query=workflow%3Amaster
+[crates-io-batch]: https://img.shields.io/crates/v/tycho-types.svg
+[crates-io-link]: https://crates.io/crates/tycho-types
+[docs-badge]: https://docs.rs/tycho-types/badge.svg
+[docs-url]: https://docs.rs/tycho-types
+[rust-version-badge]: https://img.shields.io/badge/rustc-1.85+-lightgray.svg
+[rust-version-link]: https://blog.rust-lang.org/2025/02/20/Rust-1.85.0/
+[workflow-badge]: https://img.shields.io/github/actions/workflow/status/broxus/tycho-types/master.yml?branch=master
+[workflow-link]: https://github.com/broxus/tycho-types/actions?query=workflow%3Amaster
 
 > Status: WIP
 
 ## About
 
-A set of primitive types and utilities for the Everscale blockchain.
-
-Heavily inspired by [`ton-labs-types`](https://github.com/tonlabs/ton-labs-types),
-but with much more emphasis on speed.
+A set of primitive types and utilities for the Tycho node.
 
 ## Basic usage
 
-Get `Cell` from `Vec<u8>` representation of bytes
+Decode `Cell` from bytes using the BOC (Bag Of Cells) format:
 ```rust
-use everscale_types::boc::Boc;
+use tycho_types::boc::Boc;
 
 let cell: Cell = Boc::decode(bytes)?;
 ```
 
-Encode any model e.g.`MerkleProof` to `base64` BOC representation and vice versa
+Encode TLB model e.g.`MerkleProof`:
 ```rust
-use everscale_types::boc::BocRepr;
+use tycho_types::boc::BocRepr;
 
-let cell = MerkleProof::create_for_cell(cell.as_ref(), EMPTY_CELL_HASH)
-            .build()
-            .unwrap();
+let proof = MerkleProof::create_for_cell(cell.as_ref(), some_filter).build()?;
 
-let encoded = BocRepr::encode_base64(&cell).unwrap();
-
-let decoded = Boc::decode_base64(encoded)?.as_ref().parse::<MerkleProof>()?:
+let encoded = BocRepr::encode_base64(proof)?;
+let decoded = BocRepr::decode_base64(encoded)?:
 ```
 
-Get specific everscale type from `Cell`
+Parse TLB type from `Cell`:
 ```rust
-use everscale_types::models::BlockProof;
+use tycho_types::models::BlockProof;
 
 let proof: BlockProof = cell.parse::<BlockProof>()?;
 ```
-Same usage for virtualized cell
-```rust
-use everscale_types::prelude::DynCell;
-use everscale_types::models::Block;
 
-let virt_cell: &DynCell = cell.virtualize();
+Parse TLB type from proof cell (partially pruned):
+```rust
+use tycho_types::cell::DynCell;
+use tycho_types::models::Block;
+
+let virt_cell: &DynCell = proof.virtualize();
 let block = virt_cell.parse::<Block>()?;
 ```
 
-You can also use `CellBuilder` to create any `Cell`
+Use `CellBuilder` to create any `Cell`:
 ```rust
 let mut builder = CellBuilder::new();
 builder.store_bit_one()?;
@@ -74,7 +62,15 @@ builder.store_raw(&[0xdd, 0x55], 10)?;
 builder.store_reference(cell)?;
 builder.store_reference(another_cell)?;
 
-let final_cell = builder.build()?;
+let final_cell: Cell = builder.build()?;
+
+// === or ===
+let other_cell: Cell = CellBuilder::build_from((
+    true,
+    100u32,
+    cell,
+    another_cell,
+))?;
 ```
 
 ## Development

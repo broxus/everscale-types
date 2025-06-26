@@ -4,7 +4,7 @@ use std::mem::MaybeUninit;
 #[cfg(feature = "stats")]
 use super::CellTreeStats;
 use super::{
-    Cell, CellDescriptor, CellFamily, CellImpl, CellInner, DynCell, HashBytes, EMPTY_CELL_HASH,
+    Cell, CellDescriptor, CellFamily, CellImpl, CellInner, DynCell, EMPTY_CELL_HASH, HashBytes,
     MAX_REF_COUNT,
 };
 use crate::util::TryAsMut;
@@ -803,9 +803,9 @@ const unsafe fn virtualize_into_next_wrapper<
 
     // Construct fat pointer with vtable info
     let data = cell as *const T as *const ();
-    let ptr: *const DynCell = std::mem::transmute([data, vtable]);
+    let ptr: *const DynCell = unsafe { std::mem::transmute([data, vtable]) };
 
-    &*ptr
+    unsafe { &*ptr }
 }
 
 fn virtual_hash_index(descriptor: CellDescriptor, level: u8, offset: u8) -> u8 {

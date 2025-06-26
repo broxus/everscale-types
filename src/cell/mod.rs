@@ -3,7 +3,7 @@
 use std::ops::{BitOr, BitOrAssign};
 use std::str::FromStr;
 
-pub use everscale_types_proc::{Load, Store};
+pub use tycho_types_proc::{Load, Store};
 
 pub use self::builder::{
     CellBuilder, CellDataBuilder, CellRefsBuilder, DisplayCellBuilderData, Store,
@@ -872,11 +872,19 @@ where
     }
 }
 
-#[cfg(any(feature = "rand", test))]
-impl rand::distributions::Distribution<HashBytes> for rand::distributions::Standard {
+#[cfg(feature = "rand8")]
+impl rand8::distributions::Distribution<HashBytes> for rand8::distributions::Standard {
     #[inline]
-    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> HashBytes {
-        HashBytes(rand::distributions::Standard.sample(rng))
+    fn sample<R: rand8::Rng + ?Sized>(&self, rng: &mut R) -> HashBytes {
+        HashBytes(rand8::distributions::Standard.sample(rng))
+    }
+}
+
+#[cfg(feature = "rand9")]
+impl rand9::distr::Distribution<HashBytes> for rand9::distr::StandardUniform {
+    #[inline]
+    fn sample<R: rand9::Rng + ?Sized>(&self, rng: &mut R) -> HashBytes {
+        HashBytes(rand9::distr::StandardUniform.sample(rng))
     }
 }
 

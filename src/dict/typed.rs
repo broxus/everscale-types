@@ -4,12 +4,13 @@ use std::marker::PhantomData;
 
 use super::raw::*;
 use super::{
-    build_dict_from_sorted_iter, dict_find_bound, dict_find_owned, dict_get, dict_get_owned,
-    dict_insert, dict_load_from_root, dict_merge_siblings, dict_modify_from_sorted_iter,
-    dict_remove_bound_owned, dict_split_by_prefix, DictBound, DictKey, SetMode, StoreDictKey,
+    DictBound, DictKey, SetMode, StoreDictKey, build_dict_from_sorted_iter, dict_find_bound,
+    dict_find_owned, dict_get, dict_get_owned, dict_insert, dict_load_from_root,
+    dict_merge_siblings, dict_modify_from_sorted_iter, dict_remove_bound_owned,
+    dict_split_by_prefix,
 };
 use crate::cell::*;
-use crate::dict::{dict_remove_owned, LoadDictKey};
+use crate::dict::{LoadDictKey, dict_remove_owned};
 use crate::error::Error;
 use crate::util::*;
 
@@ -1137,7 +1138,7 @@ where
             value: &mut Option<CellSlice<'a>>,
         ) -> Result<Option<V>, Error> {
             match value {
-                Some(mut value) => match V::load_from(&mut value) {
+                Some(value) => match V::load_from(value) {
                     Ok(value) => Ok(Some(value)),
                     Err(e) => Err(e),
                 },
@@ -1728,12 +1729,12 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)]
     fn big_dict() {
-        use rand::{Rng, SeedableRng};
+        use rand9::{Rng, SeedableRng};
 
         let mut rng = rand_xorshift::XorShiftRng::from_seed([0u8; 16]);
 
         let values = (0..100000)
-            .map(|_| (rng.gen::<u32>(), rng.gen::<u64>()))
+            .map(|_| (rng.random::<u32>(), rng.random::<u64>()))
             .collect::<Vec<_>>();
 
         // Wrap builder into a new function for the flamegraph

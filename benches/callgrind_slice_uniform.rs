@@ -1,6 +1,6 @@
 use std::hint::black_box;
 
-use everscale_types::prelude::*;
+use tycho_types::prelude::*;
 use iai_callgrind::{library_benchmark, library_benchmark_group, main};
 
 #[library_benchmark]

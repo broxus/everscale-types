@@ -29,13 +29,13 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Erro
 
     let result = quote! {
         #[automatically_derived]
-        impl #impl_generics ::everscale_types::cell::Store for #ident #ty_generics #where_clause {
+        impl #impl_generics ::tycho_types::cell::Store for #ident #ty_generics #where_clause {
             #inline
             fn store_into(
                 &self,
-                __builder: &mut ::everscale_types::cell::CellBuilder,
-                __context: &dyn ::everscale_types::cell::CellContext,
-            ) -> ::core::result::Result<(), ::everscale_types::error::Error> {
+                __builder: &mut ::tycho_types::cell::CellBuilder,
+                __context: &dyn ::tycho_types::cell::CellContext,
+            ) -> ::core::result::Result<(), ::tycho_types::error::Error> {
                 #body
             }
         }
@@ -98,7 +98,7 @@ fn build_struct(
         _ => {
             let validate_with = container.attrs.tlb_validate_with.as_ref().map(|expr| {
                 quote!(if !#expr(self) {
-                    return ::core::result::Result::Err(::everscale_types::error::Error::InvalidData);
+                    return ::core::result::Result::Err(::tycho_types::error::Error::InvalidData);
                 })
             });
             let store_tag = store_tag.map(into_ok);
@@ -235,7 +235,7 @@ fn store_op(field_ident: &TokenStream, ty: &syn::Type) -> TokenStream {
         }
     };
 
-    quote! { <#ty as ::everscale_types::cell::Store>::store_into(&#field_ident, __builder, __context) }
+    quote! { <#ty as ::tycho_types::cell::Store>::store_into(&#field_ident, __builder, __context) }
 }
 
 fn into_ok(tokens: TokenStream) -> TokenStream {

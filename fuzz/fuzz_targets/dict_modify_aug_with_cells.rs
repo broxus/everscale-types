@@ -1,9 +1,9 @@
 #![no_main]
 use arbitrary::Arbitrary;
-use everscale_types::cell::Lazy;
-use everscale_types::dict::AugDictExtra;
-use everscale_types::error::Error;
-use everscale_types::prelude::*;
+use tycho_types::cell::Lazy;
+use tycho_types::dict::AugDictExtra;
+use tycho_types::error::Error;
+use tycho_types::prelude::*;
 use libfuzzer_sys::fuzz_target;
 
 use self::common::AugInput;

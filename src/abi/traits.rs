@@ -1278,7 +1278,7 @@ unsafe fn cast_vec<T1, T2>(v: Vec<T1>) -> Vec<T2> {
     let len = v.len();
     let cap = v.capacity();
 
-    Vec::<T2>::from_raw_parts(p, len, cap)
+    unsafe { Vec::<T2>::from_raw_parts(p, len, cap) }
 }
 
 #[cfg(test)]

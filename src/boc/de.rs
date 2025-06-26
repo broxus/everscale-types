@@ -6,7 +6,7 @@ use super::BocTag;
 #[cfg(feature = "stats")]
 use crate::cell::CellTreeStats;
 use crate::cell::{Cell, CellContext, CellDescriptor, CellParts, LevelMask, MAX_REF_COUNT};
-use crate::util::{read_be_u32_fast, read_be_u64_fast, unlikely, ArrayVec};
+use crate::util::{ArrayVec, read_be_u32_fast, read_be_u64_fast, unlikely};
 
 /// BOC deserialization options.
 #[derive(Debug, Default, Clone)]
@@ -330,7 +330,7 @@ impl BocReader {
 
     #[inline(always)]
     unsafe fn read_boc_tag(&self, data: &[u8]) -> Option<BocTag> {
-        BocTag::from_bytes(*(data.as_ptr() as *const [u8; 4]))
+        unsafe { BocTag::from_bytes(*(data.as_ptr() as *const [u8; 4])) }
     }
 
     /// # Safety
@@ -340,9 +340,11 @@ impl BocReader {
     /// - data must be at least `self.offset + size` bytes long.
     #[inline(always)]
     unsafe fn read_next_be_uint_fast(&mut self, data: &[u8], size: usize) -> usize {
-        let res = read_be_u32_fast(data.as_ptr().add(self.offset), size) as usize;
-        self.advance(size);
-        res
+        unsafe {
+            let res = read_be_u32_fast(data.as_ptr().add(self.offset), size) as usize;
+            self.advance(size);
+            res
+        }
     }
 
     /// # Safety
@@ -352,21 +354,25 @@ impl BocReader {
     /// - data must be at least `self.offset + size` bytes long.
     #[inline(always)]
     unsafe fn read_next_be_uint_full(&mut self, data: &[u8], size: usize) -> u64 {
-        let res = read_be_u64_fast(data.as_ptr().add(self.offset), size);
-        self.advance(size);
-        res
+        unsafe {
+            let res = read_be_u64_fast(data.as_ptr().add(self.offset), size);
+            self.advance(size);
+            res
+        }
     }
 
     #[cfg(not(fuzzing))]
     #[inline(always)]
     unsafe fn check_crc(&self, data: &[u8]) -> bool {
-        let data_ptr = data.as_ptr();
-        let crc_start_ptr = data_ptr.add(self.offset);
+        unsafe {
+            let data_ptr = data.as_ptr();
+            let crc_start_ptr = data_ptr.add(self.offset);
 
-        let parsed_crc = u32::from_le_bytes(*(crc_start_ptr as *const [u8; 4]));
-        let real_crc = crc32c::crc32c(std::slice::from_raw_parts(data_ptr, self.offset));
+            let parsed_crc = u32::from_le_bytes(*(crc_start_ptr as *const [u8; 4]));
+            let real_crc = crc32c::crc32c(std::slice::from_raw_parts(data_ptr, self.offset));
 
-        parsed_crc == real_crc
+            parsed_crc == real_crc
+        }
     }
 }
 
@@ -394,71 +400,73 @@ impl<'a> CellParts<'a> {
         cell_count: u32,
         ref_size: usize,
     ) -> Result<Self, Error> {
-        let raw_cell_ptr = raw_cell.as_ptr();
+        unsafe {
+            let raw_cell_ptr = raw_cell.as_ptr();
 
-        let descriptor = CellDescriptor::new(*(raw_cell_ptr as *const [u8; 2]));
-        let data_len = descriptor.byte_len() as usize;
+            let descriptor = CellDescriptor::new(*(raw_cell_ptr as *const [u8; 2]));
+            let data_len = descriptor.byte_len() as usize;
 
-        let mut data_ptr = raw_cell_ptr.add(2);
-        if unlikely(descriptor.store_hashes()) {
-            let level = descriptor.level_mask().level();
-            debug_assert!(!descriptor.cell_type().is_pruned_branch());
-            data_ptr = data_ptr.add((32 + 2) * (level as usize + 1));
-        }
-
-        let data = std::slice::from_raw_parts(data_ptr, data_len);
-        data_ptr = data_ptr.add(data_len);
-
-        let bit_len = if descriptor.is_aligned() {
-            (data_len * 8) as u16
-        } else if let Some(data) = data.last() {
-            data_len as u16 * 8 - data.trailing_zeros() as u16 - 1
-        } else {
-            0
-        };
-
-        let mut references = ArrayVec::<Cell, MAX_REF_COUNT>::default();
-        let mut children_mask = LevelMask::EMPTY;
-
-        #[cfg(feature = "stats")]
-        let mut stats = CellTreeStats {
-            bit_count: bit_len as u64,
-            cell_count: 1,
-        };
-
-        for _ in 0..descriptor.reference_count() {
-            let child_index = read_be_u32_fast(data_ptr, ref_size);
-            if child_index >= cell_count {
-                return Err(Error::InvalidRef);
+            let mut data_ptr = raw_cell_ptr.add(2);
+            if unlikely(descriptor.store_hashes()) {
+                let level = descriptor.level_mask().level();
+                debug_assert!(!descriptor.cell_type().is_pruned_branch());
+                data_ptr = data_ptr.add((32 + 2) * (level as usize + 1));
             }
 
-            let child = match cells.get((cell_count - child_index - 1) as usize) {
-                Some(child) => child.clone(),
-                None => return Err(Error::InvalidRefOrder),
+            let data = std::slice::from_raw_parts(data_ptr, data_len);
+            data_ptr = data_ptr.add(data_len);
+
+            let bit_len = if descriptor.is_aligned() {
+                (data_len * 8) as u16
+            } else if let Some(data) = data.last() {
+                data_len as u16 * 8 - data.trailing_zeros() as u16 - 1
+            } else {
+                0
             };
 
-            {
-                let child = child.as_ref();
-                children_mask |= child.descriptor().level_mask();
-                #[cfg(feature = "stats")]
-                {
-                    stats += child.stats();
-                }
-            }
-            references.push(child);
+            let mut references = ArrayVec::<Cell, MAX_REF_COUNT>::default();
+            let mut children_mask = LevelMask::EMPTY;
 
-            data_ptr = data_ptr.add(ref_size);
-        }
-
-        Ok(CellParts {
             #[cfg(feature = "stats")]
-            stats,
-            bit_len,
-            descriptor,
-            children_mask,
-            references,
-            data,
-        })
+            let mut stats = CellTreeStats {
+                bit_count: bit_len as u64,
+                cell_count: 1,
+            };
+
+            for _ in 0..descriptor.reference_count() {
+                let child_index = read_be_u32_fast(data_ptr, ref_size);
+                if child_index >= cell_count {
+                    return Err(Error::InvalidRef);
+                }
+
+                let child = match cells.get((cell_count - child_index - 1) as usize) {
+                    Some(child) => child.clone(),
+                    None => return Err(Error::InvalidRefOrder),
+                };
+
+                {
+                    let child = child.as_ref();
+                    children_mask |= child.descriptor().level_mask();
+                    #[cfg(feature = "stats")]
+                    {
+                        stats += child.stats();
+                    }
+                }
+                references.push(child);
+
+                data_ptr = data_ptr.add(ref_size);
+            }
+
+            Ok(CellParts {
+                #[cfg(feature = "stats")]
+                stats,
+                bit_len,
+                descriptor,
+                children_mask,
+                references,
+                data,
+            })
+        }
     }
 
     /// Reads a raw cell from the specified slice.

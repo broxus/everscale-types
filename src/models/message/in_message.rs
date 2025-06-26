@@ -155,7 +155,7 @@ impl InMsg {
             Self::External(_) => Ok(None),
             Self::Immediate(_) => Ok(None),
             Self::Final(_) => Ok(None),
-            Self::Transit(ref x) => x.load_out_msg_envelope().map(Some),
+            Self::Transit(x) => x.load_out_msg_envelope().map(Some),
         }
     }
 

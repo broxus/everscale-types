@@ -47,11 +47,11 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<syn::Erro
 
     let result = quote! {
         #[automatically_derived]
-        impl #impl_generics ::everscale_types::cell::Load<#tlb_lifetime> for #ident #ty_generics #where_clause {
+        impl #impl_generics ::tycho_types::cell::Load<#tlb_lifetime> for #ident #ty_generics #where_clause {
             #inline
             fn load_from(
-                __slice: &mut ::everscale_types::cell::CellSlice<#tlb_lifetime>
-            ) -> ::core::result::Result<Self, ::everscale_types::error::Error> {
+                __slice: &mut ::tycho_types::cell::CellSlice<#tlb_lifetime>
+            ) -> ::core::result::Result<Self, ::tycho_types::error::Error> {
                 #body
             }
         }
@@ -117,7 +117,7 @@ fn build_struct(
             if #expr(&result) {
                 ::core::result::Result::Ok(result)
             } else {
-                ::core::result::Result::Err(::everscale_types::error::Error::InvalidData)
+                ::core::result::Result::Err(::tycho_types::error::Error::InvalidData)
             }
         },
         None => quote!(::core::result::Result::Ok(#result)),
@@ -135,7 +135,7 @@ fn load_tag(tag: attr::TlbTag) -> Option<TokenStream> {
     Some(quote! {
         match #op {
             ::core::result::Result::Ok(#value) => {},
-            ::core::result::Result::Ok(_) => return ::core::result::Result::Err(::everscale_types::error::Error::InvalidTag),
+            ::core::result::Result::Ok(_) => return ::core::result::Result::Err(::tycho_types::error::Error::InvalidTag),
             ::core::result::Result::Err(e) => return ::core::result::Result::Err(e),
         }
     })
@@ -183,7 +183,7 @@ fn load_tags_versioned(tags: &[attr::TlbTag]) -> Option<TokenStream> {
     Some(quote! {
         match #op {
             #(#values),*,
-            ::core::result::Result::Ok(_) => return ::core::result::Result::Err(::everscale_types::error::Error::InvalidTag),
+            ::core::result::Result::Ok(_) => return ::core::result::Result::Err(::tycho_types::error::Error::InvalidTag),
             ::core::result::Result::Err(e) => return ::core::result::Result::Err(e),
         }
     })
@@ -257,7 +257,7 @@ fn load_op(lifetime_def: &syn::LifetimeParam, ty: &syn::Type) -> TokenStream {
     };
 
     quote! {
-        match <#ty as ::everscale_types::cell::Load<#lifetime_def>>::load_from(__slice) {
+        match <#ty as ::tycho_types::cell::Load<#lifetime_def>>::load_from(__slice) {
             ::core::result::Result::Ok(val) => val,
             ::core::result::Result::Err(err) => return ::core::result::Result::Err(err),
         }

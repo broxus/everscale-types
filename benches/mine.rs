@@ -1,8 +1,8 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use everscale_types::boc::Boc;
-use everscale_types::cell::{Cell, CellBuilder, CellFamily, DynCell, HashBytes, StaticCell, Store};
-use everscale_types::dict::{Dict, RawDict};
-use everscale_types::models::{StateInit, StdAddr};
+use tycho_types::boc::Boc;
+use tycho_types::cell::{Cell, CellBuilder, CellFamily, DynCell, HashBytes, StaticCell, Store};
+use tycho_types::dict::{Dict, RawDict};
+use tycho_types::models::{StateInit, StdAddr};
 
 pub const MAX_NONCE: u64 = 300;
 

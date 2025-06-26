@@ -418,7 +418,7 @@ impl BlockSignatureExt for Dict<u16, BlockSignature> {
             );
 
         for node in list {
-            let node_id_short = tl_proto::hash(everscale_crypto::tl::PublicKey::Ed25519 {
+            let node_id_short = tl_proto::hash(tycho_crypto::tl::PublicKey::Ed25519 {
                 key: node.public_key.as_ref(),
             });
             unique_nodes.insert(node_id_short, node);
@@ -489,7 +489,7 @@ impl<'a> Load<'a> for Signature {
 #[cfg(feature = "serde")]
 impl serde::Serialize for Signature {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use base64::prelude::{Engine as _, BASE64_STANDARD};
+        use base64::prelude::{BASE64_STANDARD, Engine as _};
 
         const fn encoded_len(len: usize) -> usize {
             (len * 4 / 3 + 3) & !3

@@ -1,4 +1,4 @@
-//! The `everscale-types` prelude.
+//! The `tycho-types` prelude.
 //!
 //! This brings into scope a number of traits and commonly used type aliases.
 

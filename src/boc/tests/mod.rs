@@ -95,7 +95,7 @@ struct SomeStruct {
 #[cfg(feature = "serde")]
 #[test]
 fn hex_bytes() {
-    let hash: crate::cell::HashBytes = rand::random();
+    let hash: crate::cell::HashBytes = rand9::random();
 
     let test = format!(r#"{{"some_hash":"{hash}"}}"#);
     let SerdeWithHashBytes { some_hash } = serde_json::from_str(&test).unwrap();

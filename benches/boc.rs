@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use everscale_types::boc::Boc;
+use tycho_types::boc::Boc;
 
 fn deserialize_boc(id: BenchmarkId, boc: &'static [u8], c: &mut Criterion) {
     c.bench_with_input(id, &boc, |b, boc| {

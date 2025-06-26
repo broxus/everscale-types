@@ -189,9 +189,9 @@ impl WorkchainShardHashes {
             cx: &dyn CellContext,
         ) -> Result<(ShardIdent, Cell), Error> {
             match iter.next() {
-                Some((&ident, descr)) => {
+                Some((ident, descr)) => {
                     let cell = make_leaf(descr, cx)?;
-                    Ok((ident, cell))
+                    Ok((**ident, cell))
                 }
                 None => Err(Error::Unbalanced),
             }

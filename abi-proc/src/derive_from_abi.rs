@@ -22,7 +22,7 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<Error>> {
     let generics = container::with_bound(
         &container.data.fields,
         &container.generics,
-        &syn::parse_quote!(::everscale_types::abi::FromAbi),
+        &syn::parse_quote!(::tycho_types::abi::FromAbi),
     );
 
     let ident = container.name_ident;
@@ -35,10 +35,10 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<Error>> {
     };
 
     let token_stream = quote! {
-        impl #impl_generics ::everscale_types::abi::FromAbi for #ident #ty_generics #where_clause {
-            fn from_abi(value: ::everscale_types::abi::AbiValue) -> everscale_types::abi::__export::anyhow::Result<Self> {
-                let ::everscale_types::abi::AbiValue::Tuple(inner) = value else {
-                    return Err(everscale_types::abi::__export::anyhow::anyhow!(
+        impl #impl_generics ::tycho_types::abi::FromAbi for #ident #ty_generics #where_clause {
+            fn from_abi(value: ::tycho_types::abi::AbiValue) -> ::tycho_types::abi::__export::anyhow::Result<Self> {
+                let ::tycho_types::abi::AbiValue::Tuple(inner) = value else {
+                    return Err(::tycho_types::abi::__export::anyhow::anyhow!(
                         "expected tuple while parsing AbiValue"
                     ));
                 };
@@ -88,13 +88,13 @@ fn construct_from_abi_inner(
     } else if let Some(path) = &attrs.mod_handler {
         quote! { #path::from_abi }
     } else {
-        quote! { <_ as ::everscale_types::abi::FromAbi>::from_abi }
+        quote! { <_ as ::tycho_types::abi::FromAbi>::from_abi }
     };
 
     let base = quote! {
         match __iter.next() {
             Some(__item) => #extractor(__item.value)?,
-            None => return Err(everscale_types::abi::__export::anyhow::anyhow!(
+            None => return Err(::tycho_types::abi::__export::anyhow::anyhow!(
                 "not enough tuple items while parsing AbiValue",
             )),
         }

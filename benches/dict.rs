@@ -1,19 +1,19 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use everscale_types::cell::*;
-use everscale_types::dict::*;
-use rand::distributions::{Distribution, Standard};
-use rand::{Rng, SeedableRng};
+use tycho_types::cell::*;
+use tycho_types::dict::*;
+use rand9::distr::{Distribution, StandardUniform};
+use rand9::{Rng, SeedableRng};
 
 fn build_dict_impl<K, V>(id: BenchmarkId, num_elements: usize, c: &mut Criterion)
 where
-    Standard: Distribution<K> + Distribution<V>,
+    StandardUniform: Distribution<K> + Distribution<V>,
     K: StoreDictKey,
     V: Store,
 {
     let mut rng = rand_xorshift::XorShiftRng::from_seed([0u8; 16]);
 
     let values = (0..num_elements)
-        .map(|_| (rng.gen::<K>(), rng.gen::<V>()))
+        .map(|_| (rng.random::<K>(), rng.random::<V>()))
         .collect::<Vec<_>>();
 
     c.bench_with_input(id, &values, |b, values| {

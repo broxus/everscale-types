@@ -14,10 +14,10 @@ mod raw;
 mod typed;
 
 mod ops {
-    pub use self::build::{build_aug_dict_from_sorted_iter, build_dict_from_sorted_iter};
     pub(crate) use self::build::{
         AugMergeStackItemMode, MergeStackItem, MergeStackItemMode, SimpleMergeStackItemMode,
     };
+    pub use self::build::{build_aug_dict_from_sorted_iter, build_dict_from_sorted_iter};
     pub use self::find::{
         aug_dict_find_by_extra, dict_find_bound, dict_find_bound_owned, dict_find_owned,
     };
@@ -26,8 +26,8 @@ mod ops {
     pub use self::modify::{aug_dict_modify_from_sorted_iter, dict_modify_from_sorted_iter};
     pub use self::remove::{aug_dict_remove_owned, dict_remove_bound_owned, dict_remove_owned};
     pub use self::split_merge::{
-        aug_dict_merge_siblings, dict_merge, dict_merge_siblings, dict_split_by_prefix,
-        dict_split_raw, PartialSplitDict,
+        PartialSplitDict, aug_dict_merge_siblings, dict_merge, dict_merge_siblings,
+        dict_split_by_prefix, dict_split_raw,
     };
 
     mod build;
@@ -753,11 +753,7 @@ impl Branch {
 
 impl From<bool> for Branch {
     fn from(value: bool) -> Self {
-        if value {
-            Self::Right
-        } else {
-            Self::Left
-        }
+        if value { Self::Right } else { Self::Left }
     }
 }
 
@@ -847,9 +843,9 @@ mod tests {
     #[test]
     fn build_from_any_array() {
         for _ in 0..100 {
-            let n = 1 + rand::random::<usize>() % 1000;
+            let n = 1 + rand9::random::<u32>() % 1000;
             let mut entries = (0..n)
-                .map(|_| (rand::random::<u32>(), rand::random::<u32>()))
+                .map(|_| (rand9::random::<u32>(), rand9::random::<u32>()))
                 .collect::<Vec<_>>();
             entries.sort_by_key(|(k, _)| *k);
 

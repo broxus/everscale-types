@@ -1,6 +1,6 @@
 use std::num::{NonZeroU16, NonZeroU32};
 
-use everscale_crypto::ed25519;
+use tycho_crypto::ed25519;
 
 use crate::cell::*;
 use crate::dict::Dict;
@@ -1380,7 +1380,7 @@ impl<'de> serde::Deserialize<'de> for ValidatorSet {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ValidatorDescription {
     /// Validator public key.
-    pub public_key: HashBytes, // TODO: replace with everscale_crypto::ed25519::PublicKey ?
+    pub public_key: HashBytes, // TODO: replace with tycho_crypto::ed25519::PublicKey ?
     /// Validator weight in some units.
     pub weight: u64,
     /// Optional validator ADNL address.

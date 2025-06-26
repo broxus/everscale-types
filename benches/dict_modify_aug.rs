@@ -1,17 +1,17 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use everscale_types::cell::*;
-use everscale_types::dict::*;
-use everscale_types::error::Error;
-use rand::distributions::{Distribution, Standard};
-use rand::{Rng, SeedableRng};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use rand9::distr::{Distribution, StandardUniform};
+use rand9::{Rng, SeedableRng};
+use tycho_types::cell::*;
+use tycho_types::dict::*;
+use tycho_types::error::Error;
 
 #[derive(Default, Debug, Store, Load, Clone, Copy)]
 struct SimpleAug(u32);
 
-impl rand::distributions::Distribution<SimpleAug> for rand::distributions::Standard {
+impl rand9::distr::Distribution<SimpleAug> for rand9::distr::StandardUniform {
     #[inline]
-    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> SimpleAug {
-        SimpleAug(rand::distributions::Standard.sample(rng))
+    fn sample<R: rand9::Rng + ?Sized>(&self, rng: &mut R) -> SimpleAug {
+        SimpleAug(rand9::distr::StandardUniform.sample(rng))
     }
 }
 
@@ -30,7 +30,7 @@ impl AugDictExtra for SimpleAug {
 
 fn build_dict_impl<K, A, V>(id: impl Into<String>, sizes: &[usize], c: &mut Criterion)
 where
-    Standard: Distribution<K> + Distribution<V> + Distribution<A>,
+    StandardUniform: Distribution<K> + Distribution<V> + Distribution<A>,
     K: Copy + StoreDictKey + Ord,
     for<'a> A: Copy + AugDictExtra + Store + Load<'a>,
     V: Copy + Store,
@@ -41,13 +41,17 @@ where
 
     for size in sizes {
         let mut values = (0..*size)
-            .map(|_| (rng.gen::<K>(), rng.gen::<A>(), rng.gen::<V>()))
+            .map(|_| (rng.random::<K>(), rng.random::<A>(), rng.random::<V>()))
             .collect::<Vec<_>>();
         values.sort_by(|(l, ..), (r, ..)| l.cmp(r));
         let initial = AugDict::try_from_sorted_slice(&values).unwrap();
 
         let mut operations = (0..*size)
-            .map(|_| (rng.gen::<K>(), rng.gen::<Option<(A, V)>>()))
+            .map(|_| {
+                let key = rng.random::<K>();
+                let value = rng.random::<bool>().then(|| rng.random::<(A, V)>());
+                (key, value)
+            })
             .collect::<Vec<_>>();
         operations.sort_by(|(l, _), (r, _)| l.cmp(r));
         operations.dedup_by(|(l, _), (r, _)| (*l).eq(r));

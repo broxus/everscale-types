@@ -1,5 +1,5 @@
 #![no_main]
-use everscale_types::models::{StdAddr, StdAddrFormat};
+use tycho_types::models::{StdAddr, StdAddrFormat};
 use libfuzzer_sys::{fuzz_target, Corpus};
 
 fuzz_target!(|data: &[u8]| -> Corpus {

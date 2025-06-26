@@ -27,23 +27,23 @@ pub fn impl_derive(input: syn::DeriveInput) -> Result<TokenStream, Vec<Error>> {
     let generics = container::with_bound(
         &container.data.fields,
         &container.generics,
-        &syn::parse_quote!(::everscale_types::abi::IntoAbi),
+        &syn::parse_quote!(::tycho_types::abi::IntoAbi),
     );
 
     let ident = container.name_ident;
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     let token_stream = quote! {
-        impl #impl_generics ::everscale_types::abi::IntoAbi for #ident #ty_generics #where_clause {
-            fn into_abi(self) -> ::everscale_types::abi::AbiValue
+        impl #impl_generics ::tycho_types::abi::IntoAbi for #ident #ty_generics #where_clause {
+            fn into_abi(self) -> ::tycho_types::abi::AbiValue
             where
                 Self: Sized,
             {
-                ::everscale_types::abi::AbiValue::Tuple(#into_abi_items)
+                ::tycho_types::abi::AbiValue::Tuple(#into_abi_items)
             }
 
-            fn as_abi(&self) -> ::everscale_types::abi::AbiValue {
-                ::everscale_types::abi::AbiValue::Tuple(#as_abi_items)
+            fn as_abi(&self) -> ::tycho_types::abi::AbiValue {
+                ::tycho_types::abi::AbiValue::Tuple(#as_abi_items)
             }
         }
     };
@@ -109,7 +109,7 @@ fn construct_named_abi_value_inner(
             quote! { #path::as_abi(&self.#field_name) },
         )
     } else {
-        let path = quote! { ::everscale_types::abi::IntoAbi };
+        let path = quote! { ::tycho_types::abi::IntoAbi };
         (
             quote! { #path::into_abi(self.#field_name) },
             quote! { #path::as_abi(&self.#field_name) },

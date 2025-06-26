@@ -1,9 +1,9 @@
 #![warn(missing_docs)]
 
-//! Everscale types.
+//! Tycho types.
 //!
 //! This crate is a collection of basic structures and models for the
-//! Everscale blockchain. The [`Cell`] represents the core
+//! Tycho node. The [`Cell`] represents the core
 //! data structure which is used as an atom for building other structures.
 //!
 //! *Compiler support: [requires `rustc` 1.65+][msrv]*
@@ -127,7 +127,7 @@ macro_rules! assert_impl_all {
     };
 }
 
-extern crate self as everscale_types;
+extern crate self as tycho_types;
 
 pub mod boc;
 pub mod cell;

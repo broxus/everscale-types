@@ -2,9 +2,9 @@ use std::cell::RefCell;
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use everscale_types::boc::ser::BocHeaderCache;
-use everscale_types::boc::Boc;
-use everscale_types::cell::{Cell, CellBuilder};
+use tycho_types::boc::ser::BocHeaderCache;
+use tycho_types::boc::Boc;
+use tycho_types::cell::{Cell, CellBuilder};
 
 thread_local! {
     static CACHE: RefCell<BocHeaderCache<ahash::RandomState>> = {

@@ -41,7 +41,7 @@ fn check_master_state(cell: Cell) {
 
 #[test]
 fn prod_zerostate() {
-    const BOC: &[u8] = include_bytes!("everscale_zerostate.boc");
+    const BOC: &[u8] = include_bytes!("zerostate.boc");
     check_master_state(Boc::decode(BOC).unwrap());
 }
 

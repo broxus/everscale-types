@@ -1,12 +1,12 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use everscale_types::cell::*;
-use everscale_types::dict::*;
-use rand::distributions::{Distribution, Standard};
-use rand::{Rng, SeedableRng};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use rand9::distr::{Distribution, StandardUniform};
+use rand9::{Rng, SeedableRng};
+use tycho_types::cell::*;
+use tycho_types::dict::*;
 
 fn build_dict_impl<K, V>(id: impl Into<String>, sizes: &[usize], c: &mut Criterion)
 where
-    Standard: Distribution<K> + Distribution<V>,
+    StandardUniform: Distribution<K> + Distribution<V>,
     K: StoreDictKey + Ord,
     V: Store,
 {
@@ -16,7 +16,7 @@ where
 
     for size in sizes {
         let mut values = (0..*size)
-            .map(|_| (rng.gen::<K>(), rng.gen::<V>()))
+            .map(|_| (rng.random::<K>(), rng.random::<V>()))
             .collect::<Vec<_>>();
 
         group.bench_with_input(BenchmarkId::new("inserts", size), &values, |b, values| {

@@ -1,6 +1,6 @@
 use arbitrary::Arbitrary;
-use everscale_types::dict::{self, AugDictExtra, StoreDictKey};
-use everscale_types::prelude::*;
+use tycho_types::dict::{self, AugDictExtra, StoreDictKey};
+use tycho_types::prelude::*;
 
 #[derive(Debug)]
 pub struct AugInput<const MAX_N: usize, K, A, V> {

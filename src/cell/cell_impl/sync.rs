@@ -5,8 +5,8 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, OnceLock, Weak};
 
 use super::{
-    EmptyOrdinaryCell, HeaderWithData, LibraryReference, OrdinaryCell, OrdinaryCellHeader,
-    PrunedBranch, PrunedBranchHeader, VirtualCell, ALL_ONES_CELL, ALL_ZEROS_CELL,
+    ALL_ONES_CELL, ALL_ZEROS_CELL, EmptyOrdinaryCell, HeaderWithData, LibraryReference,
+    OrdinaryCell, OrdinaryCellHeader, PrunedBranch, PrunedBranchHeader, VirtualCell,
 };
 use crate::cell::cell_context::{CellContext, CellParts, LoadMode};
 use crate::cell::{CellFamily, CellImpl, CellType, DynCell, HashBytes};
@@ -196,48 +196,50 @@ impl CellContext for EmptyCellContext {
 }
 
 unsafe fn make_cell(ctx: CellParts, hashes: Vec<(HashBytes, u16)>) -> Cell {
-    match ctx.descriptor.cell_type() {
-        CellType::PrunedBranch => {
-            debug_assert!(hashes.len() == 1);
-            let repr = hashes.get_unchecked(0);
+    unsafe {
+        match ctx.descriptor.cell_type() {
+            CellType::PrunedBranch => {
+                debug_assert!(hashes.len() == 1);
+                let repr = hashes.get_unchecked(0);
 
-            make_pruned_branch(
-                PrunedBranchHeader {
+                make_pruned_branch(
+                    PrunedBranchHeader {
+                        repr_hash: repr.0,
+                        level: ctx.descriptor.level_mask().level(),
+                        descriptor: ctx.descriptor,
+                    },
+                    ctx.data,
+                )
+            }
+            CellType::LibraryReference => {
+                debug_assert!(hashes.len() == 1);
+                let repr = hashes.get_unchecked(0);
+
+                debug_assert!(ctx.descriptor.byte_len() == 33);
+                debug_assert!(ctx.data.len() == 33);
+
+                Cell(Arc::new(LibraryReference {
                     repr_hash: repr.0,
-                    level: ctx.descriptor.level_mask().level(),
                     descriptor: ctx.descriptor,
+                    data: *(ctx.data.as_ptr() as *const [u8; 33]),
+                }))
+            }
+            CellType::Ordinary if ctx.descriptor.d1 == 0 && ctx.descriptor.d2 == 0 => {
+                Cell(Arc::new(EmptyOrdinaryCell))
+            }
+            _ => make_ordinary_cell(
+                OrdinaryCellHeader {
+                    bit_len: ctx.bit_len,
+                    #[cfg(feature = "stats")]
+                    stats: ctx.stats,
+                    hashes,
+                    descriptor: ctx.descriptor,
+                    references: ctx.references.into_inner(),
+                    without_first: false,
                 },
                 ctx.data,
-            )
+            ),
         }
-        CellType::LibraryReference => {
-            debug_assert!(hashes.len() == 1);
-            let repr = hashes.get_unchecked(0);
-
-            debug_assert!(ctx.descriptor.byte_len() == 33);
-            debug_assert!(ctx.data.len() == 33);
-
-            Cell(Arc::new(LibraryReference {
-                repr_hash: repr.0,
-                descriptor: ctx.descriptor,
-                data: *(ctx.data.as_ptr() as *const [u8; 33]),
-            }))
-        }
-        CellType::Ordinary if ctx.descriptor.d1 == 0 && ctx.descriptor.d2 == 0 => {
-            Cell(Arc::new(EmptyOrdinaryCell))
-        }
-        _ => make_ordinary_cell(
-            OrdinaryCellHeader {
-                bit_len: ctx.bit_len,
-                #[cfg(feature = "stats")]
-                stats: ctx.stats,
-                hashes,
-                descriptor: ctx.descriptor,
-                references: ctx.references.into_inner(),
-                without_first: false,
-            },
-            ctx.data,
-        ),
     }
 }
 
@@ -274,7 +276,7 @@ unsafe fn make_ordinary_cell(header: OrdinaryCellHeader, data: &[u8]) -> Cell {
         (0, VTABLES[0])
     } else {
         let len = std::cmp::max(raw_data_len, 8).next_power_of_two();
-        let vtable = *VTABLES.get_unchecked(1 + len.trailing_zeros() as usize);
+        let vtable = unsafe { *VTABLES.get_unchecked(1 + len.trailing_zeros() as usize) };
         (len, vtable)
     };
     debug_assert!(raw_data_len <= target_data_len);
@@ -295,10 +297,12 @@ unsafe fn make_ordinary_cell(header: OrdinaryCellHeader, data: &[u8]) -> Cell {
         offset_of!(ArcInner<usize, EmptyCell>, obj) + offset_of!(EmptyCell, data);
 
     let size = (ARC_DATA_OFFSET + target_data_len + ALIGN - 1) & !(ALIGN - 1);
-    let layout = Layout::from_size_align_unchecked(size, ALIGN).pad_to_align();
+    let layout = unsafe { Layout::from_size_align_unchecked(size, ALIGN).pad_to_align() };
 
     // Make ArcCell
-    make_arc_cell::<OrdinaryCellHeader, 0>(layout, header, data.as_ptr(), raw_data_len, vtable)
+    unsafe {
+        make_arc_cell::<OrdinaryCellHeader, 0>(layout, header, data.as_ptr(), raw_data_len, vtable)
+    }
 }
 
 unsafe fn make_pruned_branch(header: PrunedBranchHeader, data: &[u8]) -> Cell {
@@ -324,7 +328,7 @@ unsafe fn make_pruned_branch(header: PrunedBranchHeader, data: &[u8]) -> Cell {
     debug_assert_eq!(data_len, data.len());
     debug_assert_eq!(data_len, header.descriptor.byte_len() as usize);
 
-    let vtable = *VTABLES.get_unchecked((header.level - 1) as usize);
+    let vtable = unsafe { *VTABLES.get_unchecked((header.level - 1) as usize) };
 
     // Compute object layout
     type InnerPrunedBranch<const N: usize> = ArcInner<AtomicUsize, PrunedBranch<N>>;
@@ -339,16 +343,18 @@ unsafe fn make_pruned_branch(header: PrunedBranchHeader, data: &[u8]) -> Cell {
         offset_of!(ArcInner<usize, EmptyCell>, obj) + offset_of!(EmptyCell, data);
 
     let size = (ARC_DATA_OFFSET + data_len + ALIGN - 1) & !(ALIGN - 1);
-    let layout = Layout::from_size_align_unchecked(size, ALIGN).pad_to_align();
+    let layout = unsafe { Layout::from_size_align_unchecked(size, ALIGN).pad_to_align() };
 
     // Make ArcCell
-    make_arc_cell::<PrunedBranchHeader, { LENGTHS[0] }>(
-        layout,
-        header,
-        data.as_ptr(),
-        data_len,
-        vtable,
-    )
+    unsafe {
+        make_arc_cell::<PrunedBranchHeader, { LENGTHS[0] }>(
+            layout,
+            header,
+            data.as_ptr(),
+            data_len,
+            vtable,
+        )
+    }
 }
 
 #[inline]
@@ -362,29 +368,31 @@ unsafe fn make_arc_cell<H, const N: usize>(
 where
     HeaderWithData<H, N>: CellImpl,
 {
-    // Allocate memory for the object
-    let buffer = std::alloc::alloc(layout);
-    if buffer.is_null() {
-        std::alloc::handle_alloc_error(layout);
+    unsafe {
+        // Allocate memory for the object
+        let buffer = std::alloc::alloc(layout);
+        if buffer.is_null() {
+            std::alloc::handle_alloc_error(layout);
+        }
+
+        // Initialize object data
+        let ptr = buffer as *mut ArcInner<AtomicUsize, HeaderWithData<H, N>>;
+        std::ptr::write(std::ptr::addr_of_mut!((*ptr).strong), AtomicUsize::new(1));
+        std::ptr::write(std::ptr::addr_of_mut!((*ptr).weak), AtomicUsize::new(1));
+        std::ptr::write(std::ptr::addr_of_mut!((*ptr).obj.header), header);
+        std::ptr::copy_nonoverlapping(
+            data_ptr,
+            std::ptr::addr_of_mut!((*ptr).obj.data) as *mut u8,
+            data_len,
+        );
+
+        // Construct fat pointer with vtable info
+        let data = std::ptr::addr_of!((*ptr).obj) as *const ();
+        let ptr: *const DynCell = std::mem::transmute([data, vtable]);
+
+        // Construct Arc
+        Cell(Arc::from_raw(ptr))
     }
-
-    // Initialize object data
-    let ptr = buffer as *mut ArcInner<AtomicUsize, HeaderWithData<H, N>>;
-    std::ptr::write(std::ptr::addr_of_mut!((*ptr).strong), AtomicUsize::new(1));
-    std::ptr::write(std::ptr::addr_of_mut!((*ptr).weak), AtomicUsize::new(1));
-    std::ptr::write(std::ptr::addr_of_mut!((*ptr).obj.header), header);
-    std::ptr::copy_nonoverlapping(
-        data_ptr,
-        std::ptr::addr_of_mut!((*ptr).obj.data) as *mut u8,
-        data_len,
-    );
-
-    // Construct fat pointer with vtable info
-    let data = std::ptr::addr_of!((*ptr).obj) as *const ();
-    let ptr: *const DynCell = std::mem::transmute([data, vtable]);
-
-    // Construct Arc
-    Cell(Arc::from_raw(ptr))
 }
 
 /// Internal Arc representation.
