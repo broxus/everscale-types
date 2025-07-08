@@ -216,7 +216,7 @@ impl MerkleUpdate {
         // Collect old cells
         let old_cells = {
             // Collect and check old cells tree
-            let old_cell_hashes = ok!(self.find_old_cells());
+            let old_cell_hashes = par_find_old_cells(&self.old);
 
             let mut visited = ahash::HashSet::default();
             let mut old_cells = ahash::HashMap::default();
@@ -502,7 +502,7 @@ where
 {
     /// Multithread build of a Merkle update using the specified cell context
     /// and sets of cells which to handle in parallel.
-    pub fn rayon_build_ext(
+    pub fn par_build_ext(
         self,
         old_split_at: ahash::HashSet<HashBytes>,
         new_split_at: ahash::HashSet<HashBytes>,
@@ -524,7 +524,7 @@ where
         old_split_at: ahash::HashSet<HashBytes>,
         new_split_at: ahash::HashSet<HashBytes>,
     ) -> Result<MerkleUpdate, Error> {
-        self.rayon_build_ext(old_split_at, new_split_at, Cell::empty_context())
+        self.par_build_ext(old_split_at, new_split_at, Cell::empty_context())
     }
 }
 
@@ -1189,4 +1189,50 @@ mod tests {
             batch.is_empty()
         }
     }
+}
+
+fn par_find_old_cells(root: &Cell) -> scc::HashSet<HashBytes, ahash::RandomState> {
+    let visited = Default::default();
+    let old_cells = Default::default();
+
+    std::thread::scope(|s| {
+        traverse_old_cells(root.virtualize(), 0, s, &visited, &old_cells);
+    });
+
+    old_cells
+}
+
+fn traverse_old_cells<'a, 'scope>(
+    cell: &'a DynCell,
+    init_merkle_depth: u8,
+    scope: &'scope std::thread::Scope<'scope, 'a>,
+    visited: &'a scc::HashSet<HashBytes, ahash::RandomState>,
+    result: &'a scc::HashSet<HashBytes, ahash::RandomState>,
+) {
+    let mut merkle_depth = init_merkle_depth;
+
+    if visited.insert(*cell.repr_hash()).is_err() {
+        return;
+    }
+
+    result.insert(*cell.hash(merkle_depth)).ok();
+
+    let descriptor = cell.descriptor();
+
+    merkle_depth += descriptor.is_merkle() as u8;
+
+    let mut iter = cell.references();
+    for child in &mut iter {
+        if child.repr_depth() > 5 {
+            scope.spawn(move || {
+                traverse_old_cells(child, merkle_depth, scope, visited, result);
+            });
+        } else {
+            traverse_old_cells(child, merkle_depth, scope, visited, result);
+        }
+    }
+
+    merkle_depth -= iter.cell().descriptor().is_merkle() as u8;
+
+    assert_eq!(merkle_depth, init_merkle_depth);
 }
