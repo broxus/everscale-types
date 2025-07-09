@@ -1223,7 +1223,7 @@ fn traverse_old_cells<'a, 'scope>(
 
     let mut iter = cell.references();
     for child in &mut iter {
-        if child.repr_depth() > 5 {
+        if child.repr_depth() > 10 {
             scope.spawn(move || {
                 traverse_old_cells(child, merkle_depth, scope, visited, result);
             });
