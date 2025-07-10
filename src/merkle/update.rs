@@ -351,7 +351,7 @@ impl MerkleUpdate {
         // Collect old cells
         let old_cells = {
             // Collect and check old cells tree
-            let old_cell_hashes = self.par_find_old_cells();
+            let old_cell_hashes = self.find_old_cells()?.into_iter().collect();
 
             let visited = Default::default();
             let old_cells = Default::default();
@@ -363,7 +363,7 @@ impl MerkleUpdate {
                     merkle_depth: u8,
                     scope: &rayon::Scope<'a>,
                     visited: &'a dashmap::DashSet<HashBytes, ahash::RandomState>,
-                    old_cell_hashes: &'a dashmap::DashSet<HashBytes, ahash::RandomState>,
+                    old_cell_hashes: &'a dashmap::DashSet<&HashBytes, ahash::RandomState>,
                     old_cells: &'a dashmap::DashMap<HashBytes, Cell, ahash::RandomState>,
                 ) {
                     if !visited.insert(*cell_ref.repr_hash()) {
