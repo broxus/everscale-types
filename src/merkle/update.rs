@@ -651,6 +651,11 @@ impl MerkleUpdate {
                 result.insert(*cell.hash(merkle_depth)).ok();
 
                 let descriptor = cell.descriptor();
+
+                if descriptor.is_pruned_branch() {
+                    return;
+                }
+
                 let next_depth = merkle_depth + descriptor.is_merkle() as u8;
 
                 let mut iter = cell.references();
