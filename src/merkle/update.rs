@@ -615,7 +615,7 @@ impl MerkleUpdate {
 
                 let mut iter = cell.references();
                 for child in &mut iter {
-                    if child.repr_depth() > 5 {
+                    if child.repr_depth() > 10 {
                         scope.spawn(move |s| {
                             traverse_old_cells(child, next_depth, s, visited, result);
                         });
@@ -663,7 +663,7 @@ impl MerkleUpdate {
 
                 let mut iter = cell.references();
                 for child in &mut iter {
-                    if child.repr_depth() > 5 {
+                    if child.repr_depth() > 10 {
                         scope.spawn(move |s| {
                             traverse_new_cells(child, next_depth, s, visited, old_cells).unwrap();
                         });
