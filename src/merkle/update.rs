@@ -279,7 +279,7 @@ impl MerkleUpdate {
     /// TODO
     #[cfg(all(feature = "rayon", feature = "sync"))]
     pub fn par_apply(&self, old: &Cell) -> Result<Cell, Error> {
-        self.apply_ext(old, Cell::empty_context())
+        self.par_apply_ext(old, Cell::empty_context())
     }
 
     /// TODO
