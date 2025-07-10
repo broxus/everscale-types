@@ -615,7 +615,7 @@ impl MerkleUpdate {
 
                 let mut iter = cell.references();
                 for child in &mut iter {
-                    if child.repr_depth() > 10 {
+                    if child.repr_depth() > 5 {
                         scope.spawn(move |s| {
                             traverse_old_cells(child, next_depth, s, visited, result);
                         });
@@ -626,11 +626,70 @@ impl MerkleUpdate {
 
                 debug_assert_eq!(
                     merkle_depth,
-                    next_depth - cell.descriptor().is_merkle() as u8,
+                    next_depth - iter.cell().descriptor().is_merkle() as u8,
                 );
             }
 
             traverse_old_cells(self.old.virtualize(), 0, scope, &visited, &old_cells);
+        });
+
+        visited.clear();
+
+        rayon::scope(|scope| {
+            fn traverse_new_cells<'a>(
+                cell: &'a DynCell,
+                merkle_depth: u8,
+                scope: &rayon::Scope<'a>,
+                visited: &'a scc::HashSet<HashBytes, ahash::RandomState>,
+                old_cells: &'a scc::HashSet<HashBytes, ahash::RandomState>,
+            ) -> Result<(), Error> {
+                if visited.insert(*cell.repr_hash()).is_err() {
+                    return Ok(());
+                }
+
+                let descriptor = cell.descriptor();
+
+                if descriptor.is_pruned_branch() {
+                    let level_ok = descriptor.level_mask().level() == merkle_depth + 1;
+
+                    if level_ok && !old_cells.contains(cell.hash(merkle_depth)) {
+                        return Err(Error::InvalidData);
+                    }
+
+                    return Ok(());
+                }
+
+                let next_depth = merkle_depth + descriptor.is_merkle() as u8;
+
+                let mut iter = cell.references();
+                for child in &mut iter {
+                    if child.repr_depth() > 5 {
+                        scope.spawn(move |s| {
+                            traverse_new_cells(child, next_depth, s, visited, old_cells).unwrap();
+                        });
+                    } else {
+                        traverse_new_cells(child, next_depth, scope, visited, old_cells)?;
+                    }
+                }
+
+                debug_assert_eq!(
+                    merkle_depth,
+                    next_depth - iter.cell().descriptor().is_merkle() as u8,
+                );
+
+                Ok(())
+            }
+
+            let merkle_depth = self.new.descriptor().is_merkle() as u8;
+
+            traverse_new_cells(
+                self.new.virtualize(),
+                merkle_depth,
+                scope,
+                &visited,
+                &old_cells,
+            )
+            .unwrap();
         });
 
         old_cells
