@@ -362,11 +362,11 @@ impl MerkleUpdate {
                     cell_ref: &'a DynCell,
                     merkle_depth: u8,
                     scope: &rayon::Scope<'a>,
-                    visited: &'a scc::HashSet<HashBytes, ahash::RandomState>,
-                    old_cells: &'a scc::HashMap<HashBytes, Cell, ahash::RandomState>,
-                    old_cell_hashes: &'a scc::HashSet<HashBytes, ahash::RandomState>,
+                    visited: &'a dashmap::DashSet<HashBytes, ahash::RandomState>,
+                    old_cells: &'a dashmap::DashMap<HashBytes, Cell, ahash::RandomState>,
+                    old_cell_hashes: &'a dashmap::DashSet<HashBytes, ahash::RandomState>,
                 ) {
-                    if visited.insert(*cell_ref.repr_hash()).is_err() {
+                    if !visited.insert(*cell_ref.repr_hash()) {
                         return;
                     }
 
@@ -377,7 +377,7 @@ impl MerkleUpdate {
                     }
 
                     // Store an owned cell with original merkle depth
-                    old_cells.insert(*hash, cell).ok();
+                    old_cells.insert(*hash, cell);
 
                     let next_depth = merkle_depth + cell_ref.descriptor().is_merkle() as u8;
 
@@ -426,12 +426,7 @@ impl MerkleUpdate {
                 );
             });
 
-            let mut result = std::collections::HashMap::default();
-            old_cells.scan(|k, v| {
-                result.insert(*k, v.clone());
-            });
-
-            result
+            old_cells.into_iter().collect()
         };
 
         // Apply changed cells
@@ -630,7 +625,7 @@ impl MerkleUpdate {
     }
 
     #[cfg(all(feature = "rayon", feature = "sync"))]
-    fn par_find_old_cells(&self) -> scc::HashSet<HashBytes, ahash::RandomState> {
+    fn par_find_old_cells(&self) -> dashmap::DashSet<HashBytes, ahash::RandomState> {
         let visited = Default::default();
         let old_cells = Default::default();
 
@@ -639,14 +634,14 @@ impl MerkleUpdate {
                 cell: &'a DynCell,
                 merkle_depth: u8,
                 scope: &rayon::Scope<'a>,
-                visited: &'a scc::HashSet<HashBytes, ahash::RandomState>,
-                result: &'a scc::HashSet<HashBytes, ahash::RandomState>,
+                visited: &'a dashmap::DashSet<HashBytes, ahash::RandomState>,
+                result: &'a dashmap::DashSet<HashBytes, ahash::RandomState>,
             ) {
-                if visited.insert(*cell.repr_hash()).is_err() {
+                if !visited.insert(*cell.repr_hash()) {
                     return;
                 }
 
-                result.insert(*cell.hash(merkle_depth)).ok();
+                result.insert(*cell.hash(merkle_depth));
 
                 let descriptor = cell.descriptor();
 
@@ -683,10 +678,10 @@ impl MerkleUpdate {
                 cell: &'a DynCell,
                 merkle_depth: u8,
                 scope: &rayon::Scope<'a>,
-                visited: &'a scc::HashSet<HashBytes, ahash::RandomState>,
-                old_cells: &'a scc::HashSet<HashBytes, ahash::RandomState>,
+                visited: &'a dashmap::DashSet<HashBytes, ahash::RandomState>,
+                old_cells: &'a dashmap::DashSet<HashBytes, ahash::RandomState>,
             ) -> Result<(), Error> {
-                if visited.insert(*cell.repr_hash()).is_err() {
+                if !visited.insert(*cell.repr_hash()) {
                     return Ok(());
                 }
 
