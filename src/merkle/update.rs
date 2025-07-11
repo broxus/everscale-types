@@ -351,7 +351,11 @@ impl MerkleUpdate {
         // Collect old cells
         let old_cells = {
             // Collect and check old cells tree
-            let old_cell_hashes = self.par_find_old_cells();
+            let old_cell_hashes = scc::HashSet::default();
+
+            for v in self.find_old_cells()? {
+                old_cell_hashes.insert(v).ok();
+            }
 
             let visited = Default::default();
             let old_cells = Default::default();
@@ -363,8 +367,8 @@ impl MerkleUpdate {
                     merkle_depth: u8,
                     scope: &rayon::Scope<'a>,
                     visited: &'a scc::HashSet<HashBytes, ahash::RandomState>,
-                    old_cell_hashes: &'a scc::HashSet<HashBytes, ahash::RandomState>,
                     old_cells: &'a scc::HashMap<HashBytes, Cell, ahash::RandomState>,
+                    old_cell_hashes: &'a scc::HashSet<&HashBytes, ahash::RandomState>,
                 ) {
                     if visited.insert(*cell_ref.repr_hash()).is_err() {
                         return;
@@ -392,8 +396,8 @@ impl MerkleUpdate {
                                     next_depth,
                                     s,
                                     visited,
-                                    old_cell_hashes,
                                     old_cells,
+                                    old_cell_hashes,
                                 );
                             });
                         } else {
@@ -403,8 +407,8 @@ impl MerkleUpdate {
                                 next_depth,
                                 scope,
                                 visited,
-                                old_cell_hashes,
                                 old_cells,
+                                old_cell_hashes,
                             );
                         }
                     }
@@ -421,8 +425,8 @@ impl MerkleUpdate {
                     0,
                     scope,
                     &visited,
-                    &old_cell_hashes,
                     &old_cells,
+                    &old_cell_hashes,
                 );
             });
 
