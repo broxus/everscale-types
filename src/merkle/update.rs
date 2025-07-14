@@ -1,10 +1,12 @@
 #[cfg(all(feature = "rayon", feature = "sync"))]
+use std::sync::Arc;
+
+#[cfg(all(feature = "rayon", feature = "sync"))]
 use super::promise::Promise;
 use super::{FilterAction, MerkleFilter, MerkleProofBuilder, make_pruned_branch};
 use crate::cell::*;
 use crate::error::Error;
 use crate::util::unlikely;
-use std::sync::Arc;
 
 /// Parsed Merkle update representation.
 ///
@@ -285,7 +287,11 @@ impl MerkleUpdate {
 
     /// TODO
     #[cfg(all(feature = "rayon", feature = "sync"))]
-    pub fn par_apply_ext(&self, old: &Cell, context: &dyn CellContext) -> Result<Cell, Error> {
+    pub fn par_apply_ext(
+        &self,
+        old: &Cell,
+        context: &(dyn CellContext + Send + Sync),
+    ) -> Result<Cell, Error> {
         if old.as_ref().repr_hash() != &self.old_hash {
             return Err(Error::InvalidData);
         }
@@ -347,7 +353,10 @@ impl MerkleUpdate {
             }
         }
 
-        fn finalize(mut cell: ExtCell, context: &(dyn CellContext)) -> Result<Cell, Error> {
+        fn finalize(
+            mut cell: ExtCell,
+            context: &(dyn CellContext + Send + Sync),
+        ) -> Result<Cell, Error> {
             loop {
                 match cell {
                     ExtCell::Ordinary(cell) => return Ok(cell),
@@ -371,13 +380,18 @@ impl MerkleUpdate {
         }
 
         struct Applier<'a> {
-            old_cells: ahash::HashMap<HashBytes, Cell>,
-            new_cells: ahash::HashMap<HashBytes, Cell>,
-            context: &'a dyn CellContext,
+            old_cells: dashmap::DashMap<HashBytes, Cell, ahash::RandomState>,
+            new_cells: dashmap::DashMap<HashBytes, Cell, ahash::RandomState>,
+            context: &'a (dyn CellContext + Send + Sync),
         }
 
         impl Applier<'_> {
-            fn run(&mut self, cell: &DynCell, merkle_depth: u8) -> Result<ExtCell, Error> {
+            fn run<'scope>(
+                &'scope self,
+                cell: &DynCell,
+                merkle_depth: u8,
+                scope: Option<&rayon::Scope<'scope>>,
+            ) -> Result<ExtCell, Error> {
                 let mut children = ChildrenBuilder::Ordinary(Default::default());
 
                 let descriptor = cell.descriptor();
@@ -405,7 +419,23 @@ impl MerkleUpdate {
                         if let Some(child) = self.new_cells.get(child_hash) {
                             ExtCell::Ordinary(child.clone())
                         } else {
-                            let child = ok!(self.run(child.as_ref(), child_merkle_depth));
+                            let child = if let Some(scope) = scope
+                                && child.repr_depth() > 10
+                            {
+                                let promise = Promise::new();
+                                let merkle_depth = child_merkle_depth;
+                                scope.spawn({
+                                    let promise = promise.clone();
+                                    let child = child.clone();
+                                    move |_| {
+                                        let cell = self.run(child.as_ref(), merkle_depth, None);
+                                        promise.set(cell);
+                                    }
+                                });
+                                ExtCell::Deferred(promise)
+                            } else {
+                                ok!(self.run(child.as_ref(), child_merkle_depth, scope))
+                            };
 
                             if let ExtCell::Ordinary(cell) = &child {
                                 self.new_cells.insert(*child_hash, cell.clone());
@@ -457,7 +487,7 @@ impl MerkleUpdate {
                     cell: Cell,
                     cell_ref: &'a DynCell,
                     merkle_depth: u8,
-                    scope: &rayon::Scope<'a>,
+                    scope: Option<&rayon::Scope<'a>>,
                     visited: &'a dashmap::DashSet<HashBytes, ahash::RandomState>,
                     old_cells: &'a dashmap::DashMap<HashBytes, Cell, ahash::RandomState>,
                     old_cell_hashes: &'a dashmap::DashSet<HashBytes, ahash::RandomState>,
@@ -480,13 +510,15 @@ impl MerkleUpdate {
                     let mut iter = cell_ref.references();
                     let cloned = iter.clone().cloned();
                     for (child_ref, child) in std::iter::zip(&mut iter, cloned) {
-                        if child_ref.repr_depth() > 10 {
-                            scope.spawn(move |s| {
+                        if let Some(scope) = scope
+                            && child_ref.repr_depth() > 10
+                        {
+                            scope.spawn(move |_| {
                                 traverse(
                                     child,
                                     child_ref,
                                     next_depth,
-                                    s,
+                                    None,
                                     visited,
                                     old_cells,
                                     old_cell_hashes,
@@ -515,7 +547,7 @@ impl MerkleUpdate {
                     old.clone(),
                     old.virtualize(),
                     0,
-                    scope,
+                    Some(scope),
                     &visited,
                     &old_cells,
                     &old_cell_hashes,
@@ -526,12 +558,13 @@ impl MerkleUpdate {
         };
 
         // Apply changed cells
-        let new = Applier {
+        let applier = Applier {
             old_cells,
             new_cells: Default::default(),
             context,
-        }
-        .run(self.new.as_ref(), 0)?;
+        };
+
+        let new = rayon::scope(|scope| applier.run(self.new.as_ref(), 0, Some(scope)))?;
 
         let new = finalize(new, context)?;
 
@@ -731,7 +764,7 @@ impl MerkleUpdate {
             fn traverse_old_cells<'a>(
                 cell: &'a DynCell,
                 merkle_depth: u8,
-                scope: &rayon::Scope<'a>,
+                scope: Option<&rayon::Scope<'a>>,
                 visited: &'a dashmap::DashSet<HashBytes, ahash::RandomState>,
                 result: &'a dashmap::DashSet<HashBytes, ahash::RandomState>,
             ) {
@@ -751,9 +784,11 @@ impl MerkleUpdate {
 
                 let mut iter = cell.references();
                 for child in &mut iter {
-                    if child.repr_depth() > 10 {
-                        scope.spawn(move |s| {
-                            traverse_old_cells(child, next_depth, s, visited, result);
+                    if let Some(scope) = scope
+                        && child.repr_depth() > 10
+                    {
+                        scope.spawn(move |_| {
+                            traverse_old_cells(child, next_depth, None, visited, result);
                         });
                     } else {
                         traverse_old_cells(child, next_depth, scope, visited, result);
@@ -766,7 +801,7 @@ impl MerkleUpdate {
                 );
             }
 
-            traverse_old_cells(self.old.virtualize(), 0, scope, &visited, &old_cells);
+            traverse_old_cells(self.old.virtualize(), 0, Some(scope), &visited, &old_cells);
         });
 
         visited.clear();
@@ -775,7 +810,7 @@ impl MerkleUpdate {
             fn traverse_new_cells<'a>(
                 cell: &'a DynCell,
                 merkle_depth: u8,
-                scope: &rayon::Scope<'a>,
+                scope: Option<&rayon::Scope<'a>>,
                 visited: &'a dashmap::DashSet<HashBytes, ahash::RandomState>,
                 old_cells: &'a dashmap::DashSet<HashBytes, ahash::RandomState>,
             ) -> Result<(), Error> {
@@ -799,9 +834,13 @@ impl MerkleUpdate {
 
                 let mut iter = cell.references();
                 for child in &mut iter {
-                    if child.repr_depth() > 10 {
-                        scope.spawn(move |s| {
-                            traverse_new_cells(child, next_depth, s, visited, old_cells).unwrap();
+                    if let Some(scope) = scope
+                        && child.repr_depth() > 10
+                    {
+                        scope.spawn(move |_| {
+                            let res =
+                                traverse_new_cells(child, next_depth, None, visited, old_cells);
+                            debug_assert!(res.is_ok());
                         });
                     } else {
                         traverse_new_cells(child, next_depth, scope, visited, old_cells)?;
@@ -821,7 +860,7 @@ impl MerkleUpdate {
             traverse_new_cells(
                 self.new.virtualize(),
                 merkle_depth,
-                scope,
+                Some(scope),
                 &visited,
                 &old_cells,
             )
