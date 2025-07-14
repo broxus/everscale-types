@@ -4,6 +4,7 @@ use super::{FilterAction, MerkleFilter, MerkleProofBuilder, make_pruned_branch};
 use crate::cell::*;
 use crate::error::Error;
 use crate::util::unlikely;
+use std::sync::Arc;
 
 /// Parsed Merkle update representation.
 ///
@@ -293,6 +294,82 @@ impl MerkleUpdate {
             return Ok(old.clone());
         }
 
+        #[derive(Clone)]
+        enum ExtCell {
+            Ordinary(Cell),
+            Partial(Arc<CellParts>),
+            Deferred(Promise<Result<ExtCell, Error>>),
+        }
+
+        #[derive(Clone)]
+        struct CellParts {
+            data: CellDataBuilder,
+            is_exotic: bool,
+            refs: Vec<ExtCell>,
+        }
+
+        enum ChildrenBuilder {
+            Ordinary(CellRefsBuilder),
+            Extended(Vec<ExtCell>),
+        }
+
+        impl ChildrenBuilder {
+            fn store_reference(&mut self, cell: ExtCell) -> Result<(), Error> {
+                match (&mut *self, cell) {
+                    (Self::Ordinary(builder), ExtCell::Ordinary(cell)) => {
+                        builder.store_reference(cell)
+                    }
+                    (Self::Ordinary(builder), cell) => {
+                        let capacity = builder.len() + 1;
+                        let Self::Ordinary(builder) =
+                            std::mem::replace(self, Self::Extended(Vec::with_capacity(capacity)))
+                        else {
+                            // SAFETY: We have just checked the `self` discriminant.
+                            unsafe { std::hint::unreachable_unchecked() }
+                        };
+
+                        let Self::Extended(ext_builder) = self else {
+                            // SAFETY: We have just updated the `self` with this value.
+                            unsafe { std::hint::unreachable_unchecked() }
+                        };
+
+                        for cell in builder {
+                            ext_builder.push(ExtCell::Ordinary(cell.clone()));
+                        }
+                        ext_builder.push(cell);
+                        Ok(())
+                    }
+                    (Self::Extended(builder), cell) => {
+                        builder.push(cell);
+                        Ok(())
+                    }
+                }
+            }
+        }
+
+        fn finalize(mut cell: ExtCell, context: &(dyn CellContext)) -> Result<Cell, Error> {
+            loop {
+                match cell {
+                    ExtCell::Ordinary(cell) => return Ok(cell),
+                    ExtCell::Partial(parts) => {
+                        let parts = Arc::unwrap_or_clone(parts);
+
+                        let mut refs = CellRefsBuilder::default();
+                        for child in parts.refs {
+                            let cell = finalize(child, context)?;
+                            refs.store_reference(cell)?;
+                        }
+
+                        return CellBuilder::from_parts(parts.is_exotic, parts.data.clone(), refs)
+                            .build_ext(context);
+                    }
+                    ExtCell::Deferred(promise) => {
+                        cell = ok!(promise.wait_cloned());
+                    }
+                }
+            }
+        }
+
         struct Applier<'a> {
             old_cells: ahash::HashMap<HashBytes, Cell>,
             new_cells: ahash::HashMap<HashBytes, Cell>,
@@ -300,16 +377,12 @@ impl MerkleUpdate {
         }
 
         impl Applier<'_> {
-            fn run(&mut self, cell: &DynCell, merkle_depth: u8) -> Result<Cell, Error> {
+            fn run(&mut self, cell: &DynCell, merkle_depth: u8) -> Result<ExtCell, Error> {
+                let mut children = ChildrenBuilder::Ordinary(Default::default());
+
                 let descriptor = cell.descriptor();
                 let child_merkle_depth = merkle_depth + descriptor.cell_type().is_merkle() as u8;
 
-                // Start building a new cell
-                let mut result = CellBuilder::new();
-                result.set_exotic(descriptor.is_exotic());
-
-                // Build all child cells
-                let mut children_mask = LevelMask::EMPTY;
                 for child in cell.references().cloned() {
                     let child_descriptor = child.as_ref().descriptor();
 
@@ -320,31 +393,54 @@ impl MerkleUpdate {
                             // Use original hash for pruned branches
                             let child_hash = child.as_ref().hash(mask.level() - 1);
                             match self.old_cells.get(child_hash) {
-                                Some(cell) => cell.clone(),
+                                Some(cell) => ExtCell::Ordinary(cell.clone()),
                                 None => return Err(Error::InvalidData),
                             }
                         } else {
-                            child
+                            ExtCell::Ordinary(child)
                         }
                     } else {
                         // Build a child cell if it hasn't been built before
                         let child_hash = child.as_ref().hash(child_merkle_depth);
                         if let Some(child) = self.new_cells.get(child_hash) {
-                            child.clone()
+                            ExtCell::Ordinary(child.clone())
                         } else {
                             let child = ok!(self.run(child.as_ref(), child_merkle_depth));
-                            self.new_cells.insert(*child_hash, child.clone());
+
+                            if let ExtCell::Ordinary(cell) = &child {
+                                self.new_cells.insert(*child_hash, cell.clone());
+                            }
+
                             child
                         }
                     };
 
-                    children_mask |= child.as_ref().level_mask();
-                    _ = result.store_reference(child);
+                    children.store_reference(child)?;
                 }
 
-                _ = result.store_cell_data(cell);
+                // Build the cell
+                let cell = match children {
+                    ChildrenBuilder::Ordinary(children) => {
+                        let mut builder = CellBuilder::new();
+                        builder.set_exotic(cell.is_exotic());
+                        _ = builder.store_cell_data(cell);
+                        builder.set_references(children);
+                        let new_cell = ok!(builder.build_ext(self.context));
 
-                result.build_ext(self.context)
+                        ExtCell::Ordinary(new_cell)
+                    }
+                    ChildrenBuilder::Extended(refs) => {
+                        let mut builder = CellDataBuilder::new();
+                        builder.store_cell_data(cell)?;
+                        ExtCell::Partial(Arc::new(CellParts {
+                            data: builder,
+                            is_exotic: cell.is_exotic(),
+                            refs,
+                        }))
+                    }
+                };
+
+                Ok(cell)
             }
         }
 
@@ -436,6 +532,8 @@ impl MerkleUpdate {
             context,
         }
         .run(self.new.as_ref(), 0)?;
+
+        let new = finalize(new, context)?;
 
         if new.as_ref().repr_hash() == &self.new_hash {
             Ok(new)
