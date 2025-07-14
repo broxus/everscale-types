@@ -419,22 +419,23 @@ impl MerkleUpdate {
                         if let Some(child) = self.new_cells.get(child_hash) {
                             ExtCell::Ordinary(child.clone())
                         } else {
-                            let child = if let Some(scope) = scope
-                                && child.repr_depth() > 10
-                            {
-                                let promise = Promise::new();
-                                let merkle_depth = child_merkle_depth;
-                                scope.spawn({
-                                    let promise = promise.clone();
-                                    let child = child.clone();
-                                    move |_| {
-                                        let cell = self.run(child.as_ref(), merkle_depth, None);
-                                        promise.set(cell);
-                                    }
-                                });
-                                ExtCell::Deferred(promise)
-                            } else {
-                                ok!(self.run(child.as_ref(), child_merkle_depth, scope))
+                            let child = match scope {
+                                Some(scope) if child.repr_depth() > 10 => {
+                                    let promise = Promise::new();
+                                    let merkle_depth = child_merkle_depth;
+                                    scope.spawn({
+                                        let promise = promise.clone();
+                                        let child = child.clone();
+                                        move |_| {
+                                            let cell = self.run(child.as_ref(), merkle_depth, None);
+                                            promise.set(cell);
+                                        }
+                                    });
+                                    ExtCell::Deferred(promise)
+                                }
+                                _ => {
+                                    ok!(self.run(child.as_ref(), child_merkle_depth, scope))
+                                }
                             };
 
                             if let ExtCell::Ordinary(cell) = &child {
@@ -510,30 +511,31 @@ impl MerkleUpdate {
                     let mut iter = cell_ref.references();
                     let cloned = iter.clone().cloned();
                     for (child_ref, child) in std::iter::zip(&mut iter, cloned) {
-                        if let Some(scope) = scope
-                            && child_ref.repr_depth() > 10
-                        {
-                            scope.spawn(move |_| {
+                        match scope {
+                            Some(scope) if child.repr_depth() > 10 => {
+                                scope.spawn(move |_| {
+                                    traverse(
+                                        child,
+                                        child_ref,
+                                        next_depth,
+                                        None,
+                                        visited,
+                                        old_cells,
+                                        old_cell_hashes,
+                                    );
+                                });
+                            }
+                            _ => {
                                 traverse(
                                     child,
                                     child_ref,
                                     next_depth,
-                                    None,
+                                    scope,
                                     visited,
                                     old_cells,
                                     old_cell_hashes,
                                 );
-                            });
-                        } else {
-                            traverse(
-                                child,
-                                child_ref,
-                                next_depth,
-                                scope,
-                                visited,
-                                old_cells,
-                                old_cell_hashes,
-                            );
+                            }
                         }
                     }
 
@@ -784,14 +786,15 @@ impl MerkleUpdate {
 
                 let mut iter = cell.references();
                 for child in &mut iter {
-                    if let Some(scope) = scope
-                        && child.repr_depth() > 10
-                    {
-                        scope.spawn(move |_| {
-                            traverse_old_cells(child, next_depth, None, visited, result);
-                        });
-                    } else {
-                        traverse_old_cells(child, next_depth, scope, visited, result);
+                    match scope {
+                        Some(scope) if child.repr_depth() > 10 => {
+                            scope.spawn(move |_| {
+                                traverse_old_cells(child, next_depth, None, visited, result);
+                            });
+                        }
+                        _ => {
+                            traverse_old_cells(child, next_depth, scope, visited, result);
+                        }
                     }
                 }
 
@@ -834,16 +837,17 @@ impl MerkleUpdate {
 
                 let mut iter = cell.references();
                 for child in &mut iter {
-                    if let Some(scope) = scope
-                        && child.repr_depth() > 10
-                    {
-                        scope.spawn(move |_| {
-                            let res =
-                                traverse_new_cells(child, next_depth, None, visited, old_cells);
-                            debug_assert!(res.is_ok());
-                        });
-                    } else {
-                        traverse_new_cells(child, next_depth, scope, visited, old_cells)?;
+                    match scope {
+                        Some(scope) if child.repr_depth() > 10 => {
+                            scope.spawn(move |_| {
+                                let res =
+                                    traverse_new_cells(child, next_depth, None, visited, old_cells);
+                                debug_assert!(res.is_ok());
+                            });
+                        }
+                        _ => {
+                            traverse_new_cells(child, next_depth, scope, visited, old_cells)?;
+                        }
                     }
                 }
 
