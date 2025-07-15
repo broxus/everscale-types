@@ -292,7 +292,7 @@ impl MerkleUpdate {
         old: &Cell,
         context: &(dyn CellContext + Send + Sync),
     ) -> Result<Cell, Error> {
-        const SPLIT_DEPTH: u16 = 7;
+        const SPLIT_DEPTH: u16 = 10;
 
         if old.as_ref().repr_hash() != &self.old_hash {
             return Err(Error::InvalidData);
@@ -824,7 +824,7 @@ impl MerkleUpdate {
 
     #[cfg(all(feature = "rayon", feature = "sync"))]
     fn par_find_old_cells(&self) -> dashmap::DashSet<HashBytes, ahash::RandomState> {
-        const SPLIT_DEPTH: u16 = 7;
+        const SPLIT_DEPTH: u16 = 10;
 
         let visited = Default::default();
         let old_cells = Default::default();
