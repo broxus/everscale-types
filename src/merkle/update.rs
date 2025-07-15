@@ -292,6 +292,8 @@ impl MerkleUpdate {
         old: &Cell,
         context: &(dyn CellContext + Send + Sync),
     ) -> Result<Cell, Error> {
+        const SPLIT_DEPTH: u16 = 7;
+
         if old.as_ref().repr_hash() != &self.old_hash {
             return Err(Error::InvalidData);
         }
@@ -420,7 +422,7 @@ impl MerkleUpdate {
                             ExtCell::Ordinary(child.clone())
                         } else {
                             let child = match scope {
-                                Some(scope) if child.repr_depth() > 10 => {
+                                Some(scope) if child.repr_depth() > SPLIT_DEPTH => {
                                     let promise = Promise::new();
                                     let merkle_depth = child_merkle_depth;
                                     scope.spawn({
@@ -512,7 +514,7 @@ impl MerkleUpdate {
                     let cloned = iter.clone().cloned();
                     for (child_ref, child) in std::iter::zip(&mut iter, cloned) {
                         match scope {
-                            Some(scope) if child.repr_depth() > 10 => {
+                            Some(scope) if child.repr_depth() > SPLIT_DEPTH => {
                                 scope.spawn(move |_| {
                                     traverse(
                                         child,
@@ -759,6 +761,8 @@ impl MerkleUpdate {
 
     #[cfg(all(feature = "rayon", feature = "sync"))]
     fn par_find_old_cells(&self) -> dashmap::DashSet<HashBytes, ahash::RandomState> {
+        const SPLIT_DEPTH: u16 = 7;
+
         let visited = Default::default();
         let old_cells = Default::default();
 
@@ -787,7 +791,7 @@ impl MerkleUpdate {
                 let mut iter = cell.references();
                 for child in &mut iter {
                     match scope {
-                        Some(scope) if child.repr_depth() > 10 => {
+                        Some(scope) if child.repr_depth() > SPLIT_DEPTH => {
                             scope.spawn(move |_| {
                                 traverse_old_cells(child, next_depth, None, visited, result);
                             });
@@ -838,7 +842,7 @@ impl MerkleUpdate {
                 let mut iter = cell.references();
                 for child in &mut iter {
                     match scope {
-                        Some(scope) if child.repr_depth() > 10 => {
+                        Some(scope) if child.repr_depth() > SPLIT_DEPTH => {
                             scope.spawn(move |_| {
                                 let res =
                                     traverse_new_cells(child, next_depth, None, visited, old_cells);
