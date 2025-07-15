@@ -381,24 +381,119 @@ impl MerkleUpdate {
             }
         }
 
+        // struct Applier<'a> {
+        //     old_cells: dashmap::DashMap<HashBytes, Cell, ahash::RandomState>,
+        //     new_cells: dashmap::DashMap<HashBytes, Cell, ahash::RandomState>,
+        //     context: &'a (dyn CellContext + Send + Sync),
+        // }
+        //
+        // impl Applier<'_> {
+        //     fn run<'scope>(
+        //         &'scope self,
+        //         cell: &DynCell,
+        //         merkle_depth: u8,
+        //         scope: Option<&rayon::Scope<'scope>>,
+        //     ) -> Result<ExtCell, Error> {
+        //         let mut children = ChildrenBuilder::Ordinary(Default::default());
+        //
+        //         let descriptor = cell.descriptor();
+        //         let child_merkle_depth = merkle_depth + descriptor.cell_type().is_merkle() as u8;
+        //
+        //         for child in cell.references().cloned() {
+        //             let child_descriptor = child.as_ref().descriptor();
+        //
+        //             let child = if child_descriptor.is_pruned_branch() {
+        //                 // Replace pruned branches with old cells
+        //                 let mask = child_descriptor.level_mask();
+        //                 if mask.to_byte() & (1 << child_merkle_depth) != 0 {
+        //                     // Use original hash for pruned branches
+        //                     let child_hash = child.as_ref().hash(mask.level() - 1);
+        //                     match self.old_cells.get(child_hash) {
+        //                         Some(cell) => ExtCell::Ordinary(cell.clone()),
+        //                         None => return Err(Error::InvalidData),
+        //                     }
+        //                 } else {
+        //                     ExtCell::Ordinary(child)
+        //                 }
+        //             } else {
+        //                 // Build a child cell if it hasn't been built before
+        //                 let child_hash = child.as_ref().hash(child_merkle_depth);
+        //                 if let Some(child) = self.new_cells.get(child_hash) {
+        //                     ExtCell::Ordinary(child.clone())
+        //                 } else {
+        //                     let child = match scope {
+        //                         Some(scope) if child.repr_depth() > SPLIT_DEPTH => {
+        //                             let promise = Promise::new();
+        //                             let merkle_depth = child_merkle_depth;
+        //                             scope.spawn({
+        //                                 let promise = promise.clone();
+        //                                 let child = child.clone();
+        //                                 move |_| {
+        //                                     let cell = self.run(child.as_ref(), merkle_depth, None);
+        //                                     promise.set(cell);
+        //                                 }
+        //                             });
+        //                             ExtCell::Deferred(promise)
+        //                         }
+        //                         _ => {
+        //                             ok!(self.run(child.as_ref(), child_merkle_depth, scope))
+        //                         }
+        //                     };
+        //
+        //                     if let ExtCell::Ordinary(cell) = &child {
+        //                         self.new_cells.insert(*child_hash, cell.clone());
+        //                     }
+        //
+        //                     child
+        //                 }
+        //             };
+        //
+        //             children.store_reference(child)?;
+        //         }
+        //
+        //         // Build the cell
+        //         let cell = match children {
+        //             ChildrenBuilder::Ordinary(children) => {
+        //                 let mut builder = CellBuilder::new();
+        //                 builder.set_exotic(cell.is_exotic());
+        //                 _ = builder.store_cell_data(cell);
+        //                 builder.set_references(children);
+        //                 let new_cell = ok!(builder.build_ext(self.context));
+        //
+        //                 ExtCell::Ordinary(new_cell)
+        //             }
+        //             ChildrenBuilder::Extended(refs) => {
+        //                 let mut builder = CellDataBuilder::new();
+        //                 builder.store_cell_data(cell)?;
+        //                 ExtCell::Partial(Arc::new(CellParts {
+        //                     data: builder,
+        //                     is_exotic: cell.is_exotic(),
+        //                     refs,
+        //                 }))
+        //             }
+        //         };
+        //
+        //         Ok(cell)
+        //     }
+        // }
+
         struct Applier<'a> {
-            old_cells: dashmap::DashMap<HashBytes, Cell, ahash::RandomState>,
-            new_cells: dashmap::DashMap<HashBytes, Cell, ahash::RandomState>,
-            context: &'a (dyn CellContext + Send + Sync),
+            old_cells: ahash::HashMap<HashBytes, Cell>,
+            new_cells: ahash::HashMap<HashBytes, Cell>,
+            context: &'a dyn CellContext,
         }
 
         impl Applier<'_> {
-            fn run<'scope>(
-                &'scope self,
-                cell: &DynCell,
-                merkle_depth: u8,
-                scope: Option<&rayon::Scope<'scope>>,
-            ) -> Result<ExtCell, Error> {
-                let mut children = ChildrenBuilder::Ordinary(Default::default());
-
+            fn run(&mut self, cell: &DynCell, merkle_depth: u8) -> Result<Cell, Error> {
                 let descriptor = cell.descriptor();
                 let child_merkle_depth = merkle_depth + descriptor.cell_type().is_merkle() as u8;
 
+                // Start building a new cell
+                let mut result = CellBuilder::new();
+                result.set_exotic(descriptor.is_exotic());
+
+                // Build all child cells
+                let mut children_mask = LevelMask::EMPTY;
                 for child in cell.references().cloned() {
                     let child_descriptor = child.as_ref().descriptor();
 
@@ -409,71 +504,31 @@ impl MerkleUpdate {
                             // Use original hash for pruned branches
                             let child_hash = child.as_ref().hash(mask.level() - 1);
                             match self.old_cells.get(child_hash) {
-                                Some(cell) => ExtCell::Ordinary(cell.clone()),
+                                Some(cell) => cell.clone(),
                                 None => return Err(Error::InvalidData),
                             }
                         } else {
-                            ExtCell::Ordinary(child)
+                            child
                         }
                     } else {
                         // Build a child cell if it hasn't been built before
                         let child_hash = child.as_ref().hash(child_merkle_depth);
                         if let Some(child) = self.new_cells.get(child_hash) {
-                            ExtCell::Ordinary(child.clone())
+                            child.clone()
                         } else {
-                            let child = match scope {
-                                Some(scope) if child.repr_depth() > SPLIT_DEPTH => {
-                                    let promise = Promise::new();
-                                    let merkle_depth = child_merkle_depth;
-                                    scope.spawn({
-                                        let promise = promise.clone();
-                                        let child = child.clone();
-                                        move |_| {
-                                            let cell = self.run(child.as_ref(), merkle_depth, None);
-                                            promise.set(cell);
-                                        }
-                                    });
-                                    ExtCell::Deferred(promise)
-                                }
-                                _ => {
-                                    ok!(self.run(child.as_ref(), child_merkle_depth, scope))
-                                }
-                            };
-
-                            if let ExtCell::Ordinary(cell) = &child {
-                                self.new_cells.insert(*child_hash, cell.clone());
-                            }
-
+                            let child = ok!(self.run(child.as_ref(), child_merkle_depth));
+                            self.new_cells.insert(*child_hash, child.clone());
                             child
                         }
                     };
 
-                    children.store_reference(child)?;
+                    children_mask |= child.as_ref().level_mask();
+                    _ = result.store_reference(child);
                 }
 
-                // Build the cell
-                let cell = match children {
-                    ChildrenBuilder::Ordinary(children) => {
-                        let mut builder = CellBuilder::new();
-                        builder.set_exotic(cell.is_exotic());
-                        _ = builder.store_cell_data(cell);
-                        builder.set_references(children);
-                        let new_cell = ok!(builder.build_ext(self.context));
+                _ = result.store_cell_data(cell);
 
-                        ExtCell::Ordinary(new_cell)
-                    }
-                    ChildrenBuilder::Extended(refs) => {
-                        let mut builder = CellDataBuilder::new();
-                        builder.store_cell_data(cell)?;
-                        ExtCell::Partial(Arc::new(CellParts {
-                            data: builder,
-                            is_exotic: cell.is_exotic(),
-                            refs,
-                        }))
-                    }
-                };
-
-                Ok(cell)
+                result.build_ext(self.context)
             }
         }
 
@@ -561,16 +616,24 @@ impl MerkleUpdate {
             old_cells.into_iter().collect()
         };
 
+        // // Apply changed cells
+        // let applier = Applier {
+        //     old_cells,
+        //     new_cells: Default::default(),
+        //     context,
+        // };
+        //
+        // let new = rayon::scope(|scope| applier.run(self.new.as_ref(), 0, Some(scope)))?;
+        //
+        // let new = finalize(new, context)?;
+
         // Apply changed cells
-        let applier = Applier {
+        let new = Applier {
             old_cells,
             new_cells: Default::default(),
             context,
-        };
-
-        let new = rayon::scope(|scope| applier.run(self.new.as_ref(), 0, Some(scope)))?;
-
-        let new = finalize(new, context)?;
+        }
+        .run(self.new.as_ref(), 0)?;
 
         if new.as_ref().repr_hash() == &self.new_hash {
             Ok(new)
