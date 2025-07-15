@@ -292,7 +292,7 @@ impl MerkleUpdate {
         old: &Cell,
         context: &(dyn CellContext + Send + Sync),
     ) -> Result<Cell, Error> {
-        const SPLIT_DEPTH: u16 = 10;
+        const SPLIT_DEPTH: u16 = 5;
 
         if old.as_ref().repr_hash() != &self.old_hash {
             return Err(Error::InvalidData);
@@ -392,6 +392,7 @@ impl MerkleUpdate {
         //         &'scope self,
         //         cell: &DynCell,
         //         merkle_depth: u8,
+        //         traverse_depth: u16,
         //         scope: Option<&rayon::Scope<'scope>>,
         //     ) -> Result<ExtCell, Error> {
         //         let mut children = ChildrenBuilder::Ordinary(Default::default());
@@ -422,7 +423,7 @@ impl MerkleUpdate {
         //                     ExtCell::Ordinary(child.clone())
         //                 } else {
         //                     let child = match scope {
-        //                         Some(scope) if child.repr_depth() > SPLIT_DEPTH => {
+        //                         Some(scope) if traverse_depth > SPLIT_DEPTH && child.repr_depth() > SPLIT_DEPTH => {
         //                             let promise = Promise::new();
         //                             let merkle_depth = child_merkle_depth;
         //                             scope.spawn({
@@ -545,6 +546,7 @@ impl MerkleUpdate {
                     cell: Cell,
                     cell_ref: &'a DynCell,
                     merkle_depth: u8,
+                    traverse_depth: u16,
                     scope: Option<&rayon::Scope<'a>>,
                     visited: &'a dashmap::DashSet<HashBytes, ahash::RandomState>,
                     old_cells: &'a dashmap::DashMap<HashBytes, Cell, ahash::RandomState>,
@@ -563,19 +565,24 @@ impl MerkleUpdate {
                     // Store an owned cell with original merkle depth
                     old_cells.insert(*hash, cell);
 
-                    let next_depth = merkle_depth + cell_ref.descriptor().is_merkle() as u8;
+                    let next_merkle_depth = merkle_depth + cell_ref.descriptor().is_merkle() as u8;
+                    let next_traverse_depth = traverse_depth + 1;
 
                     let mut iter = cell_ref.references();
                     let cloned = iter.clone().cloned();
                     for (child_ref, child) in std::iter::zip(&mut iter, cloned) {
                         match scope {
-                            Some(scope) if child.repr_depth() > SPLIT_DEPTH => {
-                                scope.spawn(move |scope| {
+                            Some(scope)
+                                if traverse_depth > SPLIT_DEPTH
+                                    && child.repr_depth() > SPLIT_DEPTH =>
+                            {
+                                scope.spawn(move |_| {
                                     traverse(
                                         child,
                                         child_ref,
-                                        next_depth,
-                                        Some(scope),
+                                        next_merkle_depth,
+                                        next_traverse_depth,
+                                        None,
                                         visited,
                                         old_cells,
                                         old_cell_hashes,
@@ -586,7 +593,8 @@ impl MerkleUpdate {
                                 traverse(
                                     child,
                                     child_ref,
-                                    next_depth,
+                                    next_merkle_depth,
+                                    next_traverse_depth,
                                     scope,
                                     visited,
                                     old_cells,
@@ -598,13 +606,14 @@ impl MerkleUpdate {
 
                     debug_assert_eq!(
                         merkle_depth,
-                        next_depth - iter.cell().descriptor().is_merkle() as u8,
+                        next_merkle_depth - iter.cell().descriptor().is_merkle() as u8,
                     );
                 }
 
                 traverse(
                     old.clone(),
                     old.virtualize(),
+                    0,
                     0,
                     Some(scope),
                     &visited,
@@ -824,7 +833,7 @@ impl MerkleUpdate {
 
     #[cfg(all(feature = "rayon", feature = "sync"))]
     fn par_find_old_cells(&self) -> dashmap::DashSet<HashBytes, ahash::RandomState> {
-        const SPLIT_DEPTH: u16 = 10;
+        const SPLIT_DEPTH: u16 = 5;
 
         let visited = Default::default();
         let old_cells = Default::default();
@@ -833,6 +842,7 @@ impl MerkleUpdate {
             fn traverse_old_cells<'a>(
                 cell: &'a DynCell,
                 merkle_depth: u8,
+                traverse_depth: u16,
                 scope: Option<&rayon::Scope<'a>>,
                 visited: &'a dashmap::DashSet<HashBytes, ahash::RandomState>,
                 result: &'a dashmap::DashSet<HashBytes, ahash::RandomState>,
@@ -849,29 +859,53 @@ impl MerkleUpdate {
                     return;
                 }
 
-                let next_depth = merkle_depth + descriptor.is_merkle() as u8;
+                let next_merkle_depth = merkle_depth + descriptor.is_merkle() as u8;
+                let next_traverse_depth = traverse_depth + 1;
 
                 let mut iter = cell.references();
                 for child in &mut iter {
                     match scope {
-                        Some(scope) if child.repr_depth() > SPLIT_DEPTH => {
-                            scope.spawn(move |scope| {
-                                traverse_old_cells(child, next_depth, Some(scope), visited, result);
+                        Some(scope)
+                            if traverse_depth > SPLIT_DEPTH && child.repr_depth() > SPLIT_DEPTH =>
+                        {
+                            scope.spawn(move |_| {
+                                traverse_old_cells(
+                                    child,
+                                    next_merkle_depth,
+                                    next_traverse_depth,
+                                    None,
+                                    visited,
+                                    result,
+                                );
                             });
                         }
                         _ => {
-                            traverse_old_cells(child, next_depth, scope, visited, result);
+                            traverse_old_cells(
+                                child,
+                                next_merkle_depth,
+                                next_traverse_depth,
+                                scope,
+                                visited,
+                                result,
+                            );
                         }
                     }
                 }
 
                 debug_assert_eq!(
                     merkle_depth,
-                    next_depth - iter.cell().descriptor().is_merkle() as u8,
+                    next_merkle_depth - iter.cell().descriptor().is_merkle() as u8,
                 );
             }
 
-            traverse_old_cells(self.old.virtualize(), 0, Some(scope), &visited, &old_cells);
+            traverse_old_cells(
+                self.old.virtualize(),
+                0,
+                0,
+                Some(scope),
+                &visited,
+                &old_cells,
+            );
         });
 
         visited.clear();
@@ -880,6 +914,7 @@ impl MerkleUpdate {
             fn traverse_new_cells<'a>(
                 cell: &'a DynCell,
                 merkle_depth: u8,
+                traverse_depth: u16,
                 scope: Option<&rayon::Scope<'a>>,
                 visited: &'a dashmap::DashSet<HashBytes, ahash::RandomState>,
                 old_cells: &'a dashmap::DashSet<HashBytes, ahash::RandomState>,
@@ -900,17 +935,21 @@ impl MerkleUpdate {
                     return Ok(());
                 }
 
-                let next_depth = merkle_depth + descriptor.is_merkle() as u8;
+                let next_merkle_depth = merkle_depth + descriptor.is_merkle() as u8;
+                let next_traverse_depth = traverse_depth + 1;
 
                 let mut iter = cell.references();
                 for child in &mut iter {
                     match scope {
-                        Some(scope) if child.repr_depth() > SPLIT_DEPTH => {
-                            scope.spawn(move |scope| {
+                        Some(scope)
+                            if traverse_depth > SPLIT_DEPTH && child.repr_depth() > SPLIT_DEPTH =>
+                        {
+                            scope.spawn(move |_| {
                                 let res = traverse_new_cells(
                                     child,
-                                    next_depth,
-                                    Some(scope),
+                                    next_merkle_depth,
+                                    next_traverse_depth,
+                                    None,
                                     visited,
                                     old_cells,
                                 );
@@ -918,14 +957,21 @@ impl MerkleUpdate {
                             });
                         }
                         _ => {
-                            traverse_new_cells(child, next_depth, scope, visited, old_cells)?;
+                            traverse_new_cells(
+                                child,
+                                next_merkle_depth,
+                                next_traverse_depth,
+                                scope,
+                                visited,
+                                old_cells,
+                            )?;
                         }
                     }
                 }
 
                 debug_assert_eq!(
                     merkle_depth,
-                    next_depth - iter.cell().descriptor().is_merkle() as u8,
+                    next_merkle_depth - iter.cell().descriptor().is_merkle() as u8,
                 );
 
                 Ok(())
@@ -936,6 +982,7 @@ impl MerkleUpdate {
             traverse_new_cells(
                 self.new.virtualize(),
                 merkle_depth,
+                0,
                 Some(scope),
                 &visited,
                 &old_cells,
