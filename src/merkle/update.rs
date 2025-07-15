@@ -2,6 +2,8 @@
 use std::sync::Arc;
 
 #[cfg(all(feature = "rayon", feature = "sync"))]
+use super::ext_cell::{CellParts as ExtCellParts, ChildrenBuilder, ExtCell, resolve_ext_cell};
+#[cfg(all(feature = "rayon", feature = "sync"))]
 use super::promise::Promise;
 use super::{FilterAction, MerkleFilter, MerkleProofBuilder, make_pruned_branch};
 use crate::cell::*;
@@ -279,13 +281,13 @@ impl MerkleUpdate {
         }
     }
 
-    /// TODO
+    /// Tries to apply Merkle update in parallel
     #[cfg(all(feature = "rayon", feature = "sync"))]
     pub fn par_apply(&self, old: &Cell) -> Result<Cell, Error> {
         self.par_apply_ext(old, Cell::empty_context())
     }
 
-    /// TODO
+    /// Tries to apply Merkle update in parallel
     #[cfg(all(feature = "rayon", feature = "sync"))]
     pub fn par_apply_ext(
         &self,
@@ -300,85 +302,6 @@ impl MerkleUpdate {
 
         if self.old_hash == self.new_hash {
             return Ok(old.clone());
-        }
-
-        #[derive(Clone)]
-        enum ExtCell {
-            Ordinary(Cell),
-            Partial(Arc<CellParts>),
-            Deferred(Promise<Result<ExtCell, Error>>),
-        }
-
-        #[derive(Clone)]
-        struct CellParts {
-            data: CellDataBuilder,
-            is_exotic: bool,
-            refs: Vec<ExtCell>,
-        }
-
-        enum ChildrenBuilder {
-            Ordinary(CellRefsBuilder),
-            Extended(Vec<ExtCell>),
-        }
-
-        impl ChildrenBuilder {
-            fn store_reference(&mut self, cell: ExtCell) -> Result<(), Error> {
-                match (&mut *self, cell) {
-                    (Self::Ordinary(builder), ExtCell::Ordinary(cell)) => {
-                        builder.store_reference(cell)
-                    }
-                    (Self::Ordinary(builder), cell) => {
-                        let capacity = builder.len() + 1;
-                        let Self::Ordinary(builder) =
-                            std::mem::replace(self, Self::Extended(Vec::with_capacity(capacity)))
-                        else {
-                            // SAFETY: We have just checked the `self` discriminant.
-                            unsafe { std::hint::unreachable_unchecked() }
-                        };
-
-                        let Self::Extended(ext_builder) = self else {
-                            // SAFETY: We have just updated the `self` with this value.
-                            unsafe { std::hint::unreachable_unchecked() }
-                        };
-
-                        for cell in builder {
-                            ext_builder.push(ExtCell::Ordinary(cell.clone()));
-                        }
-                        ext_builder.push(cell);
-                        Ok(())
-                    }
-                    (Self::Extended(builder), cell) => {
-                        builder.push(cell);
-                        Ok(())
-                    }
-                }
-            }
-        }
-
-        fn finalize(
-            mut cell: ExtCell,
-            context: &(dyn CellContext + Send + Sync),
-        ) -> Result<Cell, Error> {
-            loop {
-                match cell {
-                    ExtCell::Ordinary(cell) => return Ok(cell),
-                    ExtCell::Partial(parts) => {
-                        let parts = Arc::unwrap_or_clone(parts);
-
-                        let mut refs = CellRefsBuilder::default();
-                        for child in parts.refs {
-                            let cell = finalize(child, context)?;
-                            refs.store_reference(cell)?;
-                        }
-
-                        return CellBuilder::from_parts(parts.is_exotic, parts.data.clone(), refs)
-                            .build_ext(context);
-                    }
-                    ExtCell::Deferred(promise) => {
-                        cell = ok!(promise.wait_cloned());
-                    }
-                }
-            }
         }
 
         struct Applier<'a> {
@@ -480,7 +403,7 @@ impl MerkleUpdate {
                     ChildrenBuilder::Extended(refs) => {
                         let mut builder = CellDataBuilder::new();
                         builder.store_cell_data(cell)?;
-                        ExtCell::Partial(Arc::new(CellParts {
+                        ExtCell::Partial(Arc::new(ExtCellParts {
                             data: builder,
                             is_exotic: cell.is_exotic(),
                             refs,
@@ -585,15 +508,16 @@ impl MerkleUpdate {
         };
 
         // Apply changed cells
-        let applier = Applier {
-            old_cells,
-            new_cells: Default::default(),
-            context,
+        let new = {
+            let applier = Applier {
+                old_cells,
+                new_cells: Default::default(),
+                context,
+            };
+
+            let new = rayon::scope(|scope| applier.run(self.new.as_ref(), 0, 0, Some(scope)))?;
+            resolve_ext_cell(new, context)?
         };
-
-        let new = rayon::scope(|scope| applier.run(self.new.as_ref(), 0, 0, Some(scope)))?;
-
-        let new = finalize(new, context)?;
 
         if new.as_ref().repr_hash() == &self.new_hash {
             Ok(new)
