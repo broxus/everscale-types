@@ -570,12 +570,12 @@ impl MerkleUpdate {
                     for (child_ref, child) in std::iter::zip(&mut iter, cloned) {
                         match scope {
                             Some(scope) if child.repr_depth() > SPLIT_DEPTH => {
-                                scope.spawn(move |_| {
+                                scope.spawn(move |scope| {
                                     traverse(
                                         child,
                                         child_ref,
                                         next_depth,
-                                        None,
+                                        Some(scope),
                                         visited,
                                         old_cells,
                                         old_cell_hashes,
@@ -855,8 +855,8 @@ impl MerkleUpdate {
                 for child in &mut iter {
                     match scope {
                         Some(scope) if child.repr_depth() > SPLIT_DEPTH => {
-                            scope.spawn(move |_| {
-                                traverse_old_cells(child, next_depth, None, visited, result);
+                            scope.spawn(move |scope| {
+                                traverse_old_cells(child, next_depth, Some(scope), visited, result);
                             });
                         }
                         _ => {
@@ -906,9 +906,14 @@ impl MerkleUpdate {
                 for child in &mut iter {
                     match scope {
                         Some(scope) if child.repr_depth() > SPLIT_DEPTH => {
-                            scope.spawn(move |_| {
-                                let res =
-                                    traverse_new_cells(child, next_depth, None, visited, old_cells);
+                            scope.spawn(move |scope| {
+                                let res = traverse_new_cells(
+                                    child,
+                                    next_depth,
+                                    Some(scope),
+                                    visited,
+                                    old_cells,
+                                );
                                 debug_assert!(res.is_ok());
                             });
                         }
