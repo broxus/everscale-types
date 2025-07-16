@@ -294,7 +294,8 @@ impl MerkleUpdate {
         old: &Cell,
         context: &(dyn CellContext + Send + Sync),
     ) -> Result<Cell, Error> {
-        const SPLIT_DEPTH: u16 = 5;
+        const ROOT_SPLIT_DEPTH: u16 = 5;
+        const CHILD_SPLIT_DEPTH: u16 = 5;
 
         if old.as_ref().repr_hash() != &self.old_hash {
             return Err(Error::InvalidData);
@@ -347,8 +348,8 @@ impl MerkleUpdate {
                         } else {
                             let child = match scope {
                                 Some(scope)
-                                    if traverse_depth > SPLIT_DEPTH
-                                        && child.repr_depth() > SPLIT_DEPTH =>
+                                    if traverse_depth > ROOT_SPLIT_DEPTH
+                                        && child.repr_depth() > CHILD_SPLIT_DEPTH =>
                                 {
                                     let promise = Promise::new();
                                     let merkle_depth = child_merkle_depth;
@@ -454,8 +455,8 @@ impl MerkleUpdate {
                     for (child_ref, child) in std::iter::zip(&mut iter, cloned) {
                         match scope {
                             Some(scope)
-                                if traverse_depth > SPLIT_DEPTH
-                                    && child.repr_depth() > SPLIT_DEPTH =>
+                                if traverse_depth > ROOT_SPLIT_DEPTH
+                                    && child.repr_depth() > CHILD_SPLIT_DEPTH =>
                             {
                                 scope.spawn(move |_| {
                                     traverse(
@@ -704,7 +705,8 @@ impl MerkleUpdate {
 
     #[cfg(all(feature = "rayon", feature = "sync"))]
     fn par_find_old_cells(&self) -> Result<dashmap::DashSet<HashBytes, ahash::RandomState>, Error> {
-        const SPLIT_DEPTH: u16 = 5;
+        const ROOT_SPLIT_DEPTH: u16 = 5;
+        const CHILD_SPLIT_DEPTH: u16 = 5;
 
         let visited = Default::default();
         let old_cells = Default::default();
@@ -737,7 +739,8 @@ impl MerkleUpdate {
                 for child in &mut iter {
                     match scope {
                         Some(scope)
-                            if traverse_depth > SPLIT_DEPTH && child.repr_depth() > SPLIT_DEPTH =>
+                            if traverse_depth > ROOT_SPLIT_DEPTH
+                                && child.repr_depth() > CHILD_SPLIT_DEPTH =>
                         {
                             scope.spawn(move |_| {
                                 traverse_old_cells(
@@ -801,7 +804,8 @@ impl MerkleUpdate {
                 for child in &mut iter {
                     match scope {
                         Some(scope)
-                            if traverse_depth > SPLIT_DEPTH && child.repr_depth() > SPLIT_DEPTH =>
+                            if traverse_depth > ROOT_SPLIT_DEPTH
+                                && child.repr_depth() > CHILD_SPLIT_DEPTH =>
                         {
                             scope.spawn(move |_| {
                                 traverse_new_cells(
