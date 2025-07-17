@@ -283,8 +283,12 @@ impl MerkleUpdate {
 
     /// Tries to apply Merkle update in parallel
     #[cfg(all(feature = "rayon", feature = "sync"))]
-    pub fn par_apply(&self, old: &Cell) -> Result<Cell, Error> {
-        self.par_apply_ext(old, Cell::empty_context())
+    pub fn par_apply(
+        &self,
+        old: &Cell,
+        old_split_at: &ahash::HashSet<HashBytes>,
+    ) -> Result<Cell, Error> {
+        self.par_apply_ext(old, old_split_at, Cell::empty_context())
     }
 
     /// Tries to apply Merkle update in parallel
@@ -292,11 +296,9 @@ impl MerkleUpdate {
     pub fn par_apply_ext(
         &self,
         old: &Cell,
+        old_split_at: &ahash::HashSet<HashBytes>,
         context: &(dyn CellContext + Send + Sync),
     ) -> Result<Cell, Error> {
-        const ROOT_SPLIT_DEPTH: u16 = 5;
-        const CHILD_SPLIT_DEPTH: u16 = 5;
-
         if old.as_ref().repr_hash() != &self.old_hash {
             return Err(Error::InvalidData);
         }
@@ -419,7 +421,7 @@ impl MerkleUpdate {
         // Collect old cells
         let old_cells = {
             // Collect and check old cells tree
-            let old_cell_hashes = self.par_find_old_cells()?;
+            let old_cell_hashes = self.par_find_old_cells(old_split_at)?;
 
             let visited = Default::default();
             let old_cells = Default::default();
@@ -428,8 +430,8 @@ impl MerkleUpdate {
                 fn traverse<'a>(
                     (cell_ref, cell): (&'a DynCell, Cell),
                     merkle_depth: u8,
-                    traverse_depth: u16,
                     scope: Option<&rayon::Scope<'a>>,
+                    split_at: &'a ahash::HashSet<HashBytes>,
                     visited: &'a dashmap::DashSet<HashBytes, ahash::RandomState>,
                     old_cells: &'a dashmap::DashMap<HashBytes, Cell, ahash::RandomState>,
                     old_cell_hashes: &'a dashmap::DashSet<HashBytes, ahash::RandomState>,
@@ -448,22 +450,18 @@ impl MerkleUpdate {
                     old_cells.insert(*hash, cell);
 
                     let next_merkle_depth = merkle_depth + cell_ref.descriptor().is_merkle() as u8;
-                    let next_traverse_depth = traverse_depth + 1;
 
                     let mut iter = cell_ref.references();
                     let cloned = iter.clone().cloned();
                     for (child_ref, child) in std::iter::zip(&mut iter, cloned) {
                         match scope {
-                            Some(scope)
-                                if traverse_depth > ROOT_SPLIT_DEPTH
-                                    && child.repr_depth() > CHILD_SPLIT_DEPTH =>
-                            {
+                            Some(scope) if split_at.contains(child.repr_hash()) => {
                                 scope.spawn(move |_| {
                                     traverse(
                                         (child_ref, child),
                                         next_merkle_depth,
-                                        next_traverse_depth,
                                         None,
+                                        split_at,
                                         visited,
                                         old_cells,
                                         old_cell_hashes,
@@ -474,8 +472,8 @@ impl MerkleUpdate {
                                 traverse(
                                     (child_ref, child),
                                     next_merkle_depth,
-                                    next_traverse_depth,
                                     scope,
+                                    split_at,
                                     visited,
                                     old_cells,
                                     old_cell_hashes,
@@ -493,8 +491,8 @@ impl MerkleUpdate {
                 traverse(
                     (old.as_ref(), old.clone()),
                     0,
-                    0,
                     Some(scope),
+                    old_split_at,
                     &visited,
                     &old_cells,
                     &old_cell_hashes,
@@ -704,10 +702,10 @@ impl MerkleUpdate {
     }
 
     #[cfg(all(feature = "rayon", feature = "sync"))]
-    fn par_find_old_cells(&self) -> Result<dashmap::DashSet<HashBytes, ahash::RandomState>, Error> {
-        const ROOT_SPLIT_DEPTH: u16 = 5;
-        const CHILD_SPLIT_DEPTH: u16 = 5;
-
+    fn par_find_old_cells(
+        &self,
+        split_at: &ahash::HashSet<HashBytes>,
+    ) -> Result<dashmap::DashSet<HashBytes, ahash::RandomState>, Error> {
         let visited = Default::default();
         let old_cells = Default::default();
 
@@ -715,8 +713,8 @@ impl MerkleUpdate {
             fn traverse_old_cells<'a>(
                 cell: &'a DynCell,
                 merkle_depth: u8,
-                traverse_depth: u16,
                 scope: Option<&rayon::Scope<'a>>,
+                split_at: &'a ahash::HashSet<HashBytes>,
                 visited: &'a dashmap::DashSet<HashBytes, ahash::RandomState>,
                 result: &'a dashmap::DashSet<HashBytes, ahash::RandomState>,
             ) {
@@ -733,21 +731,17 @@ impl MerkleUpdate {
                 }
 
                 let next_merkle_depth = merkle_depth + descriptor.is_merkle() as u8;
-                let next_traverse_depth = traverse_depth + 1;
 
                 let mut iter = cell.references();
                 for child in &mut iter {
                     match scope {
-                        Some(scope)
-                            if traverse_depth > ROOT_SPLIT_DEPTH
-                                && child.repr_depth() > CHILD_SPLIT_DEPTH =>
-                        {
+                        Some(scope) if split_at.contains(child.repr_hash()) => {
                             scope.spawn(move |_| {
                                 traverse_old_cells(
                                     child,
                                     next_merkle_depth,
-                                    next_traverse_depth,
                                     None,
+                                    split_at,
                                     visited,
                                     result,
                                 );
@@ -757,8 +751,8 @@ impl MerkleUpdate {
                             traverse_old_cells(
                                 child,
                                 next_merkle_depth,
-                                next_traverse_depth,
                                 scope,
+                                split_at,
                                 visited,
                                 result,
                             );
@@ -772,7 +766,14 @@ impl MerkleUpdate {
                 );
             }
 
-            traverse_old_cells(self.old.as_ref(), 0, 0, Some(scope), &visited, &old_cells);
+            traverse_old_cells(
+                self.old.as_ref(),
+                0,
+                Some(scope),
+                split_at,
+                &visited,
+                &old_cells,
+            );
         });
 
         visited.clear();
@@ -1586,3 +1587,8 @@ mod tests {
         }
     }
 }
+
+#[cfg(all(feature = "rayon", feature = "sync"))]
+const ROOT_SPLIT_DEPTH: u16 = 5;
+#[cfg(all(feature = "rayon", feature = "sync"))]
+const CHILD_SPLIT_DEPTH: u16 = 5;
