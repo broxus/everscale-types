@@ -706,7 +706,7 @@ impl<'a: 'b, 'b, 'c: 'a> ParBuilderImpl<'a, 'b, 'c> {
                         split_at,
                         visited: Default::default(),
                     }
-                    .fill_impl(cell, false, Some(scope))
+                    .fill_impl(cell, 0, false, Some(scope))
                 });
                 self.finalize(result)
             }
@@ -745,6 +745,7 @@ impl<'a: 'b, 'b, 'c: 'a> ParBuilderImpl<'a, 'b, 'c> {
             fn fill_impl<'scope>(
                 &mut self,
                 cell: &'a DynCell,
+                depth: u16,
                 mut skip_filter: bool,
                 scope: Option<&rayon::Scope<'scope>>,
             ) -> CheckResult<'a>
@@ -780,7 +781,7 @@ impl<'a: 'b, 'b, 'c: 'a> ParBuilderImpl<'a, 'b, 'c> {
                 }
 
                 if let Some(scope) = scope {
-                    if unlikely(self.split_at.contains(repr_hash)) {
+                    if unlikely(depth > 5 && cell.repr_depth() > 5) {
                         let entry = match self.resolver.deferred.entry(repr_hash) {
                             scc::hash_map::Entry::Occupied(entry) => {
                                 return CheckResult::Deferred(entry.get().clone());
@@ -799,7 +800,7 @@ impl<'a: 'b, 'b, 'c: 'a> ParBuilderImpl<'a, 'b, 'c> {
                                     split_at,
                                     visited: Default::default(),
                                 }
-                                .process_children_impl(cell, skip_filter, is_pruned, None) else {
+                                .process_children_impl(cell, depth, skip_filter, is_pruned, None) else {
                                     unreachable!("deferred tasks will not spawn");
                                 };
                                 promise.set(changed)
@@ -809,7 +810,7 @@ impl<'a: 'b, 'b, 'c: 'a> ParBuilderImpl<'a, 'b, 'c> {
                     }
                 }
 
-                let result = self.process_children_impl(cell, skip_filter, is_pruned, scope);
+                let result = self.process_children_impl(cell, depth, skip_filter, is_pruned, scope);
 
                 // Mark as visited only finished cells
                 if let CheckResult::Immediate(has_changed) = result {
@@ -823,6 +824,7 @@ impl<'a: 'b, 'b, 'c: 'a> ParBuilderImpl<'a, 'b, 'c> {
             fn process_children_impl<'scope>(
                 &mut self,
                 cell: &'a DynCell,
+                depth: u16,
                 skip_filter: bool,
                 is_pruned: bool,
                 scope: Option<&rayon::Scope<'scope>>,
@@ -838,7 +840,7 @@ impl<'a: 'b, 'b, 'c: 'a> ParBuilderImpl<'a, 'b, 'c> {
                 let mut items = 'immediate: {
                     let mut result = false;
                     for child in children.by_ref() {
-                        match self.fill_impl(child, skip_filter, scope) {
+                        match self.fill_impl(child, depth + 1, skip_filter, scope) {
                             CheckResult::Immediate(res) => {
                                 result |= res;
                             }
@@ -854,7 +856,7 @@ impl<'a: 'b, 'b, 'c: 'a> ParBuilderImpl<'a, 'b, 'c> {
                 };
 
                 for child in children {
-                    items.push(self.fill_impl(child, skip_filter, scope));
+                    items.push(self.fill_impl(child, depth + 1, skip_filter, scope));
                 }
 
                 CheckResult::Parts {

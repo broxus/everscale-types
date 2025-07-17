@@ -609,7 +609,7 @@ impl<'a> ParBuilderImpl<'a, '_, '_> {
             return Err(Error::EmptyProof);
         }
 
-        let mut root_cell = rayon::scope(|scope| self.build_impl(self.root, 0, Some(scope)))?;
+        let mut root_cell = rayon::scope(|scope| self.build_impl(self.root, 0, 0, Some(scope)))?;
         loop {
             match root_cell {
                 ExtCell::Ordinary(cell) => break Ok(cell),
@@ -624,12 +624,14 @@ impl<'a> ParBuilderImpl<'a, '_, '_> {
     fn build_impl<'scope>(
         &'scope self,
         child: &'a DynCell,
+        depth: u16,
         parent_merkle_depth: u8,
         scope: Option<&rayon::Scope<'scope>>,
     ) -> Result<ExtCell, Error> {
         struct Node<'a> {
             references: RefsIter<'a>,
             descriptor: CellDescriptor,
+            depth: u16,
             merkle_depth: u8,
             children: ChildrenBuilder,
         }
@@ -680,6 +682,7 @@ impl<'a> ParBuilderImpl<'a, '_, '_> {
         stack.push(Node {
             references: child.references(),
             descriptor: root_descriptor,
+            depth,
             merkle_depth: parent_merkle_depth + root_descriptor.is_merkle() as u8,
             children: ChildrenBuilder::Ordinary(Default::default()),
         });
@@ -726,20 +729,27 @@ impl<'a> ParBuilderImpl<'a, '_, '_> {
                         // All other cells will be included in a different branch
                         _ => 'cell: {
                             if let Some(scope) = scope {
-                                if unlikely(self.split_at.contains(child_repr_hash)) {
+                                if unlikely(last.depth > 5 && child.repr_depth() > 5) {
                                     let promise = Promise::new();
+                                    let parent_depth = last.depth;
                                     let parent_merkle_depth = last.merkle_depth;
                                     scope.spawn({
                                         let promise = promise.clone();
                                         move |_| {
-                                            let cell =
-                                                self.build_impl(child, parent_merkle_depth, None);
+                                            let cell = self.build_impl(
+                                                child,
+                                                parent_depth,
+                                                parent_merkle_depth,
+                                                None,
+                                            );
                                             promise.set(cell);
                                         }
                                     });
                                     break 'cell ExtCell::Deferred(promise);
                                 }
                             }
+
+                            let depth = last.depth + 1;
 
                             // Add merkle offset to the current merkle depth
                             let merkle_depth = last.merkle_depth + descriptor.is_merkle() as u8;
@@ -748,6 +758,7 @@ impl<'a> ParBuilderImpl<'a, '_, '_> {
                             stack.push(Node {
                                 references: child.references(),
                                 descriptor,
+                                depth,
                                 merkle_depth,
                                 children: ChildrenBuilder::Ordinary(Default::default()),
                             });
