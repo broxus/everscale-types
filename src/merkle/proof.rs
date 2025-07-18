@@ -729,7 +729,7 @@ impl<'a> ParBuilderImpl<'a, '_, '_> {
                         // All other cells will be included in a different branch
                         _ => 'cell: {
                             if let Some(scope) = scope {
-                                if unlikely(last.depth > 5 && child.repr_depth() > 5) {
+                                if unlikely(last.depth > 3 && child.repr_depth() > 3) {
                                     let promise = Promise::new();
                                     let parent_depth = last.depth;
                                     let parent_merkle_depth = last.merkle_depth;

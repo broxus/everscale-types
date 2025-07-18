@@ -781,7 +781,7 @@ impl<'a: 'b, 'b, 'c: 'a> ParBuilderImpl<'a, 'b, 'c> {
                 }
 
                 if let Some(scope) = scope {
-                    if unlikely(depth > 5 && cell.repr_depth() > 5) {
+                    if unlikely(depth > 3 && cell.repr_depth() > 3) {
                         let entry = match self.resolver.deferred.entry(repr_hash) {
                             scc::hash_map::Entry::Occupied(entry) => {
                                 return CheckResult::Deferred(entry.get().clone());
