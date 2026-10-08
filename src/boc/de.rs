@@ -34,6 +34,7 @@ pub struct BocHeader<'a> {
 
 impl<'a> BocHeader<'a> {
     /// Decodes boc info from the specified bytes.
+    #[allow(clippy::needless_late_init)]
     pub fn decode(data: &'a [u8], options: &Options) -> Result<Self, Error> {
         let mut reader = BocReader::new(data.len());
 

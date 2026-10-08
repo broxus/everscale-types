@@ -45,7 +45,7 @@ where
         let mut values = (0..*size)
             .map(|_| (rng.random::<K>(), rng.random::<A>(), rng.random::<V>()))
             .collect::<Vec<_>>();
-        values.sort_by(|(l, ..), (r, ..)| l.cmp(r));
+        values.sort_by_key(|(key, ..)| *key);
         let initial = AugDict::try_from_sorted_slice(&values).unwrap();
 
         let mut operations = (0..*size)
@@ -55,7 +55,7 @@ where
                 (key, value)
             })
             .collect::<Vec<_>>();
-        operations.sort_by(|(l, _), (r, _)| l.cmp(r));
+        operations.sort_by_key(|(key, _)| *key);
         operations.dedup_by(|(l, _), (r, _)| (*l).eq(r));
 
         group.bench_with_input(
